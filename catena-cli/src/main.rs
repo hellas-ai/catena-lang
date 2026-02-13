@@ -3,9 +3,15 @@ use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
 use hexpr::*;
-use metacat::{check::check, syntax::TheoryBundle, theory::OperationKey};
+use metacat::{
+    check::check,
+    syntax::TheoryBundle,
+    theory::{OperationKey, Theory},
+    tree::Tree,
+};
 use open_hypergraphs::lax::{OpenHypergraph, functor::Functor};
 
+use catena::lang::{Arr, Obj};
 use catena::pass::{bend::Bend, erase::Erase, unbound::Unbound};
 
 #[derive(Parser)]
@@ -110,27 +116,12 @@ fn bend(path: PathBuf, definition: &str) -> anyhow::Result<()> {
         .clone()
         .ok_or(anyhow!("not a definition: {definition}"))?;
 
-    let mut term = forget_labels(try_interpret(&arrow_theory, &definition_hexpr)?);
+    let term = forget_labels(try_interpret(&arrow_theory, &definition_hexpr)?);
     let source = forget_labels(try_interpret(&object_theory, &declaration.source_map)?);
     let target = forget_labels(try_interpret(&object_theory, &declaration.target_map)?);
 
-    let result = check(&arrow_theory, source, target, &mut term)
-        .map_err(|e| anyhow!("typechecking failed: {e:?}"))?;
-
-    let term = term.with_nodes(|_| result).unwrap();
-
-    // Erase
-    let mut erased = Erase.map_arrow(&term);
-    erased.quotient();
-
-    // bound → value
-    let mut unbound = Unbound.map_arrow(&erased);
-    unbound.quotient();
-
-    let mut bent = Bend.map_arrow(&unbound);
-    bent.quotient();
-
-    let term = bent;
+    // Apply compiler passes
+    let term = lower(term, source, target, arrow_theory)?;
 
     // Tell pretty-printer the coarity of each operation
     let coarity = |op: &OperationKey| -> usize { object_theory.type_maps(op).1.targets.len() };
@@ -153,6 +144,33 @@ fn bend(path: PathBuf, definition: &str) -> anyhow::Result<()> {
     )?)?;
 
     Ok(())
+}
+
+fn lower(
+    mut term: OpenHypergraph<(), OperationKey>,
+    source: OpenHypergraph<(), OperationKey>,
+    target: OpenHypergraph<(), OperationKey>,
+    arrow_theory: Theory<OperationKey>,
+) -> anyhow::Result<OpenHypergraph<Tree<(), OperationKey>, OperationKey>> {
+    // Typecheck: compute a type for each node in the hypergraph
+    let result = check(&arrow_theory, source, target, &mut term)
+        .map_err(|e| anyhow!("typechecking failed: {e:?}"))?;
+
+    let term = term.with_nodes(|_| result).unwrap();
+
+    // Erase
+    let mut erased = Erase.map_arrow(&term);
+    erased.quotient();
+
+    // bound(t) → value(t)
+    let mut unbound = Unbound.map_arrow(&erased);
+    unbound.quotient();
+
+    // bound.eta → discard ; cup
+    let mut bent = Bend.map_arrow(&unbound);
+    bent.quotient();
+
+    Ok(bent)
 }
 
 fn forget_labels<O, A>(f: OpenHypergraph<O, A>) -> OpenHypergraph<(), A> {

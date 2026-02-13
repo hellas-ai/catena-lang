@@ -6,7 +6,7 @@ use hexpr::*;
 use metacat::{check::check, syntax::TheoryBundle, theory::OperationKey};
 use open_hypergraphs::lax::{OpenHypergraph, functor::Functor};
 
-use catena::{bend::Bend, erase::Erase, unbound::Unbound};
+use catena::pass::{bend::Bend, erase::Erase, unbound::Unbound};
 
 #[derive(Parser)]
 #[command(name = "catena", version=env!("CARGO_PKG_VERSION"))]

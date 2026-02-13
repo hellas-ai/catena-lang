@@ -3,7 +3,7 @@
 use crate::lang::{Arr, Obj};
 use metacat::{theory::OperationKey, tree::Tree};
 use open_hypergraphs::lax::{
-    Hypergraph, NodeId, OpenHypergraph,
+    OpenHypergraph,
     functor::{Functor, try_define_map_arrow},
 };
 

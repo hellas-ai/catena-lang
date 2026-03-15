@@ -12,7 +12,9 @@ use super::runtime::Value;
 
 /// Handle to a sandbox worker process hosting one compiled shared object.
 #[derive(Debug)]
-pub struct SandboxProcess {}
+pub struct SandboxProcess {
+    _artifact: SharedObject,
+}
 
 /// Opaque identifier for a value owned by the sandbox worker.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -38,16 +40,10 @@ pub enum SandboxError {
 }
 
 impl SandboxProcess {
-    /// Spawn a fresh sandbox worker process.
-    pub fn spawn() -> Result<Self, SandboxError> {
-        todo!()
-    }
-
-    /// Load a compiled shared object into the sandbox worker, replacing any
-    /// currently loaded program.
+    /// Create a fresh sandbox worker process for one compiled shared object.
     #[allow(dead_code)]
-    pub(crate) fn load(&mut self, artifact: &SharedObject) -> Result<(), SandboxError> {
-        let _ = artifact;
+    pub(crate) fn new(artifact: SharedObject) -> Result<Self, SandboxError> {
+        let _ = &artifact;
         todo!()
     }
 

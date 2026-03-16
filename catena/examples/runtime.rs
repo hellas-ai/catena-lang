@@ -4,11 +4,8 @@ use catena::backend::c::{Runtime, Value};
 fn main() -> anyhow::Result<()> {
     // Create a C runtime. This lets us load and run catena code safely inside
     // a 'sandbox' child process.
-    let runtime = Runtime::new();
-
-    // Compile, typecheck, and lower the specified def-arrow blocks in program_source
-    let source = std::fs::read_to_string("stdlib.hex")?;
-    runtime.compile(&source)?;
+    // Compiles, typechecks, and lowers the contents of 'stdlib.hex' to init the runtime.
+    let runtime = Runtime::new(&std::fs::read_to_string("stdlib.hex")?)?;
 
     // Create a runtime 'extent' value reference
     let n = runtime.value(Value::Extent(10));

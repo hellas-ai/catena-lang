@@ -1,12 +1,12 @@
-use std::sync::Mutex;
 use thiserror::Error;
 
-pub use super::compile::CompileError;
+use super::compile::{CompileError, SharedObject};
+use super::executor::ExecutorError;
 
 /// Run catena programs with the C backend
 #[derive(Debug)]
 pub struct Runtime {
-    artifact: Mutex<Option<super::compile::SharedObject>>,
+    artifact: SharedObject,
 }
 
 /// Public interface for marshalling values into/out of the runtime
@@ -18,31 +18,27 @@ pub enum Value {
 // An opaque pointer to a value reference.
 // NOTE: these *cannot* be safely copied; we rely on them being 'consumable'.
 #[derive(Debug)]
-pub struct ValueRef;
+pub struct ValueRef {
+    value: Value,
+}
 
-// Error types
+pub type InitError = CompileError;
+
 #[derive(Debug, Error)]
-pub enum ExecError {}
+pub enum ExecError {
+    #[error("Executor error: {0}")]
+    Executor(#[from] ExecutorError),
+}
 
 impl Runtime {
-    pub fn new() -> Runtime {
-        Self {
-            artifact: Mutex::new(None),
-        }
-    }
-
-    // Compile the standard library and all its functions.
-    // Later, we'll need to allow multiple modules + auto-load the stdlib.
-    pub fn compile(&self, source: &str) -> Result<(), CompileError> {
+    pub fn new(source: &str) -> Result<Runtime, InitError> {
         let artifact = super::compile::compile(source)?;
-        let _ = artifact.path();
-        *self.artifact.lock().unwrap() = Some(artifact);
-        Ok(())
+        Ok(Self { artifact })
     }
 
-    // Move a value into the runtime
-    pub fn value(&self, _value: Value) -> ValueRef {
-        todo!()
+    /// Move a value into the runtime
+    pub fn value(&self, value: Value) -> ValueRef {
+        ValueRef { value }
     }
 
     /// Run 'fn_name', which must have M arguments, and return its N arguments.
@@ -51,18 +47,8 @@ impl Runtime {
         fn_name: &str,
         args: [ValueRef; M],
     ) -> Result<[ValueRef; N], ExecError> {
-        let artifact = self.artifact.lock().unwrap();
-        let symbol = artifact
-            .as_ref()
-            .and_then(|artifact| artifact.symbol(fn_name))
-            .unwrap_or(fn_name);
-        println!("{fn_name} [{symbol}] ({args:?})");
-        todo!()
-    }
-}
-
-impl Default for Runtime {
-    fn default() -> Self {
-        Self::new()
+        let args = args.map(|arg| arg.value);
+        let outputs = super::executor::exec(&self.artifact, fn_name, args)?;
+        Ok(outputs.map(|value| ValueRef { value }))
     }
 }

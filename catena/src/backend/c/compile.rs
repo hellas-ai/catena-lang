@@ -2,7 +2,6 @@
 use crate::backend::c::codegen::codegen;
 use crate::lower::{LowerError, Pass, lower};
 use metacat::syntax::TheoryBundle;
-use std::any::Any;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus};
@@ -19,8 +18,6 @@ pub enum CompileError {
         definition: String,
         source: LowerError,
     },
-    #[error("Codegen panicked for definition '{definition}': {message}")]
-    CodegenPanic { definition: String, message: String },
     #[error("Failed to create temporary build directory: {0}")]
     TempDir(#[from] std::io::Error),
     #[error("C compiler is unavailable: {0}")]
@@ -71,13 +68,7 @@ pub(crate) fn compile(source: &str) -> Result<SharedObject, CompileError> {
         })?;
 
         let symbol = unique_symbol(&definition, &mut used_symbols);
-        let function = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            codegen(lowered, &symbol)
-        }))
-        .map_err(|payload| CompileError::CodegenPanic {
-            definition: definition.clone(),
-            message: panic_message(payload),
-        })?;
+        let function = codegen(lowered, &symbol);
 
         translation_unit.push_str(&function);
         translation_unit.push_str("\n\n");
@@ -147,14 +138,4 @@ fn mangle_symbol(name: &str) -> String {
     } else {
         symbol
     }
-}
-
-fn panic_message(payload: Box<dyn Any + Send>) -> String {
-    if let Some(message) = payload.downcast_ref::<&str>() {
-        return (*message).to_string();
-    }
-    if let Some(message) = payload.downcast_ref::<String>() {
-        return message.clone();
-    }
-    "non-string panic payload".to_string()
 }

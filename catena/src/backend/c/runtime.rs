@@ -47,8 +47,7 @@ impl Runtime {
         fn_name: &str,
         args: [ValueRef; M],
     ) -> Result<[ValueRef; N], ExecError> {
-        let args = args.map(|arg| arg.value);
-        let outputs = super::executor::exec(&self.artifact, fn_name, args)?;
-        Ok(outputs.map(|value| ValueRef { value }))
+        let _ = (&self.artifact, fn_name, args);
+        Err(ExecutorError::Unimplemented.into())
     }
 }

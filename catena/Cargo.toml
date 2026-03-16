@@ -9,6 +9,7 @@ metacat = { workspace = true }
 open-hypergraphs = { workspace = true }
 thiserror = "2.0.18"
 tempfile = "3.23.0"
+libffi = "5.1.0"
 
 [dev-dependencies]
 anyhow = "1.0.102"

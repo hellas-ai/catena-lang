@@ -11,7 +11,7 @@ fn main() -> anyhow::Result<()> {
     // Uses const generics to return fixed size array, returning error if the
     // constant size is different to the dynamically-inspected number of return
     // values of 'materialize-range'.
-    let [result] = runtime.exec("f32.increment", [Value::Extent(10), Value::Index(9)])?;
+    let [result] = runtime.exec("sum-range-f32", [Value::Extent(10)])?;
     println!("result: {result:?}");
 
     Ok(())

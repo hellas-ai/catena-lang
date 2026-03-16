@@ -26,6 +26,8 @@ pub type InitError = CompileError;
 
 #[derive(Debug, Error)]
 pub enum ExecError {
+    #[error("Unknown function '{0}'")]
+    UnknownFunction(String),
     #[error("Executor error: {0}")]
     Executor(#[from] ExecutorError),
 }
@@ -47,7 +49,11 @@ impl Runtime {
         fn_name: &str,
         args: [ValueRef; M],
     ) -> Result<[ValueRef; N], ExecError> {
-        let _ = (&self.artifact, fn_name, args);
-        Err(ExecutorError::Unimplemented.into())
+        let symbol = self
+            .artifact
+            .symbol(fn_name)
+            .ok_or_else(|| ExecError::UnknownFunction(fn_name.to_string()))?;
+        let _ = (self.artifact.path(), symbol, args);
+        todo!()
     }
 }

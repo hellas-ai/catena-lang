@@ -1,9 +1,11 @@
 use catena::lower::{Pass, lower};
+use catena::shallow::shallow_graph;
 
 use clap::{Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 
 use catena::backend::c::codegen::codegen;
+use catena::lang::Obj;
 use metacat::{syntax::TheoryBundle, theory::OperationKey};
 
 #[derive(Parser)]
@@ -28,6 +30,14 @@ enum Command {
     Lower {
         #[arg()]
         pass: PassArg,
+        #[arg()]
+        path: PathBuf,
+        #[arg()]
+        definition: String,
+    },
+
+    /// Check one definition and output its graph without inlining called arrows
+    ShallowGraph {
         #[arg()]
         path: PathBuf,
         #[arg()]
@@ -71,12 +81,26 @@ fn main() -> anyhow::Result<()> {
             pass,
             definition,
         } => lower_command(TheoryBundle::from_file(path)?, pass.into(), &definition),
+        Command::ShallowGraph { path, definition } => {
+            shallow_graph_command(TheoryBundle::from_file(path)?, &definition)
+        }
     }
 }
 
 fn lower_command(bundle: TheoryBundle, until: Pass, definition: &str) -> anyhow::Result<()> {
     let current = lower(&bundle, until, definition)?;
+    print_svg(&bundle, current)
+}
 
+fn shallow_graph_command(bundle: TheoryBundle, definition: &str) -> anyhow::Result<()> {
+    let current = shallow_graph(&bundle, definition)?;
+    print_svg(&bundle, current)
+}
+
+fn print_svg(
+    bundle: &TheoryBundle,
+    current: open_hypergraphs::lax::OpenHypergraph<Obj, OperationKey>,
+) -> anyhow::Result<()> {
     // Pretty-print
     let coarity =
         |op: &OperationKey| -> usize { bundle.object_theory.type_maps(op).1.targets.len() };

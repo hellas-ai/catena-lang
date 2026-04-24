@@ -45,20 +45,6 @@
 (object value : 1 -> 1)
 
 ################################################################################
-# Lowering support
-
-(object f32 : 0 -> 1)
-(arrow f32 : [] -> f32)
-(arrow f32.zero : [] -> (f32 value))
-(arrow f32.add : {(f32 value) (f32 value)} -> (f32 value))
-(arrow f32.mul : {(f32 value) (f32 value)} -> (f32 value))
-(arrow gpu.id-f32 : (f32 value) -> (f32 value))
-
-(def-arrow f32.sum : (f32 value) -> (f32 value) = gpu.id-f32)
-(def-arrow ones-2d : (f32 value) -> (f32 value) = gpu.id-f32)
-(def-arrow id-matrix-2d : (f32 value) -> (f32 value) = gpu.id-f32)
-
-################################################################################
 # GPU state vocabulary
 
 # A whole-block state consists of local/private state, global memory, and shared

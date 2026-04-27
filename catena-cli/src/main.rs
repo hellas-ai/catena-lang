@@ -6,6 +6,7 @@ use std::path::PathBuf;
 
 use catena::backend::c::codegen::codegen;
 use catena::lang::Obj;
+use catena::structured::structured_from_shallow;
 use metacat::{syntax::TheoryBundle, theory::OperationKey};
 
 #[derive(Parser)]
@@ -38,6 +39,14 @@ enum Command {
 
     /// Check one definition and output its graph without inlining called arrows
     ShallowGraph {
+        /// Emit the shallow hypergraph as SVG instead of structured code
+        #[arg(long)]
+        svg: bool,
+
+        /// Emit structured IR instead of C
+        #[arg(long)]
+        ir: bool,
+
         #[arg()]
         path: PathBuf,
         #[arg()]
@@ -81,9 +90,12 @@ fn main() -> anyhow::Result<()> {
             pass,
             definition,
         } => lower_command(TheoryBundle::from_file(path)?, pass.into(), &definition),
-        Command::ShallowGraph { path, definition } => {
-            shallow_graph_command(TheoryBundle::from_file(path)?, &definition)
-        }
+        Command::ShallowGraph {
+            svg,
+            ir,
+            path,
+            definition,
+        } => shallow_graph_command(TheoryBundle::from_file(path)?, &definition, svg, ir),
     }
 }
 
@@ -92,9 +104,24 @@ fn lower_command(bundle: TheoryBundle, until: Pass, definition: &str) -> anyhow:
     print_svg(&bundle, current)
 }
 
-fn shallow_graph_command(bundle: TheoryBundle, definition: &str) -> anyhow::Result<()> {
+fn shallow_graph_command(
+    bundle: TheoryBundle,
+    definition: &str,
+    svg: bool,
+    ir: bool,
+) -> anyhow::Result<()> {
     let current = shallow_graph(&bundle, definition)?;
-    print_svg(&bundle, current)
+    if svg {
+        print_svg(&bundle, current)
+    } else {
+        let program = structured_from_shallow(&current, definition)?;
+        if ir {
+            print!("{}", program.render_ir());
+        } else {
+            print!("{}", program.render_c());
+        }
+        Ok(())
+    }
 }
 
 fn print_svg(

@@ -47,6 +47,10 @@ enum Command {
         #[arg(long)]
         ir: bool,
 
+        /// Select shallow output format
+        #[arg(long, value_enum, default_value_t = ShallowOutput::Cuda)]
+        output: ShallowOutput,
+
         #[arg()]
         path: PathBuf,
         #[arg()]
@@ -61,6 +65,14 @@ enum PassArg {
     ForgetBound,
     ExpandEta,
     DiscardNaturality,
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum ShallowOutput {
+    Ir,
+    Cuda,
+    CudaWithLaunch,
+    Svg,
 }
 
 impl From<PassArg> for Pass {
@@ -93,9 +105,20 @@ fn main() -> anyhow::Result<()> {
         Command::ShallowGraph {
             svg,
             ir,
+            output,
             path,
             definition,
-        } => shallow_graph_command(TheoryBundle::from_file(path)?, &definition, svg, ir),
+        } => shallow_graph_command(
+            TheoryBundle::from_file(path)?,
+            &definition,
+            if svg {
+                ShallowOutput::Svg
+            } else if ir {
+                ShallowOutput::Ir
+            } else {
+                output
+            },
+        ),
     }
 }
 
@@ -107,20 +130,26 @@ fn lower_command(bundle: TheoryBundle, until: Pass, definition: &str) -> anyhow:
 fn shallow_graph_command(
     bundle: TheoryBundle,
     definition: &str,
-    svg: bool,
-    ir: bool,
+    output: ShallowOutput,
 ) -> anyhow::Result<()> {
     let current = shallow_graph(&bundle, definition)?;
-    if svg {
-        print_svg(&bundle, current)
-    } else {
-        let program = structured_from_shallow(&current, definition)?;
-        if ir {
+    match output {
+        ShallowOutput::Svg => print_svg(&bundle, current),
+        ShallowOutput::Ir => {
+            let program = structured_from_shallow(&current, definition)?;
             print!("{}", program.render_ir());
-        } else {
-            print!("{}", program.render_c());
+            Ok(())
         }
-        Ok(())
+        ShallowOutput::Cuda => {
+            let program = structured_from_shallow(&current, definition)?;
+            print!("{}", program.render_c());
+            Ok(())
+        }
+        ShallowOutput::CudaWithLaunch => {
+            let program = structured_from_shallow(&current, definition)?;
+            print!("{}", program.render_cuda_with_launch());
+            Ok(())
+        }
     }
 }
 

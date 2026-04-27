@@ -1,6 +1,7 @@
 use crate::lang::{Arr, Obj};
 use open_hypergraphs::lax::OpenHypergraph;
 
+mod cuda;
 pub mod ir;
 mod ramsey;
 mod tiled_matmul;

@@ -18,7 +18,7 @@ impl ArrowSemantics for TiledMatmulSemantics {
 
     fn counted_loop(&self, op: &str) -> Option<(String, String)> {
         if op.contains("for-num-tiles.prelude") {
-            Some(("p".to_string(), "state.num_tiles".to_string()))
+            Some(("p".to_string(), "num_tiles".to_string()))
         } else if op.contains("for-tile.prelude") {
             Some(("q".to_string(), "TILE".to_string()))
         } else {
@@ -32,10 +32,32 @@ pub fn program(definition: &str, body: Vec<Stmt>) -> Program {
         name: sanitize_ident(definition),
         entry: EntryPoint {
             name: sanitize_ident(definition),
-            params: vec![Param {
-                ty: "gpu_tiled_matmul_state".to_string(),
-                name: "state".to_string(),
-            }],
+            params: vec![
+                Param {
+                    ty: "const float*".to_string(),
+                    name: "A".to_string(),
+                },
+                Param {
+                    ty: "const float*".to_string(),
+                    name: "B".to_string(),
+                },
+                Param {
+                    ty: "float*".to_string(),
+                    name: "C".to_string(),
+                },
+                Param {
+                    ty: "int".to_string(),
+                    name: "M".to_string(),
+                },
+                Param {
+                    ty: "int".to_string(),
+                    name: "N".to_string(),
+                },
+                Param {
+                    ty: "int".to_string(),
+                    name: "K".to_string(),
+                },
+            ],
         },
         body,
     }
@@ -47,9 +69,6 @@ impl Program {
         let mut out = String::new();
         out.push_str("#include <stdint.h>\n\n");
         out.push_str("#ifndef TILE\n#define TILE 16\n#endif\n\n");
-        out.push_str("typedef struct gpu_tiled_matmul_state {\n");
-        out.push_str("    uint64_t num_tiles;\n");
-        out.push_str("} gpu_tiled_matmul_state;\n\n");
         out.push_str(&format!("__global__ void {}(", self.entry.name));
         out.push_str(
             &self
@@ -61,6 +80,7 @@ impl Program {
                 .join(", "),
         );
         out.push_str(") {\n");
+        render_kernel_preamble(&mut out);
         render_c_stmts(&mut out, &self.body, 1, &branch_targets);
         out.push_str("}\n");
         out
@@ -71,13 +91,16 @@ fn primitive_mapping(op: &str) -> Primitive {
     let code = match op {
         "gpu.tiled-matmul.init-acc" => "float acc = 0.0f;",
         "gpu.tiled-matmul.collectively-load-shared-tile" => {
-            "/* TODO: load this block/thread's A and B fragments for tile p into shared memory. */"
+            r#"int a_col = p * TILE + tx;
+int b_row = p * TILE + ty;
+tile_A[ty][tx] = (row < M && a_col < K) ? A[row * K + a_col] : 0.0f;
+tile_B[ty][tx] = (b_row < K && col < N) ? B[b_row * N + col] : 0.0f;"#
         }
-        "gpu.tiled-matmul.dot-by-thread" => {
-            "/* TODO: acc += tile_A[threadIdx.y][q] * tile_B[q][threadIdx.x]; */"
-        }
+        "gpu.tiled-matmul.dot-by-thread" => "acc += tile_A[ty][q] * tile_B[q][tx];",
         "gpu.tiled-matmul.store-output" => {
-            "/* TODO: store acc to the output element owned by this thread. */"
+            r#"if (row < M && col < N) {
+    C[row * N + col] = acc;
+}"#
         }
         _ => {
             return Primitive {
@@ -91,6 +114,16 @@ fn primitive_mapping(op: &str) -> Primitive {
         name: op.to_string(),
         code: code.to_string(),
     }
+}
+
+fn render_kernel_preamble(out: &mut String) {
+    out.push_str("    __shared__ float tile_A[TILE][TILE];\n");
+    out.push_str("    __shared__ float tile_B[TILE][TILE];\n\n");
+    out.push_str("    int row = blockIdx.y * TILE + threadIdx.y;\n");
+    out.push_str("    int col = blockIdx.x * TILE + threadIdx.x;\n");
+    out.push_str("    int ty = threadIdx.y;\n");
+    out.push_str("    int tx = threadIdx.x;\n");
+    out.push_str("    int num_tiles = (K + TILE - 1) / TILE;\n\n");
 }
 
 fn render_c_stmts(out: &mut String, stmts: &[Stmt], indent: usize, branch_targets: &BranchTargets) {
@@ -123,7 +156,7 @@ fn render_c_stmts(out: &mut String, stmts: &[Stmt], indent: usize, branch_target
                 body,
             } => {
                 out.push_str(&format!(
-                    "{pad}for (uint64_t {var} = 0; {var} < {extent}; ++{var}) {{\n"
+                    "{pad}for (int {var} = 0; {var} < {extent}; ++{var}) {{\n"
                 ));
                 render_c_stmts(out, body, indent + 1, branch_targets);
                 if branch_targets.continues.contains(label) {

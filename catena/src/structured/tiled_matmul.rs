@@ -1,5 +1,5 @@
 use super::cuda::{
-    render_cuda, CudaDecl, CudaKernelEnv, CudaLaunchConfig, CudaRenderMode, CudaStmt,
+    render_cuda, CudaDecl, CudaError, CudaKernelEnv, CudaLaunchConfig, CudaRenderMode, CudaStmt,
 };
 use super::ir::{EntryPoint, Param, Primitive, Program, Stmt};
 use super::ramsey::ArrowSemantics;
@@ -33,7 +33,7 @@ impl ArrowSemantics for TiledMatmulSemantics {
 }
 
 pub fn program(definition: &str, body: Vec<Stmt>) -> Program {
-    let env = kernel_env();
+    let env = kernel_env(DEFAULT_TILE_SIZE);
     Program {
         name: sanitize_ident(definition),
         entry: EntryPoint {
@@ -45,23 +45,39 @@ pub fn program(definition: &str, body: Vec<Stmt>) -> Program {
 }
 
 impl Program {
-    pub fn render_c(&self) -> String {
-        render_cuda(self, &kernel_env(), CudaRenderMode::Kernel, lower_primitive)
+    pub fn render_c(&self) -> Result<String, CudaError> {
+        self.render_c_with_tile(DEFAULT_TILE_SIZE)
     }
 
-    pub fn render_cuda_with_launch(&self) -> String {
+    pub fn render_c_with_tile(&self, tile_size: usize) -> Result<String, CudaError> {
         render_cuda(
             self,
-            &kernel_env(),
+            &kernel_env(tile_size),
+            CudaRenderMode::Kernel,
+            lower_primitive,
+        )
+    }
+
+    pub fn render_cuda_with_launch(&self) -> Result<String, CudaError> {
+        self.render_cuda_with_launch_with_tile(DEFAULT_TILE_SIZE)
+    }
+
+    pub fn render_cuda_with_launch_with_tile(&self, tile_size: usize) -> Result<String, CudaError> {
+        render_cuda(
+            self,
+            &kernel_env(tile_size),
             CudaRenderMode::KernelWithLaunch,
             lower_primitive,
         )
     }
 }
 
-fn kernel_env() -> CudaKernelEnv {
+const DEFAULT_TILE_SIZE: usize = 16;
+
+fn kernel_env(tile_size: usize) -> CudaKernelEnv {
     CudaKernelEnv {
         tile_macro: "TILE".to_string(),
+        tile_size,
         params: vec![
             Param {
                 ty: "const float*".to_string(),
@@ -134,8 +150,8 @@ fn kernel_env() -> CudaKernelEnv {
     }
 }
 
-fn lower_primitive(primitive: &Primitive) -> Vec<CudaStmt> {
-    match primitive.name.as_str() {
+fn lower_primitive(primitive: &Primitive) -> Result<Vec<CudaStmt>, CudaError> {
+    let stmts = match primitive.name.as_str() {
         "gpu.tiled-matmul.init-acc" => vec![CudaStmt::Decl(CudaDecl {
             ty: "float".to_string(),
             name: "acc".to_string(),
@@ -172,8 +188,9 @@ fn lower_primitive(primitive: &Primitive) -> Vec<CudaStmt> {
                 rhs: "acc".to_string(),
             }],
         }],
-        other => vec![CudaStmt::Comment(format!("TODO: primitive {other};"))],
-    }
+        other => return Err(CudaError::UnknownPrimitive(other.to_string())),
+    };
+    Ok(stmts)
 }
 
 fn sanitize_ident(name: &str) -> String {

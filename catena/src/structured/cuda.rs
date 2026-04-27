@@ -10,6 +10,7 @@ pub enum CudaRenderMode {
 #[derive(Debug, Clone)]
 pub struct CudaKernelEnv {
     pub tile_macro: String,
+    pub tile_size: usize,
     pub params: Vec<Param>,
     pub shared: Vec<CudaDecl>,
     pub prelude: Vec<CudaStmt>,
@@ -45,21 +46,27 @@ pub enum CudaStmt {
         body: Vec<CudaStmt>,
     },
     Syncthreads,
-    Comment(String),
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum CudaError {
+    #[error("no CUDA lowering for primitive {0}")]
+    UnknownPrimitive(String),
 }
 
 pub fn render_cuda(
     program: &Program,
     env: &CudaKernelEnv,
     mode: CudaRenderMode,
-    lower_primitive: impl Fn(&Primitive) -> Vec<CudaStmt>,
-) -> String {
+    lower_primitive: impl Fn(&Primitive) -> Result<Vec<CudaStmt>, CudaError>,
+) -> Result<String, CudaError> {
     let branch_targets = BranchTargets::new(&program.body);
     let mut out = String::new();
     out.push_str("#include <stdint.h>\n\n");
     out.push_str(&format!(
-        "#ifndef {tile}\n#define {tile} 16\n#endif\n\n",
-        tile = env.tile_macro
+        "#ifndef {tile}\n#define {tile} {tile_size}\n#endif\n\n",
+        tile = env.tile_macro,
+        tile_size = env.tile_size
     ));
     out.push_str(&format!("__global__ void {}(", program.entry.name));
     out.push_str(
@@ -79,7 +86,7 @@ pub fn render_cuda(
         1,
         &branch_targets,
         &lower_primitive,
-    );
+    )?;
     out.push_str("}\n");
 
     if mode == CudaRenderMode::KernelWithLaunch {
@@ -89,7 +96,7 @@ pub fn render_cuda(
         }
     }
 
-    out
+    Ok(out)
 }
 
 fn render_kernel_preamble(out: &mut String, env: &CudaKernelEnv) {
@@ -134,14 +141,14 @@ fn render_cuda_stmts(
     stmts: &[Stmt],
     indent: usize,
     branch_targets: &BranchTargets,
-    lower_primitive: &impl Fn(&Primitive) -> Vec<CudaStmt>,
-) {
+    lower_primitive: &impl Fn(&Primitive) -> Result<Vec<CudaStmt>, CudaError>,
+) -> Result<(), CudaError> {
     let pad = "    ".repeat(indent);
     for stmt in stmts {
         match stmt {
             Stmt::Block { label, body } => {
                 out.push_str(&format!("{pad}do {{\n"));
-                render_cuda_stmts(out, body, indent + 1, branch_targets, lower_primitive);
+                render_cuda_stmts(out, body, indent + 1, branch_targets, lower_primitive)?;
                 out.push_str(&format!("{pad}}} while (0);\n"));
                 if branch_targets.breaks.contains(label) {
                     out.push_str(&format!("{pad}{}:\n", after_label(label)));
@@ -152,7 +159,7 @@ fn render_cuda_stmts(
                 if branch_targets.continues.contains(label) {
                     out.push_str(&format!("{pad}{}:\n", continue_label(label)));
                 }
-                render_cuda_stmts(out, body, indent + 1, branch_targets, lower_primitive);
+                render_cuda_stmts(out, body, indent + 1, branch_targets, lower_primitive)?;
                 out.push_str(&format!("{pad}}}\n"));
                 if branch_targets.breaks.contains(label) {
                     out.push_str(&format!("{pad}{}:\n", after_label(label)));
@@ -167,7 +174,7 @@ fn render_cuda_stmts(
                 out.push_str(&format!(
                     "{pad}for (int {var} = 0; {var} < {extent}; ++{var}) {{\n"
                 ));
-                render_cuda_stmts(out, body, indent + 1, branch_targets, lower_primitive);
+                render_cuda_stmts(out, body, indent + 1, branch_targets, lower_primitive)?;
                 if branch_targets.continues.contains(label) {
                     out.push_str(&format!("{pad}{}:\n", continue_label(label)));
                 }
@@ -182,16 +189,16 @@ fn render_cuda_stmts(
                 else_body,
             } => {
                 out.push_str(&format!("{pad}if ({condition}) {{\n"));
-                render_cuda_stmts(out, then_body, indent + 1, branch_targets, lower_primitive);
+                render_cuda_stmts(out, then_body, indent + 1, branch_targets, lower_primitive)?;
                 out.push_str(&format!("{pad}}} else {{\n"));
-                render_cuda_stmts(out, else_body, indent + 1, branch_targets, lower_primitive);
+                render_cuda_stmts(out, else_body, indent + 1, branch_targets, lower_primitive)?;
                 out.push_str(&format!("{pad}}}\n"));
             }
             Stmt::Switch { selector, cases } => {
                 out.push_str(&format!("{pad}switch ({selector}) {{\n"));
                 for (index, body) in cases.iter().enumerate() {
                     out.push_str(&format!("{pad}case {index}:\n"));
-                    render_cuda_stmts(out, body, indent + 1, branch_targets, lower_primitive);
+                    render_cuda_stmts(out, body, indent + 1, branch_targets, lower_primitive)?;
                     out.push_str(&format!("{pad}    break;\n"));
                 }
                 out.push_str(&format!("{pad}}}\n"));
@@ -203,11 +210,12 @@ fn render_cuda_stmts(
             Stmt::Return => out.push_str(&format!("{pad}return;\n")),
             Stmt::Barrier => render_cuda_stmt(out, &CudaStmt::Syncthreads, indent),
             Stmt::Primitive(primitive) => {
-                render_cuda_stmt_list(out, &lower_primitive(primitive), indent);
+                render_cuda_stmt_list(out, &lower_primitive(primitive)?, indent);
             }
             Stmt::Comment(comment) => out.push_str(&format!("{pad}// {comment}\n")),
         }
     }
+    Ok(())
 }
 
 fn render_cuda_stmt_list(out: &mut String, stmts: &[CudaStmt], indent: usize) {
@@ -231,7 +239,6 @@ fn render_cuda_stmt(out: &mut String, stmt: &CudaStmt, indent: usize) {
             out.push_str(&format!("{pad}}}\n"));
         }
         CudaStmt::Syncthreads => out.push_str(&format!("{pad}__syncthreads();\n")),
-        CudaStmt::Comment(comment) => out.push_str(&format!("{pad}// {comment}\n")),
     }
 }
 

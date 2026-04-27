@@ -1,4 +1,4 @@
-use catena::lower::{Pass, lower};
+use catena::lower::{lower, Pass};
 use catena::shallow::shallow_graph;
 
 use clap::{Parser, Subcommand, ValueEnum};
@@ -50,6 +50,10 @@ enum Command {
         /// Select shallow output format
         #[arg(long, value_enum, default_value_t = ShallowOutput::Cuda)]
         output: ShallowOutput,
+
+        /// CUDA tile size used by CUDA output modes
+        #[arg(long, default_value_t = 16)]
+        tile: usize,
 
         #[arg()]
         path: PathBuf,
@@ -106,6 +110,7 @@ fn main() -> anyhow::Result<()> {
             svg,
             ir,
             output,
+            tile,
             path,
             definition,
         } => shallow_graph_command(
@@ -118,6 +123,7 @@ fn main() -> anyhow::Result<()> {
             } else {
                 output
             },
+            tile,
         ),
     }
 }
@@ -131,8 +137,12 @@ fn shallow_graph_command(
     bundle: TheoryBundle,
     definition: &str,
     output: ShallowOutput,
+    tile: usize,
 ) -> anyhow::Result<()> {
     let current = shallow_graph(&bundle, definition)?;
+    if matches!(output, ShallowOutput::Cuda | ShallowOutput::CudaWithLaunch) && tile == 0 {
+        anyhow::bail!("--tile must be greater than zero");
+    }
     match output {
         ShallowOutput::Svg => print_svg(&bundle, current),
         ShallowOutput::Ir => {
@@ -142,12 +152,12 @@ fn shallow_graph_command(
         }
         ShallowOutput::Cuda => {
             let program = structured_from_shallow(&current, definition)?;
-            print!("{}", program.render_c());
+            print!("{}", program.render_c_with_tile(tile)?);
             Ok(())
         }
         ShallowOutput::CudaWithLaunch => {
             let program = structured_from_shallow(&current, definition)?;
-            print!("{}", program.render_cuda_with_launch());
+            print!("{}", program.render_cuda_with_launch_with_tile(tile)?);
             Ok(())
         }
     }
@@ -168,7 +178,7 @@ fn print_svg(
         .map(|n| n.pretty(Some(&coarity)))
         .collect();
 
-    use open_hypergraphs_dot::{Options, svg::to_svg_with};
+    use open_hypergraphs_dot::{svg::to_svg_with, Options};
     use std::io::Write;
 
     let opts = Options::default().display();

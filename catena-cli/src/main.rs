@@ -1,14 +1,16 @@
-use catena::lower::{Pass, lower};
+use catena::lower::{lower, Pass};
 use catena::shallow::shallow_graph;
 
 use clap::{Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 
 use catena::backend::c::codegen::codegen;
-use catena::compile::check_bundle;
+use catena::compile::{check_bundle, check_compile_bundle, ArrowType, CompileCheckReport};
 use catena::lang::Obj;
 use catena::structured::structured_from_shallow;
 use metacat::{syntax::TheoryBundle, theory::OperationKey};
+use open_hypergraphs::category::Arrow;
+use open_hypergraphs::lax::{NodeId, OpenHypergraph};
 
 #[derive(Parser)]
 #[command(name = "catena", version=env!("CARGO_PKG_VERSION"))]
@@ -32,6 +34,12 @@ enum Command {
         path: PathBuf,
         #[arg()]
         definition: String,
+    },
+
+    /// Run the new Catena compile pipeline
+    Compile {
+        #[command(subcommand)]
+        command: CompileCommand,
     },
 
     /// Run compiler passes up to the given pass and output SVG
@@ -66,6 +74,21 @@ enum Command {
         path: PathBuf,
         #[arg()]
         definition: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum CompileCommand {
+    /// Check data/control theories after Catena lift passes
+    Check {
+        #[arg(long)]
+        data: PathBuf,
+
+        #[arg(long)]
+        control: PathBuf,
+
+        #[arg(long)]
+        verbose: bool,
     },
 }
 
@@ -109,6 +132,7 @@ fn main() -> anyhow::Result<()> {
             println!("{}", codegen(lowered, "out"));
             Ok(())
         }
+        Command::Compile { command } => compile_command(command),
         Command::Lower {
             path,
             pass,
@@ -136,6 +160,27 @@ fn main() -> anyhow::Result<()> {
     }
 }
 
+fn compile_command(command: CompileCommand) -> anyhow::Result<()> {
+    match command {
+        CompileCommand::Check {
+            data,
+            control,
+            verbose,
+        } => compile_check_command(data, control, verbose),
+    }
+}
+
+fn compile_check_command(data: PathBuf, control: PathBuf, verbose: bool) -> anyhow::Result<()> {
+    let data_display = data.display().to_string();
+    let control_display = control.display().to_string();
+    let data_bundle = TheoryBundle::from_file(data)?;
+    let control_bundle = TheoryBundle::from_file(control)?;
+    let report = check_compile_bundle(&data_bundle, &control_bundle)?;
+
+    print_compile_check_report(&data_display, &control_display, &report, verbose);
+    Ok(())
+}
+
 fn check_command(path: PathBuf) -> anyhow::Result<()> {
     let path_display = path.display().to_string();
     let bundle = TheoryBundle::from_file(path)?;
@@ -146,6 +191,142 @@ fn check_command(path: PathBuf) -> anyhow::Result<()> {
         report.definitions_checked
     );
     Ok(())
+}
+
+fn print_compile_check_report(
+    data: &str,
+    control: &str,
+    report: &CompileCheckReport,
+    verbose: bool,
+) {
+    println!("OK: compile check passed");
+    println!(
+        "  data: {data} ({} definitions)",
+        report.data.definitions_checked
+    );
+    println!(
+        "  control: {control} ({} definitions)",
+        report.control.definitions_checked
+    );
+    println!(
+        "  control + lifted data: {} definitions",
+        report.control_with_data.definitions_checked
+    );
+    println!(
+        "  data + lifted control: {} definitions",
+        report.data_with_control.definitions_checked
+    );
+    println!(
+        "  lifted data -> control: {} arrows",
+        report.data_to_control.len()
+    );
+    println!(
+        "  lifted control -> data: {} arrows",
+        report.control_to_data.len()
+    );
+
+    if verbose {
+        print_lift_report("data -> control", &report.data_to_control);
+        print_lift_report("control -> data", &report.control_to_data);
+    }
+}
+
+fn print_lift_report(label: &str, operations: &[ArrowType]) {
+    println!("  {label}:");
+    for arrow_type in operations {
+        println!("    {}", render_arrow_declaration(arrow_type));
+    }
+}
+
+fn render_arrow_declaration(arrow_type: &ArrowType) -> String {
+    format!(
+        "(arrow {} : {} -> {})",
+        arrow_type.name,
+        render_object_map(&arrow_type.source),
+        render_object_map(&arrow_type.target)
+    )
+}
+
+fn render_object_map(map: &OpenHypergraph<(), OperationKey>) -> String {
+    let vars = source_vars(map);
+    match map.target().len() {
+        0 => "[]".to_string(),
+        1 => render_target(map, map.targets[0], &vars),
+        _ => {
+            let targets = map
+                .targets
+                .iter()
+                .map(|node| render_node_as_var(map, *node, &vars))
+                .collect::<Vec<_>>();
+            render_spider(&vars, &targets)
+        }
+    }
+}
+
+fn render_target(map: &OpenHypergraph<(), OperationKey>, node: NodeId, vars: &[String]) -> String {
+    if let Some(edge_index) = producer_edge(map, node) {
+        render_edge(map, edge_index, vars)
+    } else {
+        render_spider(vars, &[render_node_as_var(map, node, vars)])
+    }
+}
+
+fn render_edge(
+    map: &OpenHypergraph<(), OperationKey>,
+    edge_index: usize,
+    vars: &[String],
+) -> String {
+    let op = &map.hypergraph.edges[edge_index];
+    let adjacency = &map.hypergraph.adjacency[edge_index];
+    if adjacency.sources.is_empty() {
+        return if vars.is_empty() {
+            op.to_string()
+        } else {
+            format!("{{{} {op}}}", render_spider(vars, &[]))
+        };
+    }
+
+    let inputs = adjacency
+        .sources
+        .iter()
+        .map(|node| render_node_as_var(map, *node, vars))
+        .collect::<Vec<_>>();
+    format!("({} {op})", render_spider(vars, &inputs))
+}
+
+fn render_node_as_var(
+    map: &OpenHypergraph<(), OperationKey>,
+    node: NodeId,
+    vars: &[String],
+) -> String {
+    map.sources
+        .iter()
+        .position(|source| *source == node)
+        .map(|index| vars[index].clone())
+        .unwrap_or_else(|| format!("n{}", node.0))
+}
+
+fn render_spider(sources: &[String], targets: &[String]) -> String {
+    if sources == targets {
+        format!("[{}]", sources.join(" "))
+    } else if targets.is_empty() {
+        format!("[{} .]", sources.join(" "))
+    } else {
+        format!("[{} . {}]", sources.join(" "), targets.join(" "))
+    }
+}
+
+fn source_vars(map: &OpenHypergraph<(), OperationKey>) -> Vec<String> {
+    (0..map.source().len())
+        .map(|index| format!("x{index}"))
+        .collect()
+}
+
+fn producer_edge(map: &OpenHypergraph<(), OperationKey>, node: NodeId) -> Option<usize> {
+    map.hypergraph
+        .adjacency
+        .iter()
+        .position(|edge| edge.targets.contains(&node))
 }
 
 fn lower_command(bundle: TheoryBundle, until: Pass, definition: &str) -> anyhow::Result<()> {
@@ -198,7 +379,7 @@ fn print_svg(
         .map(|n| n.pretty(Some(&coarity)))
         .collect();
 
-    use open_hypergraphs_dot::{Options, svg::to_svg_with};
+    use open_hypergraphs_dot::{svg::to_svg_with, Options};
     use std::io::Write;
 
     let opts = Options::default().display();

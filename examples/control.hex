@@ -6,6 +6,7 @@
 
 ### Primitive type
 (object f32 : 0 -> 1)
+(object bool : 0 -> 1)
 
 ### Type constructors
 (object product : 2 -> 1)

@@ -6,6 +6,12 @@
 
 ### Primitive type
 (object f32 : 0 -> 1)
+(object bool : 0 -> 1)
+
+### Arithmetics
+(arrow f32.zero : [] -> f32)
+(arrow bool.gt : {f32 f32} -> bool)
+(arrow bool.or : {bool bool} -> bool)
 
 ### Type constructors
 (object product : 2 -> 1)
@@ -20,3 +26,11 @@
 
 (def-arrow projl : [x y] -> [x y . x] = {[x] discard})
 (def-arrow projr : [x y] -> [x y . y] = {discard [y]})
+
+### Programs
+
+(def-arrow any-positive : {f32 f32} -> bool =
+  ({
+    ({[x] f32.zero} bool.gt)
+    ({[y] f32.zero} bool.gt)
+  } bool.or))

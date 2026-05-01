@@ -12,3 +12,10 @@
 (object unit : 0 -> 1)
 (object coproduct : 2 -> 1)
 (object counit : 0 -> 1)
+
+### Cartesian CoMonoidal Category
+
+(arrow merge : [x . x x] -> [x])
+(arrow create : [x.] -> [x])
+(arrow branch : [x] -> [x . x x])
+(arrow discard : [x] -> [x.])

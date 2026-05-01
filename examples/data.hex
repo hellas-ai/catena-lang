@@ -10,6 +10,8 @@
 
 ### Arithmetics
 (arrow f32.zero : [] -> f32)
+(arrow f32.one : [] -> f32)
+(arrow f32.add : {f32 f32} -> f32)
 (arrow bool.gt : {f32 f32} -> bool)
 (arrow bool.or : {bool bool} -> bool)
 
@@ -39,4 +41,16 @@
   {[a b x.]
     ([.a b] any-positive [condition.])
     ([.condition x])
+  })
+
+(def-arrow add-one-first : {f32 f32} -> {f32 f32} =
+  {
+    ({[x] f32.one} f32.add)
+    [y]
+  })
+
+(def-arrow add-one-second : {f32 f32} -> {f32 f32} =
+  {
+    [x]
+    ({[y] f32.one} f32.add)
   })

@@ -21,3 +21,16 @@
 (arrow branch : [x] -> [x . x x])
 (arrow discard : [x] -> [x.])
 (arrow guard : ({bool [x]} product) -> [x . x x])
+
+### Programs
+
+(def-arrow guarded-positive-update :
+  ({f32 f32} product) ->
+  {({f32 f32} product) ({f32 f32} product)}
+  =
+  (
+    data.copy
+    data.any-positive.bind
+    guard
+    {data.add-one-second data.add-one-first}
+  ))

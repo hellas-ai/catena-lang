@@ -205,10 +205,7 @@ fn print_compile_check_report(
         "  data: {data} ({} definitions)",
         report.data.definitions_checked
     );
-    println!(
-        "  control: {control} ({} definitions)",
-        report.control.definitions_checked
-    );
+    println!("  control: {control}");
     println!(
         "  control + lifted data: {} definitions",
         report.control_with_data.definitions_checked

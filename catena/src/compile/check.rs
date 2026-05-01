@@ -13,7 +13,6 @@ pub struct CheckReport {
 #[derive(Clone, Debug, PartialEq)]
 pub struct CompileCheckReport {
     pub data: CheckReport,
-    pub control: CheckReport,
     pub control_with_data: CheckReport,
     pub data_with_control: CheckReport,
     pub data_to_control: Vec<ArrowType>,
@@ -51,7 +50,6 @@ pub fn check_compile_bundle(
     control: &TheoryBundle,
 ) -> Result<CompileCheckReport, CheckError> {
     let data_report = check_bundle(data)?;
-    let control_report = check_bundle(control)?;
     let control_with_data = lift_data_to_control(data, control)?;
     let data_with_control = lift_control_to_data(control, data)?;
     let control_with_data_report = check_bundle(&control_with_data)?;
@@ -61,7 +59,6 @@ pub fn check_compile_bundle(
 
     Ok(CompileCheckReport {
         data: data_report,
-        control: control_report,
         control_with_data: control_with_data_report,
         data_with_control: data_with_control_report,
         data_to_control,

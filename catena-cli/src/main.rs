@@ -5,6 +5,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 
 use catena::backend::c::codegen::codegen;
+use catena::compile::check_bundle;
 use catena::lang::Obj;
 use catena::structured::structured_from_shallow;
 use metacat::{syntax::TheoryBundle, theory::OperationKey};
@@ -19,6 +20,12 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Check a hex file with metacat
+    Check {
+        #[arg()]
+        path: PathBuf,
+    },
+
     /// Run codegen for a given pass
     Codegen {
         #[arg()]
@@ -95,6 +102,7 @@ fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
+        Command::Check { path } => check_command(path),
         Command::Codegen { path, definition } => {
             let bundle = TheoryBundle::from_file(path)?;
             let lowered = lower(&bundle, Pass::DiscardNaturality, &definition)?;
@@ -126,6 +134,18 @@ fn main() -> anyhow::Result<()> {
             tile,
         ),
     }
+}
+
+fn check_command(path: PathBuf) -> anyhow::Result<()> {
+    let path_display = path.display().to_string();
+    let bundle = TheoryBundle::from_file(path)?;
+    let report = check_bundle(&bundle)?;
+
+    println!(
+        "OK: checked {path_display} ({} definitions)",
+        report.definitions_checked
+    );
+    Ok(())
 }
 
 fn lower_command(bundle: TheoryBundle, until: Pass, definition: &str) -> anyhow::Result<()> {

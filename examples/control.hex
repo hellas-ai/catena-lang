@@ -1,0 +1,14 @@
+#
+# Control Flow Theory
+#
+
+# shared syntax
+
+### Primitive type
+(object f32 : 0 -> 1)
+
+### Type constructors
+(object product : 2 -> 1)
+(object unit : 0 -> 1)
+(object coproduct : 2 -> 1)
+(object counit : 0 -> 1)

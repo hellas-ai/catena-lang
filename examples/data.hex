@@ -1,0 +1,22 @@
+#
+# Data Flow Theory
+#
+
+# shared syntax
+
+### Primitive type
+(object f32 : 0 -> 1)
+
+### Type constructors
+(object product : 2 -> 1)
+(object unit : 0 -> 1)
+(object coproduct : 2 -> 1)
+(object counit : 0 -> 1)
+
+### Cartesian Monoidal Category
+
+(arrow copy :  [x] -> [x . x x])
+(arrow discard :  [x] -> [x.])
+
+(def-arrow projl : [x y] -> [x y . x] = {[x] discard})
+(def-arrow projr : [x y] -> [x y . y] = {discard [y]})

@@ -1,7 +1,7 @@
 use crate::lang::*;
-use crate::scope::{scope_ids, scopes, ScopeId};
+use crate::scope::{ScopeId, scope_ids, scopes};
 
-use metacat::ssa::{ssa, SSA};
+use metacat::ssa::{SSA, ssa};
 use metacat::theory::OperationKey;
 use metacat::tree::Tree;
 
@@ -101,41 +101,41 @@ pub fn render_c(
 ) -> String {
     match op.op.to_string().as_str() {
         "f32.zero" => {
-            let t0 = &op.targets[0].0 .0;
+            let t0 = &op.targets[0].0.0;
             format!("float v{t0} = 0.0; // f32.zero")
         }
         "f32.one" => {
-            let t0 = &op.targets[0].0 .0;
+            let t0 = &op.targets[0].0.0;
             format!("float v{t0} = 1.0; // f32.one")
         }
         "f32.add" => {
-            let s0 = &op.sources[0].0 .0;
-            let s1 = &op.sources[1].0 .0;
-            let t0 = &op.targets[0].0 .0;
+            let s0 = &op.sources[0].0.0;
+            let s1 = &op.sources[1].0.0;
+            let t0 = &op.targets[0].0.0;
             format!("float v{t0} = v{s0} + v{s1}; // f32.add")
         }
         "f32.mul" => {
-            let s0 = &op.sources[0].0 .0;
-            let s1 = &op.sources[1].0 .0;
-            let t0 = &op.targets[0].0 .0;
+            let s0 = &op.sources[0].0.0;
+            let s1 = &op.sources[1].0.0;
+            let t0 = &op.targets[0].0.0;
             format!("float v{t0} = v{s0} + v{s1}; // f32.add")
         }
         "f32.from-index" => {
-            let s0 = &op.sources[0].0 .0;
-            let t0 = &op.targets[0].0 .0;
+            let s0 = &op.sources[0].0.0;
+            let t0 = &op.targets[0].0.0;
             format!("float v{t0} = (float) v{s0}; // f32.from-index")
         }
         "reduce" => {
             // Sources: [Extent, Zero, Acc, Val, Combined, Index*, Body]
-            let extent = &op.sources[0].0 .0;
-            let zero = &op.sources[1].0 .0;
-            let acc = &op.sources[2].0 .0;
-            let val = &op.sources[3].0 .0;
-            let combined = &op.sources[4].0 .0;
-            let index = &op.sources[5].0 .0;
-            let body = &op.sources[6].0 .0;
+            let extent = &op.sources[0].0.0;
+            let zero = &op.sources[1].0.0;
+            let acc = &op.sources[2].0.0;
+            let val = &op.sources[3].0.0;
+            let combined = &op.sources[4].0.0;
+            let index = &op.sources[5].0.0;
+            let body = &op.sources[6].0.0;
 
-            let result = &op.targets[0].0 .0;
+            let result = &op.targets[0].0.0;
 
             // Body scope (scope 1): computes body value from index
             let body_scope_id = ScopeId {

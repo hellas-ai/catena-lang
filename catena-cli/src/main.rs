@@ -1,4 +1,4 @@
-use catena::lower::{lower, Pass};
+use catena::lower::{Pass, lower};
 use catena::shallow::shallow_graph;
 
 use clap::{Parser, Subcommand, ValueEnum};
@@ -178,7 +178,7 @@ fn print_svg(
         .map(|n| n.pretty(Some(&coarity)))
         .collect();
 
-    use open_hypergraphs_dot::{svg::to_svg_with, Options};
+    use open_hypergraphs_dot::{Options, svg::to_svg_with};
     use std::io::Write;
 
     let opts = Options::default().display();

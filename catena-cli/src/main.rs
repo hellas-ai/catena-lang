@@ -1,11 +1,12 @@
-use catena::lower::{Pass, lower};
+use catena::lower::{lower, Pass};
 use catena::shallow::shallow_graph;
 
 use clap::{Parser, Subcommand, ValueEnum};
+use std::collections::HashSet;
 use std::path::PathBuf;
 
 use catena::backend::c::codegen::codegen;
-use catena::compile::{ArrowType, CompileCheckReport, check_bundle, check_compile_bundle};
+use catena::compile::{check_bundle, check_compile_bundle, ArrowType, CompileCheckReport};
 use catena::lang::Obj;
 use catena::structured::structured_from_shallow;
 use metacat::{syntax::TheoryBundle, theory::OperationKey};
@@ -248,6 +249,9 @@ fn render_arrow_declaration(arrow_type: &ArrowType) -> String {
 }
 
 fn render_object_map(map: &OpenHypergraph<(), OperationKey>) -> String {
+    let mut map = map.clone();
+    let _ = map.quotient();
+    let map = &map;
     let vars = source_vars(map);
     match map.target().len() {
         0 => "[]".to_string(),
@@ -256,7 +260,7 @@ fn render_object_map(map: &OpenHypergraph<(), OperationKey>) -> String {
             let targets = map
                 .targets
                 .iter()
-                .map(|node| render_node_as_var(map, *node, &vars))
+                .map(|node| render_node(map, *node, &vars, &mut HashSet::new()))
                 .collect::<Vec<_>>();
             render_spider(&vars, &targets)
         }
@@ -264,46 +268,57 @@ fn render_object_map(map: &OpenHypergraph<(), OperationKey>) -> String {
 }
 
 fn render_target(map: &OpenHypergraph<(), OperationKey>, node: NodeId, vars: &[String]) -> String {
-    if let Some(edge_index) = producer_edge(map, node) {
-        render_edge(map, edge_index, vars)
-    } else {
-        render_spider(vars, &[render_node_as_var(map, node, vars)])
-    }
+    render_node(map, node, vars, &mut HashSet::new())
 }
 
 fn render_edge(
     map: &OpenHypergraph<(), OperationKey>,
     edge_index: usize,
     vars: &[String],
+    seen: &mut HashSet<NodeId>,
 ) -> String {
     let op = &map.hypergraph.edges[edge_index];
     let adjacency = &map.hypergraph.adjacency[edge_index];
     if adjacency.sources.is_empty() {
-        return if vars.is_empty() {
-            op.to_string()
-        } else {
-            format!("{{{} {op}}}", render_spider(vars, &[]))
-        };
+        return op.to_string();
     }
 
     let inputs = adjacency
         .sources
         .iter()
-        .map(|node| render_node_as_var(map, *node, vars))
+        .map(|node| render_node(map, *node, vars, seen))
         .collect::<Vec<_>>();
     format!("({} {op})", render_spider(vars, &inputs))
 }
 
-fn render_node_as_var(
+fn render_node(
     map: &OpenHypergraph<(), OperationKey>,
     node: NodeId,
     vars: &[String],
+    seen: &mut HashSet<NodeId>,
 ) -> String {
-    map.sources
+    if let Some(var) = map
+        .sources
         .iter()
         .position(|source| *source == node)
         .map(|index| vars[index].clone())
-        .unwrap_or_else(|| format!("n{}", node.0))
+    {
+        return var;
+    }
+
+    if !seen.insert(node) {
+        return format!("n{}", node.0);
+    }
+
+    let rendered = producer_edge(map, node)
+        .map(|edge_index| render_edge(map, edge_index, vars, seen))
+        .or_else(|| {
+            object_edge_at_node(map, node)
+                .map(|edge_index| map.hypergraph.edges[edge_index].to_string())
+        })
+        .unwrap_or_else(|| format!("n{}", node.0));
+    seen.remove(&node);
+    rendered
 }
 
 fn render_spider(sources: &[String], targets: &[String]) -> String {
@@ -327,6 +342,13 @@ fn producer_edge(map: &OpenHypergraph<(), OperationKey>, node: NodeId) -> Option
         .adjacency
         .iter()
         .position(|edge| edge.targets.contains(&node))
+}
+
+fn object_edge_at_node(map: &OpenHypergraph<(), OperationKey>, node: NodeId) -> Option<usize> {
+    map.hypergraph
+        .adjacency
+        .iter()
+        .position(|edge| edge.sources.is_empty() && edge.targets.contains(&node))
 }
 
 fn lower_command(bundle: TheoryBundle, until: Pass, definition: &str) -> anyhow::Result<()> {
@@ -379,7 +401,7 @@ fn print_svg(
         .map(|n| n.pretty(Some(&coarity)))
         .collect();
 
-    use open_hypergraphs_dot::{Options, svg::to_svg_with};
+    use open_hypergraphs_dot::{svg::to_svg_with, Options};
     use std::io::Write;
 
     let opts = Options::default().display();

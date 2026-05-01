@@ -34,3 +34,9 @@
     ({[x] f32.zero} bool.gt)
     ({[y] f32.zero} bool.gt)
   } bool.or))
+
+(def-arrow any-positive.bind : {f32 f32 [x]} -> {bool [x]} =
+  {[a b x.]
+    ([.a b] any-positive [condition.])
+    ([.condition x])
+  })

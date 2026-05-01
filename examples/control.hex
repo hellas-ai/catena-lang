@@ -20,3 +20,4 @@
 (arrow create : [x.] -> [x])
 (arrow branch : [x] -> [x . x x])
 (arrow discard : [x] -> [x.])
+(arrow guard : ({bool [x]} product) -> [x . x x])

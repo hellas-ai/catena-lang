@@ -1,11 +1,11 @@
-use catena::lower::{lower, Pass};
+use catena::lower::{Pass, lower};
 use catena::shallow::shallow_graph;
 
 use clap::{Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 
 use catena::backend::c::codegen::codegen;
-use catena::compile::{check_bundle, check_compile_bundle, ArrowType, CompileCheckReport};
+use catena::compile::{ArrowType, CompileCheckReport, check_bundle, check_compile_bundle};
 use catena::lang::Obj;
 use catena::structured::structured_from_shallow;
 use metacat::{syntax::TheoryBundle, theory::OperationKey};
@@ -379,7 +379,7 @@ fn print_svg(
         .map(|n| n.pretty(Some(&coarity)))
         .collect();
 
-    use open_hypergraphs_dot::{svg::to_svg_with, Options};
+    use open_hypergraphs_dot::{Options, svg::to_svg_with};
     use std::io::Write;
 
     let opts = Options::default().display();

@@ -16,7 +16,9 @@ pub enum LiftError {
         prefix: &'static str,
         object: String,
     },
-    #[error("cannot lift {prefix}: object constructor `{object}` has profile {source_arity} -> {target_arity}, expected {expected_source_arity} -> {expected_target_arity}")]
+    #[error(
+        "cannot lift {prefix}: object constructor `{object}` has profile {source_arity} -> {target_arity}, expected {expected_source_arity} -> {expected_target_arity}"
+    )]
     InvalidObjectProfile {
         prefix: &'static str,
         object: String,

@@ -3,7 +3,7 @@ use metacat::{check::check, syntax::TheoryBundle, theory::OperationKey};
 use open_hypergraphs::lax::OpenHypergraph;
 use thiserror::Error;
 
-use crate::compile::lift::{lift_control_to_data, lift_data_to_control, LiftError};
+use crate::compile::lift::{LiftError, lift_control_to_data, lift_data_to_control};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CheckReport {

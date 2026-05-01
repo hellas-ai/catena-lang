@@ -87,9 +87,7 @@ pub fn lower(
 }
 
 /// Construct the compiler lowering passes
-fn lower_passes(
-    bundle: &TheoryBundle,
-) -> Result<Vec<LowerPass>, LowerError> {
+fn lower_passes(bundle: &TheoryBundle) -> Result<Vec<LowerPass>, LowerError> {
     let bound_key = bundle.object_theory.get_operation_key("bound").unwrap();
     let value_key = bundle.object_theory.get_operation_key("value").unwrap();
     let forget_bound = ForgetBound::new(bound_key, value_key);

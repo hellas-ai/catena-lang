@@ -1,5 +1,5 @@
 use super::cuda::{
-    render_cuda, CudaDecl, CudaError, CudaKernelEnv, CudaLaunchConfig, CudaRenderMode, CudaStmt,
+    CudaDecl, CudaError, CudaKernelEnv, CudaLaunchConfig, CudaRenderMode, CudaStmt, render_cuda,
 };
 use super::ir::{EntryPoint, Param, Primitive, Program, Stmt};
 use super::ramsey::ArrowSemantics;

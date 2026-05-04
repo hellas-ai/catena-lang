@@ -62,7 +62,7 @@ impl From<LiftError> for CheckError {
 }
 
 /// Check a compile theory set that has already been extended according to
-/// `config`, for example by `compile_theory_set_from_text`.
+/// `config`, for example by `load_extended_theory_set_from_text`.
 pub fn check_compile_theories(
     set: &TheorySet,
     config: &CompileConfig,

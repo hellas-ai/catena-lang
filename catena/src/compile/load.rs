@@ -30,7 +30,13 @@ pub enum CompileLoadError {
     InvalidOperation(String),
 }
 
-pub fn compile_theory_set_from_text(
+/// Load a metacat theory source after adding Catena compile-extension arrows.
+///
+/// The returned [`TheorySet`] contains the original theories plus generated
+/// lifted arrow declarations described by `config`. This allows definitions to
+/// refer to extension arrows such as `data.copy` without declaring temporary
+/// stubs in the source file.
+pub fn load_extended_theory_set_from_text(
     source: &str,
     config: &CompileConfig,
 ) -> Result<TheorySet, CompileLoadError> {

@@ -5,7 +5,7 @@ mod hexpr_render;
 use std::path::PathBuf;
 
 use catena::compile::{
-    CompileConfig, check_compile_theories, compile_graph, compile_theory_set_from_text,
+    CompileConfig, check_compile_theories, compile_graph, load_extended_theory_set_from_text,
 };
 use clap::{Parser, Subcommand};
 
@@ -88,7 +88,7 @@ fn compile_check_command(path: PathBuf, verbose: bool) -> anyhow::Result<()> {
     let path_display = path.display().to_string();
     let source = std::fs::read_to_string(path)?;
     let config = CompileConfig::data_control();
-    let theory_set = compile_theory_set_from_text(&source, &config)?;
+    let theory_set = load_extended_theory_set_from_text(&source, &config)?;
     let report = check_compile_theories(&theory_set, &config)?;
 
     compile_check_report::print_compile_check_report(&path_display, &report, verbose);
@@ -103,7 +103,7 @@ fn compile_graph_command(
 ) -> anyhow::Result<()> {
     let source = std::fs::read_to_string(path)?;
     let config = CompileConfig::data_control();
-    let theory_set = compile_theory_set_from_text(&source, &config)?;
+    let theory_set = load_extended_theory_set_from_text(&source, &config)?;
     let graph = compile_graph(&theory_set, &config, theory, definition)?;
     let svg = compile_graph_render::nested_svg(&graph)?;
 

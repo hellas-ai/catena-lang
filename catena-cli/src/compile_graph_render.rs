@@ -3,18 +3,27 @@ use std::collections::HashMap;
 use catena::compile::CompileGraph;
 use graphviz_rust::{
     cmd::{CommandArg, Format},
-    exec_dot,
+    dot_structures::{
+        Attribute, Edge, EdgeTy, Graph, GraphAttributes, Id, Node, NodeId as DotNodeId, Port, Stmt,
+        Subgraph, Vertex,
+    },
+    exec,
+    printer::PrinterContext,
 };
 use hexpr::Operation;
 use open_hypergraphs::lax::{NodeId, OpenHypergraph};
 
-// open-hypergraphs-dot handles flat OpenHypergraph -> DOT/SVG rendering.
-// This module implements the missing hierarchical part: DOT clusters whose
-// contents are themselves rendered OpenHypergraphs.
+// This is intentionally custom instead of delegating to open-hypergraphs-dot:
+// Catena graphs need hierarchical DOT clusters, cluster boundary edges, hidden
+// interface anchors, and theory-specific nesting rules that a flat renderer
+// cannot express without substantial post-processing.
 pub fn nested_svg(graph: &CompileGraph) -> std::io::Result<Vec<u8>> {
     let mut renderer = NestedDotRenderer::default();
-    let dot = renderer.render(graph);
-    exec_dot(dot, vec![CommandArg::Format(Format::Svg)])
+    exec(
+        renderer.render(graph),
+        &mut PrinterContext::default(),
+        vec![CommandArg::Format(Format::Svg)],
+    )
 }
 
 #[derive(Default)]
@@ -34,15 +43,28 @@ struct ParentInterface {
 }
 
 impl NestedDotRenderer {
-    fn render(&mut self, graph: &CompileGraph) -> String {
-        let mut dot = String::new();
-        dot.push_str("digraph G {\n");
-        dot.push_str("  graph [rankdir=TB, bgcolor=\"#4a4a4a\", compound=true];\n");
-        dot.push_str("  node [fontcolor=\"white\", color=\"white\"];\n");
-        dot.push_str("  edge [fontcolor=\"white\", color=\"white\"];\n");
-        self.render_cluster(graph, &qualified_name(graph), None, &mut dot);
-        dot.push_str("}\n");
-        dot
+    fn render(&mut self, graph: &CompileGraph) -> Graph {
+        let (cluster, _) = self.render_cluster(graph, &qualified_name(graph), None);
+        Graph::DiGraph {
+            id: id("G"),
+            strict: false,
+            stmts: vec![
+                Stmt::GAttribute(GraphAttributes::Graph(vec![
+                    attr_plain("rankdir", "TB"),
+                    attr_quoted("bgcolor", "#4a4a4a"),
+                    attr_plain("compound", "true"),
+                ])),
+                Stmt::GAttribute(GraphAttributes::Node(vec![
+                    attr_quoted("fontcolor", "white"),
+                    attr_quoted("color", "white"),
+                ])),
+                Stmt::GAttribute(GraphAttributes::Edge(vec![
+                    attr_quoted("fontcolor", "white"),
+                    attr_quoted("color", "white"),
+                ])),
+                Stmt::Subgraph(cluster),
+            ],
+        }
     }
 
     fn render_cluster(
@@ -50,34 +72,33 @@ impl NestedDotRenderer {
         graph: &CompileGraph,
         label: &str,
         parent_interface: Option<ParentInterface>,
-        dot: &mut String,
-    ) -> RenderedInterface {
+    ) -> (Subgraph, RenderedInterface) {
         let graph_id = self.next_id();
         let prefix = format!("g{graph_id}");
         let cluster_id = cluster_id(graph_id);
+        let mut stmts = vec![
+            Stmt::Attribute(attr_quoted("label", label)),
+            Stmt::Attribute(attr_quoted("color", "white")),
+            Stmt::Attribute(attr_quoted("fontcolor", "white")),
+            Stmt::Attribute(attr_plain("style", "rounded")),
+        ];
         let children = graph
             .children
             .iter()
             .map(|child| (child.operation.as_str(), &child.graph))
             .collect::<HashMap<_, _>>();
 
-        dot.push_str(&format!("  subgraph {cluster_id} {{\n"));
-        dot.push_str(&format!("    label=\"{}\";\n", escape_dot_string(label)));
-        dot.push_str("    color=\"white\";\n");
-        dot.push_str("    fontcolor=\"white\";\n");
-        dot.push_str("    style=\"rounded\";\n");
-
         if let Some(interface) = parent_interface.as_ref() {
-            self.render_external_interface(&prefix, interface, dot);
+            self.render_external_interface(&prefix, interface, &mut stmts);
         }
-        self.render_nodes(&prefix, &graph.graph, dot);
-        self.render_boundary(&prefix, &graph.graph, dot);
+        self.render_nodes(&prefix, &graph.graph, &mut stmts);
+        self.render_boundary(&prefix, &graph.graph, &mut stmts);
 
         for edge_index in 0..graph.graph.hypergraph.edges.len() {
             let operation = &graph.graph.hypergraph.edges[edge_index];
             if let Some(child) = children.get(operation.to_string().as_str()) {
                 let hyperedge = &graph.graph.hypergraph.adjacency[edge_index];
-                let child_interface = self.render_cluster(
+                let (child_cluster, child_interface) = self.render_cluster(
                     child,
                     &operation.to_string(),
                     Some(ParentInterface {
@@ -92,25 +113,23 @@ impl NestedDotRenderer {
                             .map(|node| graph.graph.hypergraph.nodes[node.0].clone())
                             .collect(),
                     }),
-                    dot,
                 );
+                stmts.push(Stmt::Subgraph(child_cluster));
                 self.render_nested_connections(
                     &prefix,
                     &graph.graph,
                     edge_index,
                     &child_interface,
-                    dot,
+                    &mut stmts,
                 );
             } else {
-                self.render_edge_box(&prefix, &graph.graph, edge_index, operation, dot);
+                self.render_edge_box(&prefix, &graph.graph, edge_index, operation, &mut stmts);
             }
         }
 
-        dot.push_str("  }\n");
-
-        if let Some(interface) = parent_interface {
+        let rendered_interface = if let Some(interface) = parent_interface {
             RenderedInterface {
-                cluster_id,
+                cluster_id: cluster_id.clone(),
                 sources: (0..interface.source_labels.len())
                     .map(|index| interface_source_id(&prefix, index))
                     .collect(),
@@ -120,7 +139,7 @@ impl NestedDotRenderer {
             }
         } else {
             RenderedInterface {
-                cluster_id,
+                cluster_id: cluster_id.clone(),
                 sources: graph
                     .graph
                     .sources
@@ -134,26 +153,41 @@ impl NestedDotRenderer {
                     .map(|node| node_id(&prefix, *node))
                     .collect(),
             }
-        }
+        };
+
+        (
+            Subgraph {
+                id: id(&cluster_id),
+                stmts,
+            },
+            rendered_interface,
+        )
     }
 
     fn render_external_interface(
         &self,
         prefix: &str,
         interface: &ParentInterface,
-        dot: &mut String,
+        stmts: &mut Vec<Stmt>,
     ) {
         for index in 0..interface.source_labels.len() {
-            self.render_invisible_interface_node(&interface_source_id(prefix, index), dot);
+            self.render_invisible_interface_node(&interface_source_id(prefix, index), stmts);
         }
         for index in 0..interface.target_labels.len() {
-            self.render_invisible_interface_node(&interface_target_id(prefix, index), dot);
+            self.render_invisible_interface_node(&interface_target_id(prefix, index), stmts);
         }
     }
 
-    fn render_invisible_interface_node(&self, id: &str, dot: &mut String) {
-        dot.push_str(&format!(
-            "    {id} [shape=point, style=invis, label=\"\", width=0.01, height=0.01];\n"
+    fn render_invisible_interface_node(&self, node_id: &str, stmts: &mut Vec<Stmt>) {
+        stmts.push(node_stmt(
+            node_id,
+            vec![
+                attr_plain("shape", "point"),
+                attr_plain("style", "invis"),
+                attr_quoted("label", ""),
+                attr_plain("width", "0.01"),
+                attr_plain("height", "0.01"),
+            ],
         ));
     }
 
@@ -161,15 +195,14 @@ impl NestedDotRenderer {
         &self,
         prefix: &str,
         graph: &OpenHypergraph<String, Operation>,
-        dot: &mut String,
+        stmts: &mut Vec<Stmt>,
     ) {
         for node_index in 0..graph.hypergraph.nodes.len() {
             let node = NodeId(node_index);
             let label = graph.hypergraph.nodes[node_index].clone();
-            dot.push_str(&format!(
-                "    {} [shape=point, xlabel=\"{}\"];\n",
-                node_id(prefix, node),
-                escape_dot_string(&label)
+            stmts.push(node_stmt(
+                &node_id(prefix, node),
+                vec![attr_plain("shape", "point"), attr_quoted("xlabel", &label)],
             ));
         }
     }
@@ -178,46 +211,42 @@ impl NestedDotRenderer {
         &self,
         prefix: &str,
         graph: &OpenHypergraph<String, Operation>,
-        dot: &mut String,
+        stmts: &mut Vec<Stmt>,
     ) {
         for (index, source) in graph.sources.iter().enumerate() {
-            dot.push_str(&format!(
-                "    {} [shape=point, label=\"\", width=0.05, height=0.05];\n",
-                input_id(prefix, index)
-            ));
-            dot.push_str(&format!(
-                "    {} -> {} [style=dashed, dir=none];\n",
-                input_id(prefix, index),
-                node_id(prefix, *source)
+            stmts.push(boundary_node(&input_id(prefix, index)));
+            stmts.push(edge_stmt(
+                node_vertex(&input_id(prefix, index)),
+                node_vertex(&node_id(prefix, *source)),
+                vec![attr_plain("style", "dashed"), attr_plain("dir", "none")],
             ));
         }
 
         for (index, target) in graph.targets.iter().enumerate() {
-            dot.push_str(&format!(
-                "    {} [shape=point, label=\"\", width=0.05, height=0.05];\n",
-                output_id(prefix, index)
-            ));
-            dot.push_str(&format!(
-                "    {} -> {} [style=dashed, dir=none];\n",
-                node_id(prefix, *target),
-                output_id(prefix, index)
+            stmts.push(boundary_node(&output_id(prefix, index)));
+            stmts.push(edge_stmt(
+                node_vertex(&node_id(prefix, *target)),
+                node_vertex(&output_id(prefix, index)),
+                vec![attr_plain("style", "dashed"), attr_plain("dir", "none")],
             ));
         }
 
         if !graph.sources.is_empty() {
-            dot.push_str("    { rank=source;");
-            for index in 0..graph.sources.len() {
-                dot.push_str(&format!(" {}", input_id(prefix, index)));
-            }
-            dot.push_str(" }\n");
+            stmts.push(rank_subgraph(
+                "source",
+                (0..graph.sources.len())
+                    .map(|index| input_id(prefix, index))
+                    .collect(),
+            ));
         }
 
         if !graph.targets.is_empty() {
-            dot.push_str("    { rank=sink;");
-            for index in 0..graph.targets.len() {
-                dot.push_str(&format!(" {}", output_id(prefix, index)));
-            }
-            dot.push_str(" }\n");
+            stmts.push(rank_subgraph(
+                "sink",
+                (0..graph.targets.len())
+                    .map(|index| output_id(prefix, index))
+                    .collect(),
+            ));
         }
     }
 
@@ -227,27 +256,32 @@ impl NestedDotRenderer {
         graph: &OpenHypergraph<String, Operation>,
         edge_index: usize,
         operation: &Operation,
-        dot: &mut String,
+        stmts: &mut Vec<Stmt>,
     ) {
         let edge_id = edge_id(prefix, edge_index);
         let hyperedge = &graph.hypergraph.adjacency[edge_index];
         let label = record_label(operation, hyperedge.sources.len(), hyperedge.targets.len());
 
-        dot.push_str(&format!(
-            "    {edge_id} [label=\"{}\", shape=record];\n",
-            escape_record_label(&label)
+        stmts.push(node_stmt(
+            &edge_id,
+            vec![
+                attr_quoted("label", &label),
+                attr_plain("shape", "record"),
+            ],
         ));
 
         for (source_index, source) in hyperedge.sources.iter().enumerate() {
-            dot.push_str(&format!(
-                "    {} -> {edge_id}:s_{source_index};\n",
-                node_id(prefix, *source)
+            stmts.push(edge_stmt(
+                node_vertex(&node_id(prefix, *source)),
+                port_vertex(&edge_id, &format!("s_{source_index}")),
+                vec![],
             ));
         }
         for (target_index, target) in hyperedge.targets.iter().enumerate() {
-            dot.push_str(&format!(
-                "    {edge_id}:t_{target_index} -> {};\n",
-                node_id(prefix, *target)
+            stmts.push(edge_stmt(
+                port_vertex(&edge_id, &format!("t_{target_index}")),
+                node_vertex(&node_id(prefix, *target)),
+                vec![],
             ));
         }
     }
@@ -258,21 +292,21 @@ impl NestedDotRenderer {
         graph: &OpenHypergraph<String, Operation>,
         edge_index: usize,
         child: &RenderedInterface,
-        dot: &mut String,
+        stmts: &mut Vec<Stmt>,
     ) {
         let hyperedge = &graph.hypergraph.adjacency[edge_index];
         for (source, child_source) in hyperedge.sources.iter().zip(&child.sources) {
-            dot.push_str(&format!(
-                "    {} -> {child_source} [lhead={}];\n",
-                node_id(prefix, *source),
-                child.cluster_id
+            stmts.push(edge_stmt(
+                node_vertex(&node_id(prefix, *source)),
+                node_vertex(child_source),
+                vec![attr_plain("lhead", &child.cluster_id)],
             ));
         }
         for (child_target, target) in child.targets.iter().zip(&hyperedge.targets) {
-            dot.push_str(&format!(
-                "    {child_target} -> {} [ltail={}];\n",
-                node_id(prefix, *target),
-                child.cluster_id
+            stmts.push(edge_stmt(
+                node_vertex(child_target),
+                node_vertex(&node_id(prefix, *target)),
+                vec![attr_plain("ltail", &child.cluster_id)],
             ));
         }
     }
@@ -339,19 +373,71 @@ fn record_ports(prefix: &str, arity: usize) -> String {
         .join(" | ")
 }
 
-fn escape_dot_string(label: &str) -> String {
-    label
-        .chars()
-        .flat_map(|character| match character {
-            '\\' => "\\\\".chars().collect::<Vec<_>>(),
-            '"' => "\\\"".chars().collect(),
-            _ => vec![character],
-        })
-        .collect()
+fn boundary_node(node_id: &str) -> Stmt {
+    node_stmt(
+        node_id,
+        vec![
+            attr_plain("shape", "point"),
+            attr_quoted("label", ""),
+            attr_plain("width", "0.05"),
+            attr_plain("height", "0.05"),
+        ],
+    )
 }
 
-fn escape_record_label(label: &str) -> String {
-    label
+fn rank_subgraph(rank: &str, nodes: Vec<String>) -> Stmt {
+    Stmt::Subgraph(Subgraph {
+        id: Id::Anonymous(String::new()),
+        stmts: std::iter::once(Stmt::Attribute(attr_plain("rank", rank)))
+            .chain(nodes.into_iter().map(|node| node_stmt(&node, vec![])))
+            .collect(),
+    })
+}
+
+fn node_stmt(node_id: &str, attributes: Vec<Attribute>) -> Stmt {
+    Stmt::Node(Node {
+        id: dot_node_id(node_id),
+        attributes,
+    })
+}
+
+fn edge_stmt(source: Vertex, target: Vertex, attributes: Vec<Attribute>) -> Stmt {
+    Stmt::Edge(Edge {
+        ty: EdgeTy::Pair(source, target),
+        attributes,
+    })
+}
+
+fn node_vertex(node_id: &str) -> Vertex {
+    Vertex::N(dot_node_id(node_id))
+}
+
+fn port_vertex(node_id: &str, port: &str) -> Vertex {
+    Vertex::N(DotNodeId(id(node_id), Some(Port(None, Some(port.to_string())))))
+}
+
+fn dot_node_id(node_id: &str) -> DotNodeId {
+    DotNodeId(id(node_id), None)
+}
+
+fn attr_plain(name: &str, value: &str) -> Attribute {
+    Attribute(id(name), id(value))
+}
+
+fn attr_quoted(name: &str, value: &str) -> Attribute {
+    Attribute(id(name), Id::Escaped(quoted(value)))
+}
+
+fn id(value: &str) -> Id {
+    Id::Plain(value.to_string())
+}
+
+fn quoted(value: &str) -> String {
+    format!("\"{}\"", escape_quoted(value))
+}
+
+fn escape_quoted(value: &str) -> String {
+    value
         .chars()
         .flat_map(|character| match character {
             '\\' => "\\\\".chars().collect::<Vec<_>>(),

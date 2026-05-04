@@ -4,10 +4,9 @@ mod hexpr_render;
 
 use std::path::PathBuf;
 
-use catena::compile::{GraphTheory, check_compile_set, compile_graph};
+use catena::compile::{check_compile_set, compile_graph};
 use clap::{Parser, Subcommand};
-use hexpr::Operation;
-use metacat::theory::{Theory, TheoryId, TheorySet};
+use metacat::theory::TheorySet;
 
 #[derive(Parser)]
 #[command(name = "catena", version = env!("CARGO_PKG_VERSION"))]
@@ -52,7 +51,7 @@ enum CompileCommand {
         path: PathBuf,
 
         #[arg(long)]
-        theory: Option<String>,
+        theory: String,
 
         #[arg()]
         definition: String,
@@ -80,7 +79,7 @@ fn compile_command(command: CompileCommand) -> anyhow::Result<()> {
             theory,
             definition,
             output,
-        } => compile_graph_command(path, theory.as_deref(), &definition, output),
+        } => compile_graph_command(path, &theory, &definition, output),
     }
 }
 
@@ -95,12 +94,11 @@ fn compile_check_command(path: PathBuf, verbose: bool) -> anyhow::Result<()> {
 
 fn compile_graph_command(
     path: PathBuf,
-    theory: Option<&str>,
+    theory: &str,
     definition: &str,
     output: Option<PathBuf>,
 ) -> anyhow::Result<()> {
     let theory_set = TheorySet::from_file(path)?;
-    let theory = resolve_graph_theory(&theory_set, theory, definition)?;
     let graph = compile_graph(&theory_set, theory, definition)?;
     let svg = compile_graph_render::nested_svg(&graph)?;
 
@@ -113,59 +111,4 @@ fn compile_graph_command(
     }
 
     Ok(())
-}
-
-fn resolve_graph_theory(
-    theory_set: &TheorySet,
-    theory: Option<&str>,
-    definition: &str,
-) -> anyhow::Result<GraphTheory> {
-    if let Some(theory) = theory {
-        return parse_graph_theory(theory);
-    }
-
-    match (
-        definition_exists(theory_set, "data", definition)?,
-        definition_exists(theory_set, "control", definition)?,
-    ) {
-        (true, false) => Ok(GraphTheory::Data),
-        (false, true) => Ok(GraphTheory::Control),
-        (true, true) => anyhow::bail!(
-            "definition `{definition}` exists in both data and control; pass --theory data or --theory control"
-        ),
-        (false, false) => anyhow::bail!(
-            "definition `{definition}` was not found in data or control; pass --theory if the target theory is ambiguous"
-        ),
-    }
-}
-
-fn parse_graph_theory(theory: &str) -> anyhow::Result<GraphTheory> {
-    match theory {
-        "data" => Ok(GraphTheory::Data),
-        "control" => Ok(GraphTheory::Control),
-        _ => anyhow::bail!("unsupported graph theory `{theory}`; expected `data` or `control`"),
-    }
-}
-
-fn definition_exists(
-    theory_set: &TheorySet,
-    theory_name: &str,
-    definition: &str,
-) -> anyhow::Result<bool> {
-    let Some(theory) = theory_set.theories.get(&theory_id(theory_name)?) else {
-        return Ok(false);
-    };
-    let definition: Operation = definition.parse()?;
-    Ok(matches!(
-        theory,
-        Theory::Theory { arrows, .. }
-            if arrows
-                .get(&definition)
-                .and_then(|arrow| arrow.definition.as_ref())
-                .is_some()
-    ))
-}
-
-fn theory_id(name: &str) -> anyhow::Result<TheoryId> {
-    Ok(TheoryId(name.parse()?))
 }

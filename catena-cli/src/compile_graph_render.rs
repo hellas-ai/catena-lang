@@ -316,11 +316,7 @@ impl NestedDotRenderer {
 }
 
 fn qualified_name(graph: &CompileGraph) -> String {
-    let prefix = match graph.theory {
-        catena::compile::GraphTheory::Data => "data",
-        catena::compile::GraphTheory::Control => "control",
-    };
-    format!("{prefix}.{}", graph.definition)
+    format!("{}.{}", graph.theory, graph.definition)
 }
 
 fn node_id(prefix: &str, node: NodeId) -> String {

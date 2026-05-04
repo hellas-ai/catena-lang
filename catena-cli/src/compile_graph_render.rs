@@ -143,35 +143,12 @@ impl NestedDotRenderer {
         interface: &ParentInterface,
         dot: &mut String,
     ) {
-        for (index, label) in interface.source_labels.iter().enumerate() {
+        for index in 0..interface.source_labels.len() {
             self.render_invisible_interface_node(&interface_source_id(prefix, index), dot);
-            self.render_interface_label(&interface_source_label_id(prefix, index), label, dot);
-            self.render_invisible_alignment(
-                &interface_source_label_id(prefix, index),
-                &interface_source_id(prefix, index),
-                dot,
-            );
         }
-        for (index, label) in interface.target_labels.iter().enumerate() {
+        for index in 0..interface.target_labels.len() {
             self.render_invisible_interface_node(&interface_target_id(prefix, index), dot);
-            self.render_interface_label(&interface_target_label_id(prefix, index), label, dot);
-            self.render_invisible_alignment(
-                &interface_target_id(prefix, index),
-                &interface_target_label_id(prefix, index),
-                dot,
-            );
         }
-    }
-
-    fn render_interface_label(&self, id: &str, label: &str, dot: &mut String) {
-        dot.push_str(&format!(
-            "    {id} [shape=plaintext, label=\"{}\"];\n",
-            escape_dot_string(label)
-        ));
-    }
-
-    fn render_invisible_alignment(&self, from: &str, to: &str, dot: &mut String) {
-        dot.push_str(&format!("    {from} -> {to} [style=invis, weight=10];\n"));
     }
 
     fn render_invisible_interface_node(&self, id: &str, dot: &mut String) {
@@ -341,14 +318,6 @@ fn interface_source_id(prefix: &str, index: usize) -> String {
 
 fn interface_target_id(prefix: &str, index: usize) -> String {
     format!("{prefix}_interface_target_{index}")
-}
-
-fn interface_source_label_id(prefix: &str, index: usize) -> String {
-    format!("{prefix}_interface_source_label_{index}")
-}
-
-fn interface_target_label_id(prefix: &str, index: usize) -> String {
-    format!("{prefix}_interface_target_label_{index}")
 }
 
 fn record_label(operation: &OperationKey, source_arity: usize, target_arity: usize) -> String {

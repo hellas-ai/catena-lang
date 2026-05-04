@@ -5,6 +5,8 @@ use hexpr::Operation;
 use open_hypergraphs::category::Arrow;
 use open_hypergraphs::lax::{NodeId, OpenHypergraph};
 
+// This is HExpr pretty-printing for interpreted object maps. It may belong in
+// hexpr/metacat eventually, once the desired notation is stable.
 pub fn render_arrow_declaration(arrow_type: &ArrowType) -> String {
     format!(
         "(arr {} : {} -> {})",

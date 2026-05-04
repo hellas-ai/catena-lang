@@ -6,7 +6,10 @@ use metacat::{
 use open_hypergraphs::lax::OpenHypergraph;
 use thiserror::Error;
 
-use crate::compile::lift::{LiftError, lift_control_to_data, lift_data_to_control};
+use crate::compile::{
+    config::{CompileConfig, TheoryExtension},
+    lift::{LiftError, lift_with_tensor},
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CheckReport {
@@ -51,17 +54,19 @@ impl From<LiftError> for CheckError {
 }
 
 pub fn check_compile_set(set: &TheorySet) -> Result<CompileCheckReport, CheckError> {
-    let syntax = theory(set, "syntax")?;
+    let config = CompileConfig::data_control();
+    let syntax = theory(set, config.syntax)?;
     let data = theory(set, "data")?;
-    let control = theory(set, "control")?;
+    let data_to_control_extension = extension(&config, "control", "data")?;
+    let control_to_data_extension = extension(&config, "data", "control")?;
 
     let data_report = check_theory(data)?;
-    let control_with_data = lift_data_to_control(data, control, syntax)?;
-    let data_with_control = lift_control_to_data(control, data, syntax)?;
+    let control_with_data = lift_extension(set, &config, syntax, data_to_control_extension)?;
+    let data_with_control = lift_extension(set, &config, syntax, control_to_data_extension)?;
     let control_with_data_report = check_theory(&control_with_data)?;
     let data_with_control_report = check_theory(&data_with_control)?;
-    let data_to_control = lifted_arrow_types(&control_with_data, "data");
-    let control_to_data = lifted_arrow_types(&data_with_control, "control");
+    let data_to_control = lifted_arrow_types(&control_with_data, data_to_control_extension.prefix);
+    let control_to_data = lifted_arrow_types(&data_with_control, control_to_data_extension.prefix);
 
     Ok(CompileCheckReport {
         data: data_report,
@@ -70,6 +75,36 @@ pub fn check_compile_set(set: &TheorySet) -> Result<CompileCheckReport, CheckErr
         data_to_control,
         control_to_data,
     })
+}
+
+fn extension<'a>(
+    config: &'a CompileConfig,
+    target: &str,
+    prefix: &str,
+) -> Result<&'a TheoryExtension, CheckError> {
+    config
+        .extension_for_target_and_prefix(target, prefix)
+        .ok_or_else(|| CheckError::UnknownTheory(format!("{target}/{prefix}")))
+}
+
+fn lift_extension(
+    set: &TheorySet,
+    config: &CompileConfig,
+    syntax: &Theory,
+    extension: &TheoryExtension,
+) -> Result<Theory, CheckError> {
+    let source = theory(set, extension.source)?;
+    let target = theory(set, extension.target)?;
+    let excluded_prefixes = config.lifted_prefixes();
+    Ok(lift_with_tensor(
+        source,
+        target,
+        syntax,
+        extension.prefix,
+        extension.tensor,
+        extension.unit,
+        &excluded_prefixes,
+    )?)
 }
 
 pub fn check_theory(theory: &Theory) -> Result<CheckReport, CheckError> {

@@ -28,38 +28,6 @@ pub enum LiftError {
     InvalidLiftedOperationName { prefix: &'static str, name: String },
 }
 
-pub fn lift_data_to_control(
-    data: &Theory,
-    control: &Theory,
-    syntax: &Theory,
-) -> Result<Theory, LiftError> {
-    lift_with_tensor(
-        data,
-        control,
-        syntax,
-        "data",
-        "product",
-        "unit",
-        &["data", "control"],
-    )
-}
-
-pub fn lift_control_to_data(
-    control: &Theory,
-    data: &Theory,
-    syntax: &Theory,
-) -> Result<Theory, LiftError> {
-    lift_with_tensor(
-        control,
-        data,
-        syntax,
-        "control",
-        "coproduct",
-        "unit",
-        &["data", "control"],
-    )
-}
-
 pub fn lift_with_tensor(
     source: &Theory,
     target: &Theory,

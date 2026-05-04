@@ -8,4 +8,4 @@ pub use check::{
 };
 pub use config::{CompileConfig, TheoryExtension};
 pub use graph::{CompileGraph, CompileGraphError, compile_graph};
-pub use lift::{LiftError, lift_control_to_data, lift_data_to_control};
+pub use lift::{LiftError, lift_with_tensor};

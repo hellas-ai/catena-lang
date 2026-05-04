@@ -78,14 +78,6 @@ impl From<CheckError> for CompileGraphError {
 
 pub fn compile_graph(
     set: &TheorySet,
-    theory: &str,
-    definition: &str,
-) -> Result<CompileGraph, CompileGraphError> {
-    compile_graph_with_config(set, &CompileConfig::data_control(), theory, definition)
-}
-
-pub fn compile_graph_with_config(
-    set: &TheorySet,
     config: &CompileConfig,
     theory: &str,
     definition: &str,

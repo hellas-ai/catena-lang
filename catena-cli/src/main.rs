@@ -4,7 +4,7 @@ mod hexpr_render;
 
 use std::path::PathBuf;
 
-use catena::compile::{check_compile_set, compile_graph};
+use catena::compile::{CompileConfig, check_compile_set, compile_graph};
 use clap::{Parser, Subcommand};
 use metacat::theory::TheorySet;
 
@@ -99,7 +99,8 @@ fn compile_graph_command(
     output: Option<PathBuf>,
 ) -> anyhow::Result<()> {
     let theory_set = TheorySet::from_file(path)?;
-    let graph = compile_graph(&theory_set, theory, definition)?;
+    let config = CompileConfig::data_control();
+    let graph = compile_graph(&theory_set, &config, theory, definition)?;
     let svg = compile_graph_render::nested_svg(&graph)?;
 
     match output {

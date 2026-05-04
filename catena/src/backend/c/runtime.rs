@@ -3,6 +3,7 @@ use thiserror::Error;
 use super::compile::{CompileError, SharedObject};
 use super::executor::{CallFrame, ExecutorError};
 use super::value::{Value, ValueKind};
+use metacat::theory::{Theory, TheorySet};
 
 /// Run catena programs with the C backend
 #[derive(Debug)]
@@ -10,7 +11,15 @@ pub struct Runtime {
     artifact: SharedObject,
 }
 
-pub type InitError = CompileError;
+#[derive(Debug, Error)]
+pub enum InitError {
+    #[error("Failed to parse program: {0}")]
+    Parse(#[from] metacat::theory::load::LoadError),
+    #[error("No runtime theory found")]
+    NoRuntimeTheory,
+    #[error(transparent)]
+    Compile(#[from] CompileError),
+}
 
 #[derive(Debug, Error)]
 pub enum ExecError {
@@ -40,7 +49,9 @@ pub enum ExecError {
 
 impl Runtime {
     pub fn new(source: &str) -> Result<Runtime, InitError> {
-        let artifact = super::compile::compile(source)?;
+        let theory_set = TheorySet::from_text(source)?;
+        let theory = runtime_theory(&theory_set).ok_or(InitError::NoRuntimeTheory)?;
+        let artifact = super::compile::compile(theory)?;
         Ok(Self { artifact })
     }
 
@@ -98,6 +109,15 @@ impl Runtime {
             .try_into()
             .expect("output arity already validated"))
     }
+}
+
+fn runtime_theory(theory_set: &TheorySet) -> Option<&Theory> {
+    // Legacy runtime selection shim: compile the first user theory in the file.
+    // This should be removed soon in favor of an explicit runtime theory choice.
+    theory_set
+        .theories
+        .values()
+        .find(|theory| matches!(theory, Theory::Theory { .. }))
 }
 
 fn collect_inputs<const M: usize>(

@@ -3,14 +3,12 @@ use crate::backend::c::codegen::codegen;
 use crate::backend::c::value::ValueKind;
 use crate::lang::Obj;
 use crate::lower::{LowerError, Pass, lower};
-use hexpr::Operation;
-use metacat::theory::{Theory, TheoryId, TheorySet};
+use metacat::theory::Theory;
 use metacat::tree::Tree;
 use std::collections::{HashMap, HashSet};
 use std::convert::Infallible;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus};
-use std::str::FromStr;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -60,10 +58,7 @@ pub(crate) struct FunctionSignature {
     pub(crate) outputs: Vec<ValueKind>,
 }
 
-pub(crate) fn compile(source: &str) -> Result<SharedObject, CompileError> {
-    let theory_set = TheorySet::from_text(source)?;
-    let theory = runtime_theory(&theory_set).ok_or(CompileError::NoDefinitions)?;
-
+pub(crate) fn compile(theory: &Theory) -> Result<SharedObject, CompileError> {
     let mut definitions: Vec<String> = match theory {
         Theory::Nat => Vec::new(),
         Theory::Theory { arrows, .. } => arrows
@@ -130,16 +125,6 @@ pub(crate) fn compile(source: &str) -> Result<SharedObject, CompileError> {
         _build_dir: build_dir,
         path: so_path,
         signatures,
-    })
-}
-
-fn runtime_theory(theory_set: &TheorySet) -> Option<&Theory> {
-    let runtime_id = TheoryId::new(Operation::from_str("runtime").expect("valid operation"));
-    theory_set.theories.get(&runtime_id).or_else(|| {
-        theory_set
-            .theories
-            .values()
-            .find(|theory| matches!(theory, Theory::Theory { .. }))
     })
 }
 

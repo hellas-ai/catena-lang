@@ -3,9 +3,8 @@ use thiserror::Error;
 use open_hypergraphs::strict::vec::FiniteFunction;
 use std::collections::HashMap;
 
-use hexpr::{Operation, try_interpret};
-use metacat::ssa::SSAError;
-use metacat::{check::check, syntax::TheoryBundle, theory::OperationKey, tree::Tree};
+use hexpr::Operation;
+use metacat::{check::check, ssa::SSAError, theory::Theory, tree::Tree};
 use open_hypergraphs::lax::{OpenHypergraph, functor::Functor};
 
 use crate::lang::{Arr, Obj};
@@ -27,7 +26,6 @@ pub enum Pass {
     DiscardNaturality,
 }
 
-/// An error during [`lower`]ing of a term
 #[derive(Error, Debug)]
 pub enum LowerError {
     #[error("Invalid quotient: {0:?}")]
@@ -40,41 +38,31 @@ pub enum LowerError {
     DiscardNaturality(SSAError),
     #[error("Invalid definition name: {0}")]
     InvalidDefinition(String),
-    #[error("Invalid hexpr: {0}")]
-    InvalidHexpr(#[from] hexpr::interpret::Error<metacat::theory::Error>),
+    #[error("Expected a user theory")]
+    NotUserTheory,
     #[error("Typecheck failed: {0:?}")]
-    TypecheckError(metacat::check::Error<OperationKey>),
+    TypecheckError(metacat::check::Error<Operation>),
 }
 
-/// Lower a term by applying passes until the specified pass
-/// TODO: add a post-processing hook on `lower` to transform any pass into readable strings - used
-/// for lower command -> svg
 pub fn lower(
-    bundle: &TheoryBundle,
+    theory: &Theory,
     until: Pass,
     definition: &str,
-) -> Result<OpenHypergraph<Tree<(), OperationKey>, OperationKey>, LowerError> {
+) -> Result<OpenHypergraph<Tree<(), Operation>, Operation>, LowerError> {
     let key: Operation = definition
         .parse()
         .map_err(|_| LowerError::InvalidDefinition(definition.to_string()))?;
 
-    let declaration = bundle
-        .definitions
-        .get(&key)
+    let arrow = theory
+        .get_arrow(&key)
         .ok_or_else(|| LowerError::UnknownDefinition(definition.to_string()))?;
 
-    // Get term from declaration & key
-    // NOTE: we *must* inline before typechecking: we need annotated nodes to be specialised to the
-    // types applied to each definition.
-    let mut current = declaration_term(bundle, &key)?;
-    let current = inline(bundle, &mut current)?;
+    let mut current = declaration_term(theory, &key)?;
+    let current = inline(theory, &mut current)?;
+    let mut current = compute_types(theory, arrow, current)?;
 
-    // Check inlined
-    let mut current = compute_types(bundle, declaration, current)?;
-
-    // Run subsequent passes in order, stopping after the requested one
     if until != Pass::Check {
-        for (pass, apply) in lower_passes(bundle)? {
+        for (pass, apply) in lower_passes()? {
             current = apply(&current)?;
             current.quotient().map_err(LowerError::InvalidQuotient)?;
             if pass == until {
@@ -86,10 +74,9 @@ pub fn lower(
     Ok(current)
 }
 
-/// Construct the compiler lowering passes
-fn lower_passes(bundle: &TheoryBundle) -> Result<Vec<LowerPass>, LowerError> {
-    let bound_key = bundle.object_theory.get_operation_key("bound").unwrap();
-    let value_key = bundle.object_theory.get_operation_key("value").unwrap();
+fn lower_passes() -> Result<Vec<LowerPass>, LowerError> {
+    let bound_key = parse_operation("bound")?;
+    let value_key = parse_operation("value")?;
     let forget_bound = ForgetBound::new(bound_key, value_key);
 
     Ok(vec![
@@ -107,23 +94,16 @@ fn lower_passes(bundle: &TheoryBundle) -> Result<Vec<LowerPass>, LowerError> {
 }
 
 fn inline(
-    bundle: &TheoryBundle,
+    theory: &Theory,
     t: &mut OpenHypergraph<(), Arr>,
 ) -> Result<OpenHypergraph<(), Arr>, LowerError> {
     let inline = {
         let names = ["f32.sum", "ones-2d", "id-matrix-2d"];
         let mut inline_defs = HashMap::new();
         for name in names {
-            let op: Operation = name
-                .parse()
-                .map_err(|_| LowerError::InvalidDefinition(name.to_string()))?;
-            let arrow = declaration_term(bundle, &op)?;
-            let key = bundle
-                .arrow_theory
-                .get_operation_key(name)
-                .ok_or(LowerError::UnknownOperation(name.to_string()))?;
-
-            inline_defs.insert(key, arrow);
+            let op = parse_operation(name)?;
+            let arrow = declaration_term(theory, &op)?;
+            inline_defs.insert(op, arrow);
         }
         Inline {
             definitions: inline_defs,
@@ -134,37 +114,31 @@ fn inline(
 }
 
 fn declaration_term(
-    bundle: &TheoryBundle,
+    theory: &Theory,
     key: &Operation,
 ) -> Result<OpenHypergraph<(), Arr>, LowerError> {
-    let hexpr = bundle
-        .definitions
-        .get(key)
-        .and_then(|decl| decl.definition.clone())
-        .ok_or_else(|| LowerError::UnknownDefinition(key.to_string()))?;
-
-    Ok(forget_labels(try_interpret(&bundle.arrow_theory, &hexpr)?))
+    theory
+        .get_arrow(key)
+        .and_then(|arrow| arrow.definition.clone())
+        .ok_or_else(|| LowerError::UnknownDefinition(key.to_string()))
 }
 
 fn compute_types(
-    bundle: &TheoryBundle,
-    declaration: &metacat::syntax::Declaration,
-    term: OpenHypergraph<(), Arr>,
+    theory: &Theory,
+    arrow: &metacat::theory::TheoryArrow,
+    mut term: OpenHypergraph<(), Arr>,
 ) -> Result<OpenHypergraph<Obj, Arr>, LowerError> {
-    let mut term = term;
-    let source = forget_labels(try_interpret(
-        &bundle.object_theory,
-        &declaration.source_map,
-    )?);
-    let target = forget_labels(try_interpret(
-        &bundle.object_theory,
-        &declaration.target_map,
-    )?);
-    let result = check(&bundle.arrow_theory, source, target, &mut term)
-        .map_err(LowerError::TypecheckError)?;
+    let result = check(
+        theory,
+        arrow.type_maps.0.clone(),
+        arrow.type_maps.1.clone(),
+        &mut term,
+    )
+    .map_err(LowerError::TypecheckError)?;
     Ok(term.with_nodes(|_| result).unwrap())
 }
 
-fn forget_labels<O, A>(f: OpenHypergraph<O, A>) -> OpenHypergraph<(), A> {
-    f.map_nodes(|_| ())
+fn parse_operation(name: &str) -> Result<Operation, LowerError> {
+    name.parse()
+        .map_err(|_| LowerError::InvalidDefinition(name.to_string()))
 }

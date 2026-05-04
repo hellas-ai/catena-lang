@@ -1,17 +1,14 @@
-use std::collections::HashMap;
-
 use hexpr::Operation;
-use metacat::{
-    syntax::{Declaration, TheoryBundle},
-    theory::OperationKey,
-};
+use metacat::theory::{Theory, TheoryArrow};
 use open_hypergraphs::category::Arrow;
 use open_hypergraphs::lax::OpenHypergraph;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum LiftError {
-    #[error("cannot lift {prefix}: missing object constructor `{object}` in target theory")]
+    #[error("cannot lift {prefix}: target is not a user theory")]
+    TargetIsNotUserTheory { prefix: &'static str },
+    #[error("cannot lift {prefix}: missing object constructor `{object}` in syntax theory")]
     MissingObject {
         prefix: &'static str,
         object: String,
@@ -29,45 +26,44 @@ pub enum LiftError {
     },
     #[error("cannot lift {prefix}: invalid lifted operation name `{name}`")]
     InvalidLiftedOperationName { prefix: &'static str, name: String },
-    #[error("cannot lift {prefix}: failed to add lifted operation `{name}`: {error}")]
-    AddOperation {
-        prefix: &'static str,
-        name: String,
-        error: metacat::theory::Error,
-    },
 }
 
 pub fn lift_data_to_control(
-    data: &TheoryBundle,
-    control: &TheoryBundle,
-) -> Result<TheoryBundle, LiftError> {
-    lift_with_tensor(data, control, "data", "product", "unit")
+    data: &Theory,
+    control: &Theory,
+    syntax: &Theory,
+) -> Result<Theory, LiftError> {
+    lift_with_tensor(data, control, syntax, "data", "product", "unit")
 }
 
 pub fn lift_control_to_data(
-    control: &TheoryBundle,
-    data: &TheoryBundle,
-) -> Result<TheoryBundle, LiftError> {
-    lift_with_tensor(control, data, "control", "coproduct", "unit")
+    control: &Theory,
+    data: &Theory,
+    syntax: &Theory,
+) -> Result<Theory, LiftError> {
+    lift_with_tensor(control, data, syntax, "control", "coproduct", "unit")
 }
 
 fn lift_with_tensor(
-    source: &TheoryBundle,
-    target: &TheoryBundle,
+    source: &Theory,
+    target: &Theory,
+    syntax: &Theory,
     prefix: &'static str,
     tensor: &str,
     unit: &str,
-) -> Result<TheoryBundle, LiftError> {
-    let tensor_key = require_object(target, prefix, tensor, 2, 1)?;
-    let unit_key = require_object(target, prefix, unit, 0, 1)?;
-    let mut bundle = clone_bundle(target);
+) -> Result<Theory, LiftError> {
+    let tensor_key = require_object(syntax, prefix, tensor, 2, 1)?;
+    let unit_key = require_object(syntax, prefix, unit, 0, 1)?;
+    let mut theory = target.clone();
+    let Theory::Theory { arrows, .. } = &mut theory else {
+        return Err(LiftError::TargetIsNotUserTheory { prefix });
+    };
 
-    let mut operations: Vec<_> = source.arrow_theory.operations().collect();
-    operations.sort_by_key(|op| op.to_string());
+    let mut operations = source_arrows(source);
+    operations.sort_by(|(left, _), (right, _)| left.cmp(right));
 
-    for op in operations {
-        let original_name = op.to_string();
-        let lifted_name = format!("{prefix}.{original_name}");
+    for (name, arrow) in operations {
+        let lifted_name = format!("{prefix}.{name}");
         let lifted_operation: Operation =
             lifted_name
                 .parse()
@@ -75,43 +71,58 @@ fn lift_with_tensor(
                     prefix,
                     name: lifted_name.clone(),
                 })?;
+        let lifted_source =
+            lift_object_map(&arrow.type_maps.0, syntax, &tensor_key, &unit_key, prefix)?;
+        let lifted_target =
+            lift_object_map(&arrow.type_maps.1, syntax, &tensor_key, &unit_key, prefix)?;
 
-        let (source_map, target_map) = source.arrow_theory.type_maps(op);
-        let lifted_source = lift_object_map(source_map, target, &tensor_key, &unit_key, prefix)?;
-        let lifted_target = lift_object_map(target_map, target, &tensor_key, &unit_key, prefix)?;
-
-        bundle
-            .arrow_theory
-            .add_operation(lifted_operation, lifted_source, lifted_target)
-            .map_err(|error| LiftError::AddOperation {
-                prefix,
-                name: lifted_name.clone(),
-                error,
-            })?;
+        let mut lifted_arrow = arrow.clone();
+        lifted_arrow.name = lifted_operation.clone();
+        lifted_arrow.type_maps = (lifted_source, lifted_target);
+        lifted_arrow.definition = None;
+        lifted_arrow.raw.name = lifted_operation.clone();
+        lifted_arrow.raw.definition = None;
+        arrows.insert(lifted_operation, lifted_arrow);
     }
 
-    Ok(bundle)
+    Ok(theory)
+}
+
+fn source_arrows(source: &Theory) -> Vec<(Operation, TheoryArrow)> {
+    match source {
+        Theory::Nat => Vec::new(),
+        Theory::Theory { arrows, .. } => arrows
+            .iter()
+            .filter(|(name, _)| {
+                let name = name.to_string();
+                !name.starts_with("data.") && !name.starts_with("control.")
+            })
+            .map(|(name, arrow)| (name.clone(), arrow.clone()))
+            .collect(),
+    }
 }
 
 fn require_object(
-    bundle: &TheoryBundle,
+    syntax: &Theory,
     prefix: &'static str,
     object: &str,
     expected_source_arity: usize,
     expected_target_arity: usize,
-) -> Result<OperationKey, LiftError> {
-    let key = bundle
-        .object_theory
-        .get_operation_key(object)
+) -> Result<Operation, LiftError> {
+    let operation: Operation = object.parse().map_err(|_| LiftError::MissingObject {
+        prefix,
+        object: object.to_string(),
+    })?;
+    let arrow = syntax
+        .get_arrow(&operation)
         .ok_or_else(|| LiftError::MissingObject {
             prefix,
             object: object.to_string(),
         })?;
-    let (source, target) = bundle.object_theory.type_maps(&key);
-    let source_arity = source.target().len();
-    let target_arity = target.target().len();
+    let source_arity = arrow.type_maps.0.target().len();
+    let target_arity = arrow.type_maps.1.target().len();
     if source_arity == expected_source_arity && target_arity == expected_target_arity {
-        Ok(key)
+        Ok(operation)
     } else {
         Err(LiftError::InvalidObjectProfile {
             prefix,
@@ -125,29 +136,22 @@ fn require_object(
 }
 
 fn lift_object_map(
-    map: &OpenHypergraph<(), OperationKey>,
-    target: &TheoryBundle,
-    tensor_key: &OperationKey,
-    unit_key: &OperationKey,
+    map: &OpenHypergraph<(), Operation>,
+    syntax: &Theory,
+    tensor_key: &Operation,
+    unit_key: &Operation,
     prefix: &'static str,
-) -> Result<OpenHypergraph<(), OperationKey>, LiftError> {
-    let remapped_edges = map
-        .hypergraph
-        .edges
-        .iter()
-        .map(|op| {
-            let object = op.to_string();
-            target
-                .object_theory
-                .get_operation_key(&object)
-                .ok_or_else(|| LiftError::MissingObject { prefix, object })
-        })
-        .collect::<Result<Vec<_>, _>>()?;
+) -> Result<OpenHypergraph<(), Operation>, LiftError> {
+    for op in &map.hypergraph.edges {
+        if syntax.get_arrow(op).is_none() {
+            return Err(LiftError::MissingObject {
+                prefix,
+                object: op.to_string(),
+            });
+        }
+    }
 
-    let mut lifted = map
-        .clone()
-        .with_edges(|_| remapped_edges)
-        .expect("edge remapping preserves edge count");
+    let mut lifted = map.clone();
 
     match lifted.targets.len() {
         0 => {
@@ -170,32 +174,4 @@ fn lift_object_map(
     }
 
     Ok(lifted)
-}
-
-fn clone_bundle(bundle: &TheoryBundle) -> TheoryBundle {
-    TheoryBundle {
-        object_theory: bundle.object_theory.clone(),
-        arrow_theory: bundle.arrow_theory.clone(),
-        definitions: clone_definitions(&bundle.definitions),
-    }
-}
-
-fn clone_definitions(
-    definitions: &HashMap<Operation, Declaration>,
-) -> HashMap<Operation, Declaration> {
-    definitions
-        .iter()
-        .map(|(name, declaration)| {
-            (
-                name.clone(),
-                Declaration {
-                    theory: declaration.theory.clone(),
-                    name: declaration.name.clone(),
-                    source_map: declaration.source_map.clone(),
-                    target_map: declaration.target_map.clone(),
-                    definition: declaration.definition.clone(),
-                },
-            )
-        })
-        .collect()
 }

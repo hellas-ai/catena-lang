@@ -1,7 +1,8 @@
-use metacat::{theory::OperationKey, tree::Tree};
+use hexpr::Operation;
+use metacat::tree::Tree;
 
-pub type Obj = Tree<(), OperationKey>;
-pub type Arr = OperationKey;
+pub type Obj = Tree<(), Operation>;
+pub type Arr = Operation;
 
 pub fn is_value(o: &Obj) -> bool {
     // true iff the root of the tree is "value" (the type of runtime values)

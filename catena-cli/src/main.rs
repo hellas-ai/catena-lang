@@ -1,24 +1,19 @@
-use catena::lower::{Pass, lower};
-use catena::shallow::shallow_graph;
-
 mod compile_graph_render;
 
-use clap::{Parser, Subcommand, ValueEnum};
 use std::collections::HashSet;
 use std::path::PathBuf;
 
-use catena::backend::c::codegen::codegen;
 use catena::compile::{
-    ArrowType, CompileCheckReport, GraphTheory, check_bundle, check_compile_bundle, compile_graph,
+    ArrowType, CompileCheckReport, GraphTheory, check_compile_set, compile_graph,
 };
-use catena::lang::Obj;
-use catena::structured::structured_from_shallow;
-use metacat::{syntax::TheoryBundle, theory::OperationKey};
+use clap::{Parser, Subcommand, ValueEnum};
+use hexpr::Operation;
+use metacat::theory::TheorySet;
 use open_hypergraphs::category::Arrow;
 use open_hypergraphs::lax::{NodeId, OpenHypergraph};
 
 #[derive(Parser)]
-#[command(name = "catena", version=env!("CARGO_PKG_VERSION"))]
+#[command(name = "catena", version = env!("CARGO_PKG_VERSION"))]
 #[command(about = "catena compiler")]
 struct Cli {
     #[command(subcommand)]
@@ -27,58 +22,19 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Check a hex file with metacat
+    /// Check a multi-theory hex file with metacat/Catena compile checks
     Check {
         #[arg()]
         path: PathBuf,
+
+        #[arg(long)]
+        verbose: bool,
     },
 
-    /// Run codegen for a given pass
-    Codegen {
-        #[arg()]
-        path: PathBuf,
-        #[arg()]
-        definition: String,
-    },
-
-    /// Run the new Catena compile pipeline
+    /// Run the Catena compile pipeline
     Compile {
         #[command(subcommand)]
         command: CompileCommand,
-    },
-
-    /// Run compiler passes up to the given pass and output SVG
-    Lower {
-        #[arg()]
-        pass: PassArg,
-        #[arg()]
-        path: PathBuf,
-        #[arg()]
-        definition: String,
-    },
-
-    /// Check one definition and output its graph without inlining called arrows
-    ShallowGraph {
-        /// Emit the shallow hypergraph as SVG instead of structured code
-        #[arg(long)]
-        svg: bool,
-
-        /// Emit structured IR instead of C
-        #[arg(long)]
-        ir: bool,
-
-        /// Select shallow output format
-        #[arg(long, value_enum, default_value_t = ShallowOutput::Cuda)]
-        output: ShallowOutput,
-
-        /// CUDA tile size used by CUDA output modes
-        #[arg(long, default_value_t = 16)]
-        tile: usize,
-
-        #[arg()]
-        path: PathBuf,
-        #[arg()]
-        definition: String,
     },
 }
 
@@ -86,11 +42,8 @@ enum Command {
 enum CompileCommand {
     /// Check data/control theories after Catena lift passes
     Check {
-        #[arg(long)]
-        data: PathBuf,
-
-        #[arg(long)]
-        control: PathBuf,
+        #[arg()]
+        path: PathBuf,
 
         #[arg(long)]
         verbose: bool,
@@ -98,11 +51,8 @@ enum CompileCommand {
 
     /// Render one compile graph as SVG, inlining only same-theory definitions
     Graph {
-        #[arg(long)]
-        data: PathBuf,
-
-        #[arg(long)]
-        control: PathBuf,
+        #[arg()]
+        path: PathBuf,
 
         #[arg(long, value_enum)]
         theory: CompileTheoryArg,
@@ -114,23 +64,6 @@ enum CompileCommand {
         #[arg(short, long)]
         output: Option<PathBuf>,
     },
-}
-
-#[derive(Clone, Copy, Debug, ValueEnum)]
-enum PassArg {
-    Check,
-    Erase,
-    ForgetBound,
-    ExpandEta,
-    DiscardNaturality,
-}
-
-#[derive(Clone, Copy, Debug, ValueEnum)]
-enum ShallowOutput {
-    Ir,
-    Cuda,
-    CudaWithLaunch,
-    Svg,
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -148,95 +81,44 @@ impl From<CompileTheoryArg> for GraphTheory {
     }
 }
 
-impl From<PassArg> for Pass {
-    fn from(value: PassArg) -> Self {
-        match value {
-            PassArg::Check => Pass::Check,
-            PassArg::Erase => Pass::Erase,
-            PassArg::ForgetBound => Pass::ForgetBound,
-            PassArg::ExpandEta => Pass::ExpandEta,
-            PassArg::DiscardNaturality => Pass::DiscardNaturality,
-        }
-    }
-}
-
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Command::Check { path } => check_command(path),
-        Command::Codegen { path, definition } => {
-            let bundle = TheoryBundle::from_file(path)?;
-            let lowered = lower(&bundle, Pass::DiscardNaturality, &definition)?;
-            println!("{}", codegen(lowered, "out"));
-            Ok(())
-        }
+        Command::Check { path, verbose } => compile_check_command(path, verbose),
         Command::Compile { command } => compile_command(command),
-        Command::Lower {
-            path,
-            pass,
-            definition,
-        } => lower_command(TheoryBundle::from_file(path)?, pass.into(), &definition),
-        Command::ShallowGraph {
-            svg,
-            ir,
-            output,
-            tile,
-            path,
-            definition,
-        } => shallow_graph_command(
-            TheoryBundle::from_file(path)?,
-            &definition,
-            if svg {
-                ShallowOutput::Svg
-            } else if ir {
-                ShallowOutput::Ir
-            } else {
-                output
-            },
-            tile,
-        ),
     }
 }
 
 fn compile_command(command: CompileCommand) -> anyhow::Result<()> {
     match command {
-        CompileCommand::Check {
-            data,
-            control,
-            verbose,
-        } => compile_check_command(data, control, verbose),
+        CompileCommand::Check { path, verbose } => compile_check_command(path, verbose),
         CompileCommand::Graph {
-            data,
-            control,
+            path,
             theory,
             definition,
             output,
-        } => compile_graph_command(data, control, theory.into(), &definition, output),
+        } => compile_graph_command(path, theory.into(), &definition, output),
     }
 }
 
-fn compile_check_command(data: PathBuf, control: PathBuf, verbose: bool) -> anyhow::Result<()> {
-    let data_display = data.display().to_string();
-    let control_display = control.display().to_string();
-    let data_bundle = TheoryBundle::from_file(data)?;
-    let control_bundle = TheoryBundle::from_file(control)?;
-    let report = check_compile_bundle(&data_bundle, &control_bundle)?;
+fn compile_check_command(path: PathBuf, verbose: bool) -> anyhow::Result<()> {
+    let path_display = path.display().to_string();
+    let theory_set = TheorySet::from_file(path)?;
+    let report = check_compile_set(&theory_set)?;
 
-    print_compile_check_report(&data_display, &control_display, &report, verbose);
+    print_compile_check_report(&path_display, &report, verbose);
     Ok(())
 }
 
 fn compile_graph_command(
-    data: PathBuf,
-    control: PathBuf,
+    path: PathBuf,
     theory: GraphTheory,
     definition: &str,
     output: Option<PathBuf>,
 ) -> anyhow::Result<()> {
-    let data_bundle = TheoryBundle::from_file(data)?;
-    let control_bundle = TheoryBundle::from_file(control)?;
-    let graph = compile_graph(&data_bundle, &control_bundle, theory, definition)?;
+    let theory_set = TheorySet::from_file(path)?;
+    let graph = compile_graph(&theory_set, theory, definition)?;
     let svg = compile_graph_render::nested_svg(&graph)?;
 
     match output {
@@ -250,30 +132,10 @@ fn compile_graph_command(
     Ok(())
 }
 
-fn check_command(path: PathBuf) -> anyhow::Result<()> {
-    let path_display = path.display().to_string();
-    let bundle = TheoryBundle::from_file(path)?;
-    let report = check_bundle(&bundle)?;
-
-    println!(
-        "OK: checked {path_display} ({} definitions)",
-        report.definitions_checked
-    );
-    Ok(())
-}
-
-fn print_compile_check_report(
-    data: &str,
-    control: &str,
-    report: &CompileCheckReport,
-    verbose: bool,
-) {
+fn print_compile_check_report(path: &str, report: &CompileCheckReport, verbose: bool) {
     println!("OK: compile check passed");
-    println!(
-        "  data: {data} ({} definitions)",
-        report.data.definitions_checked
-    );
-    println!("  control: {control}");
+    println!("  file: {path}");
+    println!("  data: {} definitions", report.data.definitions_checked);
     println!(
         "  control + lifted data: {} definitions",
         report.control_with_data.definitions_checked
@@ -306,14 +168,14 @@ fn print_lift_report(label: &str, operations: &[ArrowType]) {
 
 fn render_arrow_declaration(arrow_type: &ArrowType) -> String {
     format!(
-        "(arrow {} : {} -> {})",
+        "(arr {} : {} -> {})",
         arrow_type.name,
         render_object_map(&arrow_type.source),
         render_object_map(&arrow_type.target)
     )
 }
 
-fn render_object_map(map: &OpenHypergraph<(), OperationKey>) -> String {
+fn render_object_map(map: &OpenHypergraph<(), Operation>) -> String {
     let mut map = map.clone();
     let _ = map.quotient();
     let map = &map;
@@ -332,12 +194,12 @@ fn render_object_map(map: &OpenHypergraph<(), OperationKey>) -> String {
     }
 }
 
-fn render_target(map: &OpenHypergraph<(), OperationKey>, node: NodeId, vars: &[String]) -> String {
+fn render_target(map: &OpenHypergraph<(), Operation>, node: NodeId, vars: &[String]) -> String {
     render_node(map, node, vars, &mut HashSet::new())
 }
 
 fn render_edge(
-    map: &OpenHypergraph<(), OperationKey>,
+    map: &OpenHypergraph<(), Operation>,
     edge_index: usize,
     vars: &[String],
     seen: &mut HashSet<NodeId>,
@@ -357,7 +219,7 @@ fn render_edge(
 }
 
 fn render_node(
-    map: &OpenHypergraph<(), OperationKey>,
+    map: &OpenHypergraph<(), Operation>,
     node: NodeId,
     vars: &[String],
     seen: &mut HashSet<NodeId>,
@@ -396,86 +258,22 @@ fn render_spider(sources: &[String], targets: &[String]) -> String {
     }
 }
 
-fn source_vars(map: &OpenHypergraph<(), OperationKey>) -> Vec<String> {
+fn source_vars(map: &OpenHypergraph<(), Operation>) -> Vec<String> {
     (0..map.source().len())
         .map(|index| format!("x{index}"))
         .collect()
 }
 
-fn producer_edge(map: &OpenHypergraph<(), OperationKey>, node: NodeId) -> Option<usize> {
+fn producer_edge(map: &OpenHypergraph<(), Operation>, node: NodeId) -> Option<usize> {
     map.hypergraph
         .adjacency
         .iter()
         .position(|edge| edge.targets.contains(&node))
 }
 
-fn object_edge_at_node(map: &OpenHypergraph<(), OperationKey>, node: NodeId) -> Option<usize> {
+fn object_edge_at_node(map: &OpenHypergraph<(), Operation>, node: NodeId) -> Option<usize> {
     map.hypergraph
         .adjacency
         .iter()
         .position(|edge| edge.sources.is_empty() && edge.targets.contains(&node))
-}
-
-fn lower_command(bundle: TheoryBundle, until: Pass, definition: &str) -> anyhow::Result<()> {
-    let current = lower(&bundle, until, definition)?;
-    print_svg(&bundle, current)
-}
-
-fn shallow_graph_command(
-    bundle: TheoryBundle,
-    definition: &str,
-    output: ShallowOutput,
-    tile: usize,
-) -> anyhow::Result<()> {
-    let current = shallow_graph(&bundle, definition)?;
-    if matches!(output, ShallowOutput::Cuda | ShallowOutput::CudaWithLaunch) && tile == 0 {
-        anyhow::bail!("--tile must be greater than zero");
-    }
-    match output {
-        ShallowOutput::Svg => print_svg(&bundle, current),
-        ShallowOutput::Ir => {
-            let program = structured_from_shallow(&current, definition)?;
-            print!("{}", program.render_ir());
-            Ok(())
-        }
-        ShallowOutput::Cuda => {
-            let program = structured_from_shallow(&current, definition)?;
-            print!("{}", program.render_c_with_tile(tile)?);
-            Ok(())
-        }
-        ShallowOutput::CudaWithLaunch => {
-            let program = structured_from_shallow(&current, definition)?;
-            print!("{}", program.render_cuda_with_launch_with_tile(tile)?);
-            Ok(())
-        }
-    }
-}
-
-fn print_svg(
-    bundle: &TheoryBundle,
-    current: open_hypergraphs::lax::OpenHypergraph<Obj, OperationKey>,
-) -> anyhow::Result<()> {
-    // Pretty-print
-    let coarity =
-        |op: &OperationKey| -> usize { bundle.object_theory.type_maps(op).1.targets.len() };
-
-    let labels: Vec<String> = current
-        .hypergraph
-        .nodes
-        .iter()
-        .map(|n| n.pretty(Some(&coarity)))
-        .collect();
-
-    use open_hypergraphs_dot::{Options, svg::to_svg_with};
-    use std::io::Write;
-
-    let opts = Options::default().display();
-    std::io::stdout().write_all(&to_svg_with(
-        &current
-            .with_nodes(|_| labels)
-            .expect("labels length mismatch"),
-        &opts,
-    )?)?;
-
-    Ok(())
 }

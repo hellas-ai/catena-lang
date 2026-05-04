@@ -1,5 +1,5 @@
-use hexpr::{Operation, try_interpret};
-use metacat::{check::check, syntax::TheoryBundle, theory::OperationKey};
+use hexpr::Operation;
+use metacat::{check::check, theory::Theory};
 use open_hypergraphs::lax::OpenHypergraph;
 use open_hypergraphs::strict::vec::FiniteFunction;
 use thiserror::Error;
@@ -14,53 +14,34 @@ pub enum ShallowError {
     UnknownDefinition(String),
     #[error("Invalid definition name: {0}")]
     InvalidDefinition(String),
-    #[error("Invalid hexpr: {0}")]
-    InvalidHexpr(#[from] hexpr::interpret::Error<metacat::theory::Error>),
     #[error("Typecheck failed: {0:?}")]
-    TypecheckError(metacat::check::Error<OperationKey>),
+    TypecheckError(metacat::check::Error<Operation>),
 }
 
-/// Build the graph for one definition without inlining any called definitions.
-///
-/// Each arrow used by the selected definition remains a single hypergraph box.
-/// This is useful for control-flow sketches such as `gpu.tiled-matmul.block-f32`,
-/// where primitive GPU arrows should stay opaque instead of being lowered through
-/// the existing compiler passes.
 pub fn shallow_graph(
-    bundle: &TheoryBundle,
+    theory: &Theory,
     definition: &str,
 ) -> Result<OpenHypergraph<Obj, Arr>, ShallowError> {
     let key: Operation = definition
         .parse()
         .map_err(|_| ShallowError::InvalidDefinition(definition.to_string()))?;
 
-    let declaration = bundle
-        .definitions
-        .get(&key)
+    let arrow = theory
+        .get_arrow(&key)
         .ok_or_else(|| ShallowError::UnknownDefinition(definition.to_string()))?;
-
-    let hexpr = declaration
+    let mut term = arrow
         .definition
         .clone()
         .ok_or_else(|| ShallowError::UnknownDefinition(definition.to_string()))?;
 
-    let mut term = forget_labels(try_interpret(&bundle.arrow_theory, &hexpr)?);
-    let source = forget_labels(try_interpret(
-        &bundle.object_theory,
-        &declaration.source_map,
-    )?);
-    let target = forget_labels(try_interpret(
-        &bundle.object_theory,
-        &declaration.target_map,
-    )?);
-
-    let checked_nodes = check(&bundle.arrow_theory, source, target, &mut term)
-        .map_err(ShallowError::TypecheckError)?;
+    let checked_nodes = check(
+        theory,
+        arrow.type_maps.0.clone(),
+        arrow.type_maps.1.clone(),
+        &mut term,
+    )
+    .map_err(ShallowError::TypecheckError)?;
     let mut term = term.with_nodes(|_| checked_nodes).unwrap();
     term.quotient().map_err(ShallowError::InvalidQuotient)?;
     Ok(term)
-}
-
-fn forget_labels<O, A>(f: OpenHypergraph<O, A>) -> OpenHypergraph<(), A> {
-    f.map_nodes(|_| ())
 }

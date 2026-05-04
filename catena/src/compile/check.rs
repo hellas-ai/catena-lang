@@ -1,5 +1,8 @@
-use hexpr::try_interpret;
-use metacat::{check::check, syntax::TheoryBundle, theory::OperationKey};
+use hexpr::Operation;
+use metacat::{
+    check::check,
+    theory::{Theory, TheorySet},
+};
 use open_hypergraphs::lax::OpenHypergraph;
 use thiserror::Error;
 
@@ -22,18 +25,20 @@ pub struct CompileCheckReport {
 #[derive(Clone, Debug, PartialEq)]
 pub struct ArrowType {
     pub name: String,
-    pub source: OpenHypergraph<(), OperationKey>,
-    pub target: OpenHypergraph<(), OperationKey>,
+    pub source: OpenHypergraph<(), Operation>,
+    pub target: OpenHypergraph<(), Operation>,
 }
 
 #[derive(Error, Debug)]
 pub enum CheckError {
-    #[error("invalid hexpr: {0}")]
-    InvalidHexpr(#[from] hexpr::interpret::Error<metacat::theory::Error>),
+    #[error("unknown theory `{0}`")]
+    UnknownTheory(String),
+    #[error("theory `{0}` is not a user theory")]
+    NotUserTheory(String),
     #[error("definition {definition} failed typecheck: {error:?}")]
     Typecheck {
         definition: String,
-        error: metacat::check::Error<OperationKey>,
+        error: metacat::check::Error<Operation>,
     },
     #[error("{error}")]
     Lift { error: LiftError },
@@ -45,15 +50,16 @@ impl From<LiftError> for CheckError {
     }
 }
 
-pub fn check_compile_bundle(
-    data: &TheoryBundle,
-    control: &TheoryBundle,
-) -> Result<CompileCheckReport, CheckError> {
-    let data_report = check_bundle(data)?;
-    let control_with_data = lift_data_to_control(data, control)?;
-    let data_with_control = lift_control_to_data(control, data)?;
-    let control_with_data_report = check_bundle(&control_with_data)?;
-    let data_with_control_report = check_bundle(&data_with_control)?;
+pub fn check_compile_set(set: &TheorySet) -> Result<CompileCheckReport, CheckError> {
+    let syntax = theory(set, "syntax")?;
+    let data = theory(set, "data")?;
+    let control = theory(set, "control")?;
+
+    let data_report = check_theory(data)?;
+    let control_with_data = lift_data_to_control(data, control, syntax)?;
+    let data_with_control = lift_control_to_data(control, data, syntax)?;
+    let control_with_data_report = check_theory(&control_with_data)?;
+    let data_with_control_report = check_theory(&data_with_control)?;
     let data_to_control = lifted_arrow_types(&control_with_data, "data");
     let control_to_data = lifted_arrow_types(&data_with_control, "control");
 
@@ -66,49 +72,25 @@ pub fn check_compile_bundle(
     })
 }
 
-fn lifted_arrow_types(bundle: &TheoryBundle, prefix: &str) -> Vec<ArrowType> {
-    let mut operations: Vec<_> = bundle
-        .arrow_theory
-        .operations()
-        .filter(|op| op.to_string().starts_with(&format!("{prefix}.")))
-        .map(|op| {
-            let (source, target) = bundle.arrow_theory.type_maps(op);
-            ArrowType {
-                name: op.to_string(),
-                source: source.clone(),
-                target: target.clone(),
-            }
-        })
-        .collect();
-    operations.sort_by(|left, right| left.name.cmp(&right.name));
-    operations
-}
-
-pub fn check_bundle(bundle: &TheoryBundle) -> Result<CheckReport, CheckError> {
-    let mut definitions: Vec<_> = bundle.definitions.iter().collect();
-    definitions.sort_by_key(|(name, _)| name.to_string());
+pub fn check_theory(theory: &Theory) -> Result<CheckReport, CheckError> {
+    let Theory::Theory { arrows, .. } = theory else {
+        return Err(CheckError::NotUserTheory("nat".to_string()));
+    };
 
     let mut definitions_checked = 0;
-    for (name, declaration) in definitions {
-        let hexpr = declaration
-            .definition
-            .as_ref()
-            .expect("definition entries always have a body");
-        let mut term = forget_labels(try_interpret(&bundle.arrow_theory, hexpr)?);
-        let source = forget_labels(try_interpret(
-            &bundle.object_theory,
-            &declaration.source_map,
-        )?);
-        let target = forget_labels(try_interpret(
-            &bundle.object_theory,
-            &declaration.target_map,
-        )?);
-
-        check(&bundle.arrow_theory, source, target, &mut term).map_err(|error| {
-            CheckError::Typecheck {
-                definition: name.to_string(),
-                error,
-            }
+    for (name, arrow) in arrows {
+        let Some(mut term) = arrow.definition.clone() else {
+            continue;
+        };
+        check(
+            theory,
+            arrow.type_maps.0.clone(),
+            arrow.type_maps.1.clone(),
+            &mut term,
+        )
+        .map_err(|error| CheckError::Typecheck {
+            definition: name.to_string(),
+            error,
         })?;
         definitions_checked += 1;
     }
@@ -118,6 +100,29 @@ pub fn check_bundle(bundle: &TheoryBundle) -> Result<CheckReport, CheckError> {
     })
 }
 
-fn forget_labels<O, A>(f: OpenHypergraph<O, A>) -> OpenHypergraph<(), A> {
-    f.map_nodes(|_| ())
+fn lifted_arrow_types(theory: &Theory, prefix: &str) -> Vec<ArrowType> {
+    let Theory::Theory { arrows, .. } = theory else {
+        return Vec::new();
+    };
+    let mut operations = arrows
+        .iter()
+        .filter(|(op, _)| op.to_string().starts_with(&format!("{prefix}.")))
+        .map(|(op, arrow)| ArrowType {
+            name: op.to_string(),
+            source: arrow.type_maps.0.clone(),
+            target: arrow.type_maps.1.clone(),
+        })
+        .collect::<Vec<_>>();
+    operations.sort_by(|left, right| left.name.cmp(&right.name));
+    operations
+}
+
+pub fn theory<'a>(set: &'a TheorySet, name: &str) -> Result<&'a Theory, CheckError> {
+    let id = metacat::theory::TheoryId(
+        name.parse()
+            .map_err(|_| CheckError::UnknownTheory(name.to_string()))?,
+    );
+    set.theories
+        .get(&id)
+        .ok_or_else(|| CheckError::UnknownTheory(name.to_string()))
 }

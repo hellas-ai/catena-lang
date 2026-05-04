@@ -1,8 +1,8 @@
 use crate::lang::*;
 use crate::scope::{ScopeId, scope_ids, scopes};
 
+use hexpr::Operation;
 use metacat::ssa::{SSA, ssa};
-use metacat::theory::OperationKey;
 use metacat::tree::Tree;
 
 use open_hypergraphs::lax::{EdgeId, OpenHypergraph};
@@ -202,7 +202,7 @@ fn to_c_type(obj: &Obj) -> Result<String, CodegenError> {
     .ok_or_else(|| CodegenError::NoCType(obj.clone()))
 }
 
-fn match_value_types<T: Clone>(tree: &Tree<(), OperationKey>, cases: &[(&str, T)]) -> Option<T> {
+fn match_value_types<T: Clone>(tree: &Tree<(), Operation>, cases: &[(&str, T)]) -> Option<T> {
     for (name, value) in cases {
         if match_value_type(name, tree) {
             return Some(value.clone());
@@ -212,7 +212,7 @@ fn match_value_types<T: Clone>(tree: &Tree<(), OperationKey>, cases: &[(&str, T)
 }
 
 // Match any tree of the form π0(value(π0(<name>(...))))
-fn match_value_type(name: &str, tree: &Tree<(), OperationKey>) -> bool {
+fn match_value_type(name: &str, tree: &Tree<(), Operation>) -> bool {
     // Top level must be a 'value' node
     match tree {
         Tree::Node(val, 0, children) if val.to_string() == "value" => {

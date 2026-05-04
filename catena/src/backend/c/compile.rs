@@ -3,17 +3,20 @@ use crate::backend::c::codegen::codegen;
 use crate::backend::c::value::ValueKind;
 use crate::lang::Obj;
 use crate::lower::{LowerError, Pass, lower};
-use metacat::syntax::TheoryBundle;
+use hexpr::{Hexpr, Operation, parse_hexprs};
+use metacat::theory::{Theory, TheoryId, TheorySet};
 use metacat::tree::Tree;
 use std::collections::{HashMap, HashSet};
+use std::convert::Infallible;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus};
+use std::str::FromStr;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum CompileError {
     #[error("Failed to parse program: {0}")]
-    Parse(#[from] metacat::syntax::LoadError),
+    Parse(#[from] metacat::theory::load::LoadError),
     #[error("No def-arrow declarations found to compile")]
     NoDefinitions,
     #[error("Failed to lower definition '{definition}': {source}")]
@@ -58,13 +61,17 @@ pub(crate) struct FunctionSignature {
 }
 
 pub(crate) fn compile(source: &str) -> Result<SharedObject, CompileError> {
-    let bundle = TheoryBundle::from_text(source)?;
+    let theory_set = runtime_theory_set(source)?;
+    let theory = runtime_theory(&theory_set).ok_or(CompileError::NoDefinitions)?;
 
-    let mut definitions: Vec<String> = bundle
-        .definitions
-        .keys()
-        .map(|definition| definition.as_str().to_string())
-        .collect();
+    let mut definitions: Vec<String> = match theory {
+        Theory::Nat => Vec::new(),
+        Theory::Theory { arrows, .. } => arrows
+            .iter()
+            .filter(|(_, arrow)| arrow.definition.is_some())
+            .map(|(definition, _)| definition.as_str().to_string())
+            .collect(),
+    };
     definitions.sort();
     if definitions.is_empty() {
         return Err(CompileError::NoDefinitions);
@@ -75,7 +82,7 @@ pub(crate) fn compile(source: &str) -> Result<SharedObject, CompileError> {
     let mut used_symbols = HashSet::new();
     let mut signatures = HashMap::new();
     for definition in definitions {
-        let lowered = lower(&bundle, Pass::DiscardNaturality, &definition).map_err(|source| {
+        let lowered = lower(theory, Pass::DiscardNaturality, &definition).map_err(|source| {
             CompileError::Lower {
                 definition: definition.clone(),
                 source,
@@ -124,6 +131,74 @@ pub(crate) fn compile(source: &str) -> Result<SharedObject, CompileError> {
         path: so_path,
         signatures,
     })
+}
+
+fn runtime_theory_set(source: &str) -> Result<TheorySet, CompileError> {
+    match TheorySet::from_text(source) {
+        Ok(theory_set) => Ok(theory_set),
+        Err(source_error) => {
+            let legacy_source =
+                legacy_runtime_theory(source).map_err(|_| CompileError::Parse(source_error))?;
+            Ok(TheorySet::from_text(&legacy_source)?)
+        }
+    }
+}
+
+fn runtime_theory(theory_set: &TheorySet) -> Option<&Theory> {
+    let runtime_id = TheoryId::new(Operation::from_str("runtime").expect("valid operation"));
+    theory_set.theories.get(&runtime_id).or_else(|| {
+        theory_set
+            .theories
+            .values()
+            .find(|theory| matches!(theory, Theory::Theory { .. }))
+    })
+}
+
+fn legacy_runtime_theory(source: &str) -> Result<String, hexpr::ParseError> {
+    let declarations = parse_hexprs(source)?;
+    let mut syntax = Vec::new();
+    let mut runtime = Vec::new();
+
+    for declaration in declarations {
+        match declaration_head(&declaration) {
+            Some("object") => syntax.push(rename_declaration(declaration, "arr")),
+            Some("arrow") => runtime.push(rename_declaration(declaration, "arr")),
+            Some("def-arrow") => runtime.push(rename_declaration(declaration, "def")),
+            _ => runtime.push(declaration),
+        }
+    }
+
+    Ok(format!(
+        "(theory syntax nat {{\n{}\n}})\n\n(theory runtime syntax {{\n{}\n}})",
+        syntax
+            .into_iter()
+            .map(|declaration| format!("  {declaration}"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        runtime
+            .into_iter()
+            .map(|declaration| format!("  {declaration}"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    ))
+}
+
+fn declaration_head(declaration: &Hexpr) -> Option<&str> {
+    let Hexpr::Composition(items) = declaration else {
+        return None;
+    };
+    let Some(Hexpr::Operation(operation)) = items.first() else {
+        return None;
+    };
+    Some(operation.as_str())
+}
+
+fn rename_declaration(declaration: Hexpr, head: &str) -> Hexpr {
+    let Hexpr::Composition(mut items) = declaration else {
+        return declaration;
+    };
+    items[0] = Hexpr::Operation(Operation::from_str(head).expect("valid operation"));
+    Hexpr::Composition(items)
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -181,26 +256,33 @@ fn value_kinds(
 
 fn value_kind(definition: &str, obj: &Obj) -> Result<ValueKind, CompileError> {
     match obj {
-        Tree::Node(val, 0, children) if val.to_string() == "value" => {
+        Tree::Node(val, 0, children) if val.as_str() == "value" => {
             let [Tree::Node(key, 0, _)] = children.as_slice() else {
                 return Err(CompileError::UnsupportedRuntimeType {
                     definition: definition.to_string(),
-                    value: obj.to_string(),
+                    value: obj_string(obj),
                 });
             };
-            match key.to_string().as_str() {
+            match key.as_str() {
                 "f32" => Ok(ValueKind::F32),
                 "index" => Ok(ValueKind::Index),
                 "extent" => Ok(ValueKind::Extent),
                 _ => Err(CompileError::UnsupportedRuntimeType {
                     definition: definition.to_string(),
-                    value: obj.to_string(),
+                    value: obj_string(obj),
                 }),
             }
         }
         _ => Err(CompileError::UnsupportedRuntimeType {
             definition: definition.to_string(),
-            value: obj.to_string(),
+            value: obj_string(obj),
         }),
+    }
+}
+
+fn obj_string(obj: &Obj) -> String {
+    match obj.try_pretty::<Infallible>(None) {
+        Ok(value) => value,
+        Err(error) => match error {},
     }
 }

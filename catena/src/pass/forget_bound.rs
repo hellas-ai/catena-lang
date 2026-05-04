@@ -1,6 +1,7 @@
 //! Forget the `bound` symbol, replacing it with `value`.
 use crate::lang::{Arr, Obj};
-use metacat::{theory::OperationKey, tree::Tree};
+use hexpr::Operation;
+use metacat::tree::Tree;
 use open_hypergraphs::lax::{
     OpenHypergraph,
     functor::{Functor, try_define_map_arrow},
@@ -10,12 +11,12 @@ use open_hypergraphs::lax::{
 /// any type labeled "bound(t)" becomes "value(t)".
 #[derive(Clone)]
 pub struct ForgetBound {
-    bound_key: OperationKey,
-    value_key: OperationKey,
+    bound_key: Operation,
+    value_key: Operation,
 }
 
 impl ForgetBound {
-    pub fn new(bound_key: OperationKey, value_key: OperationKey) -> Self {
+    pub fn new(bound_key: Operation, value_key: Operation) -> Self {
         Self {
             bound_key,
             value_key,
@@ -26,7 +27,7 @@ impl ForgetBound {
 impl Functor<Obj, Arr, Obj, Arr> for ForgetBound {
     fn map_object(&self, o: &Obj) -> impl ExactSizeIterator<Item = Obj> {
         // bound(t) ⇒ value(t)
-        let o: Tree<_, OperationKey> = match o {
+        let o: Tree<_, Operation> = match o {
             Tree::Node(label, port, trees) => {
                 let new_label = if label == &self.bound_key {
                     self.value_key.clone()

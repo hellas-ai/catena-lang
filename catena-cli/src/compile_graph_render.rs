@@ -5,7 +5,7 @@ use graphviz_rust::{
     cmd::{CommandArg, Format},
     exec_dot,
 };
-use metacat::theory::OperationKey;
+use hexpr::Operation;
 use open_hypergraphs::lax::{NodeId, OpenHypergraph};
 
 // open-hypergraphs-dot handles flat OpenHypergraph -> DOT/SVG rendering.
@@ -160,7 +160,7 @@ impl NestedDotRenderer {
     fn render_nodes(
         &self,
         prefix: &str,
-        graph: &OpenHypergraph<String, OperationKey>,
+        graph: &OpenHypergraph<String, Operation>,
         dot: &mut String,
     ) {
         for node_index in 0..graph.hypergraph.nodes.len() {
@@ -177,7 +177,7 @@ impl NestedDotRenderer {
     fn render_boundary(
         &self,
         prefix: &str,
-        graph: &OpenHypergraph<String, OperationKey>,
+        graph: &OpenHypergraph<String, Operation>,
         dot: &mut String,
     ) {
         for (index, source) in graph.sources.iter().enumerate() {
@@ -224,9 +224,9 @@ impl NestedDotRenderer {
     fn render_edge_box(
         &self,
         prefix: &str,
-        graph: &OpenHypergraph<String, OperationKey>,
+        graph: &OpenHypergraph<String, Operation>,
         edge_index: usize,
-        operation: &OperationKey,
+        operation: &Operation,
         dot: &mut String,
     ) {
         let edge_id = edge_id(prefix, edge_index);
@@ -255,7 +255,7 @@ impl NestedDotRenderer {
     fn render_nested_connections(
         &self,
         prefix: &str,
-        graph: &OpenHypergraph<String, OperationKey>,
+        graph: &OpenHypergraph<String, Operation>,
         edge_index: usize,
         child: &RenderedInterface,
         dot: &mut String,
@@ -320,7 +320,7 @@ fn interface_target_id(prefix: &str, index: usize) -> String {
     format!("{prefix}_interface_target_{index}")
 }
 
-fn record_label(operation: &OperationKey, source_arity: usize, target_arity: usize) -> String {
+fn record_label(operation: &Operation, source_arity: usize, target_arity: usize) -> String {
     let sources = record_ports("s", source_arity);
     let targets = record_ports("t", target_arity);
 

@@ -1,10 +1,9 @@
 use std::collections::{HashMap, HashSet};
 
-use hexpr::{Operation, try_interpret};
+use hexpr::Operation;
 use metacat::{
     check::check,
-    syntax::{Declaration, TheoryBundle},
-    theory::OperationKey,
+    theory::{Theory, TheorySet},
 };
 use open_hypergraphs::{
     category::Arrow,
@@ -13,7 +12,10 @@ use open_hypergraphs::{
 use thiserror::Error;
 
 use crate::{
-    compile::lift::{LiftError, lift_control_to_data, lift_data_to_control},
+    compile::{
+        check::{CheckError, theory as lookup_theory},
+        lift::{LiftError, lift_control_to_data, lift_data_to_control},
+    },
     pass::inline::Inline,
 };
 
@@ -43,7 +45,7 @@ impl GraphTheory {
 pub struct CompileGraph {
     pub theory: GraphTheory,
     pub definition: String,
-    pub graph: OpenHypergraph<String, OperationKey>,
+    pub graph: OpenHypergraph<String, Operation>,
     pub children: Vec<NestedCompileGraph>,
 }
 
@@ -57,18 +59,20 @@ pub struct NestedCompileGraph {
 pub enum CompileGraphError {
     #[error("{error}")]
     Lift { error: LiftError },
+    #[error("unknown theory `{0}`")]
+    UnknownTheory(String),
+    #[error("theory `{0}` is not a user theory")]
+    NotUserTheory(String),
     #[error("invalid definition name `{0}`")]
     InvalidDefinition(String),
     #[error("unknown definition `{0}`")]
     UnknownDefinition(String),
     #[error("unknown operation `{0}`")]
     UnknownOperation(String),
-    #[error("invalid hexpr: {0}")]
-    InvalidHexpr(#[from] hexpr::interpret::Error<metacat::theory::Error>),
     #[error("definition {definition} failed typecheck: {error:?}")]
     Typecheck {
         definition: String,
-        error: metacat::check::Error<OperationKey>,
+        error: metacat::check::Error<Operation>,
     },
     #[error("recursive or too-deep inline expansion while rendering `{0}`")]
     InlineLimit(String),
@@ -82,18 +86,27 @@ impl From<LiftError> for CompileGraphError {
     }
 }
 
+impl From<CheckError> for CompileGraphError {
+    fn from(error: CheckError) -> Self {
+        match error {
+            CheckError::UnknownTheory(name) => Self::UnknownTheory(name),
+            CheckError::NotUserTheory(name) => Self::NotUserTheory(name),
+            CheckError::Lift { error } => Self::Lift { error },
+            CheckError::Typecheck { definition, error } => Self::Typecheck { definition, error },
+        }
+    }
+}
+
 pub fn compile_graph(
-    data: &TheoryBundle,
-    control: &TheoryBundle,
+    set: &TheorySet,
     theory: GraphTheory,
     definition: &str,
 ) -> Result<CompileGraph, CompileGraphError> {
-    compile_graph_at_depth(data, control, theory, definition, 0)
+    compile_graph_at_depth(set, theory, definition, 0)
 }
 
 fn compile_graph_at_depth(
-    data: &TheoryBundle,
-    control: &TheoryBundle,
+    set: &TheorySet,
     theory: GraphTheory,
     definition: &str,
     depth: usize,
@@ -102,25 +115,24 @@ fn compile_graph_at_depth(
         return Err(CompileGraphError::NestedLimit(definition.to_string()));
     }
 
+    let syntax = lookup_theory(set, "syntax")?;
+    let data = lookup_theory(set, "data")?;
+    let control = lookup_theory(set, "control")?;
     let bundle = match theory {
-        GraphTheory::Data => lift_control_to_data(control, data)?,
-        GraphTheory::Control => lift_data_to_control(data, control)?,
+        GraphTheory::Data => lift_control_to_data(control, data, syntax)?,
+        GraphTheory::Control => lift_data_to_control(data, control, syntax)?,
     };
-    let foreign_bundle = match theory {
+    let foreign_theory = match theory {
         GraphTheory::Data => control,
         GraphTheory::Control => data,
     };
     let definition_key = parse_operation(definition)?;
-    let declaration = bundle
-        .definitions
-        .get(&definition_key)
-        .ok_or_else(|| CompileGraphError::UnknownDefinition(definition.to_string()))?;
     let graph = strictify(annotated_definition_graph(
         &bundle,
+        syntax,
         &definition_key,
-        declaration,
     )?);
-    let children = nested_graphs(data, control, theory, foreign_bundle, &graph, depth)?;
+    let children = nested_graphs(set, theory, foreign_theory, &graph, depth)?;
 
     Ok(CompileGraph {
         theory,
@@ -131,11 +143,11 @@ fn compile_graph_at_depth(
 }
 
 fn locally_inlined_definition(
-    bundle: &TheoryBundle,
+    theory: &Theory,
     definition_key: &Operation,
-) -> Result<OpenHypergraph<(), OperationKey>, CompileGraphError> {
-    let mut graph = definition_term(bundle, definition_key)?;
-    let definitions = inline_definitions(bundle)?;
+) -> Result<OpenHypergraph<(), Operation>, CompileGraphError> {
+    let mut graph = definition_term(theory, definition_key)?;
+    let definitions = inline_definitions(theory)?;
 
     for _ in 0..64 {
         let inlinable = inlinable_edges(&graph, &definitions);
@@ -154,41 +166,46 @@ fn locally_inlined_definition(
 }
 
 fn annotated_definition_graph(
-    bundle: &TheoryBundle,
+    theory: &Theory,
+    syntax: &Theory,
     definition_key: &Operation,
-    declaration: &Declaration,
-) -> Result<OpenHypergraph<String, OperationKey>, CompileGraphError> {
-    let graph = locally_inlined_definition(bundle, definition_key)?;
-    let source = forget_labels(try_interpret(
-        &bundle.object_theory,
-        &declaration.source_map,
-    )?);
-    let target = forget_labels(try_interpret(
-        &bundle.object_theory,
-        &declaration.target_map,
-    )?);
-    annotated_graph(bundle, definition_key.as_str(), source, target, graph)
+) -> Result<OpenHypergraph<String, Operation>, CompileGraphError> {
+    let arrow = theory
+        .get_arrow(definition_key)
+        .ok_or_else(|| CompileGraphError::UnknownDefinition(definition_key.to_string()))?;
+    let graph = locally_inlined_definition(theory, definition_key)?;
+    annotated_graph(
+        theory,
+        syntax,
+        definition_key.as_str(),
+        arrow.type_maps.0.clone(),
+        arrow.type_maps.1.clone(),
+        graph,
+    )
 }
 
 fn annotated_graph(
-    bundle: &TheoryBundle,
+    theory: &Theory,
+    syntax: &Theory,
     definition: &str,
-    source: OpenHypergraph<(), OperationKey>,
-    target: OpenHypergraph<(), OperationKey>,
-    mut graph: OpenHypergraph<(), OperationKey>,
-) -> Result<OpenHypergraph<String, OperationKey>, CompileGraphError> {
-    let labels = check(&bundle.arrow_theory, source, target, &mut graph)
+    source: OpenHypergraph<(), Operation>,
+    target: OpenHypergraph<(), Operation>,
+    mut graph: OpenHypergraph<(), Operation>,
+) -> Result<OpenHypergraph<String, Operation>, CompileGraphError> {
+    let labels = check(theory, source, target, &mut graph)
         .map_err(|error| CompileGraphError::Typecheck {
             definition: definition.to_string(),
             error,
         })?
         .into_iter()
         .map(|tree| {
-            tree.pretty(Some(&|op| {
-                bundle.object_theory.type_maps(op).1.targets.len()
+            tree.try_pretty(Some(&|op| {
+                syntax
+                    .coarity_of(op)
+                    .ok_or_else(|| CompileGraphError::UnknownOperation(op.to_string()))
             }))
         })
-        .collect::<Vec<_>>();
+        .collect::<Result<Vec<_>, _>>()?;
 
     graph
         .with_nodes(|_| labels)
@@ -199,11 +216,10 @@ fn annotated_graph(
 }
 
 fn nested_graphs(
-    data: &TheoryBundle,
-    control: &TheoryBundle,
+    set: &TheorySet,
     theory: GraphTheory,
-    native_bundle: &TheoryBundle,
-    graph: &OpenHypergraph<String, OperationKey>,
+    native_foreign_theory: &Theory,
+    graph: &OpenHypergraph<String, Operation>,
     depth: usize,
 ) -> Result<Vec<NestedCompileGraph>, CompileGraphError> {
     let foreign_prefix = theory.foreign_prefix();
@@ -219,16 +235,16 @@ fn nested_graphs(
             continue;
         }
 
-        let graph = if foreign_definition_exists(native_bundle, local_name)? {
-            compile_graph_at_depth(
-                data,
-                control,
+        let graph = if definition_exists(native_foreign_theory, local_name)? {
+            compile_graph_at_depth(set, theory.foreign_theory(), local_name, depth + 1)?
+        } else {
+            let syntax = lookup_theory(set, "syntax")?;
+            primitive_graph(
+                syntax,
+                native_foreign_theory,
                 theory.foreign_theory(),
                 local_name,
-                depth + 1,
             )?
-        } else {
-            primitive_graph(native_bundle, theory.foreign_theory(), local_name)?
         };
         children.push(NestedCompileGraph {
             operation: operation_name,
@@ -239,40 +255,40 @@ fn nested_graphs(
     Ok(children)
 }
 
-fn foreign_definition_exists(
-    bundle: &TheoryBundle,
-    local_name: &str,
-) -> Result<bool, CompileGraphError> {
-    Ok(bundle
-        .definitions
-        .contains_key(&parse_operation(local_name)?))
+fn definition_exists(theory: &Theory, local_name: &str) -> Result<bool, CompileGraphError> {
+    let operation = parse_operation(local_name)?;
+    Ok(theory
+        .get_arrow(&operation)
+        .and_then(|arrow| arrow.definition.as_ref())
+        .is_some())
 }
 
 fn primitive_graph(
-    bundle: &TheoryBundle,
-    theory: GraphTheory,
+    syntax: &Theory,
+    theory: &Theory,
+    graph_theory: GraphTheory,
     local_name: &str,
 ) -> Result<CompileGraph, CompileGraphError> {
-    let operation = bundle
-        .arrow_theory
-        .get_operation_key(local_name)
+    let operation = parse_operation(local_name)?;
+    let arrow = theory
+        .get_arrow(&operation)
         .ok_or_else(|| CompileGraphError::UnknownOperation(local_name.to_string()))?;
-    let (source, target) = bundle.arrow_theory.type_maps(&operation);
     let graph = OpenHypergraph::singleton(
         operation,
-        vec![(); source.target().len()],
-        vec![(); target.target().len()],
+        vec![(); arrow.type_maps.0.target().len()],
+        vec![(); arrow.type_maps.1.target().len()],
     );
     let graph = strictify(annotated_graph(
-        bundle,
+        theory,
+        syntax,
         local_name,
-        source.clone(),
-        target.clone(),
+        arrow.type_maps.0.clone(),
+        arrow.type_maps.1.clone(),
         graph,
     )?);
 
     Ok(CompileGraph {
-        theory,
+        theory: graph_theory,
         definition: local_name.to_string(),
         graph,
         children: Vec::new(),
@@ -280,23 +296,21 @@ fn primitive_graph(
 }
 
 fn inline_definitions(
-    bundle: &TheoryBundle,
-) -> Result<HashMap<OperationKey, OpenHypergraph<(), OperationKey>>, CompileGraphError> {
-    let mut definitions = HashMap::new();
-    for name in bundle.definitions.keys() {
-        let key = bundle
-            .arrow_theory
-            .get_operation_key(name.as_str())
-            .ok_or_else(|| CompileGraphError::UnknownOperation(name.to_string()))?;
-        definitions.insert(key, definition_term(bundle, name)?);
-    }
-    Ok(definitions)
+    theory: &Theory,
+) -> Result<HashMap<Operation, OpenHypergraph<(), Operation>>, CompileGraphError> {
+    let Theory::Theory { arrows, .. } = theory else {
+        return Err(CompileGraphError::NotUserTheory("nat".to_string()));
+    };
+    Ok(arrows
+        .iter()
+        .filter_map(|(name, arrow)| arrow.definition.clone().map(|term| (name.clone(), term)))
+        .collect())
 }
 
 fn inlinable_edges(
-    graph: &OpenHypergraph<(), OperationKey>,
-    definitions: &HashMap<OperationKey, OpenHypergraph<(), OperationKey>>,
-) -> HashSet<OperationKey> {
+    graph: &OpenHypergraph<(), Operation>,
+    definitions: &HashMap<Operation, OpenHypergraph<(), Operation>>,
+) -> HashSet<Operation> {
     graph
         .hypergraph
         .edges
@@ -307,25 +321,13 @@ fn inlinable_edges(
 }
 
 fn definition_term(
-    bundle: &TheoryBundle,
+    theory: &Theory,
     key: &Operation,
-) -> Result<OpenHypergraph<(), OperationKey>, CompileGraphError> {
-    let declaration = bundle
-        .definitions
-        .get(key)
-        .ok_or_else(|| CompileGraphError::UnknownDefinition(key.to_string()))?;
-    declaration_term(bundle, declaration)
-}
-
-fn declaration_term(
-    bundle: &TheoryBundle,
-    declaration: &Declaration,
-) -> Result<OpenHypergraph<(), OperationKey>, CompileGraphError> {
-    let hexpr = declaration
-        .definition
-        .as_ref()
-        .expect("definition entries always have a body");
-    Ok(forget_labels(try_interpret(&bundle.arrow_theory, hexpr)?))
+) -> Result<OpenHypergraph<(), Operation>, CompileGraphError> {
+    theory
+        .get_arrow(key)
+        .and_then(|arrow| arrow.definition.clone())
+        .ok_or_else(|| CompileGraphError::UnknownDefinition(key.to_string()))
 }
 
 fn parse_operation(name: &str) -> Result<Operation, CompileGraphError> {
@@ -333,12 +335,8 @@ fn parse_operation(name: &str) -> Result<Operation, CompileGraphError> {
         .map_err(|_| CompileGraphError::InvalidDefinition(name.to_string()))
 }
 
-fn forget_labels<O, A>(f: OpenHypergraph<O, A>) -> OpenHypergraph<(), A> {
-    f.map_nodes(|_| ())
-}
-
 fn strictify<O: Clone + PartialEq>(
-    graph: OpenHypergraph<O, OperationKey>,
-) -> OpenHypergraph<O, OperationKey> {
+    graph: OpenHypergraph<O, Operation>,
+) -> OpenHypergraph<O, Operation> {
     OpenHypergraph::from_strict(graph.to_strict())
 }

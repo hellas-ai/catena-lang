@@ -1,0 +1,80 @@
+(theory syntax nat {
+  (arr f32 : 0 -> 1)
+  (arr bool : 0 -> 1)
+  (arr product : 2 -> 1)
+  (arr unit : 0 -> 1)
+  (arr coproduct : 2 -> 1)
+  (arr counit : 0 -> 1)
+})
+
+(theory data syntax {
+  (arr f32.zero : [] -> f32)
+  (arr f32.one : [] -> f32)
+  (arr f32.add : {f32 f32} -> f32)
+  (arr bool.gt : {f32 f32} -> bool)
+  (arr bool.or : {bool bool} -> bool)
+
+  (arr copy : [x] -> [x . x x])
+  (arr discard : [x] -> [x.])
+
+  (def projl : [x y] -> [x y . x] = {[x] discard})
+  (def projr : [x y] -> [x y . y] = {discard [y]})
+
+  (def any-positive : {f32 f32} -> bool =
+    ({
+      ({[x] f32.zero} bool.gt)
+      ({[y] f32.zero} bool.gt)
+    } bool.or))
+
+  (def any-positive.bind : {f32 f32 [x]} -> {bool [x]} =
+    {[a b x.]
+      ([.a b] any-positive [condition.])
+      ([.condition x])
+    })
+
+  (def add-one-first : {f32 f32} -> {f32 f32} =
+    {
+      ({[x] f32.one} f32.add)
+      [y]
+    })
+
+  (def add-one-second : {f32 f32} -> {f32 f32} =
+    {
+      [x]
+      ({[y] f32.one} f32.add)
+    })
+})
+
+(theory control syntax {
+  (arr merge : [x . x x] -> [x])
+  (arr create : [x.] -> [x])
+  (arr branch : [x] -> [x . x x])
+  (arr discard : [x] -> [x.])
+  (arr guard : ({bool [x]} product) -> [x . x x])
+
+  # Temporary local declarations for cross-theory references used in definitions.
+  # Catena's lift pass regenerates these declarations before checking.
+  (arr data.copy :
+    ({f32 f32} product) ->
+    ({({f32 f32} product) ({f32 f32} product)} product))
+  (arr data.any-positive.bind :
+    ({({f32 f32} product) ({f32 f32} product)} product) ->
+    ({bool ({f32 f32} product)} product))
+  (arr data.add-one-first :
+    ({f32 f32} product) ->
+    ({f32 f32} product))
+  (arr data.add-one-second :
+    ({f32 f32} product) ->
+    ({f32 f32} product))
+
+  (def guarded-positive-update :
+    ({f32 f32} product) ->
+    {({f32 f32} product) ({f32 f32} product)}
+    =
+    (
+      data.copy
+      data.any-positive.bind
+      guard
+      {data.add-one-second data.add-one-first}
+    ))
+})

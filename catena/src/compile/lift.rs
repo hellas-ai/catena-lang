@@ -33,7 +33,15 @@ pub fn lift_data_to_control(
     control: &Theory,
     syntax: &Theory,
 ) -> Result<Theory, LiftError> {
-    lift_with_tensor(data, control, syntax, "data", "product", "unit")
+    lift_with_tensor(
+        data,
+        control,
+        syntax,
+        "data",
+        "product",
+        "unit",
+        &["data", "control"],
+    )
 }
 
 pub fn lift_control_to_data(
@@ -41,16 +49,25 @@ pub fn lift_control_to_data(
     data: &Theory,
     syntax: &Theory,
 ) -> Result<Theory, LiftError> {
-    lift_with_tensor(control, data, syntax, "control", "coproduct", "unit")
+    lift_with_tensor(
+        control,
+        data,
+        syntax,
+        "control",
+        "coproduct",
+        "unit",
+        &["data", "control"],
+    )
 }
 
-fn lift_with_tensor(
+pub fn lift_with_tensor(
     source: &Theory,
     target: &Theory,
     syntax: &Theory,
     prefix: &'static str,
     tensor: &str,
     unit: &str,
+    excluded_prefixes: &[&str],
 ) -> Result<Theory, LiftError> {
     let tensor_key = require_object(syntax, prefix, tensor, 2, 1)?;
     let unit_key = require_object(syntax, prefix, unit, 0, 1)?;
@@ -59,7 +76,7 @@ fn lift_with_tensor(
         return Err(LiftError::TargetIsNotUserTheory { prefix });
     };
 
-    let mut operations = source_arrows(source);
+    let mut operations = source_arrows(source, excluded_prefixes);
     operations.sort_by(|(left, _), (right, _)| left.cmp(right));
 
     for (name, arrow) in operations {
@@ -88,14 +105,16 @@ fn lift_with_tensor(
     Ok(theory)
 }
 
-fn source_arrows(source: &Theory) -> Vec<(Operation, TheoryArrow)> {
+fn source_arrows(source: &Theory, excluded_prefixes: &[&str]) -> Vec<(Operation, TheoryArrow)> {
     match source {
         Theory::Nat => Vec::new(),
         Theory::Theory { arrows, .. } => arrows
             .iter()
             .filter(|(name, _)| {
                 let name = name.to_string();
-                !name.starts_with("data.") && !name.starts_with("control.")
+                !excluded_prefixes
+                    .iter()
+                    .any(|prefix| name.starts_with(&format!("{prefix}.")))
             })
             .map(|(name, arrow)| (name.clone(), arrow.clone()))
             .collect(),

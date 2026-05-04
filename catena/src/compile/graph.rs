@@ -14,7 +14,8 @@ use thiserror::Error;
 use crate::{
     compile::{
         check::{CheckError, theory as lookup_theory},
-        lift::{LiftError, lift_control_to_data, lift_data_to_control},
+        config::CompileConfig,
+        lift::{LiftError, lift_with_tensor},
     },
     pass::inline::Inline,
 };
@@ -80,11 +81,21 @@ pub fn compile_graph(
     theory: &str,
     definition: &str,
 ) -> Result<CompileGraph, CompileGraphError> {
-    compile_graph_at_depth(set, theory, definition, 0)
+    compile_graph_with_config(set, &CompileConfig::data_control(), theory, definition)
+}
+
+pub fn compile_graph_with_config(
+    set: &TheorySet,
+    config: &CompileConfig,
+    theory: &str,
+    definition: &str,
+) -> Result<CompileGraph, CompileGraphError> {
+    compile_graph_at_depth(set, config, theory, definition, 0)
 }
 
 fn compile_graph_at_depth(
     set: &TheorySet,
+    config: &CompileConfig,
     theory_name: &str,
     definition: &str,
     depth: usize,
@@ -93,15 +104,15 @@ fn compile_graph_at_depth(
         return Err(CompileGraphError::NestedLimit(definition.to_string()));
     }
 
-    let syntax = lookup_theory(set, "syntax")?;
-    let bundle = graph_theory(set, syntax, theory_name)?;
+    let syntax = lookup_theory(set, config.syntax)?;
+    let bundle = graph_theory(set, config, syntax, theory_name)?;
     let definition_key = parse_operation(definition)?;
     let graph = strictify(annotated_definition_graph(
         &bundle,
         syntax,
         &definition_key,
     )?);
-    let children = nested_graphs(set, theory_name, &graph, depth)?;
+    let children = nested_graphs(set, config, theory_name, &graph, depth)?;
 
     Ok(CompileGraph {
         theory: theory_name.to_string(),
@@ -113,21 +124,27 @@ fn compile_graph_at_depth(
 
 fn graph_theory(
     set: &TheorySet,
+    config: &CompileConfig,
     syntax: &Theory,
     theory_name: &str,
 ) -> Result<Theory, CompileGraphError> {
-    let theory = lookup_theory(set, theory_name)?;
-    match theory_name {
-        "data" => {
-            let control = lookup_theory(set, "control")?;
-            Ok(lift_control_to_data(control, theory, syntax)?)
-        }
-        "control" => {
-            let data = lookup_theory(set, "data")?;
-            Ok(lift_data_to_control(data, theory, syntax)?)
-        }
-        _ => Ok(theory.clone()),
+    let mut theory = lookup_theory(set, theory_name)?.clone();
+    let excluded_prefixes = config.lifted_prefixes();
+
+    for extension in config.extensions_for_target(theory_name) {
+        let source = lookup_theory(set, extension.source)?;
+        theory = lift_with_tensor(
+            source,
+            &theory,
+            syntax,
+            extension.prefix,
+            extension.tensor,
+            extension.unit,
+            &excluded_prefixes,
+        )?;
     }
+
+    Ok(theory)
 }
 
 fn locally_inlined_definition(
@@ -205,6 +222,7 @@ fn annotated_graph(
 
 fn nested_graphs(
     set: &TheorySet,
+    config: &CompileConfig,
     theory_name: &str,
     graph: &OpenHypergraph<String, Operation>,
     depth: usize,
@@ -217,24 +235,21 @@ fn nested_graphs(
         let Some((foreign_theory_name, local_name)) = operation_name.split_once('.') else {
             continue;
         };
-        if foreign_theory_name == theory_name || lookup_theory(set, foreign_theory_name).is_err() {
+        let Some(extension) =
+            config.extension_for_target_and_prefix(theory_name, foreign_theory_name)
+        else {
             continue;
         };
         if !seen.insert(operation_name.clone()) {
             continue;
         }
 
-        let native_foreign_theory = lookup_theory(set, foreign_theory_name)?;
+        let native_foreign_theory = lookup_theory(set, extension.source)?;
         let graph = if definition_exists(native_foreign_theory, local_name)? {
-            compile_graph_at_depth(set, foreign_theory_name, local_name, depth + 1)?
+            compile_graph_at_depth(set, config, extension.source, local_name, depth + 1)?
         } else {
-            let syntax = lookup_theory(set, "syntax")?;
-            primitive_graph(
-                syntax,
-                native_foreign_theory,
-                foreign_theory_name,
-                local_name,
-            )?
+            let syntax = lookup_theory(set, config.syntax)?;
+            primitive_graph(syntax, native_foreign_theory, extension.source, local_name)?
         };
         children.push(NestedCompileGraph {
             operation: operation_name,

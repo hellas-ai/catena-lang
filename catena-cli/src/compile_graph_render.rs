@@ -264,10 +264,7 @@ impl NestedDotRenderer {
 
         stmts.push(node_stmt(
             &edge_id,
-            vec![
-                attr_quoted("label", &label),
-                attr_plain("shape", "record"),
-            ],
+            vec![attr_quoted("label", &label), attr_plain("shape", "record")],
         ));
 
         for (source_index, source) in hyperedge.sources.iter().enumerate() {
@@ -413,7 +410,10 @@ fn node_vertex(node_id: &str) -> Vertex {
 }
 
 fn port_vertex(node_id: &str, port: &str) -> Vertex {
-    Vertex::N(DotNodeId(id(node_id), Some(Port(None, Some(port.to_string())))))
+    Vertex::N(DotNodeId(
+        id(node_id),
+        Some(Port(None, Some(port.to_string()))),
+    ))
 }
 
 fn dot_node_id(node_id: &str) -> DotNodeId {

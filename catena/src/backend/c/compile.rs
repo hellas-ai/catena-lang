@@ -6,7 +6,6 @@ use crate::lower::{LowerError, Pass, lower};
 use metacat::theory::Theory;
 use metacat::tree::Tree;
 use std::collections::{HashMap, HashSet};
-use std::convert::Infallible;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus};
 use thiserror::Error;
@@ -22,8 +21,8 @@ pub enum CompileError {
         definition: String,
         source: LowerError,
     },
-    #[error("Function '{definition}' uses an unsupported runtime value type: {value}")]
-    UnsupportedRuntimeType { definition: String, value: String },
+    #[error("Function '{definition}' uses an unsupported runtime value type: {value:?}")]
+    UnsupportedRuntimeType { definition: String, value: Obj },
     #[error("Failed to create temporary build directory: {0}")]
     TempDir(#[from] std::io::Error),
     #[error("C compiler is unavailable: {0}")]
@@ -187,7 +186,7 @@ fn value_kind(definition: &str, obj: &Obj) -> Result<ValueKind, CompileError> {
             let [Tree::Node(key, 0, _)] = children.as_slice() else {
                 return Err(CompileError::UnsupportedRuntimeType {
                     definition: definition.to_string(),
-                    value: obj_string(obj),
+                    value: obj.clone(),
                 });
             };
             match key.as_str() {
@@ -196,20 +195,13 @@ fn value_kind(definition: &str, obj: &Obj) -> Result<ValueKind, CompileError> {
                 "extent" => Ok(ValueKind::Extent),
                 _ => Err(CompileError::UnsupportedRuntimeType {
                     definition: definition.to_string(),
-                    value: obj_string(obj),
+                    value: obj.clone(),
                 }),
             }
         }
         _ => Err(CompileError::UnsupportedRuntimeType {
             definition: definition.to_string(),
-            value: obj_string(obj),
+            value: obj.clone(),
         }),
-    }
-}
-
-fn obj_string(obj: &Obj) -> String {
-    match obj.try_pretty::<Infallible>(None) {
-        Ok(value) => value,
-        Err(error) => match error {},
     }
 }

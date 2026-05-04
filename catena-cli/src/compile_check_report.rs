@@ -5,27 +5,28 @@ use crate::hexpr_render;
 pub fn print_compile_check_report(path: &str, report: &CompileCheckReport, verbose: bool) {
     println!("OK: compile check passed");
     println!("  file: {path}");
-    println!("  data: {} definitions", report.data.definitions_checked);
-    println!(
-        "  control + lifted data: {} definitions",
-        report.control_with_data.definitions_checked
-    );
-    println!(
-        "  data + lifted control: {} definitions",
-        report.data_with_control.definitions_checked
-    );
-    println!(
-        "  lifted data -> control: {} arrows",
-        report.data_to_control.len()
-    );
-    println!(
-        "  lifted control -> data: {} arrows",
-        report.control_to_data.len()
-    );
+    for theory in &report.theories {
+        println!(
+            "  {}: {} definitions",
+            theory.name, theory.report.definitions_checked
+        );
+    }
+    for extension in &report.extensions {
+        println!(
+            "  lifted {} -> {}: {} arrows",
+            extension.source,
+            extension.target,
+            extension.arrows.len()
+        );
+    }
 
     if verbose {
-        print_lift_report("data -> control", &report.data_to_control);
-        print_lift_report("control -> data", &report.control_to_data);
+        for extension in &report.extensions {
+            print_lift_report(
+                &format!("{} -> {}", extension.source, extension.target),
+                &extension.arrows,
+            );
+        }
     }
 }
 

@@ -1,15 +1,12 @@
 use hexpr::Operation;
 use metacat::{
     check::check,
-    theory::{Theory, TheorySet},
+    theory::{Theory, TheoryId, TheorySet},
 };
 use open_hypergraphs::lax::OpenHypergraph;
 use thiserror::Error;
 
-use crate::compile::{
-    config::{CompileConfig, TheoryExtension},
-    lift::{LiftError, lift_with_tensor},
-};
+use crate::compile::{config::CompileConfig, lift::LiftError};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CheckReport {
@@ -18,11 +15,22 @@ pub struct CheckReport {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct CompileCheckReport {
-    pub data: CheckReport,
-    pub control_with_data: CheckReport,
-    pub data_with_control: CheckReport,
-    pub data_to_control: Vec<ArrowType>,
-    pub control_to_data: Vec<ArrowType>,
+    pub theories: Vec<TheoryCheckReport>,
+    pub extensions: Vec<ExtensionCheckReport>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct TheoryCheckReport {
+    pub name: String,
+    pub report: CheckReport,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ExtensionCheckReport {
+    pub target: String,
+    pub source: String,
+    pub prefix: String,
+    pub arrows: Vec<ArrowType>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -53,58 +61,42 @@ impl From<LiftError> for CheckError {
     }
 }
 
-pub fn check_compile_set(set: &TheorySet) -> Result<CompileCheckReport, CheckError> {
-    let config = CompileConfig::data_control();
-    let syntax = theory(set, config.syntax)?;
-    let data = theory(set, "data")?;
-    let data_to_control_extension = extension(&config, "control", "data")?;
-    let control_to_data_extension = extension(&config, "data", "control")?;
-
-    let data_report = check_theory(data)?;
-    let control_with_data = lift_extension(set, &config, syntax, data_to_control_extension)?;
-    let data_with_control = lift_extension(set, &config, syntax, control_to_data_extension)?;
-    let control_with_data_report = check_theory(&control_with_data)?;
-    let data_with_control_report = check_theory(&data_with_control)?;
-    let data_to_control = lifted_arrow_types(&control_with_data, data_to_control_extension.prefix);
-    let control_to_data = lifted_arrow_types(&data_with_control, control_to_data_extension.prefix);
-
-    Ok(CompileCheckReport {
-        data: data_report,
-        control_with_data: control_with_data_report,
-        data_with_control: data_with_control_report,
-        data_to_control,
-        control_to_data,
-    })
-}
-
-fn extension<'a>(
-    config: &'a CompileConfig,
-    target: &str,
-    prefix: &str,
-) -> Result<&'a TheoryExtension, CheckError> {
-    config
-        .extension_for_target_and_prefix(target, prefix)
-        .ok_or_else(|| CheckError::UnknownTheory(format!("{target}/{prefix}")))
-}
-
-fn lift_extension(
+/// Check a compile theory set that has already been extended according to
+/// `config`, for example by `compile_theory_set_from_text`.
+pub fn check_compile_theories(
     set: &TheorySet,
     config: &CompileConfig,
-    syntax: &Theory,
-    extension: &TheoryExtension,
-) -> Result<Theory, CheckError> {
-    let source = theory(set, extension.source)?;
-    let target = theory(set, extension.target)?;
-    let excluded_prefixes = config.lifted_prefixes();
-    Ok(lift_with_tensor(
-        source,
-        target,
-        syntax,
-        extension.prefix,
-        extension.tensor,
-        extension.unit,
-        &excluded_prefixes,
-    )?)
+) -> Result<CompileCheckReport, CheckError> {
+    let mut theories = Vec::new();
+    for (id, loaded_theory) in &set.theories {
+        let name = id.to_string();
+        if name == "nat" || name == config.syntax {
+            continue;
+        }
+        theories.push(TheoryCheckReport {
+            name,
+            report: check_theory(loaded_theory)?,
+        });
+    }
+
+    let extensions = config
+        .extensions
+        .iter()
+        .map(|extension| {
+            let target = theory(set, extension.target)?;
+            Ok(ExtensionCheckReport {
+                target: extension.target.to_string(),
+                source: extension.source.to_string(),
+                prefix: extension.prefix.to_string(),
+                arrows: lifted_arrow_types(target, extension.prefix),
+            })
+        })
+        .collect::<Result<Vec<_>, CheckError>>()?;
+
+    Ok(CompileCheckReport {
+        theories,
+        extensions,
+    })
 }
 
 pub fn check_theory(theory: &Theory) -> Result<CheckReport, CheckError> {
@@ -153,7 +145,7 @@ fn lifted_arrow_types(theory: &Theory, prefix: &str) -> Vec<ArrowType> {
 }
 
 pub fn theory<'a>(set: &'a TheorySet, name: &str) -> Result<&'a Theory, CheckError> {
-    let id = metacat::theory::TheoryId(
+    let id = TheoryId(
         name.parse()
             .map_err(|_| CheckError::UnknownTheory(name.to_string()))?,
     );

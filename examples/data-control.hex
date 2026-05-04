@@ -52,21 +52,6 @@
   (arr discard : [x] -> [x.])
   (arr guard : ({bool [x]} product) -> [x . x x])
 
-  # Temporary local declarations for cross-theory references used in definitions.
-  # Catena's lift pass regenerates these declarations before checking.
-  (arr data.copy :
-    ({f32 f32} product) ->
-    ({({f32 f32} product) ({f32 f32} product)} product))
-  (arr data.any-positive.bind :
-    ({({f32 f32} product) ({f32 f32} product)} product) ->
-    ({bool ({f32 f32} product)} product))
-  (arr data.add-one-first :
-    ({f32 f32} product) ->
-    ({f32 f32} product))
-  (arr data.add-one-second :
-    ({f32 f32} product) ->
-    ({f32 f32} product))
-
   (def guarded-positive-update :
     ({f32 f32} product) ->
     {({f32 f32} product) ({f32 f32} product)}

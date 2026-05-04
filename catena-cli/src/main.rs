@@ -4,9 +4,10 @@ mod hexpr_render;
 
 use std::path::PathBuf;
 
-use catena::compile::{CompileConfig, check_compile_set, compile_graph};
+use catena::compile::{
+    CompileConfig, check_compile_theories, compile_graph, compile_theory_set_from_text,
+};
 use clap::{Parser, Subcommand};
-use metacat::theory::TheorySet;
 
 #[derive(Parser)]
 #[command(name = "catena", version = env!("CARGO_PKG_VERSION"))]
@@ -85,8 +86,10 @@ fn compile_command(command: CompileCommand) -> anyhow::Result<()> {
 
 fn compile_check_command(path: PathBuf, verbose: bool) -> anyhow::Result<()> {
     let path_display = path.display().to_string();
-    let theory_set = TheorySet::from_file(path)?;
-    let report = check_compile_set(&theory_set)?;
+    let source = std::fs::read_to_string(path)?;
+    let config = CompileConfig::data_control();
+    let theory_set = compile_theory_set_from_text(&source, &config)?;
+    let report = check_compile_theories(&theory_set, &config)?;
 
     compile_check_report::print_compile_check_report(&path_display, &report, verbose);
     Ok(())
@@ -98,8 +101,9 @@ fn compile_graph_command(
     definition: &str,
     output: Option<PathBuf>,
 ) -> anyhow::Result<()> {
-    let theory_set = TheorySet::from_file(path)?;
+    let source = std::fs::read_to_string(path)?;
     let config = CompileConfig::data_control();
+    let theory_set = compile_theory_set_from_text(&source, &config)?;
     let graph = compile_graph(&theory_set, &config, theory, definition)?;
     let svg = compile_graph_render::nested_svg(&graph)?;
 

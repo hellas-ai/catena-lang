@@ -34,6 +34,47 @@ pub struct NestedCompileGraph {
     pub graph: CompileGraph,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct GraphCompileOptions {
+    max_depth: usize,
+    max_inline_iterations: usize,
+}
+
+impl Default for GraphCompileOptions {
+    fn default() -> Self {
+        Self {
+            max_depth: 32,
+            max_inline_iterations: 64,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct GraphDefinition {
+    theory: String,
+    definition: String,
+}
+
+impl GraphDefinition {
+    fn new(theory: &str, definition: &str) -> Self {
+        Self {
+            theory: theory.to_string(),
+            definition: definition.to_string(),
+        }
+    }
+
+    fn label(&self) -> String {
+        format!("{}.{}", self.theory, self.definition)
+    }
+}
+
+struct GraphCompileState<'a> {
+    set: &'a TheorySet,
+    config: &'a CompileConfig,
+    options: GraphCompileOptions,
+    stack: Vec<GraphDefinition>,
+}
+
 #[derive(Error, Debug)]
 pub enum CompileGraphError {
     #[error("{error}")]
@@ -55,8 +96,10 @@ pub enum CompileGraphError {
     },
     #[error("recursive or too-deep inline expansion while rendering `{0}`")]
     InlineLimit(String),
-    #[error("recursive or too-deep nested graph expansion while rendering `{0}`")]
+    #[error("too-deep nested graph expansion while rendering `{0}`")]
     NestedLimit(String),
+    #[error("cyclic nested graph expansion: {}", .cycle.join(" -> "))]
+    NestedCycle { cycle: Vec<String> },
 }
 
 impl From<LiftError> for CompileGraphError {
@@ -82,36 +125,108 @@ pub fn compile_graph(
     theory: &str,
     definition: &str,
 ) -> Result<CompileGraph, CompileGraphError> {
-    compile_graph_at_depth(set, config, theory, definition, 0)
+    let mut state = GraphCompileState {
+        set,
+        config,
+        options: GraphCompileOptions::default(),
+        stack: Vec::new(),
+    };
+    state.compile_nested_graph(theory, definition)
 }
 
-fn compile_graph_at_depth(
-    set: &TheorySet,
-    config: &CompileConfig,
-    theory_name: &str,
-    definition: &str,
-    depth: usize,
-) -> Result<CompileGraph, CompileGraphError> {
-    if depth > 32 {
-        return Err(CompileGraphError::NestedLimit(definition.to_string()));
+impl GraphCompileState<'_> {
+    fn compile_nested_graph(
+        &mut self,
+        theory_name: &str,
+        definition: &str,
+    ) -> Result<CompileGraph, CompileGraphError> {
+        if self.stack.len() > self.options.max_depth {
+            return Err(CompileGraphError::NestedLimit(format!(
+                "{theory_name}.{definition}"
+            )));
+        }
+
+        let current = GraphDefinition::new(theory_name, definition);
+        if let Some(index) = self.stack.iter().position(|entry| entry == &current) {
+            // For now graph rendering rejects cyclic cross-theory definitions.
+            // We may relax this later and render recursive definitions with
+            // back-references instead of expanding them.
+            let mut cycle = self.stack[index..]
+                .iter()
+                .map(GraphDefinition::label)
+                .collect::<Vec<_>>();
+            cycle.push(current.label());
+            return Err(CompileGraphError::NestedCycle { cycle });
+        }
+
+        self.stack.push(current);
+        let result = self.compile_nested_graph_inner(theory_name, definition);
+        self.stack.pop();
+        result
     }
 
-    let syntax = lookup_theory(set, config.syntax)?;
-    let bundle = graph_theory(set, config, syntax, theory_name)?;
-    let definition_key = parse_operation(definition)?;
-    let graph = strictify(annotated_definition_graph(
-        &bundle,
-        syntax,
-        &definition_key,
-    )?);
-    let children = nested_graphs(set, config, theory_name, &graph, depth)?;
+    fn compile_nested_graph_inner(
+        &mut self,
+        theory_name: &str,
+        definition: &str,
+    ) -> Result<CompileGraph, CompileGraphError> {
+        let syntax = lookup_theory(self.set, self.config.syntax)?;
+        let bundle = graph_theory(self.set, self.config, syntax, theory_name)?;
+        let definition_key = parse_operation(definition)?;
+        let graph = strictify(annotated_definition_graph(
+            &bundle,
+            syntax,
+            &definition_key,
+            self.options.max_inline_iterations,
+        )?);
+        let children = self.nested_graphs(theory_name, &graph)?;
 
-    Ok(CompileGraph {
-        theory: theory_name.to_string(),
-        definition: definition.to_string(),
-        graph,
-        children,
-    })
+        Ok(CompileGraph {
+            theory: theory_name.to_string(),
+            definition: definition.to_string(),
+            graph,
+            children,
+        })
+    }
+
+    fn nested_graphs(
+        &mut self,
+        theory_name: &str,
+        graph: &OpenHypergraph<String, Operation>,
+    ) -> Result<Vec<NestedCompileGraph>, CompileGraphError> {
+        let mut seen = HashSet::new();
+        let mut children = Vec::new();
+
+        for operation in &graph.hypergraph.edges {
+            let operation_name = operation.to_string();
+            let Some((foreign_theory_name, local_name)) = operation_name.split_once('.') else {
+                continue;
+            };
+            let Some(extension) = self
+                .config
+                .extension_for_target_and_prefix(theory_name, foreign_theory_name)
+            else {
+                continue;
+            };
+            if !seen.insert(operation_name.clone()) {
+                continue;
+            }
+
+            let native_foreign_theory = lookup_theory(self.set, extension.source)?;
+            let graph = if definition_exists(native_foreign_theory, local_name)? {
+                self.compile_nested_graph(extension.source, local_name)?
+            } else {
+                let syntax = lookup_theory(self.set, self.config.syntax)?;
+                primitive_graph(syntax, native_foreign_theory, extension.source, local_name)?
+            };
+            children.push(NestedCompileGraph {
+                operation: operation_name,
+                graph,
+            });
+        }
+
+        Ok(children)
+    }
 }
 
 fn graph_theory(
@@ -142,11 +257,12 @@ fn graph_theory(
 fn locally_inlined_definition(
     theory: &Theory,
     definition_key: &Operation,
+    max_inline_iterations: usize,
 ) -> Result<OpenHypergraph<(), Operation>, CompileGraphError> {
     let mut graph = definition_term(theory, definition_key)?;
     let definitions = inline_definitions(theory)?;
 
-    for _ in 0..64 {
+    for _ in 0..max_inline_iterations {
         let inlinable = inlinable_edges(&graph, &definitions);
         if inlinable.is_empty() {
             return Ok(graph);
@@ -166,11 +282,12 @@ fn annotated_definition_graph(
     theory: &Theory,
     syntax: &Theory,
     definition_key: &Operation,
+    max_inline_iterations: usize,
 ) -> Result<OpenHypergraph<String, Operation>, CompileGraphError> {
     let arrow = theory
         .get_arrow(definition_key)
         .ok_or_else(|| CompileGraphError::UnknownDefinition(definition_key.to_string()))?;
-    let graph = locally_inlined_definition(theory, definition_key)?;
+    let graph = locally_inlined_definition(theory, definition_key, max_inline_iterations)?;
     annotated_graph(
         theory,
         syntax,
@@ -210,46 +327,6 @@ fn annotated_graph(
             definition: definition.to_string(),
             error: metacat::check::Error::InvalidTypeMaps,
         })
-}
-
-fn nested_graphs(
-    set: &TheorySet,
-    config: &CompileConfig,
-    theory_name: &str,
-    graph: &OpenHypergraph<String, Operation>,
-    depth: usize,
-) -> Result<Vec<NestedCompileGraph>, CompileGraphError> {
-    let mut seen = HashSet::new();
-    let mut children = Vec::new();
-
-    for operation in &graph.hypergraph.edges {
-        let operation_name = operation.to_string();
-        let Some((foreign_theory_name, local_name)) = operation_name.split_once('.') else {
-            continue;
-        };
-        let Some(extension) =
-            config.extension_for_target_and_prefix(theory_name, foreign_theory_name)
-        else {
-            continue;
-        };
-        if !seen.insert(operation_name.clone()) {
-            continue;
-        }
-
-        let native_foreign_theory = lookup_theory(set, extension.source)?;
-        let graph = if definition_exists(native_foreign_theory, local_name)? {
-            compile_graph_at_depth(set, config, extension.source, local_name, depth + 1)?
-        } else {
-            let syntax = lookup_theory(set, config.syntax)?;
-            primitive_graph(syntax, native_foreign_theory, extension.source, local_name)?
-        };
-        children.push(NestedCompileGraph {
-            operation: operation_name,
-            graph,
-        });
-    }
-
-    Ok(children)
 }
 
 fn definition_exists(theory: &Theory, local_name: &str) -> Result<bool, CompileGraphError> {

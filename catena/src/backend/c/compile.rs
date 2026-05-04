@@ -3,7 +3,7 @@ use crate::backend::c::codegen::codegen;
 use crate::backend::c::value::ValueKind;
 use crate::lang::Obj;
 use crate::lower::{LowerError, Pass, lower};
-use hexpr::{Hexpr, Operation, parse_hexprs};
+use hexpr::Operation;
 use metacat::theory::{Theory, TheoryId, TheorySet};
 use metacat::tree::Tree;
 use std::collections::{HashMap, HashSet};
@@ -61,7 +61,7 @@ pub(crate) struct FunctionSignature {
 }
 
 pub(crate) fn compile(source: &str) -> Result<SharedObject, CompileError> {
-    let theory_set = runtime_theory_set(source)?;
+    let theory_set = TheorySet::from_text(source)?;
     let theory = runtime_theory(&theory_set).ok_or(CompileError::NoDefinitions)?;
 
     let mut definitions: Vec<String> = match theory {
@@ -133,17 +133,6 @@ pub(crate) fn compile(source: &str) -> Result<SharedObject, CompileError> {
     })
 }
 
-fn runtime_theory_set(source: &str) -> Result<TheorySet, CompileError> {
-    match TheorySet::from_text(source) {
-        Ok(theory_set) => Ok(theory_set),
-        Err(source_error) => {
-            let legacy_source =
-                legacy_runtime_theory(source).map_err(|_| CompileError::Parse(source_error))?;
-            Ok(TheorySet::from_text(&legacy_source)?)
-        }
-    }
-}
-
 fn runtime_theory(theory_set: &TheorySet) -> Option<&Theory> {
     let runtime_id = TheoryId::new(Operation::from_str("runtime").expect("valid operation"));
     theory_set.theories.get(&runtime_id).or_else(|| {
@@ -152,53 +141,6 @@ fn runtime_theory(theory_set: &TheorySet) -> Option<&Theory> {
             .values()
             .find(|theory| matches!(theory, Theory::Theory { .. }))
     })
-}
-
-fn legacy_runtime_theory(source: &str) -> Result<String, hexpr::ParseError> {
-    let declarations = parse_hexprs(source)?;
-    let mut syntax = Vec::new();
-    let mut runtime = Vec::new();
-
-    for declaration in declarations {
-        match declaration_head(&declaration) {
-            Some("object") => syntax.push(rename_declaration(declaration, "arr")),
-            Some("arrow") => runtime.push(rename_declaration(declaration, "arr")),
-            Some("def-arrow") => runtime.push(rename_declaration(declaration, "def")),
-            _ => runtime.push(declaration),
-        }
-    }
-
-    Ok(format!(
-        "(theory syntax nat {{\n{}\n}})\n\n(theory runtime syntax {{\n{}\n}})",
-        syntax
-            .into_iter()
-            .map(|declaration| format!("  {declaration}"))
-            .collect::<Vec<_>>()
-            .join("\n"),
-        runtime
-            .into_iter()
-            .map(|declaration| format!("  {declaration}"))
-            .collect::<Vec<_>>()
-            .join("\n")
-    ))
-}
-
-fn declaration_head(declaration: &Hexpr) -> Option<&str> {
-    let Hexpr::Composition(items) = declaration else {
-        return None;
-    };
-    let Some(Hexpr::Operation(operation)) = items.first() else {
-        return None;
-    };
-    Some(operation.as_str())
-}
-
-fn rename_declaration(declaration: Hexpr, head: &str) -> Hexpr {
-    let Hexpr::Composition(mut items) = declaration else {
-        return declaration;
-    };
-    items[0] = Hexpr::Operation(Operation::from_str(head).expect("valid operation"));
-    Hexpr::Composition(items)
 }
 
 ////////////////////////////////////////////////////////////////////////////////

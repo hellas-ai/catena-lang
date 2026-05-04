@@ -100,6 +100,7 @@ dependencies = [
  "anyhow",
  "catena",
  "clap",
+ "graphviz-rust",
  "hexpr",
  "metacat",
  "open-hypergraphs",

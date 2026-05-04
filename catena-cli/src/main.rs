@@ -1,12 +1,16 @@
-use catena::lower::{lower, Pass};
+use catena::lower::{Pass, lower};
 use catena::shallow::shallow_graph;
+
+mod compile_graph_render;
 
 use clap::{Parser, Subcommand, ValueEnum};
 use std::collections::HashSet;
 use std::path::PathBuf;
 
 use catena::backend::c::codegen::codegen;
-use catena::compile::{check_bundle, check_compile_bundle, ArrowType, CompileCheckReport};
+use catena::compile::{
+    ArrowType, CompileCheckReport, GraphTheory, check_bundle, check_compile_bundle, compile_graph,
+};
 use catena::lang::Obj;
 use catena::structured::structured_from_shallow;
 use metacat::{syntax::TheoryBundle, theory::OperationKey};
@@ -91,6 +95,25 @@ enum CompileCommand {
         #[arg(long)]
         verbose: bool,
     },
+
+    /// Render one compile graph as SVG, inlining only same-theory definitions
+    Graph {
+        #[arg(long)]
+        data: PathBuf,
+
+        #[arg(long)]
+        control: PathBuf,
+
+        #[arg(long, value_enum)]
+        theory: CompileTheoryArg,
+
+        #[arg()]
+        definition: String,
+
+        /// Write SVG to a file instead of stdout
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -108,6 +131,21 @@ enum ShallowOutput {
     Cuda,
     CudaWithLaunch,
     Svg,
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum CompileTheoryArg {
+    Data,
+    Control,
+}
+
+impl From<CompileTheoryArg> for GraphTheory {
+    fn from(value: CompileTheoryArg) -> Self {
+        match value {
+            CompileTheoryArg::Data => GraphTheory::Data,
+            CompileTheoryArg::Control => GraphTheory::Control,
+        }
+    }
 }
 
 impl From<PassArg> for Pass {
@@ -168,6 +206,13 @@ fn compile_command(command: CompileCommand) -> anyhow::Result<()> {
             control,
             verbose,
         } => compile_check_command(data, control, verbose),
+        CompileCommand::Graph {
+            data,
+            control,
+            theory,
+            definition,
+            output,
+        } => compile_graph_command(data, control, theory.into(), &definition, output),
     }
 }
 
@@ -179,6 +224,29 @@ fn compile_check_command(data: PathBuf, control: PathBuf, verbose: bool) -> anyh
     let report = check_compile_bundle(&data_bundle, &control_bundle)?;
 
     print_compile_check_report(&data_display, &control_display, &report, verbose);
+    Ok(())
+}
+
+fn compile_graph_command(
+    data: PathBuf,
+    control: PathBuf,
+    theory: GraphTheory,
+    definition: &str,
+    output: Option<PathBuf>,
+) -> anyhow::Result<()> {
+    let data_bundle = TheoryBundle::from_file(data)?;
+    let control_bundle = TheoryBundle::from_file(control)?;
+    let graph = compile_graph(&data_bundle, &control_bundle, theory, definition)?;
+    let svg = compile_graph_render::nested_svg(&graph)?;
+
+    match output {
+        Some(output) => std::fs::write(output, svg)?,
+        None => {
+            use std::io::Write;
+            std::io::stdout().write_all(&svg)?;
+        }
+    }
+
     Ok(())
 }
 
@@ -398,7 +466,7 @@ fn print_svg(
         .map(|n| n.pretty(Some(&coarity)))
         .collect();
 
-    use open_hypergraphs_dot::{svg::to_svg_with, Options};
+    use open_hypergraphs_dot::{Options, svg::to_svg_with};
     use std::io::Write;
 
     let opts = Options::default().display();

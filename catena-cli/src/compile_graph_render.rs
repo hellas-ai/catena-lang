@@ -72,6 +72,7 @@ impl NestedDotRenderer {
             self.render_external_interface(&prefix, interface, dot);
         }
         self.render_nodes(&prefix, &graph.graph, dot);
+        self.render_boundary(&prefix, &graph.graph, dot);
 
         for edge_index in 0..graph.graph.hypergraph.edges.len() {
             let operation = &graph.graph.hypergraph.edges[edge_index];
@@ -166,6 +167,53 @@ impl NestedDotRenderer {
         }
     }
 
+    fn render_boundary(
+        &self,
+        prefix: &str,
+        graph: &OpenHypergraph<String, OperationKey>,
+        dot: &mut String,
+    ) {
+        for (index, source) in graph.sources.iter().enumerate() {
+            dot.push_str(&format!(
+                "    {} [shape=point, label=\"\", width=0.05, height=0.05];\n",
+                input_id(prefix, index)
+            ));
+            dot.push_str(&format!(
+                "    {} -> {} [style=dashed, dir=none];\n",
+                input_id(prefix, index),
+                node_id(prefix, *source)
+            ));
+        }
+
+        for (index, target) in graph.targets.iter().enumerate() {
+            dot.push_str(&format!(
+                "    {} [shape=point, label=\"\", width=0.05, height=0.05];\n",
+                output_id(prefix, index)
+            ));
+            dot.push_str(&format!(
+                "    {} -> {} [style=dashed, dir=none];\n",
+                node_id(prefix, *target),
+                output_id(prefix, index)
+            ));
+        }
+
+        if !graph.sources.is_empty() {
+            dot.push_str("    { rank=source;");
+            for index in 0..graph.sources.len() {
+                dot.push_str(&format!(" {}", input_id(prefix, index)));
+            }
+            dot.push_str(" }\n");
+        }
+
+        if !graph.targets.is_empty() {
+            dot.push_str("    { rank=sink;");
+            for index in 0..graph.targets.len() {
+                dot.push_str(&format!(" {}", output_id(prefix, index)));
+            }
+            dot.push_str(" }\n");
+        }
+    }
+
     fn render_edge_box(
         &self,
         prefix: &str,
@@ -243,6 +291,14 @@ fn node_id(prefix: &str, node: NodeId) -> String {
 
 fn edge_id(prefix: &str, edge_index: usize) -> String {
     format!("{prefix}_e_{edge_index}")
+}
+
+fn input_id(prefix: &str, index: usize) -> String {
+    format!("{prefix}_input_{index}")
+}
+
+fn output_id(prefix: &str, index: usize) -> String {
+    format!("{prefix}_output_{index}")
 }
 
 fn cluster_id(graph_id: usize) -> String {

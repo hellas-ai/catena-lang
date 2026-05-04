@@ -152,19 +152,16 @@ impl NestedDotRenderer {
     fn render_nodes(
         &self,
         prefix: &str,
-        graph: &OpenHypergraph<(), OperationKey>,
+        graph: &OpenHypergraph<String, OperationKey>,
         dot: &mut String,
     ) {
         for node_index in 0..graph.hypergraph.nodes.len() {
             let node = NodeId(node_index);
-            let label = if is_passthrough_boundary_node(graph, node) {
-                "id"
-            } else {
-                ""
-            };
+            let label = graph.hypergraph.nodes[node_index].clone();
             dot.push_str(&format!(
-                "    {} [shape=point, xlabel=\"{label}\"];\n",
-                node_id(prefix, node)
+                "    {} [shape=point, xlabel=\"{}\"];\n",
+                node_id(prefix, node),
+                escape_dot_string(&label)
             ));
         }
     }
@@ -172,7 +169,7 @@ impl NestedDotRenderer {
     fn render_edge_box(
         &self,
         prefix: &str,
-        graph: &OpenHypergraph<(), OperationKey>,
+        graph: &OpenHypergraph<String, OperationKey>,
         edge_index: usize,
         operation: &OperationKey,
         dot: &mut String,
@@ -203,7 +200,7 @@ impl NestedDotRenderer {
     fn render_nested_connections(
         &self,
         prefix: &str,
-        graph: &OpenHypergraph<(), OperationKey>,
+        graph: &OpenHypergraph<String, OperationKey>,
         edge_index: usize,
         child: &RenderedInterface,
         dot: &mut String,
@@ -277,16 +274,6 @@ fn record_ports(prefix: &str, arity: usize) -> String {
         .map(|index| format!("<{prefix}_{index}>"))
         .collect::<Vec<_>>()
         .join(" | ")
-}
-
-fn is_passthrough_boundary_node(graph: &OpenHypergraph<(), OperationKey>, node: NodeId) -> bool {
-    graph.sources.contains(&node)
-        && graph.targets.contains(&node)
-        && !graph
-            .hypergraph
-            .adjacency
-            .iter()
-            .any(|edge| edge.sources.contains(&node) || edge.targets.contains(&node))
 }
 
 fn escape_dot_string(label: &str) -> String {

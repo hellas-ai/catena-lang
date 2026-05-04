@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use hexpr::{Operation, try_interpret};
 use metacat::{
+    check::check,
     syntax::{Declaration, TheoryBundle},
     theory::OperationKey,
 };
@@ -42,7 +43,7 @@ impl GraphTheory {
 pub struct CompileGraph {
     pub theory: GraphTheory,
     pub definition: String,
-    pub graph: OpenHypergraph<(), OperationKey>,
+    pub graph: OpenHypergraph<String, OperationKey>,
     pub children: Vec<NestedCompileGraph>,
 }
 
@@ -64,6 +65,11 @@ pub enum CompileGraphError {
     UnknownOperation(String),
     #[error("invalid hexpr: {0}")]
     InvalidHexpr(#[from] hexpr::interpret::Error<metacat::theory::Error>),
+    #[error("definition {definition} failed typecheck: {error:?}")]
+    Typecheck {
+        definition: String,
+        error: metacat::check::Error<OperationKey>,
+    },
     #[error("recursive or too-deep inline expansion while rendering `{0}`")]
     InlineLimit(String),
     #[error("recursive or too-deep nested graph expansion while rendering `{0}`")]
@@ -105,7 +111,15 @@ fn compile_graph_at_depth(
         GraphTheory::Control => data,
     };
     let definition_key = parse_operation(definition)?;
-    let graph = strictify(locally_inlined_definition(&bundle, &definition_key)?);
+    let declaration = bundle
+        .definitions
+        .get(&definition_key)
+        .ok_or_else(|| CompileGraphError::UnknownDefinition(definition.to_string()))?;
+    let graph = strictify(annotated_definition_graph(
+        &bundle,
+        &definition_key,
+        declaration,
+    )?);
     let children = nested_graphs(data, control, theory, foreign_bundle, &graph, depth)?;
 
     Ok(CompileGraph {
@@ -139,12 +153,57 @@ fn locally_inlined_definition(
     Err(CompileGraphError::InlineLimit(definition_key.to_string()))
 }
 
+fn annotated_definition_graph(
+    bundle: &TheoryBundle,
+    definition_key: &Operation,
+    declaration: &Declaration,
+) -> Result<OpenHypergraph<String, OperationKey>, CompileGraphError> {
+    let graph = locally_inlined_definition(bundle, definition_key)?;
+    let source = forget_labels(try_interpret(
+        &bundle.object_theory,
+        &declaration.source_map,
+    )?);
+    let target = forget_labels(try_interpret(
+        &bundle.object_theory,
+        &declaration.target_map,
+    )?);
+    annotated_graph(bundle, definition_key.as_str(), source, target, graph)
+}
+
+fn annotated_graph(
+    bundle: &TheoryBundle,
+    definition: &str,
+    source: OpenHypergraph<(), OperationKey>,
+    target: OpenHypergraph<(), OperationKey>,
+    mut graph: OpenHypergraph<(), OperationKey>,
+) -> Result<OpenHypergraph<String, OperationKey>, CompileGraphError> {
+    let labels = check(&bundle.arrow_theory, source, target, &mut graph)
+        .map_err(|error| CompileGraphError::Typecheck {
+            definition: definition.to_string(),
+            error,
+        })?
+        .into_iter()
+        .map(|tree| {
+            tree.pretty(Some(&|op| {
+                bundle.object_theory.type_maps(op).1.targets.len()
+            }))
+        })
+        .collect::<Vec<_>>();
+
+    graph
+        .with_nodes(|_| labels)
+        .ok_or_else(|| CompileGraphError::Typecheck {
+            definition: definition.to_string(),
+            error: metacat::check::Error::InvalidTypeMaps,
+        })
+}
+
 fn nested_graphs(
     data: &TheoryBundle,
     control: &TheoryBundle,
     theory: GraphTheory,
     native_bundle: &TheoryBundle,
-    graph: &OpenHypergraph<(), OperationKey>,
+    graph: &OpenHypergraph<String, OperationKey>,
     depth: usize,
 ) -> Result<Vec<NestedCompileGraph>, CompileGraphError> {
     let foreign_prefix = theory.foreign_prefix();
@@ -199,11 +258,18 @@ fn primitive_graph(
         .get_operation_key(local_name)
         .ok_or_else(|| CompileGraphError::UnknownOperation(local_name.to_string()))?;
     let (source, target) = bundle.arrow_theory.type_maps(&operation);
-    let graph = strictify(OpenHypergraph::singleton(
+    let graph = OpenHypergraph::singleton(
         operation,
         vec![(); source.target().len()],
         vec![(); target.target().len()],
-    ));
+    );
+    let graph = strictify(annotated_graph(
+        bundle,
+        local_name,
+        source.clone(),
+        target.clone(),
+        graph,
+    )?);
 
     Ok(CompileGraph {
         theory,
@@ -271,6 +337,8 @@ fn forget_labels<O, A>(f: OpenHypergraph<O, A>) -> OpenHypergraph<(), A> {
     f.map_nodes(|_| ())
 }
 
-fn strictify(graph: OpenHypergraph<(), OperationKey>) -> OpenHypergraph<(), OperationKey> {
+fn strictify<O: Clone + PartialEq>(
+    graph: OpenHypergraph<O, OperationKey>,
+) -> OpenHypergraph<O, OperationKey> {
     OpenHypergraph::from_strict(graph.to_strict())
 }

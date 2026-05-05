@@ -34,8 +34,6 @@
       ([.condition x])
     })
 
-  (arr for-n.bind-f32-pair : {f32 f32} -> {nat ({f32 f32} product)})
-
   (arr any-positive.bounded.bind : {nat ({f32 f32} product) [x]} -> {bool [x]})
 
   (def add-one-first : {f32 f32} -> {f32 f32} =
@@ -63,10 +61,13 @@
   (arr discard : [x] -> [x.])
   (arr guard : ({bool [x]} product) -> [x . x x])
   (arr for-n.step :
-    ({nat [x]} product) ->
     ([x . x x] {
-      ({nat [x]} product)
-      [x]
+      [x] # entry
+      ({nat [x]} product) # continue loop
+    }) ->
+    ([x . x x] {
+      ({nat [x]} product) # loop body
+      [x] # exit
     }))
 
   (def guarded-positive-update :
@@ -93,11 +94,9 @@
     ({f32 f32} product) -> ({f32 f32} product)
     =
     {[start.]
-      ([.start] data.for-n.bind-f32-pair [entry.])
-
-      ([.entry] for-n.step [bounded exhausted.])
+      ([.start loopback] for-n.step [bounded exhausted.])
         ([.bounded] data.copy data.any-positive.bounded.bind guard [iter condition_done.])
-          ([.iter] data.add-one-first.bounded [entry.])
+          ([.iter] data.add-one-first.bounded [loopback.])
 
       ([.condition_done] data.drop-bound-f32-pair [condition_done_unbounded.])
       ([.exhausted condition_done_unbounded] merge [done.])

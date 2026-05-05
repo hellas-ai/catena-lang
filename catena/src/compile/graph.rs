@@ -14,11 +14,15 @@ use thiserror::Error;
 
 use crate::{compile::config::CompileConfig, pass::inline::Inline};
 
+type DefinitionGraph = LaxOpenHypergraph<(), Operation>;
+type LabeledGraph = LaxOpenHypergraph<String, Operation>;
+type StrictLabeledGraph = StrictOpenHypergraph<String, Operation>;
+
 #[derive(Clone, Debug)]
 pub struct CompileGraph {
     pub theory: String,
     pub definition: String,
-    pub graph: StrictOpenHypergraph<String, Operation>,
+    pub graph: StrictLabeledGraph,
     pub children: Vec<NestedCompileGraph>,
 }
 
@@ -149,7 +153,7 @@ impl GraphCompileState<'_> {
         let theory = self.theory(theory_name)?;
         let definition_key = parse_operation(definition)?;
         let graph = self.compile_definition_graph(theory, syntax, &definition_key)?;
-        let children = self.compile_foreign_children(theory_name, &graph)?;
+        let children = self.compile_nested_foreign_graphs(theory_name, &graph)?;
 
         Ok(CompileGraph {
             theory: theory_name.to_string(),
@@ -180,7 +184,7 @@ impl GraphCompileState<'_> {
         theory: &Theory,
         syntax: &Theory,
         definition_key: &Operation,
-    ) -> Result<StrictOpenHypergraph<String, Operation>, CompileGraphError> {
+    ) -> Result<StrictLabeledGraph, CompileGraphError> {
         let arrow = theory
             .get_arrow(definition_key)
             .ok_or_else(|| CompileGraphError::UnknownDefinition(definition_key.to_string()))?;
@@ -189,55 +193,29 @@ impl GraphCompileState<'_> {
             .clone()
             .ok_or_else(|| CompileGraphError::UnknownDefinition(definition_key.to_string()))?;
         let definitions = inline_definitions(theory)?;
+        graph = inline_local_definitions(
+            graph,
+            &definitions,
+            self.options.max_inline_iterations,
+            definition_key,
+        )?;
 
-        for _ in 0..self.options.max_inline_iterations {
-            let inlinable = inlinable_edges(&graph, &definitions);
-            if inlinable.is_empty() {
-                let labels = check(
-                    theory,
-                    arrow.type_maps.0.clone(),
-                    arrow.type_maps.1.clone(),
-                    &mut graph,
-                )
-                .map_err(|error| CompileGraphError::Typecheck {
-                    definition: definition_key.to_string(),
-                    error,
-                })?
-                .into_iter()
-                .map(|tree| {
-                    tree.try_pretty(Some(&|op| {
-                        syntax
-                            .coarity_of(op)
-                            .ok_or_else(|| CompileGraphError::UnknownOperation(op.to_string()))
-                    }))
-                })
-                .collect::<Result<Vec<_>, _>>()?;
+        let graph = typecheck_and_label_graph(
+            theory,
+            syntax,
+            definition_key.as_str(),
+            arrow.type_maps.0.clone(),
+            arrow.type_maps.1.clone(),
+            graph,
+        )?;
 
-                let graph =
-                    graph
-                        .with_nodes(|_| labels)
-                        .ok_or_else(|| CompileGraphError::Typecheck {
-                            definition: definition_key.to_string(),
-                            error: metacat::check::Error::InvalidTypeMaps,
-                        })?;
-
-                return Ok(graph.to_strict());
-            }
-
-            graph.quotient().expect("quotient should be defined");
-            graph = Inline {
-                definitions: definitions.clone(),
-            }
-            .map_arrow(&graph);
-        }
-
-        Err(CompileGraphError::InlineLimit(definition_key.to_string()))
+        Ok(graph.to_strict())
     }
 
-    fn compile_foreign_children(
+    fn compile_nested_foreign_graphs(
         &mut self,
         theory_name: &str,
-        graph: &StrictOpenHypergraph<String, Operation>,
+        graph: &StrictLabeledGraph,
     ) -> Result<Vec<NestedCompileGraph>, CompileGraphError> {
         let mut seen = HashSet::new();
         let mut children = Vec::new();
@@ -277,19 +255,41 @@ impl GraphCompileState<'_> {
             self.compile_nested_graph(source_theory, local_name)
         } else {
             let syntax = self.syntax_theory()?;
-            primitive_graph(syntax, native_foreign_theory, source_theory, local_name)
+            compile_primitive_child_graph(syntax, native_foreign_theory, source_theory, local_name)
         }
     }
+}
+
+fn inline_local_definitions(
+    mut graph: DefinitionGraph,
+    definitions: &HashMap<Operation, DefinitionGraph>,
+    max_inline_iterations: usize,
+    definition_key: &Operation,
+) -> Result<DefinitionGraph, CompileGraphError> {
+    for _ in 0..max_inline_iterations {
+        let inlinable = inlinable_edges(&graph, definitions);
+        if inlinable.is_empty() {
+            return Ok(graph);
+        }
+
+        graph.quotient().expect("quotient should be defined");
+        graph = Inline {
+            definitions: definitions.clone(),
+        }
+        .map_arrow(&graph);
+    }
+
+    Err(CompileGraphError::InlineLimit(definition_key.to_string()))
 }
 
 fn typecheck_and_label_graph(
     theory: &Theory,
     syntax: &Theory,
     definition: &str,
-    source: LaxOpenHypergraph<(), Operation>,
-    target: LaxOpenHypergraph<(), Operation>,
-    mut graph: LaxOpenHypergraph<(), Operation>,
-) -> Result<LaxOpenHypergraph<String, Operation>, CompileGraphError> {
+    source: DefinitionGraph,
+    target: DefinitionGraph,
+    mut graph: DefinitionGraph,
+) -> Result<LabeledGraph, CompileGraphError> {
     let labels = check(theory, source, target, &mut graph)
         .map_err(|error| CompileGraphError::Typecheck {
             definition: definition.to_string(),
@@ -321,7 +321,7 @@ fn definition_exists(theory: &Theory, local_name: &str) -> Result<bool, CompileG
         .is_some())
 }
 
-fn primitive_graph(
+fn compile_primitive_child_graph(
     syntax: &Theory,
     theory: &Theory,
     theory_name: &str,
@@ -356,7 +356,7 @@ fn primitive_graph(
 
 fn inline_definitions(
     theory: &Theory,
-) -> Result<HashMap<Operation, LaxOpenHypergraph<(), Operation>>, CompileGraphError> {
+) -> Result<HashMap<Operation, DefinitionGraph>, CompileGraphError> {
     let Theory::Theory { arrows, .. } = theory else {
         return Err(CompileGraphError::NotUserTheory("nat".to_string()));
     };
@@ -367,8 +367,8 @@ fn inline_definitions(
 }
 
 fn inlinable_edges(
-    graph: &LaxOpenHypergraph<(), Operation>,
-    definitions: &HashMap<Operation, LaxOpenHypergraph<(), Operation>>,
+    graph: &DefinitionGraph,
+    definitions: &HashMap<Operation, DefinitionGraph>,
 ) -> HashSet<Operation> {
     graph
         .hypergraph

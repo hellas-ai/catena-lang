@@ -286,7 +286,7 @@ impl GraphCompileState<'_> {
     }
 }
 
-fn annotated_graph(
+fn typecheck_and_label_graph(
     theory: &Theory,
     syntax: &Theory,
     definition: &str,
@@ -340,7 +340,7 @@ fn primitive_graph(
         vec![(); arrow.type_maps.0.target().len()],
         vec![(); arrow.type_maps.1.target().len()],
     );
-    let graph = annotated_graph(
+    let graph = typecheck_and_label_graph(
         theory,
         syntax,
         local_name,

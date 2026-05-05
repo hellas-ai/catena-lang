@@ -11,7 +11,7 @@ use graphviz_rust::{
     printer::PrinterContext,
 };
 use hexpr::Operation;
-use open_hypergraphs::lax::{NodeId, OpenHypergraph};
+use open_hypergraphs::strict::vec::OpenHypergraph;
 
 // This is intentionally custom instead of delegating to open-hypergraphs-dot:
 // Catena graphs need hierarchical DOT clusters, cluster boundary edges, hidden
@@ -94,23 +94,22 @@ impl NestedDotRenderer {
         self.render_nodes(&prefix, &graph.graph, &mut stmts);
         self.render_boundary(&prefix, &graph.graph, &mut stmts);
 
-        for edge_index in 0..graph.graph.hypergraph.edges.len() {
-            let operation = &graph.graph.hypergraph.edges[edge_index];
+        for edge_index in 0..graph.graph.h.x.0.len() {
+            let operation = &graph.graph.h.x.0[edge_index];
             if let Some(child) = children.get(operation.to_string().as_str()) {
-                let hyperedge = &graph.graph.hypergraph.adjacency[edge_index];
+                let sources = edge_sources(&graph.graph, edge_index);
+                let targets = edge_targets(&graph.graph, edge_index);
                 let (child_cluster, child_interface) = self.render_cluster(
                     child,
                     &operation.to_string(),
                     Some(ParentInterface {
-                        source_labels: hyperedge
-                            .sources
+                        source_labels: sources
                             .iter()
-                            .map(|node| graph.graph.hypergraph.nodes[node.0].clone())
+                            .map(|node| graph.graph.h.w.0[*node].clone())
                             .collect(),
-                        target_labels: hyperedge
-                            .targets
+                        target_labels: targets
                             .iter()
-                            .map(|node| graph.graph.hypergraph.nodes[node.0].clone())
+                            .map(|node| graph.graph.h.w.0[*node].clone())
                             .collect(),
                     }),
                 );
@@ -142,13 +141,15 @@ impl NestedDotRenderer {
                 cluster_id: cluster_id.clone(),
                 sources: graph
                     .graph
-                    .sources
+                    .s
+                    .table
                     .iter()
                     .map(|node| node_id(&prefix, *node))
                     .collect(),
                 targets: graph
                     .graph
-                    .targets
+                    .t
+                    .table
                     .iter()
                     .map(|node| node_id(&prefix, *node))
                     .collect(),
@@ -197,11 +198,10 @@ impl NestedDotRenderer {
         graph: &OpenHypergraph<String, Operation>,
         stmts: &mut Vec<Stmt>,
     ) {
-        for node_index in 0..graph.hypergraph.nodes.len() {
-            let node = NodeId(node_index);
-            let label = graph.hypergraph.nodes[node_index].clone();
+        for node_index in 0..graph.h.w.0.len() {
+            let label = graph.h.w.0[node_index].clone();
             stmts.push(node_stmt(
-                &node_id(prefix, node),
+                &node_id(prefix, node_index),
                 vec![attr_plain("shape", "point"), attr_quoted("xlabel", &label)],
             ));
         }
@@ -213,7 +213,7 @@ impl NestedDotRenderer {
         graph: &OpenHypergraph<String, Operation>,
         stmts: &mut Vec<Stmt>,
     ) {
-        for (index, source) in graph.sources.iter().enumerate() {
+        for (index, source) in graph.s.table.iter().enumerate() {
             stmts.push(boundary_node(&input_id(prefix, index)));
             stmts.push(edge_stmt(
                 node_vertex(&input_id(prefix, index)),
@@ -222,7 +222,7 @@ impl NestedDotRenderer {
             ));
         }
 
-        for (index, target) in graph.targets.iter().enumerate() {
+        for (index, target) in graph.t.table.iter().enumerate() {
             stmts.push(boundary_node(&output_id(prefix, index)));
             stmts.push(edge_stmt(
                 node_vertex(&node_id(prefix, *target)),
@@ -231,19 +231,19 @@ impl NestedDotRenderer {
             ));
         }
 
-        if !graph.sources.is_empty() {
+        if !graph.s.table.is_empty() {
             stmts.push(rank_subgraph(
                 "source",
-                (0..graph.sources.len())
+                (0..graph.s.table.len())
                     .map(|index| input_id(prefix, index))
                     .collect(),
             ));
         }
 
-        if !graph.targets.is_empty() {
+        if !graph.t.table.is_empty() {
             stmts.push(rank_subgraph(
                 "sink",
-                (0..graph.targets.len())
+                (0..graph.t.table.len())
                     .map(|index| output_id(prefix, index))
                     .collect(),
             ));
@@ -259,22 +259,23 @@ impl NestedDotRenderer {
         stmts: &mut Vec<Stmt>,
     ) {
         let edge_id = edge_id(prefix, edge_index);
-        let hyperedge = &graph.hypergraph.adjacency[edge_index];
-        let label = record_label(operation, hyperedge.sources.len(), hyperedge.targets.len());
+        let sources = edge_sources(graph, edge_index);
+        let targets = edge_targets(graph, edge_index);
+        let label = record_label(operation, sources.len(), targets.len());
 
         stmts.push(node_stmt(
             &edge_id,
             vec![attr_quoted("label", &label), attr_plain("shape", "record")],
         ));
 
-        for (source_index, source) in hyperedge.sources.iter().enumerate() {
+        for (source_index, source) in sources.iter().enumerate() {
             stmts.push(edge_stmt(
                 node_vertex(&node_id(prefix, *source)),
                 port_vertex(&edge_id, &format!("s_{source_index}")),
                 vec![],
             ));
         }
-        for (target_index, target) in hyperedge.targets.iter().enumerate() {
+        for (target_index, target) in targets.iter().enumerate() {
             stmts.push(edge_stmt(
                 port_vertex(&edge_id, &format!("t_{target_index}")),
                 node_vertex(&node_id(prefix, *target)),
@@ -291,15 +292,16 @@ impl NestedDotRenderer {
         child: &RenderedInterface,
         stmts: &mut Vec<Stmt>,
     ) {
-        let hyperedge = &graph.hypergraph.adjacency[edge_index];
-        for (source, child_source) in hyperedge.sources.iter().zip(&child.sources) {
+        let sources = edge_sources(graph, edge_index);
+        let targets = edge_targets(graph, edge_index);
+        for (source, child_source) in sources.iter().zip(&child.sources) {
             stmts.push(edge_stmt(
                 node_vertex(&node_id(prefix, *source)),
                 node_vertex(child_source),
                 vec![attr_plain("lhead", &child.cluster_id)],
             ));
         }
-        for (child_target, target) in child.targets.iter().zip(&hyperedge.targets) {
+        for (child_target, target) in child.targets.iter().zip(&targets) {
             stmts.push(edge_stmt(
                 node_vertex(child_target),
                 node_vertex(&node_id(prefix, *target)),
@@ -319,8 +321,8 @@ fn qualified_name(graph: &CompileGraph) -> String {
     format!("{}.{}", graph.theory, graph.definition)
 }
 
-fn node_id(prefix: &str, node: NodeId) -> String {
-    format!("{prefix}_n_{}", node.0)
+fn node_id(prefix: &str, node: usize) -> String {
+    format!("{prefix}_n_{node}")
 }
 
 fn edge_id(prefix: &str, edge_index: usize) -> String {
@@ -337,6 +339,28 @@ fn output_id(prefix: &str, index: usize) -> String {
 
 fn cluster_id(graph_id: usize) -> String {
     format!("cluster_{graph_id}")
+}
+
+fn edge_sources(graph: &OpenHypergraph<String, Operation>, edge_index: usize) -> Vec<usize> {
+    graph
+        .h
+        .s
+        .clone()
+        .into_iter()
+        .nth(edge_index)
+        .map(|sources| sources.table.0)
+        .unwrap_or_default()
+}
+
+fn edge_targets(graph: &OpenHypergraph<String, Operation>, edge_index: usize) -> Vec<usize> {
+    graph
+        .h
+        .t
+        .clone()
+        .into_iter()
+        .nth(edge_index)
+        .map(|targets| targets.table.0)
+        .unwrap_or_default()
 }
 
 fn interface_source_id(prefix: &str, index: usize) -> String {

@@ -44,12 +44,12 @@ impl Default for GraphCompileOptions {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-struct GraphDefinition {
+struct DefinitionRef {
     theory: String,
     definition: String,
 }
 
-impl GraphDefinition {
+impl DefinitionRef {
     fn new(theory: &str, definition: &str) -> Self {
         Self {
             theory: theory.to_string(),
@@ -66,7 +66,7 @@ struct GraphCompileState<'a> {
     set: &'a TheorySet,
     config: &'a CompileConfig,
     options: GraphCompileOptions,
-    stack: Vec<GraphDefinition>,
+    stack: Vec<DefinitionRef>,
 }
 
 #[derive(Error, Debug)]
@@ -121,14 +121,14 @@ impl GraphCompileState<'_> {
             )));
         }
 
-        let current = GraphDefinition::new(theory_name, definition);
+        let current = DefinitionRef::new(theory_name, definition);
         if let Some(index) = self.stack.iter().position(|entry| entry == &current) {
             // For now graph rendering rejects cyclic cross-theory definitions.
             // We may relax this later and render recursive definitions with
             // back-references instead of expanding them.
             let mut cycle = self.stack[index..]
                 .iter()
-                .map(GraphDefinition::label)
+                .map(DefinitionRef::label)
                 .collect::<Vec<_>>();
             cycle.push(current.label());
             return Err(CompileGraphError::NestedCycle { cycle });

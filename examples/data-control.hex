@@ -62,4 +62,13 @@
       guard
       {data.add-one-second data.add-one-first}
     ))
+
+  (def while-positive-update :
+    ({f32 f32} product) -> ({f32 f32} product)
+    =
+    {[entry.]
+      ([.entry] data.copy data.any-positive.bind guard [iter done.])
+        ([.iter] data.add-one-first [entry.])
+      ([.done])
+    })
 })

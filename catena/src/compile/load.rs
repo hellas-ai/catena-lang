@@ -197,10 +197,14 @@ fn render_parseable_object_map(map: &OpenHypergraph<(), Operation>) -> String {
         })
         .collect::<Vec<_>>();
 
-    let repeated_source_use = map
-        .sources
-        .iter()
-        .any(|source| target_source_uses.iter().flatten().filter(|node| *node == source).count() > 1);
+    let repeated_source_use = map.sources.iter().any(|source| {
+        target_source_uses
+            .iter()
+            .flatten()
+            .filter(|node| *node == source)
+            .count()
+            > 1
+    });
     if repeated_source_use && !single_target_direct_source_edge(&map) {
         return render_parseable_object_map_with_explicit_sharing(
             &map,
@@ -271,10 +275,7 @@ fn render_parseable_object_map_with_explicit_sharing(
         1 => rendered_targets[0].clone(),
         _ => format!("{{{}}}", rendered_targets.join(" ")),
     };
-    format!(
-        "({} {body})",
-        render_spider(all_sources, &copy_targets)
-    )
+    format!("({} {body})", render_spider(all_sources, &copy_targets))
 }
 
 fn render_parseable_node(

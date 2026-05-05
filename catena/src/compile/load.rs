@@ -184,6 +184,32 @@ fn operation(name: &str) -> Result<Operation, CompileLoadError> {
 fn render_parseable_object_map(map: &OpenHypergraph<(), Operation>) -> String {
     let mut map = map.clone();
     let _ = map.quotient();
+    let all_sources = (0..map.source().len())
+        .map(|index| format!("x{index}"))
+        .collect::<Vec<_>>();
+    let target_nodes = map.targets.clone();
+    let target_source_uses = target_nodes
+        .iter()
+        .map(|target| {
+            let mut uses = Vec::new();
+            collect_source_nodes_for_target(&map, *target, &mut uses, &mut HashSet::new());
+            uses
+        })
+        .collect::<Vec<_>>();
+
+    let repeated_source_use = map
+        .sources
+        .iter()
+        .any(|source| target_source_uses.iter().flatten().filter(|node| *node == source).count() > 1);
+    if repeated_source_use && !single_target_direct_source_edge(&map) {
+        return render_parseable_object_map_with_explicit_sharing(
+            &map,
+            &all_sources,
+            &target_nodes,
+            &target_source_uses,
+        );
+    }
+
     let body = match map.target().len() {
         0 => "[]".to_string(),
         1 => render_parseable_node(&map, map.targets[0], &mut HashSet::new()),
@@ -196,15 +222,59 @@ fn render_parseable_object_map(map: &OpenHypergraph<(), Operation>) -> String {
             format!("{{{}}}", targets.join(" "))
         }
     };
-    let all_sources = (0..map.source().len())
-        .map(|index| format!("x{index}"))
-        .collect::<Vec<_>>();
     let used_sources = used_source_vars(&map);
     if all_sources == used_sources {
         body
     } else {
         format!("({} {body})", render_spider(&all_sources, &used_sources))
     }
+}
+
+fn single_target_direct_source_edge(map: &OpenHypergraph<(), Operation>) -> bool {
+    let [target] = map.targets.as_slice() else {
+        return false;
+    };
+    let Some(edge_index) = producer_edge(map, *target) else {
+        return false;
+    };
+    map.hypergraph.adjacency[edge_index]
+        .sources
+        .iter()
+        .all(|node| source_var(map, *node).is_some())
+}
+
+fn render_parseable_object_map_with_explicit_sharing(
+    map: &OpenHypergraph<(), Operation>,
+    all_sources: &[String],
+    target_nodes: &[NodeId],
+    target_source_uses: &[Vec<NodeId>],
+) -> String {
+    let mut copy_targets = Vec::new();
+    for uses in target_source_uses {
+        for source in uses {
+            let source_index = map
+                .sources
+                .iter()
+                .position(|candidate| candidate == source)
+                .expect("source use should reference a source node");
+            copy_targets.push(format!("x{source_index}"));
+        }
+    }
+
+    let rendered_targets = target_nodes
+        .iter()
+        .map(|target| render_parseable_node(map, *target, &mut HashSet::new()))
+        .collect::<Vec<_>>();
+
+    let body = match rendered_targets.len() {
+        0 => "[]".to_string(),
+        1 => rendered_targets[0].clone(),
+        _ => format!("{{{}}}", rendered_targets.join(" ")),
+    };
+    format!(
+        "({} {body})",
+        render_spider(all_sources, &copy_targets)
+    )
 }
 
 fn render_parseable_node(
@@ -295,6 +365,26 @@ fn collect_used_source_vars(
     if let Some(edge_index) = producer_edge(map, node) {
         for source in &map.hypergraph.adjacency[edge_index].sources {
             collect_used_source_vars(map, *source, used, seen);
+        }
+    }
+}
+
+fn collect_source_nodes_for_target(
+    map: &OpenHypergraph<(), Operation>,
+    node: NodeId,
+    uses: &mut Vec<NodeId>,
+    seen: &mut HashSet<NodeId>,
+) {
+    if map.sources.contains(&node) {
+        uses.push(node);
+        return;
+    }
+    if !seen.insert(node) {
+        return;
+    }
+    if let Some(edge_index) = producer_edge(map, node) {
+        for source in &map.hypergraph.adjacency[edge_index].sources {
+            collect_source_nodes_for_target(map, *source, uses, seen);
         }
     }
 }

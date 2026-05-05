@@ -1,6 +1,7 @@
 (theory syntax nat {
   (arr f32 : 0 -> 1)
   (arr bool : 0 -> 1)
+  (arr nat : 0 -> 1)
   (arr product : 2 -> 1)
   (arr unit : 0 -> 1)
   (arr coproduct : 2 -> 1)
@@ -10,6 +11,7 @@
 (theory data syntax {
   (arr f32.zero : [] -> f32)
   (arr f32.one : [] -> f32)
+  (arr nat.bound : [] -> nat)
   (arr f32.add : {f32 f32} -> f32)
   (arr bool.gt : {f32 f32} -> bool)
   (arr bool.or : {bool bool} -> bool)
@@ -32,6 +34,10 @@
       ([.condition x])
     })
 
+  (arr for-n.bind-f32-pair : {f32 f32} -> {nat ({f32 f32} product)})
+
+  (arr any-positive.bounded.bind : {nat ({f32 f32} product) [x]} -> {bool [x]})
+
   (def add-one-first : {f32 f32} -> {f32 f32} =
     {
       ({[x] f32.one} f32.add)
@@ -43,6 +49,11 @@
       [x]
       ({[y] f32.one} f32.add)
     })
+
+  (arr add-one-first.bounded :
+    {nat ({f32 f32} product)} -> {nat ({f32 f32} product)})
+
+  (arr drop-bound-f32-pair : {nat ({f32 f32} product)} -> {f32 f32})
 })
 
 (theory control syntax {
@@ -51,6 +62,12 @@
   (arr branch : [x] -> [x . x x])
   (arr discard : [x] -> [x.])
   (arr guard : ({bool [x]} product) -> [x . x x])
+  (arr for-n.step :
+    ({nat [x]} product) ->
+    ([x . x x] {
+      ({nat [x]} product)
+      [x]
+    }))
 
   (def guarded-positive-update :
     ({f32 f32} product) ->
@@ -69,6 +86,21 @@
     {[entry.]
       ([.entry] data.copy data.any-positive.bind guard [iter done.])
         ([.iter] data.add-one-first [entry.])
+      ([.done])
+    })
+
+  (def for-n-positive-update :
+    ({f32 f32} product) -> ({f32 f32} product)
+    =
+    {[start.]
+      ([.start] data.for-n.bind-f32-pair [entry.])
+
+      ([.entry] for-n.step [bounded exhausted.])
+        ([.bounded] data.copy data.any-positive.bounded.bind guard [iter condition_done.])
+          ([.iter] data.add-one-first.bounded [entry.])
+
+      ([.condition_done] data.drop-bound-f32-pair [condition_done_unbounded.])
+      ([.exhausted condition_done_unbounded] merge [done.])
       ([.done])
     })
 })

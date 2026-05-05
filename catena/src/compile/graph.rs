@@ -147,7 +147,7 @@ impl GraphCompileState<'_> {
     ) -> Result<CompileGraph, CompileGraphError> {
         let syntax = self.syntax_theory()?;
         let theory = self.theory(theory_name)?;
-        let definition_key = self.definition_key(definition)?;
+        let definition_key = parse_operation(definition)?;
         let graph = self.compile_definition_graph(theory, syntax, &definition_key)?;
         let children = self.compile_foreign_children(theory_name, &graph)?;
 
@@ -173,10 +173,6 @@ impl GraphCompileState<'_> {
             .theories
             .get(&id)
             .ok_or_else(|| CompileGraphError::UnknownTheory(theory_name.to_string()))
-    }
-
-    fn definition_key(&self, definition: &str) -> Result<Operation, CompileGraphError> {
-        parse_operation(definition)
     }
 
     fn compile_definition_graph(

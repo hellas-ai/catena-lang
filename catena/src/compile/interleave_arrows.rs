@@ -1,4 +1,3 @@
-//!G
 //! Mutually interleave the two "control" and "data" theories by adding "product-packed" data
 //! arrows to control, and "coproduct-packed" control arrows to data.
 //!

@@ -36,12 +36,20 @@ pub enum CheckError {
 const SYNTAX_THEORY: &str = "syntax";
 const NAT_THEORY: &str = "nat";
 
-// Elaborate input program and typecheck
+/// Elaborate input program to interleave control/data maps and typecheck it
 pub fn elaborate_and_check(raw: &RawTheorySet) -> Result<TheorySet, CheckError> {
+    // *Interpret* the syntax category to get a 'Theory'
     let syntax = interpret_syntax(raw)?;
+
+    // Elaborate the raw control (resp. data) theory by adding additional axioms corresponding to
+    // all arrows in the data (resp. control) category.
     let mut elaborated = raw.clone();
     interleave(&syntax, &mut elaborated);
+
+    // Interpret all theories to get a TheorySet
     let interpreted = interpret_all(&elaborated)?;
+
+    // Typecheck all definitions
     check_all(&interpreted)?;
     Ok(interpreted)
 }
@@ -55,6 +63,7 @@ pub fn interpret_syntax(raw: &RawTheorySet) -> Result<Theory, CheckError> {
 
     let mut subset = RawTheorySet {
         theories: Default::default(),
+        extensions: Vec::new(),
     };
 
     let mut current = Some(syntax_raw);
@@ -70,7 +79,7 @@ pub fn interpret_syntax(raw: &RawTheorySet) -> Result<Theory, CheckError> {
         };
     }
 
-    let interpreted = TheorySet::from_text(&render_raw_theory_set(&subset))?;
+    let interpreted = TheorySet::from_raw(subset)?;
     interpreted
         .theories
         .get(&TheoryId(syntax_name))
@@ -81,7 +90,7 @@ pub fn interpret_syntax(raw: &RawTheorySet) -> Result<Theory, CheckError> {
 // Turn elaborated raw theories into a TheorySet.
 // Should just be able to use "vanilla metacat" to do this.
 pub fn interpret_all(elaborated: &RawTheorySet) -> Result<TheorySet, CheckError> {
-    Ok(TheorySet::from_text(&render_raw_theory_set(elaborated))?)
+    Ok(TheorySet::from_raw(elaborated.clone())?)
 }
 
 // For now, return yes/no for success/fail. Will return more deetail later.
@@ -119,41 +128,6 @@ pub fn check_definitions(elaborated: &Theory, theory_name: &str) -> Result<(), C
 
     Ok(())
 }
-
-fn render_raw_theory_set(raw: &RawTheorySet) -> String {
-    raw.theories
-        .values()
-        .map(render_raw_theory)
-        .collect::<Vec<_>>()
-        .join("\n\n")
-}
-
-fn render_raw_theory(theory: &metacat::theory::ast::RawTheory) -> String {
-    let declarations = theory
-        .arrows
-        .values()
-        .map(render_raw_arrow)
-        .collect::<Vec<_>>()
-        .join("\n");
-    format!(
-        "(theory {} {} {{\n{}\n}})",
-        theory.name, theory.syntax_category, declarations
-    )
-}
-
-fn render_raw_arrow(arrow: &metacat::theory::ast::RawTheoryArrow) -> String {
-    match &arrow.definition {
-        Some(definition) => format!(
-            "  (def {} : {} -> {} = {})",
-            arrow.name, arrow.type_maps.0, arrow.type_maps.1, definition
-        ),
-        None => format!(
-            "  (arr {} : {} -> {})",
-            arrow.name, arrow.type_maps.0, arrow.type_maps.1
-        ),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

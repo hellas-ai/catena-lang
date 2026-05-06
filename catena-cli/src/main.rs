@@ -3,7 +3,7 @@ mod compile_graph_render;
 use std::path::PathBuf;
 
 use catena::{
-    check::{check as check_elaborated, elaborate, render_raw_theory_set},
+    check::{check as check_elaborated, elaborate},
     compile::{CompileConfig, compile_graph, load_extended_theory_set_from_text},
 };
 use clap::{Parser, Subcommand};
@@ -108,7 +108,7 @@ fn elaborate_command(path: PathBuf) -> anyhow::Result<()> {
     let source = std::fs::read_to_string(path)?;
     let raw = RawTheorySet::from_text(&source)?;
     let elaborated = elaborate(&raw)?;
-    println!("{}", render_raw_theory_set(&elaborated));
+    println!("{}", elaborated.to_hexpr_text());
     Ok(())
 }
 

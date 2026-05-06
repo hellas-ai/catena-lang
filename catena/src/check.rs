@@ -11,10 +11,7 @@
 //        - check_definitions: checks each *definition* in a supplied theory over the given syntax theory
 use metacat::{
     check::check as metacat_check,
-    theory::{
-        RawTheorySet, Theory, TheoryId, TheorySet,
-        ast::{RawTheory, RawTheoryArrow},
-    },
+    theory::{RawTheorySet, Theory, TheoryId, TheorySet},
 };
 use thiserror::Error;
 
@@ -141,67 +138,6 @@ pub fn check_definitions(elaborated: &Theory, theory_name: &str) -> Result<(), C
 
     Ok(())
 }
-
-pub fn render_raw_theory_set(raw: &RawTheorySet) -> String {
-    let mut theories = raw.theories.values().collect::<Vec<_>>();
-    theories.sort_by(|left, right| left.name.cmp(&right.name));
-
-    let mut parts = theories
-        .into_iter()
-        .map(render_raw_theory)
-        .collect::<Vec<_>>();
-
-    let mut extensions = raw.extensions.iter().collect::<Vec<_>>();
-    extensions.sort_by(|left, right| left.theory.cmp(&right.theory));
-    parts.extend(extensions.into_iter().map(render_extension));
-
-    parts.join("\n\n")
-}
-
-fn render_raw_theory(theory: &RawTheory) -> String {
-    let declarations = theory
-        .arrows
-        .values()
-        .map(render_raw_arrow)
-        .collect::<Vec<_>>()
-        .join("\n");
-    format!(
-        "(theory {} {} {{\n{}\n}})",
-        theory.name, theory.syntax_category, declarations
-    )
-}
-
-fn render_extension(extension: &metacat::theory::ast::Extension) -> String {
-    extension
-        .arrows
-        .values()
-        .map(|arrow| {
-            let definition = arrow
-                .definition
-                .as_ref()
-                .expect("extensions should only contain definitions");
-            format!(
-                "(def {} {} : {} -> {} = {})",
-                extension.theory, arrow.name, arrow.type_maps.0, arrow.type_maps.1, definition
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-fn render_raw_arrow(arrow: &RawTheoryArrow) -> String {
-    match &arrow.definition {
-        Some(definition) => format!(
-            "  (def {} : {} -> {} = {})",
-            arrow.name, arrow.type_maps.0, arrow.type_maps.1, definition
-        ),
-        None => format!(
-            "  (arr {} : {} -> {})",
-            arrow.name, arrow.type_maps.0, arrow.type_maps.1
-        ),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

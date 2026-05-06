@@ -1,10 +1,10 @@
 (theory syntax nat {
   (arr f32 : 0 -> 1)
   (arr bool : 0 -> 1)
-  (arr product : 2 -> 1)
-  (arr unit : 0 -> 1)
-  (arr coproduct : 2 -> 1)
-  (arr counit : 0 -> 1)
+  (arr * : 2 -> 1)
+  (arr 1 : 0 -> 1)
+  (arr + : 2 -> 1)
+  (arr 0 : 0 -> 1)
 })
 
 (theory data syntax {
@@ -50,11 +50,11 @@
   (arr create : [x.] -> [x])
   (arr branch : [x] -> [x . x x])
   (arr discard : [x] -> [x.])
-  (arr guard : ({bool [x]} product) -> [x . x x])
+  (arr guard : ({bool [x]} *) -> [x . x x])
 
   (def guarded-positive-update :
-    ({f32 f32} product) ->
-    {({f32 f32} product) ({f32 f32} product)}
+    ({f32 f32} *) ->
+    {({f32 f32} *) ({f32 f32} *)}
     =
     (
       data.copy

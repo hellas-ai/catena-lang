@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use catena::{
     check::{check as check_elaborated, elaborate},
-    compile::{CompileConfig, compile_graph, load_extended_theory_set_from_text},
+    compile::{CompileConfig, compile_graph},
 };
 use clap::{Parser, Subcommand};
 use metacat::theory::RawTheorySet;
@@ -119,8 +119,10 @@ fn compile_graph_command(
     output: Option<PathBuf>,
 ) -> anyhow::Result<()> {
     let source = std::fs::read_to_string(path)?;
+    let raw = RawTheorySet::from_text(&source)?;
+    let elaborated = elaborate(&raw)?;
     let config = CompileConfig::data_control();
-    let theory_set = load_extended_theory_set_from_text(&source, &config)?;
+    let theory_set = check_elaborated(&elaborated)?;
     let graph = compile_graph(&theory_set, &config, theory, definition)?;
     let svg = compile_graph_render::nested_svg(&graph)?;
 

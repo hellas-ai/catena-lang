@@ -3,7 +3,7 @@ mod compile_graph_render;
 use std::path::PathBuf;
 
 use catena::{
-    check::elaborate_and_check,
+    check::{check as check_elaborated, elaborate, render_raw_theory_set},
     compile::{CompileConfig, compile_graph, load_extended_theory_set_from_text},
 };
 use clap::{Parser, Subcommand};
@@ -19,7 +19,13 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Check a multi-theory hex file with metacat/Catena compile checks
+    /// Elaborate a multi-theory hex file by interleaving control/data theories
+    Elaborate {
+        #[arg()]
+        path: PathBuf,
+    },
+
+    /// Elaborate and typecheck a multi-theory hex file
     Check {
         #[arg()]
         path: PathBuf,
@@ -58,6 +64,7 @@ fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
+        Command::Elaborate { path } => elaborate_command(path),
         Command::Check { path, verbose } => compile_check_command(path, verbose),
         Command::Compile { command } => compile_command(command),
     }
@@ -78,7 +85,8 @@ fn compile_check_command(path: PathBuf, verbose: bool) -> anyhow::Result<()> {
     let path_display = path.display().to_string();
     let source = std::fs::read_to_string(path)?;
     let raw = RawTheorySet::from_text(&source)?;
-    let theory_set = elaborate_and_check(&raw)?;
+    let elaborated = elaborate(&raw)?;
+    let theory_set = check_elaborated(&elaborated)?;
 
     println!("OK: check passed");
     println!("  file: {path_display}");
@@ -93,6 +101,14 @@ fn compile_check_command(path: PathBuf, verbose: bool) -> anyhow::Result<()> {
             }
         }
     }
+    Ok(())
+}
+
+fn elaborate_command(path: PathBuf) -> anyhow::Result<()> {
+    let source = std::fs::read_to_string(path)?;
+    let raw = RawTheorySet::from_text(&source)?;
+    let elaborated = elaborate(&raw)?;
+    println!("{}", render_raw_theory_set(&elaborated));
     Ok(())
 }
 

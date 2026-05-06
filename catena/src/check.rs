@@ -11,7 +11,10 @@
 //        - check_definitions: checks each *definition* in a supplied theory over the given syntax theory
 use metacat::{
     check::check as metacat_check,
-    theory::{RawTheorySet, Theory, TheoryId, TheorySet},
+    theory::{
+        RawTheorySet, Theory, TheoryId, TheorySet,
+        ast::{RawTheory, RawTheoryArrow},
+    },
 };
 use thiserror::Error;
 
@@ -36,8 +39,8 @@ pub enum CheckError {
 const SYNTAX_THEORY: &str = "syntax";
 const NAT_THEORY: &str = "nat";
 
-/// Elaborate input program to interleave control/data maps and typecheck it
-pub fn elaborate_and_check(raw: &RawTheorySet) -> Result<TheorySet, CheckError> {
+/// Elaborate input program to interleave control/data maps.
+pub fn elaborate(raw: &RawTheorySet) -> Result<RawTheorySet, CheckError> {
     // *Interpret* the syntax category to get a 'Theory'
     let syntax = interpret_syntax(raw)?;
 
@@ -45,13 +48,23 @@ pub fn elaborate_and_check(raw: &RawTheorySet) -> Result<TheorySet, CheckError> 
     // all arrows in the data (resp. control) category.
     let mut elaborated = raw.clone();
     interleave(&syntax, &mut elaborated);
+    Ok(elaborated)
+}
 
+/// Interpret and typecheck an already-elaborated raw theory set.
+pub fn check(elaborated: &RawTheorySet) -> Result<TheorySet, CheckError> {
     // Interpret all theories to get a TheorySet
     let interpreted = interpret_all(&elaborated)?;
 
     // Typecheck all definitions
     check_all(&interpreted)?;
     Ok(interpreted)
+}
+
+/// Elaborate input program to interleave control/data maps and typecheck it
+pub fn elaborate_and_check(raw: &RawTheorySet) -> Result<TheorySet, CheckError> {
+    let elaborated = elaborate(raw)?;
+    check(&elaborated)
 }
 
 pub fn interpret_syntax(raw: &RawTheorySet) -> Result<Theory, CheckError> {
@@ -128,12 +141,73 @@ pub fn check_definitions(elaborated: &Theory, theory_name: &str) -> Result<(), C
 
     Ok(())
 }
+
+pub fn render_raw_theory_set(raw: &RawTheorySet) -> String {
+    let mut theories = raw.theories.values().collect::<Vec<_>>();
+    theories.sort_by(|left, right| left.name.cmp(&right.name));
+
+    let mut parts = theories
+        .into_iter()
+        .map(render_raw_theory)
+        .collect::<Vec<_>>();
+
+    let mut extensions = raw.extensions.iter().collect::<Vec<_>>();
+    extensions.sort_by(|left, right| left.theory.cmp(&right.theory));
+    parts.extend(extensions.into_iter().map(render_extension));
+
+    parts.join("\n\n")
+}
+
+fn render_raw_theory(theory: &RawTheory) -> String {
+    let declarations = theory
+        .arrows
+        .values()
+        .map(render_raw_arrow)
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!(
+        "(theory {} {} {{\n{}\n}})",
+        theory.name, theory.syntax_category, declarations
+    )
+}
+
+fn render_extension(extension: &metacat::theory::ast::Extension) -> String {
+    extension
+        .arrows
+        .values()
+        .map(|arrow| {
+            let definition = arrow
+                .definition
+                .as_ref()
+                .expect("extensions should only contain definitions");
+            format!(
+                "(def {} {} : {} -> {} = {})",
+                extension.theory, arrow.name, arrow.type_maps.0, arrow.type_maps.1, definition
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn render_raw_arrow(arrow: &RawTheoryArrow) -> String {
+    match &arrow.definition {
+        Some(definition) => format!(
+            "  (def {} : {} -> {} = {})",
+            arrow.name, arrow.type_maps.0, arrow.type_maps.1, definition
+        ),
+        None => format!(
+            "  (arr {} : {} -> {})",
+            arrow.name, arrow.type_maps.0, arrow.type_maps.1
+        ),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn elaborate_and_check_interleaves_then_typechecks() {
+    fn elaborate_then_check_interleaves_then_typechecks() {
         let raw = RawTheorySet::from_text(
             r#"
             (theory syntax nat {
@@ -162,7 +236,8 @@ mod tests {
         )
         .unwrap();
 
-        let elaborated = elaborate_and_check(&raw).unwrap();
+        let elaborated_raw = elaborate(&raw).unwrap();
+        let elaborated = check(&elaborated_raw).unwrap();
         assert!(
             elaborated
                 .theories

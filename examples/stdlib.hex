@@ -31,5 +31,5 @@
 
 (theory control syntax {
   (arr merge : [x . x x] -> [x])
-  #(arr never : [.x] -> [x])
+  (arr never : [.x] -> [x])
 })

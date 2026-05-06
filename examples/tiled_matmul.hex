@@ -1,215 +1,125 @@
-################################################################################
-# Tiled matmul kernel theory
-#
-# This file follows the declaration/definition style of `stdlib.hex`: it names
-# the objects and arrows that make the program shape explicit, then composes a
-# checkable top-level skeleton out of smaller components.
-#
-# Kernel shape:
-#
-#   state tensor Sum_i B_i -> done tensor Sum_i B_i
-#
-# `state` is the in-flight whole-block state, and `done` is the completed
-# whole-block state. Each whole-block state contains the local, global, and
-# shared memory visible at that point of the kernel. `B_i` are the states
-# captured at synchronization boundaries and resumed when the block crosses the
-# matching barrier again.
-#
-# In this file, tensor is interpreted as the coproduct required by the block
-# control-flow model, so no separate `+` object constructor is introduced.
-# This also means that `{a b c}` below should be read as an alternative/control
-# boundary in the current theory, not as a product that lets us project fields.
-# When a state contains many pieces, such as local/global/shared memory, we keep
-# it opaque and pass the whole state to arrows that know how to act on it.
-#
-# The two barriers in the usual tiled matmul loop are:
-#
-#   B_sync    after cooperative global-to-shared copies
-#   B_compute after the q-loop consumes the shared tiles
-#
-# A barrier is represented as an involution on a same-state tensor/coproduct:
-#
-#   B_i tensor B_i -> B_i tensor B_i
-#
-# with the intended equations:
-#
-#   barrier(inl x) = inr x
-#   barrier(inr x) = inl x
-#
-# where the right injection is the resumable input side for the whole block.
-################################################################################
+(theory syntax nat {
+  (arr nat : 0 -> 1)
+  (arr extent : 1 -> 1)
+  (arr index : 1 -> 1)
+  (arr bool : 0 -> 1)
+  (arr f32 : 0 -> 1)
+  (arr block : 0 -> 1)
+  (arr thread : 0 -> 1)
+  # gpu.shared(f32, tile_num, tile_num) => float [tile_num][tile_num]
+  # we could use literals instead of nats
+  (arr gpu.shared : 3 -> 1)
 
-################################################################################
-# Core syntax
+  (arr value : 1 -> 1)
+  (arr bound : 1 -> 1)
 
-(object value : 1 -> 1)
-
-################################################################################
-# GPU state vocabulary
-
-# A whole-block state consists of local/private state, global memory, and shared
-# memory. `state` is the opaque in-flight block state; `done` is the completed
-# output state. The tiled matmul skeleton does not project state components out,
-# because projection would require a product tensor distinct from the
-# coproduct/control tensor used here.
-(object gpu.tiled-matmul.state : 0 -> 1)
-(object gpu.tiled-matmul.done : 0 -> 1)
-(object gpu.tiled-matmul.p-iteration : 0 -> 1)
-(object gpu.tiled-matmul.q-iteration : 0 -> 1)
-
-(arrow gpu.tiled-matmul.state : [] -> gpu.tiled-matmul.state)
-(arrow gpu.tiled-matmul.p-iteration : [] -> gpu.tiled-matmul.p-iteration)
-(arrow gpu.tiled-matmul.q-iteration : [] -> gpu.tiled-matmul.q-iteration)
-
-################################################################################
-# Indices, dimensions, and loop-carried locals
-#
-# The whole-block state is opaque. Since tensor is the coproduct/control-flow
-# tensor in this file, we do not destructure `state` into memory, block, and thread
-# fields. Instead, primitive GPU arrows name the ownership policy they apply:
-# load/store/dot "by block/thread" select the memory owned by the current
-# block/thread internally.
-#
-# For example, the source program might contain an address such as
-# `A[block.y * TILE + thread.y, p * TILE + thread.x]`. This file does not model
-# `block.y`, `thread.x`, or the address expression as separate wires. The
-# corresponding arrow is named `collectively-load-shared-tile`; its meaning is
-# "collectively load the A/B tile fragments owned by the current block into
-# shared memory."
-
-# Bounded loops are represented as wire-level control splits:
-#
-#   loop-prelude : carried state -> iteration-body alternative
-#                                + return-carried-state alternative
-#
-# The body alternative performs one iteration and produces a loop-back state.
-# Reusing the same loop-back wire name at the prelude input and body output
-# merges those endpoints in hexpr, giving the loop its internal feedback edge.
-# The return alternative exits the loop.
-(arrow gpu.tiled-matmul.for-num-tiles.prelude :
-  {
-    (gpu.tiled-matmul.state value)
-    (gpu.tiled-matmul.state value)
-  } ->
-  {
-    (gpu.tiled-matmul.p-iteration value)
-    (gpu.tiled-matmul.state value)
-  })
-
-(arrow gpu.tiled-matmul.for-tile.prelude :
-  {
-    (gpu.tiled-matmul.state value)
-    (gpu.tiled-matmul.state value)
-  } ->
-  {
-    (gpu.tiled-matmul.q-iteration value)
-    (gpu.tiled-matmul.state value)
-  })
-
-################################################################################
-# Tiled matmul components
-
-# Initialize the thread-local accumulator inside the opaque state. We do not
-# return a separate `f32` wire, because that would again require product-style
-# pairing of the opaque state with the accumulator.
-(arrow gpu.tiled-matmul.init-acc : (gpu.tiled-matmul.state value) ->
-  (gpu.tiled-matmul.state value))
-
-# Collective shared-tile load for one outer tile `p`. The arrow owns all address
-# arithmetic and ownership logic: all threads in the current block stage their
-# global-memory fragments into shared memory inside the opaque state. The result
-# is a state waiting for the other threads at the sync boundary; computation is
-# deferred until the scheduler resumes the matching after-sync phase.
-(arrow gpu.tiled-matmul.collectively-load-shared-tile : (gpu.tiled-matmul.p-iteration value) ->
-  (gpu.tiled-matmul.state value))
-
-# One inner dot-product step for the current thread. The shared-memory reads
-# `tile_A[thread.y, q]` and `tile_B[q, thread.x]`, plus the accumulator update,
-# are implicit in the arrow name and the opaque state. Only the loop index `q`
-# is explicit inside the opaque q-iteration view.
-(arrow gpu.tiled-matmul.dot-by-thread : (gpu.tiled-matmul.q-iteration value) ->
-  (gpu.tiled-matmul.state value))
-
-# Store the accumulator held inside the opaque state into the output element
-# owned by the current thread. The output address is not present as a wire; it
-# is part of this primitive's block/thread ownership semantics.
-(arrow gpu.tiled-matmul.store-output : (gpu.tiled-matmul.state value) ->
-  (gpu.tiled-matmul.done value))
-
-################################################################################
-# Barrier involutions
-
-# The inputs name the two scheduler-facing sides. For load:
-#   wait_other_threads : state produced by collective load and stored in scheduler
-#   after_sync_phase   : state returned by the scheduler for this barrier case
-# The barrier swaps the coproduct alternatives: the after phase continues in the
-# kernel, while the wait state is emitted back to the scheduler.
-(arrow gpu.tiled-matmul.barrier.sync : {
-  (gpu.tiled-matmul.state value)
-  (gpu.tiled-matmul.state value)
-} -> {
-  (gpu.tiled-matmul.state value)
-  (gpu.tiled-matmul.state value)
+  (arr product : 2 -> 1)
+  (arr coproduct : 2 -> 1)
+  (arr unit : 0 -> 1)
+  (arr counit : 0 -> 1)
 })
 
-(arrow gpu.tiled-matmul.barrier.compute : {
-  (gpu.tiled-matmul.state value)
-  (gpu.tiled-matmul.state value)
-} -> {
-  (gpu.tiled-matmul.state value)
-  (gpu.tiled-matmul.state value)
+(theory data syntax {
+  (arr block : [] -> block)
+  (arr thread : [] -> thread)
+
+  (arr shared : [n] -> ([n . n n] {f32 [n] [n]} gpu.shared))
+  (arr f32 : [] -> f32)
+
+  (arr value.type : value -> [t])
+  (arr extent.raw : extent -> [n])
+  (arr extent.index-type : extent -> index)
+  (arr bound.eta : [t] -> ([t . t t] {bound value}))
+
+  (arr reduce-f32 :
+    {
+      (extent value)
+      (f32 value)
+      (f32 bound)
+      (([tile_num] index) bound)
+      (f32 value)
+    } ->
+    ([tile_num tile_num.] f32 value))
+
+  (arr thread.x :
+    {([tile_num] extent value) (thread value)} ->
+    (([tile_num] index) value))
+
+  (arr thread.y :
+    {([tile_num] extent value) (thread value)} ->
+    (([tile_num] index) value))
+
+  (arr gpu.shared.load :
+    {[tile ix iy]} ->
+    ([tile ix iy.] f32 value))
+
+  (arr f32.mul : {(f32 value) (f32 value)} -> (f32 value))
+  (arr f32.add : {(f32 value) (f32 value)} -> (f32 value))
+
+  (def q-loop.accumulate-dot :
+    {
+      ([.tile_num] extent value)
+      (block value)
+      (thread value)
+      (({f32 [tile_num] [tile_num]} gpu.shared) value)
+      (({f32 [tile_num] [tile_num]} gpu.shared) value)
+      (f32 value)
+    } ->
+    {
+      (block value)
+      (thread value)
+      (({f32 [tile_num] [tile_num]} gpu.shared) value)
+      (({f32 [tile_num] [tile_num]} gpu.shared) value)
+      (f32 value)
+    }
+    =
+    {[n b t tile_a tile_b acc.]
+      ([.n] value.type [tile_extent.])
+      ([.tile_extent] extent.raw [tile_num.])
+      ([.tile_extent] extent.index-type bound.eta [q_r q.])
+
+      ([.n t] thread.y [thread_y.])
+      ([.n t] thread.x [thread_x.])
+      ([.tile_a thread_y q] gpu.shared.load [a_val.])
+      ([.tile_b q thread_x] gpu.shared.load [b_val.])
+      ([.a_val b_val] f32.mul [dot.])
+      ([.] f32 bound.eta [acc_r acc_q.])
+      ([.acc_q dot] f32.add [acc_next.])
+      ([.n acc acc_r q_r acc_next] reduce-f32 [acc_out.])
+
+      ([.b t tile_a tile_b acc_out])
+    })
 })
 
-# Top-level tiled matmul block
-#
-# Signature requested by the kernel model:
-#
-#   state tensor B_sync tensor B_compute -> done tensor B_sync tensor B_compute
-#
-# This wrapper binds the accumulator-in-state and spells the bounded p/q loops
-# inline as wire-level control splits. The prelude arrows expose one alternative
-# for "run the body" and one alternative for "return the carried state".
-# Loop-back states use the same wire names at the prelude input and body output,
-# so hexpr merges them into internal feedback edges. The phase wires are the
-# scheduler-returned/stored states for the two barrier cases.
+(theory control syntax {
+  (arr sync : [x] -> [x])
 
-(def-arrow gpu.tiled-matmul.block-f32 : {
-  (gpu.tiled-matmul.state value)
-  (gpu.tiled-matmul.state value)
-  (gpu.tiled-matmul.state value)
-} -> {
-  (gpu.tiled-matmul.done value)
-  (gpu.tiled-matmul.state value)
-  (gpu.tiled-matmul.state value)
-}
-= {[start after_sync_phase after_compute_phase.]
-  # Initialize the accumulator inside `state`; the accumulator is not a separate
-  # wire paired with the machine state.
-  ([.start] gpu.tiled-matmul.init-acc [x0.])
-
-  # Outer p-loop prelude. It either yields a `p_iter` body case or returns the
-  # carried state as `p_return`.
-  ([.x0 p_loopback] gpu.tiled-matmul.for-num-tiles.prelude [p_iter p_return.])
-
-    # p-loop body: collectively load the p-th A/B tiles, then wait for the other
-    # threads at the sync barrier. The load primitive owns the current p index
-    # and carried state inside `p_iter`; compute waits until the after-sync
-    # phase resumes.
-    ([.p_iter] gpu.tiled-matmul.collectively-load-shared-tile [wait_other_threads.])
-    ([.wait_other_threads after_sync_phase] gpu.tiled-matmul.barrier.sync [x_loaded wait_other_threads_out.])
-
-    # Nested q-loop prelude. It either yields a `q_iter` body case or returns
-    # the accumulator state for the end of the q-loop.
-    ([.x_loaded q_loopback] gpu.tiled-matmul.for-tile.prelude [q_iter q_return.])
-      ([.q_iter] gpu.tiled-matmul.dot-by-thread [q_loopback.])
-
-    # End of one p-iteration: cross the compute barrier. Reusing `p_loopback`
-    # here and at the p-loop prelude input merges the loop feedback wire.
-    ([.q_return after_compute_phase] gpu.tiled-matmul.barrier.compute [p_loopback wait_after_compute_out.])
-
-  # Final write for the current thread's output element. The accumulator and
-  # destination view are hidden in `store-output`, keeping `done` opaque like
-  # `state`.
-  ([.p_return] gpu.tiled-matmul.store-output [y.])
-  ([.y wait_other_threads_out wait_after_compute_out])
+  (def gpu.tiled_matmul :
+    {
+      ({({({block thread} product)
+          ({f32 [tile_num] [tile_num]} gpu.shared)} product)
+        ({f32 [tile_num] [tile_num]} gpu.shared)} product)
+      ({({({block thread} product)
+          ({f32 [tile_num] [tile_num]} gpu.shared)} product)
+        ({f32 [tile_num] [tile_num]} gpu.shared)} product)
+      ({({({block thread} product)
+          ({f32 [tile_num] [tile_num]} gpu.shared)} product)
+        ({f32 [tile_num] [tile_num]} gpu.shared)} product)
+    } ->
+    {
+      ({({({block thread} product)
+          ({f32 [tile_num] [tile_num]} gpu.shared)} product)
+        ({f32 [tile_num] [tile_num]} gpu.shared)} product)
+      ({({({block thread} product)
+          ({f32 [tile_num] [tile_num]} gpu.shared)} product)
+        ({f32 [tile_num] [tile_num]} gpu.shared)} product)
+      ({({({block thread} product)
+          ({f32 [tile_num] [tile_num]} gpu.shared)} product)
+        ({f32 [tile_num] [tile_num]} gpu.shared)} product)
+    }
+    =
+    {[entry sync_entry compute_entry.]
+      ([.entry] sync [exit.])
+      ([.exit sync_entry compute_entry])
+    })
 })

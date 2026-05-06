@@ -182,7 +182,6 @@ fn identity_hexpr(var_index: usize) -> Hexpr {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use metacat::theory::RawTheorySet;
 
     #[test]
@@ -212,10 +211,8 @@ mod tests {
         })
         "#;
 
-        let mut raw = RawTheorySet::from_text(source).unwrap();
-        let syntax = crate::check::interpret_syntax(&raw).unwrap();
-        interleave(&syntax, &mut raw);
-        let elaborated = crate::check::interpret_all(&raw).unwrap();
-        crate::check::check_all(&elaborated).unwrap();
+        let raw = RawTheorySet::from_text(source).unwrap();
+        let elaborated = crate::check::elaborate(&raw).unwrap();
+        crate::check::check(&elaborated).unwrap();
     }
 }

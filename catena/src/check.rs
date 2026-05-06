@@ -48,13 +48,7 @@ pub fn check(elaborated: &RawTheorySet) -> Result<TheorySet, CheckError> {
     Ok(interpreted)
 }
 
-/// Elaborate input program to interleave control/data maps and typecheck it
-pub fn elaborate_and_check(raw: &RawTheorySet) -> Result<TheorySet, CheckError> {
-    let elaborated = elaborate(raw)?;
-    check(&elaborated)
-}
-
-pub fn interpret_syntax(raw: &RawTheorySet) -> Result<Theory, CheckError> {
+fn interpret_syntax(raw: &RawTheorySet) -> Result<Theory, CheckError> {
     let syntax_name: hexpr::Operation = SYNTAX_THEORY.parse().expect("valid syntax theory name");
     let syntax_raw = raw
         .theories
@@ -89,12 +83,12 @@ pub fn interpret_syntax(raw: &RawTheorySet) -> Result<Theory, CheckError> {
 
 // Turn elaborated raw theories into a TheorySet.
 // Should just be able to use "vanilla metacat" to do this.
-pub fn interpret_all(elaborated: &RawTheorySet) -> Result<TheorySet, CheckError> {
+fn interpret_all(elaborated: &RawTheorySet) -> Result<TheorySet, CheckError> {
     Ok(TheorySet::from_raw(elaborated.clone())?)
 }
 
 // For now, return yes/no for success/fail. Will return more deetail later.
-pub fn check_all(elaborated: &TheorySet) -> Result<(), CheckError> {
+fn check_all(elaborated: &TheorySet) -> Result<(), CheckError> {
     for (id, theory) in &elaborated.theories {
         if id.0.as_str() == NAT_THEORY || id.0.as_str() == SYNTAX_THEORY {
             continue;
@@ -104,7 +98,7 @@ pub fn check_all(elaborated: &TheorySet) -> Result<(), CheckError> {
     Ok(())
 }
 
-pub fn check_definitions(elaborated: &Theory, theory_name: &str) -> Result<(), CheckError> {
+fn check_definitions(elaborated: &Theory, theory_name: &str) -> Result<(), CheckError> {
     let Theory::Theory { arrows, .. } = elaborated else {
         return Ok(());
     };

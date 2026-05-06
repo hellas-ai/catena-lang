@@ -65,7 +65,7 @@ fn main() -> anyhow::Result<()> {
 
     match cli.command {
         Command::Elaborate { path } => elaborate_command(path),
-        Command::Check { path, verbose } => compile_check_command(path, verbose),
+        Command::Check { path, verbose } => check_command(path, verbose),
         Command::Compile { command } => compile_command(command),
     }
 }
@@ -81,7 +81,7 @@ fn compile_command(command: CompileCommand) -> anyhow::Result<()> {
     }
 }
 
-fn compile_check_command(path: PathBuf, verbose: bool) -> anyhow::Result<()> {
+fn check_command(path: PathBuf, verbose: bool) -> anyhow::Result<()> {
     let path_display = path.display().to_string();
     let source = std::fs::read_to_string(path)?;
     let raw = RawTheorySet::from_text(&source)?;

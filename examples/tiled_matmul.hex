@@ -90,8 +90,20 @@
     ([target_extent tile_extent current_tile local . target_extent] index value))
 
   (arr gpu.global.load :
-    {[matrix row col]} ->
-    ([matrix row col.] f32 value))
+    {[matrix] (([tile_size] gpu.view) value)} ->
+    ([matrix tile_size.] f32 value))
+
+  (arr gpu.view.thread :
+    {([tile_size] extent value) (gpu.thread const)} ->
+    (([tile_size] gpu.view) value))
+
+  (arr gpu.view.block_row_current_tile_col :
+    {(([tile_size] index) value) (gpu.block const) (gpu.thread const)} ->
+    (([tile_size] gpu.view) value))
+
+  (arr gpu.view.current_tile_row_block_col :
+    {(([tile_size] index) value) (gpu.block const) (gpu.thread const)} ->
+    (([tile_size] gpu.view) value))
 
   (arr gpu.view.group_by_tile :
     {([tile_size] extent value) (gpu.block const) (gpu.thread const)} ->
@@ -102,8 +114,8 @@
     ([matrix tile_size . matrix] unique))
 
   (arr gpu.shared.store :
-    {[tile row col value]} ->
-    ([tile row col value. tile]))
+    {([tile] unique) (([tile_size] gpu.view) value) (f32 value)} ->
+    ([tile tile_size . tile] unique))
 
   (arr ceil-div : {(extent value) (extent value)} -> ([tile k . tile] extent value))
   (arr f32.zero : [] -> (f32 value))
@@ -133,21 +145,24 @@
     }
     =
     {[tile_size m k n block thread current_tile global_a global_b tile_a tile_b.]
-      ([.tile_size thread] thread.y [thread_y.])
-      ([.tile_size thread] thread.x [thread_x.])
-      ([.m tile_size block thread] block.row [row.])
-      ([.n tile_size block thread] block.col [col.])
+      ([.tile_size thread] gpu.view.thread [shared_thread_view.])
 
       # tile_A[thread.y, thread.x] = A[row, current_tile * TILE + thread.x]
-      ([.k tile_size current_tile thread_x] current-tile.offset [a_col.])
-      ([.global_a row a_col] gpu.global.load [a_val.])
-      ([.tile_a thread_y thread_x a_val] gpu.shared.store
+      # A.group_by_tile::<tile_size, tile_size>
+      #  .select_tile_row_from_block_y_and_tile_col::<current_tile>
+      #  [[block]][[thread]]
+      ([.current_tile block thread] gpu.view.block_row_current_tile_col [a_view.])
+      ([.global_a a_view] gpu.global.load [a_val.])
+      ([.tile_a shared_thread_view a_val] gpu.shared.store
         [tile_a_loaded.])
 
       # tile_B[thread.y, thread.x] = B[current_tile * TILE + thread.y, col]
-      ([.k tile_size current_tile thread_y] current-tile.offset [b_row.])
-      ([.global_b b_row col] gpu.global.load [b_val.])
-      ([.tile_b thread_y thread_x b_val] gpu.shared.store
+      # B.group_by_tile::<tile_size, tile_size>
+      #  .select_tile_row::<current_tile>_and_tile_col_from_block_x
+      #  [[block]][[thread]]
+      ([.current_tile block thread] gpu.view.current_tile_row_block_col [b_view.])
+      ([.global_b b_view] gpu.global.load [b_val.])
+      ([.tile_b shared_thread_view b_val] gpu.shared.store
         [tile_b_loaded.])
 
       ([.current_tile global_a global_b tile_a_loaded tile_b_loaded])

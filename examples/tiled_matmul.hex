@@ -99,6 +99,11 @@
     {[matrix] (([tile_size] gpu.view) value)} ->
     ([matrix tile_size.] f32 value))
 
+  # Views follow the trick used in Descent-style safe parallel access: a resource
+  # may be unique at block scope, but a view proves which thread owns a specific
+  # piece of that resource. Without the view, the whole block owns the tile or
+  # matrix. With the view, load/store can expose per-thread ownership while the
+  # unique resource still tracks exclusive access at the block level.
   (arr gpu.view.thread :
     {(([tile_size] extent) const) (gpu.thread const)} ->
     (([tile_size] gpu.view) value))

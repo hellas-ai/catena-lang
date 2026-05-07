@@ -56,16 +56,16 @@
     ([tile ix iy.] f32 value))
 
   (arr block.row :
-    {([tile_size] extent value) (block value) (thread value)} ->
-    (([tile_size] index) value))
+    {([m] extent value) ([tile_size] extent value) (block value) (thread value)} ->
+    (([m tile_size . m] index) value))
 
   (arr block.col :
-    {([tile_size] extent value) (block value) (thread value)} ->
-    (([tile_size] index) value))
+    {([n] extent value) ([tile_size] extent value) (block value) (thread value)} ->
+    (([n tile_size . n] index) value))
 
   (arr current-tile.offset :
-    {[tile_extent current_tile local]} ->
-    ([tile_extent current_tile local . tile_extent] index value))
+    {[target_extent tile_extent current_tile local]} ->
+    ([target_extent tile_extent current_tile local . target_extent] index value))
 
   (arr gpu.global.load :
     {[matrix row col]} ->
@@ -87,41 +87,47 @@
   (def cooperative-global-to-shared :
     {
       ([.tile_size] extent value)
+      ([.m] extent value)
+      ([.k] extent value)
+      ([.n] extent value)
       (block value)
       (thread value)
       (([tile_size] index) value)
-      (({f32 [tile_size] [tile_size]} gpu.global) value)
-      (({f32 [tile_size] [tile_size]} gpu.global) value)
+      (({f32 [m] [k]} gpu.global) value)
+      (({f32 [k] [n]} gpu.global) value)
       (({f32 [tile_size] [tile_size]} gpu.shared) value)
       (({f32 [tile_size] [tile_size]} gpu.shared) value)
     } ->
     {
+      ([.m] extent value)
+      ([.k] extent value)
+      ([.n] extent value)
       (block value)
       (thread value)
       (([tile_size] index) value)
-      (({f32 [tile_size] [tile_size]} gpu.global) value)
-      (({f32 [tile_size] [tile_size]} gpu.global) value)
+      (({f32 [m] [k]} gpu.global) value)
+      (({f32 [k] [n]} gpu.global) value)
       (({f32 [tile_size] [tile_size]} gpu.shared) value)
       (({f32 [tile_size] [tile_size]} gpu.shared) value)
     }
     =
-    {[tile_size b t current_tile global_a global_b tile_a tile_b.]
+    {[tile_size m k n b t current_tile global_a global_b tile_a tile_b.]
       ([.tile_size t] thread.y [thread_y.])
       ([.tile_size t] thread.x [thread_x.])
-      ([.tile_size b t] block.row [row.])
-      ([.tile_size b t] block.col [col.])
+      ([.m tile_size b t] block.row [row.])
+      ([.n tile_size b t] block.col [col.])
 
       # tile_A[thread.y, thread.x] = A[row, current_tile * TILE + thread.x]
-      ([.tile_size current_tile thread_x] current-tile.offset [a_col.])
+      ([.k tile_size current_tile thread_x] current-tile.offset [a_col.])
       ([.global_a row a_col] gpu.global.load [a_val.])
       ([.tile_a thread_y thread_x a_val] gpu.shared.store [tile_a_loaded.])
 
       # tile_B[thread.y, thread.x] = B[current_tile * TILE + thread.y, col]
-      ([.tile_size current_tile thread_y] current-tile.offset [b_row.])
+      ([.k tile_size current_tile thread_y] current-tile.offset [b_row.])
       ([.global_b b_row col] gpu.global.load [b_val.])
       ([.tile_b thread_y thread_x b_val] gpu.shared.store [tile_b_loaded.])
 
-      ([.b t current_tile global_a global_b tile_a_loaded tile_b_loaded])
+      ([.m k n b t current_tile global_a global_b tile_a_loaded tile_b_loaded])
     })
 
   (def tile.dot-product :
@@ -159,28 +165,32 @@
   (def gpu.tiled_matmul.dataflow :
     {
       ([.tile_size] extent value)
-      (extent value) # K
+      ([.m] extent value)
+      ([.k] extent value)
+      ([.n] extent value)
       (block value)
       (thread value)
-      (({f32 [tile_size] [tile_size]} gpu.global) value) # A
-      (({f32 [tile_size] [tile_size]} gpu.global) value) # B
-      (({f32 [tile_size] [tile_size]} gpu.global) value) # C
+      (({f32 [m] [k]} gpu.global) value) # A
+      (({f32 [k] [n]} gpu.global) value) # B
+      (({f32 [m] [n]} gpu.global) value) # C
       (({f32 [tile_size] [tile_size]} gpu.shared) value) # tile_A
       (({f32 [tile_size] [tile_size]} gpu.shared) value) # tile_B
     } ->
     {
       ([.tile_size] extent value)
-      (extent value)
+      ([.m] extent value)
+      ([.k] extent value)
+      ([.n] extent value)
       (block value)
       (thread value)
-      (({f32 [tile_size] [tile_size]} gpu.global) value)
-      (({f32 [tile_size] [tile_size]} gpu.global) value)
-      (({f32 [tile_size] [tile_size]} gpu.global) value)
+      (({f32 [m] [k]} gpu.global) value)
+      (({f32 [k] [n]} gpu.global) value)
+      (({f32 [m] [n]} gpu.global) value)
       (({f32 [tile_size] [tile_size]} gpu.shared) value)
       (({f32 [tile_size] [tile_size]} gpu.shared) value)
     }
     =
-    {[tile_size k b t global_a global_b global_c tile_a tile_b.]
+    {[tile_size m k n b t global_a global_b global_c tile_a tile_b.]
       ([.tile_size k] ceil-div [num_tiles.])
       ([.] f32.zero [acc0.])
 
@@ -188,18 +198,18 @@
       ([.num_tiles_extent] extent.index-type bound.eta [current_tile_r current_tile.])
       ([.] f32 bound.eta [acc_r acc_p.])
 
-      ([.tile_size b t current_tile global_a global_b tile_a tile_b]
+      ([.tile_size m k n b t current_tile global_a global_b tile_a tile_b]
         cooperative-global-to-shared
-        [b_loaded t_loaded current_tile_loaded global_a_loaded global_b_loaded tile_a_loaded tile_b_loaded.])
+        [m_loaded k_loaded n_loaded b_loaded t_loaded current_tile_loaded global_a_loaded global_b_loaded tile_a_loaded tile_b_loaded.])
       ([.tile_size t_loaded tile_a_loaded tile_b_loaded acc_p]
         tile.dot-product
         [t_dot tile_a_q tile_b_q acc_next.])
       ([.num_tiles acc0 acc_r current_tile_r acc_next] reduce-f32 [acc_done.])
 
-      ([.tile_size b_loaded t_dot] block.row [row.])
-      ([.tile_size b_loaded t_dot] block.col [col.])
+      ([.m_loaded tile_size b_loaded t_dot] block.row [row.])
+      ([.n_loaded tile_size b_loaded t_dot] block.col [col.])
       ([.global_c row col acc_done] gpu.global.store [global_c_out.])
-      ([.tile_size k b_loaded t_dot global_a_loaded global_b_loaded global_c_out tile_a_q tile_b_q])
+      ([.tile_size m_loaded k_loaded n_loaded b_loaded t_dot global_a_loaded global_b_loaded global_c_out tile_a_q tile_b_q])
     })
 })
 

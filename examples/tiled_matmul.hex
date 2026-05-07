@@ -41,6 +41,12 @@
   (arr value.type : value -> [t])
   (arr extent.raw : extent -> [n])
   (arr extent.index-type : extent -> index)
+  (arr extent.const-value :
+    (([x] extent) const) ->
+    (([x] extent) value))
+  (arr extent.const-index-type :
+    (([x] extent) const) ->
+    ([x] index))
   (arr bound.eta : [t] -> ([t . t t] {bound value}))
 
   (arr reduce :
@@ -66,11 +72,11 @@
     {([x] unique) ([y] unique) ([z] unique)})
 
   (arr thread.x :
-    {([tile_size] extent value) (gpu.thread const)} ->
+    {(([tile_size] extent) const) (gpu.thread const)} ->
     (([tile_size] index) value))
 
   (arr thread.y :
-    {([tile_size] extent value) (gpu.thread const)} ->
+    {(([tile_size] extent) const) (gpu.thread const)} ->
     (([tile_size] index) value))
 
   (arr gpu.shared.load :
@@ -78,11 +84,11 @@
     ([tile ix iy.] f32 value))
 
   (arr block.row :
-    {([m] extent value) ([tile_size] extent value) (gpu.block const) (gpu.thread const)} ->
+    {(([m] extent) const) (([tile_size] extent) const) (gpu.block const) (gpu.thread const)} ->
     (([m tile_size . m] index) value))
 
   (arr block.col :
-    {([n] extent value) ([tile_size] extent value) (gpu.block const) (gpu.thread const)} ->
+    {(([n] extent) const) (([tile_size] extent) const) (gpu.block const) (gpu.thread const)} ->
     (([n tile_size . n] index) value))
 
   (arr current-tile.offset :
@@ -94,7 +100,7 @@
     ([matrix tile_size.] f32 value))
 
   (arr gpu.view.thread :
-    {([tile_size] extent value) (gpu.thread const)} ->
+    {(([tile_size] extent) const) (gpu.thread const)} ->
     (([tile_size] gpu.view) value))
 
   (arr gpu.view.block_row_current_tile_col :
@@ -106,7 +112,7 @@
     (([tile_size] gpu.view) value))
 
   (arr gpu.view.group_by_tile :
-    {([tile_size] extent value) (gpu.block const) (gpu.thread const)} ->
+    {(([tile_size] extent) const) (gpu.block const) (gpu.thread const)} ->
     (([tile_size] gpu.view) value))
 
   (arr gpu.global.store :
@@ -117,17 +123,17 @@
     {([tile] unique) (([tile_size] gpu.view) value) (f32 value)} ->
     ([tile tile_size . tile] unique))
 
-  (arr ceil-div : {(extent value) (extent value)} -> ([tile k . tile] extent value))
+  (arr ceil-div : {(extent const) (extent const)} -> ([tile k . tile] extent value))
   (arr f32.zero : [] -> (f32 value))
   (arr f32.mul : {(f32 value) (f32 value)} -> (f32 value))
   (arr f32.add : {(f32 value) (f32 value)} -> (f32 value))
 
   (def cooperative-global-to-shared :
     {
-      ([.tile_size] extent value)
-      ([.m] extent value)
-      ([.k] extent value)
-      ([.n] extent value)
+      (([.tile_size] extent) const)
+      (([.m] extent) const)
+      (([.k] extent) const)
+      (([.n] extent) const)
       (gpu.block const)
       (gpu.thread const)
       (([tile_size] index) value)
@@ -170,7 +176,7 @@
 
   (def tile.dot-product :
     {
-      ([.tile_size] extent value)
+      (([.tile_size] extent) const)
       (gpu.thread const)
       (({f32 [tile_size] [tile_size]} gpu.shared) unique)
       (({f32 [tile_size] [tile_size]} gpu.shared) unique)
@@ -187,10 +193,9 @@
       #   acc += tile_A[thread.y, tile_inner_index] * tile_B[tile_inner_index, thread.x]
 
       # Loop setup.
-      ([.tile_size] value.type [tile_extent.])
-      ([.tile_extent] extent.raw [tile_size_type.])
-      ([.tile_extent] extent.index-type bound.eta
+      ([.tile_size] extent.const-index-type bound.eta
         [tile_inner_index_r tile_inner_index.])
+      ([.tile_size] extent.const-value [tile_size_value.])
       ([.] f32 bound.eta
         [acc_r acc_q.])
 
@@ -205,7 +210,7 @@
       ([.acc_q dot] f32.add [acc_next.])
 
       # Close the bounded loop.
-      ([.tile_size acc acc_r tile_inner_index_r acc_next]
+      ([.tile_size_value acc acc_r tile_inner_index_r acc_next]
         reduce
         [acc_out.])
 
@@ -214,10 +219,10 @@
 
   (def gpu.tiled_matmul.dataflow :
     {
-      ([.tile_size] extent value)
-      ([.m] extent value)
-      ([.k] extent value)
-      ([.n] extent value)
+      (([.tile_size] extent) const)
+      (([.m] extent) const)
+      (([.k] extent) const)
+      (([.n] extent) const)
       (gpu.block const)
       (gpu.thread const)
       (({f32 [m] [k]} gpu.global) value) # A
@@ -227,10 +232,10 @@
       (({f32 [tile_size] [tile_size]} gpu.shared) unique) # tile_B
     } ->
     {
-      ([.tile_size] extent value)
-      ([.m] extent value)
-      ([.k] extent value)
-      ([.n] extent value)
+      (([.tile_size] extent) const)
+      (([.m] extent) const)
+      (([.k] extent) const)
+      (([.n] extent) const)
       (gpu.block const)
       (gpu.thread const)
       (({f32 [m] [k]} gpu.global) value)

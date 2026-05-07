@@ -222,9 +222,15 @@
       ([.tile_size m k n b t current_tile global_a global_b tile_a tile_b]
         cooperative-global-to-shared
         [m_loaded k_loaded n_loaded b_loaded t_loaded current_tile_loaded global_a_loaded global_b_loaded tile_a_loaded tile_b_loaded.])
+
+      # sync: all threads in the block have written tile_A and tile_B before any
+      # thread reads from shared memory for the dot product.
       ([.tile_size t_loaded tile_a_loaded tile_b_loaded acc_p]
         tile.dot-product
         [t_dot tile_a_q tile_b_q acc_next.])
+
+      # sync: all threads have finished reading the current shared tiles before
+      # the next current_tile iteration overwrites tile_A and tile_B.
 
       # Close the bounded loop.
       ([.num_tiles acc0 acc_r current_tile_r acc_next]

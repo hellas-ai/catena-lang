@@ -6,6 +6,10 @@
   (arr f32 : 0 -> 1)
   (arr block : 0 -> 1)
   (arr thread : 0 -> 1)
+  (arr gpu.tiled-matmul.state : 0 -> 1)
+  (arr gpu.tiled-matmul.done : 0 -> 1)
+  (arr gpu.tiled-matmul.p-iteration : 0 -> 1)
+  (arr gpu.tiled-matmul.q-iteration : 0 -> 1)
   # gpu.global(f32, rows, cols) => global float matrix [rows][cols]
   (arr gpu.global : 3 -> 1)
   # gpu.shared(f32, tile_size, tile_size) => float [tile_size][tile_size]
@@ -271,32 +275,108 @@
 (theory control syntax {
   (arr sync : [x] -> [x])
 
-  (def gpu.tiled_matmul :
+  (arr gpu.tiled-matmul.state : [] -> gpu.tiled-matmul.state)
+  (arr gpu.tiled-matmul.p-iteration : [] -> gpu.tiled-matmul.p-iteration)
+  (arr gpu.tiled-matmul.q-iteration : [] -> gpu.tiled-matmul.q-iteration)
+
+  (arr gpu.tiled-matmul.for-num-tiles.prelude :
     {
-      ({({({block thread} product)
-          ({f32 [tile_size] [tile_size]} gpu.shared)} product)
-        ({f32 [tile_size] [tile_size]} gpu.shared)} product)
-      ({({({block thread} product)
-          ({f32 [tile_size] [tile_size]} gpu.shared)} product)
-        ({f32 [tile_size] [tile_size]} gpu.shared)} product)
-      ({({({block thread} product)
-          ({f32 [tile_size] [tile_size]} gpu.shared)} product)
-        ({f32 [tile_size] [tile_size]} gpu.shared)} product)
+      (gpu.tiled-matmul.state value)
+      (gpu.tiled-matmul.state value)
     } ->
     {
-      ({({({block thread} product)
-          ({f32 [tile_size] [tile_size]} gpu.shared)} product)
-        ({f32 [tile_size] [tile_size]} gpu.shared)} product)
-      ({({({block thread} product)
-          ({f32 [tile_size] [tile_size]} gpu.shared)} product)
-        ({f32 [tile_size] [tile_size]} gpu.shared)} product)
-      ({({({block thread} product)
-          ({f32 [tile_size] [tile_size]} gpu.shared)} product)
-        ({f32 [tile_size] [tile_size]} gpu.shared)} product)
+      (gpu.tiled-matmul.p-iteration value)
+      (gpu.tiled-matmul.state value)
+    })
+
+  (arr gpu.tiled-matmul.for-tile.prelude :
+    {
+      (gpu.tiled-matmul.state value)
+      (gpu.tiled-matmul.state value)
+    } ->
+    {
+      (gpu.tiled-matmul.q-iteration value)
+      (gpu.tiled-matmul.state value)
+    })
+
+  (arr gpu.tiled-matmul.init-acc :
+    (gpu.tiled-matmul.state value) ->
+    (gpu.tiled-matmul.state value))
+
+  (arr gpu.tiled-matmul.collectively-load-shared-tile :
+    (gpu.tiled-matmul.p-iteration value) ->
+    (gpu.tiled-matmul.state value))
+
+  (arr gpu.tiled-matmul.dot-by-thread :
+    (gpu.tiled-matmul.q-iteration value) ->
+    (gpu.tiled-matmul.state value))
+
+  (arr gpu.tiled-matmul.store-output :
+    (gpu.tiled-matmul.state value) ->
+    (gpu.tiled-matmul.done value))
+
+  (arr gpu.tiled-matmul.barrier.sync :
+    {
+      (gpu.tiled-matmul.state value)
+      (gpu.tiled-matmul.state value)
+    } ->
+    {
+      (gpu.tiled-matmul.state value)
+      (gpu.tiled-matmul.state value)
+    })
+
+  (arr gpu.tiled-matmul.barrier.compute :
+    {
+      (gpu.tiled-matmul.state value)
+      (gpu.tiled-matmul.state value)
+    } ->
+    {
+      (gpu.tiled-matmul.state value)
+      (gpu.tiled-matmul.state value)
+    })
+
+  (def gpu.tiled_matmul.controlflow :
+    {
+      (gpu.tiled-matmul.state value)
+      (gpu.tiled-matmul.state value)
+      (gpu.tiled-matmul.state value)
+    } ->
+    {
+      (gpu.tiled-matmul.done value)
+      (gpu.tiled-matmul.state value)
+      (gpu.tiled-matmul.state value)
     }
     =
-    {[entry sync_entry compute_entry.]
-      ([.entry] sync [exit.])
-      ([.exit sync_entry compute_entry])
+    {[start after_sync_phase after_compute_phase.]
+      ([.start] gpu.tiled-matmul.init-acc [x0.])
+
+      # Outer p-loop: either run one tile body or return the final carried state.
+      ([.x0 p_loopback]
+        gpu.tiled-matmul.for-num-tiles.prelude
+        [p_iter p_return.])
+
+        # Load the current A/B tile fragments, then suspend at the load barrier.
+        ([.p_iter]
+          gpu.tiled-matmul.collectively-load-shared-tile
+          [wait_other_threads.])
+        ([.wait_other_threads after_sync_phase]
+          gpu.tiled-matmul.barrier.sync
+          [x_loaded wait_other_threads_out.])
+
+        # Inner q-loop: repeatedly update the accumulator from shared tiles.
+        ([.x_loaded q_loopback]
+          gpu.tiled-matmul.for-tile.prelude
+          [q_iter q_return.])
+          ([.q_iter]
+            gpu.tiled-matmul.dot-by-thread
+            [q_loopback.])
+
+        # Suspend before the next p-iteration can overwrite shared tiles.
+        ([.q_return after_compute_phase]
+          gpu.tiled-matmul.barrier.compute
+          [p_loopback wait_after_compute_out.])
+
+      ([.p_return] gpu.tiled-matmul.store-output [y.])
+      ([.y wait_other_threads_out wait_after_compute_out])
     })
 })

@@ -8,7 +8,7 @@
   (arr thread : 0 -> 1)
   # gpu.global(f32, rows, cols) => global float matrix [rows][cols]
   (arr gpu.global : 3 -> 1)
-  # gpu.shared(f32, tile_num, tile_num) => float [tile_num][tile_num]
+  # gpu.shared(f32, tile_size, tile_size) => float [tile_size][tile_size]
   # we could use literals instead of nats
   (arr gpu.shared : 3 -> 1)
 
@@ -28,7 +28,6 @@
   (arr global : [n] -> ([n . n n] {f32 [n] [n]} gpu.global))
   (arr shared : [n] -> ([n . n n] {f32 [n] [n]} gpu.shared))
   (arr f32 : [] -> f32)
-
   (arr value.type : value -> [t])
   (arr extent.raw : extent -> [n])
   (arr extent.index-type : extent -> index)
@@ -39,118 +38,168 @@
       (extent value)
       (f32 value)
       (f32 bound)
-      (([tile_num] index) bound)
+      (([tile_size] index) bound)
       (f32 value)
     } ->
-    ([tile_num tile_num.] f32 value))
+    ([tile_size tile_size.] f32 value))
 
   (arr thread.x :
-    {([tile_num] extent value) (thread value)} ->
-    (([tile_num] index) value))
+    {([tile_size] extent value) (thread value)} ->
+    (([tile_size] index) value))
 
   (arr thread.y :
-    {([tile_num] extent value) (thread value)} ->
-    (([tile_num] index) value))
+    {([tile_size] extent value) (thread value)} ->
+    (([tile_size] index) value))
 
   (arr gpu.shared.load :
     {[tile ix iy]} ->
     ([tile ix iy.] f32 value))
 
   (arr block.row :
-    {([tile_num] extent value) (block value) (thread value)} ->
-    (([tile_num] index) value))
+    {([tile_size] extent value) (block value) (thread value)} ->
+    (([tile_size] index) value))
 
   (arr block.col :
-    {([tile_num] extent value) (block value) (thread value)} ->
-    (([tile_num] index) value))
+    {([tile_size] extent value) (block value) (thread value)} ->
+    (([tile_size] index) value))
 
-  (arr p.tile-offset :
-    {[tile_extent p local]} ->
-    ([tile_extent p local . tile_extent] index value))
+  (arr current-tile.offset :
+    {[tile_extent current_tile local]} ->
+    ([tile_extent current_tile local . tile_extent] index value))
 
   (arr gpu.global.load :
     {[matrix row col]} ->
     ([matrix row col.] f32 value))
 
+  (arr gpu.global.store :
+    {[matrix row col value]} ->
+    ([matrix row col value. matrix]))
+
   (arr gpu.shared.store :
     {[tile row col value]} ->
     ([tile row col value. tile]))
 
+  (arr ceil-div : {(extent value) (extent value)} -> ([tile k . tile] extent value))
+  (arr f32.zero : [] -> (f32 value))
   (arr f32.mul : {(f32 value) (f32 value)} -> (f32 value))
   (arr f32.add : {(f32 value) (f32 value)} -> (f32 value))
 
   (def cooperative-global-to-shared :
     {
-      ([.tile_num] extent value)
+      ([.tile_size] extent value)
       (block value)
       (thread value)
-      (([tile_num] index) value)
-      (({f32 [tile_num] [tile_num]} gpu.global) value)
-      (({f32 [tile_num] [tile_num]} gpu.global) value)
-      (({f32 [tile_num] [tile_num]} gpu.shared) value)
-      (({f32 [tile_num] [tile_num]} gpu.shared) value)
+      (([tile_size] index) value)
+      (({f32 [tile_size] [tile_size]} gpu.global) value)
+      (({f32 [tile_size] [tile_size]} gpu.global) value)
+      (({f32 [tile_size] [tile_size]} gpu.shared) value)
+      (({f32 [tile_size] [tile_size]} gpu.shared) value)
     } ->
     {
       (block value)
       (thread value)
-      (([tile_num] index) value)
-      (({f32 [tile_num] [tile_num]} gpu.global) value)
-      (({f32 [tile_num] [tile_num]} gpu.global) value)
-      (({f32 [tile_num] [tile_num]} gpu.shared) value)
-      (({f32 [tile_num] [tile_num]} gpu.shared) value)
+      (([tile_size] index) value)
+      (({f32 [tile_size] [tile_size]} gpu.global) value)
+      (({f32 [tile_size] [tile_size]} gpu.global) value)
+      (({f32 [tile_size] [tile_size]} gpu.shared) value)
+      (({f32 [tile_size] [tile_size]} gpu.shared) value)
     }
     =
-    {[n b t p global_a global_b tile_a tile_b.]
-      ([.n t] thread.y [thread_y.])
-      ([.n t] thread.x [thread_x.])
-      ([.n b t] block.row [row.])
-      ([.n b t] block.col [col.])
+    {[tile_size b t current_tile global_a global_b tile_a tile_b.]
+      ([.tile_size t] thread.y [thread_y.])
+      ([.tile_size t] thread.x [thread_x.])
+      ([.tile_size b t] block.row [row.])
+      ([.tile_size b t] block.col [col.])
 
-      # tile_A[thread.y, thread.x] = A[row, p * TILE + thread.x]
-      ([.n p thread_x] p.tile-offset [a_col.])
+      # tile_A[thread.y, thread.x] = A[row, current_tile * TILE + thread.x]
+      ([.tile_size current_tile thread_x] current-tile.offset [a_col.])
       ([.global_a row a_col] gpu.global.load [a_val.])
       ([.tile_a thread_y thread_x a_val] gpu.shared.store [tile_a_loaded.])
 
-      # tile_B[thread.y, thread.x] = B[p * TILE + thread.y, col]
-      ([.n p thread_y] p.tile-offset [b_row.])
+      # tile_B[thread.y, thread.x] = B[current_tile * TILE + thread.y, col]
+      ([.tile_size current_tile thread_y] current-tile.offset [b_row.])
       ([.global_b b_row col] gpu.global.load [b_val.])
       ([.tile_b thread_y thread_x b_val] gpu.shared.store [tile_b_loaded.])
 
-      ([.b t p global_a global_b tile_a_loaded tile_b_loaded])
+      ([.b t current_tile global_a global_b tile_a_loaded tile_b_loaded])
     })
 
-  (def q-loop.accumulate-dot :
+  (def tile.dot-product :
     {
-      ([.tile_num] extent value)
-      (block value)
+      ([.tile_size] extent value)
       (thread value)
-      (({f32 [tile_num] [tile_num]} gpu.shared) value)
-      (({f32 [tile_num] [tile_num]} gpu.shared) value)
+      (({f32 [tile_size] [tile_size]} gpu.shared) value)
+      (({f32 [tile_size] [tile_size]} gpu.shared) value)
       (f32 value)
     } ->
     {
-      (block value)
       (thread value)
-      (({f32 [tile_num] [tile_num]} gpu.shared) value)
-      (({f32 [tile_num] [tile_num]} gpu.shared) value)
+      (({f32 [tile_size] [tile_size]} gpu.shared) value)
+      (({f32 [tile_size] [tile_size]} gpu.shared) value)
       (f32 value)
     }
     =
-    {[n b t tile_a tile_b acc.]
-      ([.n] value.type [tile_extent.])
-      ([.tile_extent] extent.raw [tile_num.])
-      ([.tile_extent] extent.index-type bound.eta [q_r q.])
+    {[tile_size t tile_a tile_b acc.]
+      ([.tile_size] value.type [tile_extent.])
+      ([.tile_extent] extent.raw [tile_size_type.])
+      ([.tile_extent] extent.index-type bound.eta [tile_inner_index_r tile_inner_index.])
 
-      ([.n t] thread.y [thread_y.])
-      ([.n t] thread.x [thread_x.])
-      ([.tile_a thread_y q] gpu.shared.load [a_val.])
-      ([.tile_b q thread_x] gpu.shared.load [b_val.])
+      ([.tile_size t] thread.y [thread_y.])
+      ([.tile_size t] thread.x [thread_x.])
+      ([.tile_a thread_y tile_inner_index] gpu.shared.load [a_val.])
+      ([.tile_b tile_inner_index thread_x] gpu.shared.load [b_val.])
       ([.a_val b_val] f32.mul [dot.])
       ([.] f32 bound.eta [acc_r acc_q.])
       ([.acc_q dot] f32.add [acc_next.])
-      ([.n acc acc_r q_r acc_next] reduce-f32 [acc_out.])
+      ([.tile_size acc acc_r tile_inner_index_r acc_next] reduce-f32 [acc_out.])
 
-      ([.b t tile_a tile_b acc_out])
+      ([.t tile_a tile_b acc_out])
+    })
+
+  (def gpu.tiled_matmul.dataflow :
+    {
+      ([.tile_size] extent value)
+      (extent value) # K
+      (block value)
+      (thread value)
+      (({f32 [tile_size] [tile_size]} gpu.global) value) # A
+      (({f32 [tile_size] [tile_size]} gpu.global) value) # B
+      (({f32 [tile_size] [tile_size]} gpu.global) value) # C
+      (({f32 [tile_size] [tile_size]} gpu.shared) value) # tile_A
+      (({f32 [tile_size] [tile_size]} gpu.shared) value) # tile_B
+    } ->
+    {
+      ([.tile_size] extent value)
+      (extent value)
+      (block value)
+      (thread value)
+      (({f32 [tile_size] [tile_size]} gpu.global) value)
+      (({f32 [tile_size] [tile_size]} gpu.global) value)
+      (({f32 [tile_size] [tile_size]} gpu.global) value)
+      (({f32 [tile_size] [tile_size]} gpu.shared) value)
+      (({f32 [tile_size] [tile_size]} gpu.shared) value)
+    }
+    =
+    {[tile_size k b t global_a global_b global_c tile_a tile_b.]
+      ([.tile_size k] ceil-div [num_tiles.])
+      ([.] f32.zero [acc0.])
+
+      ([.num_tiles] value.type [num_tiles_extent.])
+      ([.num_tiles_extent] extent.index-type bound.eta [current_tile_r current_tile.])
+      ([.] f32 bound.eta [acc_r acc_p.])
+
+      ([.tile_size b t current_tile global_a global_b tile_a tile_b]
+        cooperative-global-to-shared
+        [b_loaded t_loaded current_tile_loaded global_a_loaded global_b_loaded tile_a_loaded tile_b_loaded.])
+      ([.tile_size t_loaded tile_a_loaded tile_b_loaded acc_p]
+        tile.dot-product
+        [t_dot tile_a_q tile_b_q acc_next.])
+      ([.num_tiles acc0 acc_r current_tile_r acc_next] reduce-f32 [acc_done.])
+
+      ([.tile_size b_loaded t_dot] block.row [row.])
+      ([.tile_size b_loaded t_dot] block.col [col.])
+      ([.global_c row col acc_done] gpu.global.store [global_c_out.])
+      ([.tile_size k b_loaded t_dot global_a_loaded global_b_loaded global_c_out tile_a_q tile_b_q])
     })
 })
 
@@ -160,25 +209,25 @@
   (def gpu.tiled_matmul :
     {
       ({({({block thread} product)
-          ({f32 [tile_num] [tile_num]} gpu.shared)} product)
-        ({f32 [tile_num] [tile_num]} gpu.shared)} product)
+          ({f32 [tile_size] [tile_size]} gpu.shared)} product)
+        ({f32 [tile_size] [tile_size]} gpu.shared)} product)
       ({({({block thread} product)
-          ({f32 [tile_num] [tile_num]} gpu.shared)} product)
-        ({f32 [tile_num] [tile_num]} gpu.shared)} product)
+          ({f32 [tile_size] [tile_size]} gpu.shared)} product)
+        ({f32 [tile_size] [tile_size]} gpu.shared)} product)
       ({({({block thread} product)
-          ({f32 [tile_num] [tile_num]} gpu.shared)} product)
-        ({f32 [tile_num] [tile_num]} gpu.shared)} product)
+          ({f32 [tile_size] [tile_size]} gpu.shared)} product)
+        ({f32 [tile_size] [tile_size]} gpu.shared)} product)
     } ->
     {
       ({({({block thread} product)
-          ({f32 [tile_num] [tile_num]} gpu.shared)} product)
-        ({f32 [tile_num] [tile_num]} gpu.shared)} product)
+          ({f32 [tile_size] [tile_size]} gpu.shared)} product)
+        ({f32 [tile_size] [tile_size]} gpu.shared)} product)
       ({({({block thread} product)
-          ({f32 [tile_num] [tile_num]} gpu.shared)} product)
-        ({f32 [tile_num] [tile_num]} gpu.shared)} product)
+          ({f32 [tile_size] [tile_size]} gpu.shared)} product)
+        ({f32 [tile_size] [tile_size]} gpu.shared)} product)
       ({({({block thread} product)
-          ({f32 [tile_num] [tile_num]} gpu.shared)} product)
-        ({f32 [tile_num] [tile_num]} gpu.shared)} product)
+          ({f32 [tile_size] [tile_size]} gpu.shared)} product)
+        ({f32 [tile_size] [tile_size]} gpu.shared)} product)
     }
     =
     {[entry sync_entry compute_entry.]

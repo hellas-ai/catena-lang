@@ -22,27 +22,18 @@ impl CompileConfig {
                     target: "control",
                     source: "data",
                     prefix: "data",
-                    tensor: "product",
-                    unit: "unit",
+                    tensor: "*",
+                    unit: "1",
                 },
                 TheoryExtension {
                     target: "data",
                     source: "control",
                     prefix: "control",
-                    tensor: "coproduct",
-                    unit: "unit",
+                    tensor: "+",
+                    unit: "0",
                 },
             ],
         }
-    }
-
-    pub fn extensions_for_target<'a>(
-        &'a self,
-        target: &'a str,
-    ) -> impl Iterator<Item = &'a TheoryExtension> {
-        self.extensions
-            .iter()
-            .filter(move |extension| extension.target == target)
     }
 
     pub fn extension_for_target_and_prefix(
@@ -53,12 +44,5 @@ impl CompileConfig {
         self.extensions
             .iter()
             .find(|extension| extension.target == target && extension.prefix == prefix)
-    }
-
-    pub fn lifted_prefixes(&self) -> Vec<&'static str> {
-        self.extensions
-            .iter()
-            .map(|extension| extension.prefix)
-            .collect()
     }
 }

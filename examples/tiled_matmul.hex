@@ -33,15 +33,15 @@
   (arr extent.index-type : extent -> index)
   (arr bound.eta : [t] -> ([t . t t] {bound value}))
 
-  (arr reduce-f32 :
+  (arr reduce :
     {
       (extent value)
-      (f32 value)
-      (f32 bound)
+      ([x] value)
+      ([x] bound)
       (([tile_size] index) bound)
-      (f32 value)
+      ([x] value)
     } ->
-    ([tile_size tile_size.] f32 value))
+    ([tile_size x x tile_size x . x] value))
 
   (arr thread.x :
     {([tile_size] extent value) (thread value)} ->
@@ -157,7 +157,7 @@
       ([.a_val b_val] f32.mul [dot.])
       ([.] f32 bound.eta [acc_r acc_q.])
       ([.acc_q dot] f32.add [acc_next.])
-      ([.tile_size acc acc_r tile_inner_index_r acc_next] reduce-f32 [acc_out.])
+      ([.tile_size acc acc_r tile_inner_index_r acc_next] reduce [acc_out.])
 
       ([.t tile_a tile_b acc_out])
     })
@@ -204,7 +204,7 @@
       ([.tile_size t_loaded tile_a_loaded tile_b_loaded acc_p]
         tile.dot-product
         [t_dot tile_a_q tile_b_q acc_next.])
-      ([.num_tiles acc0 acc_r current_tile_r acc_next] reduce-f32 [acc_done.])
+      ([.num_tiles acc0 acc_r current_tile_r acc_next] reduce [acc_done.])
 
       ([.m_loaded tile_size b_loaded t_dot] block.row [row.])
       ([.n_loaded tile_size b_loaded t_dot] block.col [col.])

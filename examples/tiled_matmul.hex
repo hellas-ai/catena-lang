@@ -146,18 +146,29 @@
     }
     =
     {[tile_size t tile_a tile_b acc.]
+      # for tile_inner_index in range(tile_size):
+      #   acc += tile_A[thread.y, tile_inner_index] * tile_B[tile_inner_index, thread.x]
+
+      # Loop setup.
       ([.tile_size] value.type [tile_extent.])
       ([.tile_extent] extent.raw [tile_size_type.])
-      ([.tile_extent] extent.index-type bound.eta [tile_inner_index_r tile_inner_index.])
+      ([.tile_extent] extent.index-type bound.eta
+        [tile_inner_index_r tile_inner_index.])
+      ([.] f32 bound.eta
+        [acc_r acc_q.])
 
+      # Loop body.
       ([.tile_size t] thread.y [thread_y.])
       ([.tile_size t] thread.x [thread_x.])
       ([.tile_a thread_y tile_inner_index] gpu.shared.load [a_val.])
       ([.tile_b tile_inner_index thread_x] gpu.shared.load [b_val.])
       ([.a_val b_val] f32.mul [dot.])
-      ([.] f32 bound.eta [acc_r acc_q.])
       ([.acc_q dot] f32.add [acc_next.])
-      ([.tile_size acc acc_r tile_inner_index_r acc_next] reduce [acc_out.])
+
+      # Close the bounded loop.
+      ([.tile_size acc acc_r tile_inner_index_r acc_next]
+        reduce
+        [acc_out.])
 
       ([.t tile_a tile_b acc_out])
     })
@@ -191,21 +202,36 @@
     }
     =
     {[tile_size m k n b t global_a global_b global_c tile_a tile_b.]
+      # row = block.y * TILE + thread.y
+      # col = block.x * TILE + thread.x
+      # for current_tile in range(ceil_div(k, tile_size)):
+      #   load global A/B tile slices into shared memory
+      #   acc = dot(tile_A[thread.y, :], tile_B[:, thread.x])
+      # C[row, col] = acc
+
+      # Loop setup.
       ([.tile_size k] ceil-div [num_tiles.])
       ([.] f32.zero [acc0.])
-
       ([.num_tiles] value.type [num_tiles_extent.])
-      ([.num_tiles_extent] extent.index-type bound.eta [current_tile_r current_tile.])
-      ([.] f32 bound.eta [acc_r acc_p.])
+      ([.num_tiles_extent] extent.index-type bound.eta
+        [current_tile_r current_tile.])
+      ([.] f32 bound.eta
+        [acc_r acc_p.])
 
+      # Loop body.
       ([.tile_size m k n b t current_tile global_a global_b tile_a tile_b]
         cooperative-global-to-shared
         [m_loaded k_loaded n_loaded b_loaded t_loaded current_tile_loaded global_a_loaded global_b_loaded tile_a_loaded tile_b_loaded.])
       ([.tile_size t_loaded tile_a_loaded tile_b_loaded acc_p]
         tile.dot-product
         [t_dot tile_a_q tile_b_q acc_next.])
-      ([.num_tiles acc0 acc_r current_tile_r acc_next] reduce [acc_done.])
 
+      # Close the bounded loop.
+      ([.num_tiles acc0 acc_r current_tile_r acc_next]
+        reduce
+        [acc_done.])
+
+      # Store the final accumulator in C.
       ([.m_loaded tile_size b_loaded t_dot] block.row [row.])
       ([.n_loaded tile_size b_loaded t_dot] block.col [col.])
       ([.global_c row col acc_done] gpu.global.store [global_c_out.])

@@ -14,6 +14,7 @@
 
   (arr value : 1 -> 1)
   (arr bound : 1 -> 1)
+  (arr unique : 1 -> 1)
 
   (arr product : 2 -> 1)
   (arr coproduct : 2 -> 1)
@@ -42,6 +43,18 @@
       ([x] value)
     } ->
     ([tile_size x x tile_size x . x] value))
+
+  (arr sync :
+    ([x] unique) ->
+    ([x] unique))
+
+  (arr sync-2 :
+    {([x] unique) ([y] unique)} ->
+    {([x] unique) ([y] unique)})
+
+  (arr sync-3 :
+    {([x] unique) ([y] unique) ([z] unique)} ->
+    {([x] unique) ([y] unique) ([z] unique)})
 
   (arr thread.x :
     {([tile_size] extent value) (thread value)} ->
@@ -95,8 +108,8 @@
       (([tile_size] index) value)
       (({f32 [m] [k]} gpu.global) value)
       (({f32 [k] [n]} gpu.global) value)
-      (({f32 [tile_size] [tile_size]} gpu.shared) value)
-      (({f32 [tile_size] [tile_size]} gpu.shared) value)
+      (({f32 [tile_size] [tile_size]} gpu.shared) unique)
+      (({f32 [tile_size] [tile_size]} gpu.shared) unique)
     } ->
     {
       ([.m] extent value)
@@ -107,8 +120,8 @@
       (([tile_size] index) value)
       (({f32 [m] [k]} gpu.global) value)
       (({f32 [k] [n]} gpu.global) value)
-      (({f32 [tile_size] [tile_size]} gpu.shared) value)
-      (({f32 [tile_size] [tile_size]} gpu.shared) value)
+      (({f32 [tile_size] [tile_size]} gpu.shared) unique)
+      (({f32 [tile_size] [tile_size]} gpu.shared) unique)
     }
     =
     {[tile_size m k n b t current_tile global_a global_b tile_a tile_b.]
@@ -120,12 +133,14 @@
       # tile_A[thread.y, thread.x] = A[row, current_tile * TILE + thread.x]
       ([.k tile_size current_tile thread_x] current-tile.offset [a_col.])
       ([.global_a row a_col] gpu.global.load [a_val.])
-      ([.tile_a thread_y thread_x a_val] gpu.shared.store [tile_a_loaded.])
+      ([.tile_a thread_y thread_x a_val] gpu.shared.store
+        [tile_a_loaded.])
 
       # tile_B[thread.y, thread.x] = B[current_tile * TILE + thread.y, col]
       ([.k tile_size current_tile thread_y] current-tile.offset [b_row.])
       ([.global_b b_row col] gpu.global.load [b_val.])
-      ([.tile_b thread_y thread_x b_val] gpu.shared.store [tile_b_loaded.])
+      ([.tile_b thread_y thread_x b_val] gpu.shared.store
+        [tile_b_loaded.])
 
       ([.m k n b t current_tile global_a global_b tile_a_loaded tile_b_loaded])
     })
@@ -134,14 +149,14 @@
     {
       ([.tile_size] extent value)
       (thread value)
-      (({f32 [tile_size] [tile_size]} gpu.shared) value)
-      (({f32 [tile_size] [tile_size]} gpu.shared) value)
+      (({f32 [tile_size] [tile_size]} gpu.shared) unique)
+      (({f32 [tile_size] [tile_size]} gpu.shared) unique)
       (f32 value)
     } ->
     {
       (thread value)
-      (({f32 [tile_size] [tile_size]} gpu.shared) value)
-      (({f32 [tile_size] [tile_size]} gpu.shared) value)
+      (({f32 [tile_size] [tile_size]} gpu.shared) unique)
+      (({f32 [tile_size] [tile_size]} gpu.shared) unique)
       (f32 value)
     }
     =
@@ -160,8 +175,10 @@
       # Loop body.
       ([.tile_size t] thread.y [thread_y.])
       ([.tile_size t] thread.x [thread_x.])
-      ([.tile_a thread_y tile_inner_index] gpu.shared.load [a_val.])
-      ([.tile_b tile_inner_index thread_x] gpu.shared.load [b_val.])
+      ([.tile_a thread_y tile_inner_index] gpu.shared.load
+        [a_val.])
+      ([.tile_b tile_inner_index thread_x] gpu.shared.load
+        [b_val.])
       ([.a_val b_val] f32.mul [dot.])
       ([.acc_q dot] f32.add [acc_next.])
 
@@ -183,9 +200,9 @@
       (thread value)
       (({f32 [m] [k]} gpu.global) value) # A
       (({f32 [k] [n]} gpu.global) value) # B
-      (({f32 [m] [n]} gpu.global) value) # C
-      (({f32 [tile_size] [tile_size]} gpu.shared) value) # tile_A
-      (({f32 [tile_size] [tile_size]} gpu.shared) value) # tile_B
+      (({f32 [m] [n]} gpu.global) unique) # C
+      (({f32 [tile_size] [tile_size]} gpu.shared) unique) # tile_A
+      (({f32 [tile_size] [tile_size]} gpu.shared) unique) # tile_B
     } ->
     {
       ([.tile_size] extent value)
@@ -196,9 +213,9 @@
       (thread value)
       (({f32 [m] [k]} gpu.global) value)
       (({f32 [k] [n]} gpu.global) value)
-      (({f32 [m] [n]} gpu.global) value)
-      (({f32 [tile_size] [tile_size]} gpu.shared) value)
-      (({f32 [tile_size] [tile_size]} gpu.shared) value)
+      (({f32 [m] [n]} gpu.global) unique)
+      (({f32 [tile_size] [tile_size]} gpu.shared) unique)
+      (({f32 [tile_size] [tile_size]} gpu.shared) unique)
     }
     =
     {[tile_size m k n b t global_a global_b global_c tile_a tile_b.]
@@ -225,12 +242,18 @@
 
       # sync: all threads in the block have written tile_A and tile_B before any
       # thread reads from shared memory for the dot product.
-      ([.tile_size t_loaded tile_a_loaded tile_b_loaded acc_p]
+      ([.tile_a_loaded tile_b_loaded]
+        sync-2
+        [tile_a_visible tile_b_visible.])
+      ([.tile_size t_loaded tile_a_visible tile_b_visible acc_p]
         tile.dot-product
         [t_dot tile_a_q tile_b_q acc_next.])
 
       # sync: all threads have finished reading the current shared tiles before
       # the next current_tile iteration overwrites tile_A and tile_B.
+      ([.tile_a_q tile_b_q]
+        sync-2
+        [tile_a_reusable tile_b_reusable.])
 
       # Close the bounded loop.
       ([.num_tiles acc0 acc_r current_tile_r acc_next]
@@ -241,7 +264,7 @@
       ([.m_loaded tile_size b_loaded t_dot] block.row [row.])
       ([.n_loaded tile_size b_loaded t_dot] block.col [col.])
       ([.global_c row col acc_done] gpu.global.store [global_c_out.])
-      ([.tile_size m_loaded k_loaded n_loaded b_loaded t_dot global_a_loaded global_b_loaded global_c_out tile_a_q tile_b_q])
+      ([.tile_size m_loaded k_loaded n_loaded b_loaded t_dot global_a_loaded global_b_loaded global_c_out tile_a_reusable tile_b_reusable])
     })
 })
 

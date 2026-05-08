@@ -160,37 +160,59 @@ fn prepare_boundary_type_map(map: &Hexpr, syntax: &Theory, boundary: &BoundaryTe
 /// a control-style alternative boundary. We expose it as `{a b}` instead of packing the two wires
 /// again into one control value.
 fn expose_boundary_tensor(map: &Hexpr, target_wire_shape: &Operation) -> Option<Hexpr> {
-    // Boundary tensors are represented as a final composition step. If the map
-    // is not a composition, there is no explicit boundary tensor to expose.
-    let Hexpr::Composition(steps) = map else {
-        return None;
-    };
+    let (exposed, changed) = expose_boundary_tensors(map, target_wire_shape);
+    changed.then_some(exposed)
+}
 
-    let Some(last) = steps.last() else {
-        return None;
-    };
+fn expose_boundary_tensors(map: &Hexpr, target_wire_shape: &Operation) -> (Hexpr, bool) {
+    match map {
+        Hexpr::Tensor(factors) => {
+            let mut changed = false;
+            let exposed = factors
+                .iter()
+                .map(|factor| {
+                    let (factor, factor_changed) =
+                        expose_boundary_tensors(factor, target_wire_shape);
+                    changed |= factor_changed;
+                    factor
+                })
+                .collect();
+            (Hexpr::Tensor(exposed), changed)
+        }
+        Hexpr::Composition(steps) => {
+            let Some(last) = steps.last() else {
+                return (map.clone(), false);
+            };
 
-    // If the final step already is the target theory's wire shape, remove it:
-    // the target theory should see the individual wires, not a repacked object.
-    if let Hexpr::Operation(op) = last
-        && op == target_wire_shape
-    {
-        return match &steps[..steps.len() - 1] {
-            [] => None,
-            [only] => Some(only.clone()),
-            rest => Some(Hexpr::Composition(rest.to_vec())),
-        };
-    }
+            // If the final step already is the target theory's wire shape,
+            // remove it: the target theory should see the individual wires,
+            // not a repacked object.
+            if let Hexpr::Operation(op) = last
+                && op == target_wire_shape
+            {
+                let exposed = match &steps[..steps.len() - 1] {
+                    [] => return (map.clone(), false),
+                    [only] => only.clone(),
+                    rest => Hexpr::Composition(rest.to_vec()),
+                };
+                let (exposed, _) = expose_boundary_tensors(&exposed, target_wire_shape);
+                return (exposed, true);
+            }
 
-    // The boundary tensor may be nested in the final step, for example when a
-    // source object was already partially packed. Recurse only through that
-    // final step, preserving the rest of the composition unchanged.
-    let exposed_last = expose_boundary_tensor(last, target_wire_shape)?;
-    let mut exposed = steps[..steps.len() - 1].to_vec();
-    exposed.push(exposed_last);
-    match exposed.as_slice() {
-        [only] => Some(only.clone()),
-        _ => Some(Hexpr::Composition(exposed)),
+            // Boundary tensors may appear inside nested type expressions too,
+            // so recurse through every composition step.
+            let mut changed = false;
+            let exposed = steps
+                .iter()
+                .map(|step| {
+                    let (step, step_changed) = expose_boundary_tensors(step, target_wire_shape);
+                    changed |= step_changed;
+                    step
+                })
+                .collect();
+            (Hexpr::Composition(exposed), changed)
+        }
+        _ => (map.clone(), false),
     }
 }
 
@@ -393,12 +415,11 @@ mod tests {
             ({f32 ({f32 f32} +)} +) ->
             ({({f32 f32} +) f32} +))
 
-          # after interleaving, this should typecheck only if the outer
-          # coproduct boundary is exposed while the nested coproduct remains
-          # part of the ordinary object structure
+          # after interleaving, this should typecheck only if every product
+          # boundary is exposed when lifted into data
           (def expected-control-to-data-long :
-            {f32 ({f32 f32} *)} ->
-            {({f32 f32} *) f32}
+            {f32 {f32 f32}} ->
+            {{f32 f32} f32}
             =
             control.control-to-data-long)
         })
@@ -408,12 +429,11 @@ mod tests {
             ({f32 ({f32 f32} *)} *) ->
             ({({f32 f32} *) f32} *))
 
-          # after interleaving, this should typecheck only if the outer
-          # product boundary is exposed while the nested product remains part
-          # of the ordinary object structure
+          # after interleaving, this should typecheck only if every coproduct
+          # boundary is exposed when lifted into control
           (def expected-data-to-control-long :
-            {f32 ({f32 f32} +)} ->
-            {({f32 f32} +) f32}
+            {f32 {f32 f32}} ->
+            {{f32 f32} f32}
             =
             data.data-to-control-long)
         })

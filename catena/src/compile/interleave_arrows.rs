@@ -180,10 +180,7 @@ fn expose_boundary_tensor(map: &Hexpr, target_wire_shape: &Operation) -> Option<
             [only] => only.clone(),
             rest => Hexpr::Composition(rest.to_vec()),
         };
-        return Some(expose_nested_boundary_tensors(
-            &exposed,
-            target_wire_shape,
-        ));
+        return Some(expose_nested_boundary_tensors(&exposed, target_wire_shape));
     }
 
     // A boundary tensor can be the final step of a larger contextual map, for

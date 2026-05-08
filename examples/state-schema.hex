@@ -43,6 +43,7 @@
   (arr gpu.view : 1 -> 1)
   (arr gpu.shared : 3 -> 1)
   (arr matmul.state : 4 -> 1)
+  (arr matmul.p-iteration : 4 -> 1)
   (arr done : 0 -> 1)
 
   (arr value : 1 -> 1)
@@ -443,6 +444,18 @@
     (({[tile_size] [m] [k] [n]} matmul.state) value) ->
     (({[tile_size] [m] [k] [n]} matmul.state) value))
 
+  (arr matmul.state.dot-by-thread :
+    (({[tile_size] [m] [k] [n]} matmul.state) value) ->
+    (({[tile_size] [m] [k] [n]} matmul.state) value))
+
+  (arr matmul.state.advance-current-tile :
+    (({[tile_size] [m] [k] [n]} matmul.state) value) ->
+    (({[tile_size] [m] [k] [n]} matmul.state) value))
+
+  (arr matmul.state.store-output :
+    (({[tile_size] [m] [k] [n]} matmul.state) value) ->
+    ([tile_size m k n .] done value))
+
   # A user writes this as:
   #
   #   defdata cooperative-global-to-shared(s) =
@@ -512,18 +525,11 @@
 
   (arr branch : [x] -> [x . x x])
   (arr merge : [x . x x] -> [x])
-  (arr matmul.state.barrier.sync :
-    {
-      (({[tile_size] [m] [k] [n]} matmul.state) value)
-      (({[tile_size] [m] [k] [n]} matmul.state) value)
-    } ->
-    {
-      (({[tile_size] [m] [k] [n]} matmul.state) value)
-      (({[tile_size] [m] [k] [n]} matmul.state) value)
-    })
+  (arr gpu.sync : [x x . x x] -> [x x . x x])
 
-  (def control-example :
-    ([tile_size m k n . tile_size m k n tile_size m k n] {
+  (def gpu.tiled_matmul.controlflow :
+    ([tile_size m k n . tile_size m k n tile_size m k n tile_size m k n] {
+      (matmul.state value)
       (matmul.state value)
       (matmul.state value)
     }) ->
@@ -533,13 +539,25 @@
       (matmul.state value)
     })
     =
-    {[entry after_sync_phase.]
-      ([.entry] data.init-acc [initialized.])
-      ([.initialized] data.matmul.state.has-more-tiles [then else.])
-        ([.then] data.matmul.state.cooperative-global-to-shared [loaded.])
-        ([.loaded after_sync_phase]
-          matmul.state.barrier.sync
-          [synced after_sync_phase_out.])
-      ([.synced else after_sync_phase_out])
+    {[start after_loaded_phase after_compute_phase.]
+      ([.start] data.init-acc [initialized.])
+
+      ([.initialized has_more_tiles_loopback]
+        [x x . x] data.matmul.state.has-more-tiles
+        [has_more_tiles_iter has_more_times_return.])
+
+        # Load the current A/B tile fragments, then suspend at the load barrier.
+        ([.has_more_tiles_iter] data.matmul.state.cooperative-global-to-shared [loaded.])
+        ([.loaded after_loaded_phase] gpu.sync [x_loaded after_loaded_phase_out.])
+
+        # Compute this tile contribution inside dataflow.
+        ([.x_loaded] data.matmul.state.dot-by-thread [computed.])
+
+        # Suspend before the next iteration can overwrite shared tiles.
+        ([.computed after_compute_phase] gpu.sync [after_compute after_compute_phase_out.])
+        ([.after_compute] data.matmul.state.advance-current-tile [has_more_tiles_loopback.])
+
+      ([.has_more_times_return] data.matmul.state.store-output [done.])
+      ([.done after_loaded_phase_out after_compute_phase_out])
     })
 })

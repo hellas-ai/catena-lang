@@ -148,11 +148,10 @@ fn pack(object_size: usize, tensor: Operation, unit: Operation) -> Hexpr {
         1 => identity_hexpr(0),
         n => {
             let mut steps = Vec::new();
-            for next_var in 2..n {
-                steps.push(Hexpr::Tensor(vec![
-                    Hexpr::Operation(tensor.clone()),
-                    identity_hexpr(next_var),
-                ]));
+            for first_pass_through in 2..n {
+                let mut factors = vec![Hexpr::Operation(tensor.clone())];
+                factors.extend((first_pass_through..n).map(identity_hexpr));
+                steps.push(Hexpr::Tensor(factors));
             }
             steps.push(Hexpr::Operation(tensor));
             Hexpr::Composition(steps)
@@ -181,7 +180,7 @@ fn identity_hexpr(var_index: usize) -> Hexpr {
 
 #[cfg(test)]
 mod tests {
-    use metacat::theory::RawTheorySet;
+    use metacat::theory::{RawTheorySet, TheoryId};
 
     #[test]
     fn interleaved_arrows_typecheck_in_both_directions() {
@@ -213,5 +212,45 @@ mod tests {
         let raw = RawTheorySet::from_text(source).unwrap();
         let elaborated = crate::check::elaborate(&raw).unwrap();
         crate::check::check(&elaborated).unwrap();
+    }
+
+    #[test]
+    fn interleaved_arrows_typecheck_for_large_tensor_packs() {
+        let source = r#"
+        (theory syntax nat {
+          (arr * : 2 -> 1)
+          (arr 1 : 0 -> 1)
+          (arr + : 2 -> 1)
+          (arr 0 : 0 -> 1)
+          (arr f32 : 0 -> 1)
+        })
+
+        (theory data syntax {
+          (arr wide : {f32 f32 f32 f32} -> {f32 f32 f32})
+        })
+
+        (theory control syntax {
+          (arr id : f32 -> f32)
+
+          # after interleaving, this should typecheck only if wide source and
+          # target tensors are packed with the expected left-associated shape
+          (def expected :
+            ({({({f32 f32} *) f32} *) f32} *) ->
+            ({({f32 f32} *) f32} *)
+            =
+            data.wide)
+        })
+        "#;
+
+        let raw = RawTheorySet::from_text(source).unwrap();
+        let elaborated = crate::check::elaborate(&raw).unwrap();
+        let checked = crate::check::check(&elaborated).unwrap();
+        assert!(
+            checked
+                .theories
+                .get(&TheoryId("control".parse().unwrap()))
+                .and_then(|theory| theory.get_arrow(&"data.wide".parse().unwrap()))
+                .is_some()
+        );
     }
 }

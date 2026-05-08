@@ -11,7 +11,6 @@ pub struct TheoryExtension {
     pub prefix: &'static str,
     pub tensor: &'static str,
     pub unit: &'static str,
-    pub unwrap_tensors: Vec<&'static str>,
 }
 
 impl CompileConfig {

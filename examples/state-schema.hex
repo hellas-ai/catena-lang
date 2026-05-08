@@ -16,6 +16,7 @@
 #     m         : ([.m] extent value)
 #     k         : ([.k] extent value)
 #     n         : ([.n] extent value)
+#     current_tile : ([.k] index value)
 #     block     : (gpu.block value)
 #     thread    : (gpu.thread value)
 #     a         : (({f32 [m] [k]} gpu.global) value)
@@ -34,6 +35,7 @@
   (arr extent : 1 -> 1)
   (arr index : 1 -> 1)
   (arr bool : 0 -> 1)
+  (arr condition : 4 -> 1)
   (arr f32 : 0 -> 1)
   (arr gpu.block : 0 -> 1)
   (arr gpu.thread : 0 -> 1)
@@ -53,17 +55,30 @@
 (theory data syntax {
   (arr f32.zero : [] -> (f32 value))
   (arr f32.add : {(f32 value) (f32 value)} -> (f32 value))
+  (arr ceil-div :
+    ([tile_size m k n . k tile_size] {
+      (extent value)
+      (extent value)
+    }) ->
+    ([tile_size m k n . k] extent value))
+  (arr index.lt-extent :
+    ([tile_size m k n . k k] {
+      (index value)
+      (extent value)
+    }) ->
+    (({[tile_size] [m] [k] [n]} condition) value))
 
   # The following lenses are generated from the surface `state` schema. Each
   # lens is implemented by unpacking every field, projecting or replacing one
   # field, then packing the complete state again.
   (arr matmul.state.pack :
     ([tile_size m k n .
-      tile_size m k n m k k n m n tile_size tile_size tile_size tile_size] {
+      tile_size m k n k m k k n m n tile_size tile_size tile_size tile_size] {
       (extent value)
       (extent value)
       (extent value)
       (extent value)
+      (index value)
       (gpu.block value)
       (gpu.thread value)
       (({f32 [m] [k]} gpu.global) value)
@@ -78,11 +93,12 @@
   (arr matmul.state.unpack :
     (({[tile_size] [m] [k] [n]} matmul.state) value) ->
     ([tile_size m k n .
-      tile_size m k n m k k n m n tile_size tile_size tile_size tile_size] {
+      tile_size m k n k m k k n m n tile_size tile_size tile_size tile_size] {
       (extent value)
       (extent value)
       (extent value)
       (extent value)
+      (index value)
       (gpu.block value)
       (gpu.thread value)
       (({f32 [m] [k]} gpu.global) value)
@@ -102,11 +118,43 @@
     =
     {[state.]
       ([.state] matmul.state.unpack
-        [tile_size m k n block thread a b c tile_a tile_b acc.])
-      ([.tile_size m k n block thread a b c tile_a tile_b acc]
+        [tile_size m k n current_tile block thread a b c tile_a tile_b acc.])
+      ([.tile_size m k n current_tile block thread a b c tile_a tile_b acc]
         matmul.state.pack
         [state_out.])
       ([.state_out tile_size])
+    })
+
+  (def matmul.state.k.get :
+    (({[tile_size] [m] [k] [n]} matmul.state) value) ->
+    ([tile_size m k n . tile_size m k n k] {
+      (matmul.state value)
+      (extent value)
+    })
+    =
+    {[state.]
+      ([.state] matmul.state.unpack
+        [tile_size m k n current_tile block thread a b c tile_a tile_b acc.])
+      ([.tile_size m k n current_tile block thread a b c tile_a tile_b acc]
+        matmul.state.pack
+        [state_out.])
+      ([.state_out k])
+    })
+
+  (def matmul.state.current-tile.get :
+    (({[tile_size] [m] [k] [n]} matmul.state) value) ->
+    ([tile_size m k n . tile_size m k n k] {
+      (matmul.state value)
+      (index value)
+    })
+    =
+    {[state.]
+      ([.state] matmul.state.unpack
+        [tile_size m k n current_tile block thread a b c tile_a tile_b acc.])
+      ([.tile_size m k n current_tile block thread a b c tile_a tile_b acc]
+        matmul.state.pack
+        [state_out.])
+      ([.state_out current_tile])
     })
 
   (def matmul.state.block.get :
@@ -118,8 +166,8 @@
     =
     {[state.]
       ([.state] matmul.state.unpack
-        [tile_size m k n block thread a b c tile_a tile_b acc.])
-      ([.tile_size m k n block thread a b c tile_a tile_b acc]
+        [tile_size m k n current_tile block thread a b c tile_a tile_b acc.])
+      ([.tile_size m k n current_tile block thread a b c tile_a tile_b acc]
         matmul.state.pack
         [state_out.])
       ([.state_out block])
@@ -134,8 +182,8 @@
     =
     {[state.]
       ([.state] matmul.state.unpack
-        [tile_size m k n block thread a b c tile_a tile_b acc.])
-      ([.tile_size m k n block thread a b c tile_a tile_b acc]
+        [tile_size m k n current_tile block thread a b c tile_a tile_b acc.])
+      ([.tile_size m k n current_tile block thread a b c tile_a tile_b acc]
         matmul.state.pack
         [state_out.])
       ([.state_out thread])
@@ -150,8 +198,8 @@
     =
     {[state.]
       ([.state] matmul.state.unpack
-        [tile_size m k n block thread a b c tile_a tile_b acc.])
-      ([.tile_size m k n block thread a b c tile_a tile_b acc]
+        [tile_size m k n current_tile block thread a b c tile_a tile_b acc.])
+      ([.tile_size m k n current_tile block thread a b c tile_a tile_b acc]
         matmul.state.pack
         [state_out.])
       ([.state_out c])
@@ -166,8 +214,8 @@
     =
     {[state field.]
       ([.state] matmul.state.unpack
-        [tile_size m k n block thread a b _c tile_a tile_b acc.])
-      ([.tile_size m k n block thread a b field tile_a tile_b acc]
+        [tile_size m k n current_tile block thread a b _c tile_a tile_b acc.])
+      ([.tile_size m k n current_tile block thread a b field tile_a tile_b acc]
         matmul.state.pack
         [updated_state.])
       ([.updated_state])
@@ -182,8 +230,8 @@
     =
     {[state.]
       ([.state] matmul.state.unpack
-        [tile_size m k n block thread a b c tile_a tile_b acc.])
-      ([.tile_size m k n block thread a b c tile_a tile_b acc]
+        [tile_size m k n current_tile block thread a b c tile_a tile_b acc.])
+      ([.tile_size m k n current_tile block thread a b c tile_a tile_b acc]
         matmul.state.pack
         [state_out.])
       ([.state_out tile_a])
@@ -198,8 +246,8 @@
     =
     {[state field.]
       ([.state] matmul.state.unpack
-        [tile_size m k n block thread a b c _tile_a tile_b acc.])
-      ([.tile_size m k n block thread a b c field tile_b acc]
+        [tile_size m k n current_tile block thread a b c _tile_a tile_b acc.])
+      ([.tile_size m k n current_tile block thread a b c field tile_b acc]
         matmul.state.pack
         [updated_state.])
       ([.updated_state])
@@ -214,8 +262,8 @@
     =
     {[state.]
       ([.state] matmul.state.unpack
-        [tile_size m k n block thread a b c tile_a tile_b acc.])
-      ([.tile_size m k n block thread a b c tile_a tile_b acc]
+        [tile_size m k n current_tile block thread a b c tile_a tile_b acc.])
+      ([.tile_size m k n current_tile block thread a b c tile_a tile_b acc]
         matmul.state.pack
         [state_out.])
       ([.state_out tile_b])
@@ -230,8 +278,8 @@
     =
     {[state field.]
       ([.state] matmul.state.unpack
-        [tile_size m k n block thread a b c tile_a _tile_b acc.])
-      ([.tile_size m k n block thread a b c tile_a field acc]
+        [tile_size m k n current_tile block thread a b c tile_a _tile_b acc.])
+      ([.tile_size m k n current_tile block thread a b c tile_a field acc]
         matmul.state.pack
         [updated_state.])
       ([.updated_state])
@@ -247,8 +295,8 @@
     =
     {[state tile_a tile_b.]
       ([.state] matmul.state.unpack
-        [tile_size m k n block thread a b c _tile_a _tile_b acc.])
-      ([.tile_size m k n block thread a b c tile_a tile_b acc]
+        [tile_size m k n current_tile block thread a b c _tile_a _tile_b acc.])
+      ([.tile_size m k n current_tile block thread a b c tile_a tile_b acc]
         matmul.state.pack
         [updated_state.])
       ([.updated_state])
@@ -263,8 +311,8 @@
     =
     {[state.]
       ([.state] matmul.state.unpack
-        [tile_size m k n block thread a b c tile_a tile_b acc.])
-      ([.tile_size m k n block thread a b c tile_a tile_b acc]
+        [tile_size m k n current_tile block thread a b c tile_a tile_b acc.])
+      ([.tile_size m k n current_tile block thread a b c tile_a tile_b acc]
         matmul.state.pack
         [state_out.])
       ([.state_out acc])
@@ -279,8 +327,8 @@
     =
     {[state field.]
       ([.state] matmul.state.unpack
-        [tile_size m k n block thread a b c tile_a tile_b _acc.])
-      ([.tile_size m k n block thread a b c tile_a tile_b field]
+        [tile_size m k n current_tile block thread a b c tile_a tile_b _acc.])
+      ([.tile_size m k n current_tile block thread a b c tile_a tile_b field]
         matmul.state.pack
         [updated_state.])
       ([.updated_state])
@@ -318,19 +366,12 @@
     (({[tile_size] [m] [k] [n]} matmul.state) value) ->
     (({[tile_size] [m] [k] [n]} matmul.state) value))
 
-  # A user writes this as a condition over opaque state, for example:
+  # A user writes this as a condition over opaque state:
   #
   #   defdata has-more-tiles(s) =
   #     s.current_tile < ceil_div(s.k, s.tile_size)
   #
-  # This example leaves the condition body opaque and focuses on the boundary:
-  # dataflow evaluates the state-dependent condition, then returns the state so
-  # control flow can branch on the same opaque state.
-  (arr matmul.state.eval-condition :
-    (({[tile_size] [m] [k] [n]} matmul.state) value) ->
-    (({[tile_size] [m] [k] [n]} matmul.state) value))
-
-  (def matmul.state.condition-branch :
+  (def matmul.state.has-more-tiles :
     (({[tile_size] [m] [k] [n]} matmul.state) value) ->
     ([tile_size m k n . tile_size m k n tile_size m k n] ({
       (matmul.state value)
@@ -338,8 +379,12 @@
     } coproduct))
     =
     {[entry.]
-      ([.entry] matmul.state.eval-condition [checked.])
-      ([.checked] control.branch [branched.])
+      ([.entry] matmul.state.tile-size.get [with_tile_size tile_size.])
+      ([.with_tile_size] matmul.state.k.get [with_k k_extent.])
+      ([.with_k] matmul.state.current-tile.get [with_current_tile current_tile.])
+      ([.k_extent tile_size] ceil-div [num_tiles.])
+      ([.current_tile num_tiles] index.lt-extent [has_more.])
+      ([.with_current_tile has_more] control.branch [branched.])
       ([.branched])
     })
 })
@@ -349,7 +394,9 @@
   # fields `data.init-acc` and `data.add-to-acc` change.
   (arr done : [] -> done)
 
-  (arr branch : [x] -> [x . x x])
+  (arr branch :
+    (([x c . x c] {value value}) product) ->
+    ([x c . x x] {value value}))
   (arr merge : [x . x x] -> [x])
 
   (def control-example :
@@ -361,7 +408,7 @@
     =
     {[entry.]
       ([.entry] data.init-acc [initialized.])
-      ([.initialized] data.matmul.state.condition-branch [then else.])
+      ([.initialized] data.matmul.state.has-more-tiles [then else.])
       ([.then else])
     })
 })

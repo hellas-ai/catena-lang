@@ -151,6 +151,9 @@
       (extent value)
     }) ->
     (({[tile_size] [m] [k] [n]} condition) value))
+  (arr index.succ :
+    (([x] index) value) ->
+    (([x] index) value))
   (arr guard :
     ([x c . x c] {
       (value)
@@ -469,27 +472,15 @@
   #   f32.zero;
   #   matmul.state.acc.put
   #
-  # It is left as an arrow here because the exact coercion from plain `f32` to
-  # the dimension-indexed field type is also generated schema plumbing.
-  (arr init-acc :
+  (def init-acc :
     (({[tile_size] [m] [k] [n]} matmul.state) value) ->
-    (({[tile_size] [m] [k] [n]} matmul.state) value))
-
-  # A user writes this as:
-  #
-  #   defdata add-to-acc(s, x) =
-  #     s.acc := s.acc + x
-  #
-  # Catena should lower it to:
-  #
-  #   matmul.state.acc.get;
-  #   f32.add;
-  #   matmul.state.acc.put
-  #
-  # The important point is that the user never rewrites the unchanged fields.
-  (arr add-to-acc :
-    (({[tile_size] [m] [k] [n]} matmul.state) value) ->
-    (({[tile_size] [m] [k] [n]} matmul.state) value))
+    (({[tile_size] [m] [k] [n]} matmul.state) value)
+    =
+    {[state.]
+      ([.] f32.zero [zero.])
+      ([.state zero] matmul.state.acc.put [updated_state.])
+      ([.updated_state])
+    })
 
   (def matmul.state.dot-by-thread :
     (({[tile_size] [m] [k] [n]} matmul.state) value) ->
@@ -525,9 +516,19 @@
       ([.updated_state])
     })
 
-  (arr matmul.state.advance-current-tile :
+  (def matmul.state.advance-current-tile :
     (({[tile_size] [m] [k] [n]} matmul.state) value) ->
-    (({[tile_size] [m] [k] [n]} matmul.state) value))
+    (({[tile_size] [m] [k] [n]} matmul.state) value)
+    =
+    {[state.]
+      ([.state] matmul.state.unpack
+        [tile_size m k n current_tile block thread a b c tile_a tile_b acc.])
+      ([.current_tile] index.succ [next_tile.])
+      ([.tile_size m k n next_tile block thread a b c tile_a tile_b acc]
+        matmul.state.pack
+        [updated_state.])
+      ([.updated_state])
+    })
 
   (def matmul.state.store-output :
     (({[tile_size] [m] [k] [n]} matmul.state) value) ->
@@ -608,8 +609,7 @@
 })
 
 (theory control syntax {
-  # Control flow only sees the opaque state. It does not know or care which
-  # fields `data.init-acc` and `data.add-to-acc` change.
+  # Control flow only sees the opaque state.
   (arr done : [] -> done)
 
   (arr branch : [x] -> [x . x x])

@@ -1,13 +1,13 @@
-mod compile_check_report;
 mod compile_graph_render;
-mod hexpr_render;
 
 use std::path::PathBuf;
 
-use catena::compile::{
-    CompileConfig, check_compile_theories, compile_graph, load_extended_theory_set_from_text,
+use catena::{
+    check::{check as check_elaborated, elaborate},
+    compile::{CompileConfig, compile_graph},
 };
 use clap::{Parser, Subcommand};
+use metacat::theory::RawTheorySet;
 
 #[derive(Parser)]
 #[command(name = "catena", version = env!("CARGO_PKG_VERSION"))]
@@ -19,7 +19,13 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Check a multi-theory hex file with metacat/Catena compile checks
+    /// Elaborate a multi-theory hex file by interleaving control/data theories
+    Elaborate {
+        #[arg()]
+        path: PathBuf,
+    },
+
+    /// Elaborate and typecheck a multi-theory hex file
     Check {
         #[arg()]
         path: PathBuf,
@@ -37,15 +43,6 @@ enum Command {
 
 #[derive(Subcommand)]
 enum CompileCommand {
-    /// Check data/control theories after Catena lift passes
-    Check {
-        #[arg()]
-        path: PathBuf,
-
-        #[arg(long)]
-        verbose: bool,
-    },
-
     /// Render one compile graph as SVG, inlining only same-theory definitions
     Graph {
         #[arg()]
@@ -67,14 +64,14 @@ fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Command::Check { path, verbose } => compile_check_command(path, verbose),
+        Command::Elaborate { path } => elaborate_command(path),
+        Command::Check { path, verbose } => check_command(path, verbose),
         Command::Compile { command } => compile_command(command),
     }
 }
 
 fn compile_command(command: CompileCommand) -> anyhow::Result<()> {
     match command {
-        CompileCommand::Check { path, verbose } => compile_check_command(path, verbose),
         CompileCommand::Graph {
             path,
             theory,
@@ -84,14 +81,34 @@ fn compile_command(command: CompileCommand) -> anyhow::Result<()> {
     }
 }
 
-fn compile_check_command(path: PathBuf, verbose: bool) -> anyhow::Result<()> {
+fn check_command(path: PathBuf, verbose: bool) -> anyhow::Result<()> {
     let path_display = path.display().to_string();
     let source = std::fs::read_to_string(path)?;
-    let config = CompileConfig::data_control();
-    let theory_set = load_extended_theory_set_from_text(&source, &config)?;
-    let report = check_compile_theories(&theory_set, &config)?;
+    let raw = RawTheorySet::from_text(&source)?;
+    let elaborated = elaborate(&raw)?;
+    let theory_set = check_elaborated(&elaborated)?;
 
-    compile_check_report::print_compile_check_report(&path_display, &report, verbose);
+    println!("OK: check passed");
+    println!("  file: {path_display}");
+    if verbose {
+        for (id, theory) in &theory_set.theories {
+            if let metacat::theory::Theory::Theory { arrows, .. } = theory {
+                let definitions = arrows
+                    .values()
+                    .filter(|arrow| arrow.definition.is_some())
+                    .count();
+                println!("  {}: {} definitions", id, definitions);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn elaborate_command(path: PathBuf) -> anyhow::Result<()> {
+    let source = std::fs::read_to_string(path)?;
+    let raw = RawTheorySet::from_text(&source)?;
+    let elaborated = elaborate(&raw)?;
+    println!("{}", elaborated.to_hexpr_text());
     Ok(())
 }
 
@@ -102,8 +119,10 @@ fn compile_graph_command(
     output: Option<PathBuf>,
 ) -> anyhow::Result<()> {
     let source = std::fs::read_to_string(path)?;
+    let raw = RawTheorySet::from_text(&source)?;
+    let elaborated = elaborate(&raw)?;
     let config = CompileConfig::data_control();
-    let theory_set = load_extended_theory_set_from_text(&source, &config)?;
+    let theory_set = check_elaborated(&elaborated)?;
     let graph = compile_graph(&theory_set, &config, theory, definition)?;
     let svg = compile_graph_render::nested_svg(&graph)?;
 

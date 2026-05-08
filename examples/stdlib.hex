@@ -1,0 +1,37 @@
+(theory syntax nat {
+  # product/coproduct
+  (arr * : 2 -> 1)
+  (arr + : 2 -> 1)
+
+  # unit/counit
+  (arr 0 : 0 -> 1)
+  (arr 1 : 0 -> 1)
+
+  # TODO: dynamically add definition `n` for each numeral n?
+  # Synthesize the nat as a left-biased unary type-level natural number
+  # expression.
+  # NOTE: unlike Nat, these are *not* automatically unpacked.
+  (def 2 : 0 -> 1 = ({1 1} +))
+
+  # TODO: Builtin dtype definitions
+  #(def f32 : 0 -> 1 = (32 bitvec))
+  (arr f32 : 0 -> 1)
+  (arr bool : 0 -> 1)
+})
+
+(theory data syntax {
+  (arr f32.zero : [] -> f32)
+  (arr f32.one : [] -> f32)
+  (arr f32.add : {f32 f32} -> f32)
+  (arr f32.gt : {f32 f32} -> 2)
+
+  (arr copy : [x] -> [x . x x])
+  (arr discard : [x] -> [x.])
+})
+
+(theory control syntax {
+  (arr merge : [x . x x] -> [x])
+  (arr never : [x.] -> [x])
+
+  (def test : ({f32 f32} *) -> f32 = data.f32.add)
+})

@@ -29,6 +29,11 @@
   (arr coproduct : 2 -> 1)
   (arr unit : 0 -> 1)
   (arr counit : 0 -> 1)
+
+  (arr * : 2 -> 1)
+  (arr + : 2 -> 1)
+  (arr 1 : 0 -> 1)
+  (arr 0 : 0 -> 1)
 })
 
 (theory data syntax {
@@ -82,18 +87,6 @@
   (arr gpu.shared.load :
     {[tile ix iy]} ->
     ([tile ix iy.] f32 value))
-
-  (arr block.row :
-    {(([m] extent) const) (([tile_size] extent) const) (gpu.block const) (gpu.thread const)} ->
-    (([m tile_size . m] index) value))
-
-  (arr block.col :
-    {(([n] extent) const) (([tile_size] extent) const) (gpu.block const) (gpu.thread const)} ->
-    (([n tile_size . n] index) value))
-
-  (arr current-tile.offset :
-    {[target_extent tile_extent current_tile local]} ->
-    ([target_extent tile_extent current_tile local . target_extent] index value))
 
   (arr gpu.global.load :
     {[matrix] (([tile_size] gpu.view) value)} ->

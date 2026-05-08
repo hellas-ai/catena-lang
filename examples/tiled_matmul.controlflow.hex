@@ -52,6 +52,11 @@
   (arr coproduct : 2 -> 1)
   (arr unit : 0 -> 1)
   (arr counit : 0 -> 1)
+
+  (arr * : 2 -> 1)
+  (arr + : 2 -> 1)
+  (arr 1 : 0 -> 1)
+  (arr 0 : 0 -> 1)
 })
 
 (theory data syntax {

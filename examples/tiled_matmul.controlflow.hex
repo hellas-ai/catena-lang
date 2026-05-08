@@ -48,6 +48,7 @@
 
   (arr value : 1 -> 1)
   (arr unique : 1 -> 1)
+  (arr bound : 1 -> 1)
 
   (arr * : 2 -> 1)
   (arr + : 2 -> 1)
@@ -58,6 +59,36 @@
 (theory data syntax {
   (arr f32.zero : [] -> (f32 value))
   (arr f32.add : {(f32 value) (f32 value)} -> (f32 value))
+  (arr f32.mul : {(f32 value) (f32 value)} -> (f32 value))
+  (arr f32 : [] -> f32)
+  (arr bound.eta : [t] -> ([t . t t] {bound value}))
+  (arr reduce :
+    {
+      (extent value)
+      ([x] value)
+      ([x] bound)
+      (([tile_size] index) bound)
+      ([x] value)
+    } ->
+    ([tile_size x x tile_size x . x] value))
+  (arr extent.index-type :
+    (([x] extent) value) ->
+    ([x] index))
+  (arr thread.x :
+    {
+      (([tile_size] extent) value)
+      (gpu.thread value)
+    } ->
+    (([tile_size] index) value))
+  (arr thread.y :
+    {
+      (([tile_size] extent) value)
+      (gpu.thread value)
+    } ->
+    (([tile_size] index) value))
+  (arr gpu.shared.load :
+    {[tile ix iy]} ->
+    ([tile ix iy .] f32 value))
   (arr gpu.view.thread :
     ([tile_size . tile_size] {
       (extent value)
@@ -445,9 +476,39 @@
     (({[tile_size] [m] [k] [n]} matmul.state) value) ->
     (({[tile_size] [m] [k] [n]} matmul.state) value))
 
-  (arr matmul.state.dot-by-thread :
+  (def matmul.state.dot-by-thread :
     (({[tile_size] [m] [k] [n]} matmul.state) value) ->
-    (({[tile_size] [m] [k] [n]} matmul.state) value))
+    (({[tile_size] [m] [k] [n]} matmul.state) value)
+    =
+    {[state.]
+      ([.state] matmul.state.unpack
+        [tile_size m k n current_tile block thread a b c tile_a tile_b acc.])
+
+      # for tile_inner_index in range(tile_size):
+      #   acc += tile_A[thread.y, tile_inner_index] * tile_B[tile_inner_index, thread.x]
+      ([.tile_size] extent.index-type bound.eta
+        [tile_inner_index_r tile_inner_index.])
+      ([.] f32 bound.eta
+        [acc_r acc_q.])
+
+      ([.tile_size thread] thread.y [thread_y.])
+      ([.tile_size thread] thread.x [thread_x.])
+      ([.tile_a thread_y tile_inner_index] gpu.shared.load
+        [a_val.])
+      ([.tile_b tile_inner_index thread_x] gpu.shared.load
+        [b_val.])
+      ([.a_val b_val] f32.mul [dot.])
+      ([.acc_q dot] f32.add [acc_next.])
+
+      ([.tile_size acc acc_r tile_inner_index_r acc_next]
+        reduce
+        [acc_out.])
+
+      ([.tile_size m k n current_tile block thread a b c tile_a tile_b acc_out]
+        matmul.state.pack
+        [updated_state.])
+      ([.updated_state])
+    })
 
   (arr matmul.state.advance-current-tile :
     (({[tile_size] [m] [k] [n]} matmul.state) value) ->

@@ -332,7 +332,7 @@ mod tests {
                 .theories
                 .get(&TheoryId("control".parse().unwrap()))
                 .and_then(|theory| theory.get_arrow(&"data.wide".parse().unwrap()))
-            .is_some()
+                .is_some()
         );
     }
 
@@ -394,7 +394,9 @@ mod tests {
             checked
                 .theories
                 .get(&TheoryId("data".parse().unwrap()))
-                .and_then(|theory| theory.get_arrow(&"control.control-to-data-target".parse().unwrap()))
+                .and_then(
+                    |theory| theory.get_arrow(&"control.control-to-data-target".parse().unwrap())
+                )
                 .is_some()
         );
     }

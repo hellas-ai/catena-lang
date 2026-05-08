@@ -57,6 +57,7 @@
 })
 
 (theory data syntax {
+  (arr done : [] -> (done value))
   (arr f32.zero : [] -> (f32 value))
   (arr f32.add : {(f32 value) (f32 value)} -> (f32 value))
   (arr f32.mul : {(f32 value) (f32 value)} -> (f32 value))
@@ -111,12 +112,26 @@
       (gpu.thread value)
     }) ->
     (([tile_size k . tile_size] gpu.view) value))
+  (arr gpu.view.group-by-tile :
+    ([tile_size . tile_size] {
+      (extent value)
+      (gpu.block value)
+      (gpu.thread value)
+    }) ->
+    (([tile_size] gpu.view) value))
   (arr gpu.global.load :
     ([matrix tile_size . matrix tile_size] {
       (value)
       (([tile_size] gpu.view) value)
     }) ->
     ([matrix tile_size .] f32 value))
+  (arr gpu.global.store :
+    ([matrix tile_size . matrix tile_size] {
+      (unique)
+      (([tile_size] gpu.view) value)
+      (f32 value)
+    }) ->
+    ([matrix tile_size . matrix] unique))
   (arr gpu.shared.store :
     ([tile tile_size . tile tile_size] {
       (unique)
@@ -514,9 +529,21 @@
     (({[tile_size] [m] [k] [n]} matmul.state) value) ->
     (({[tile_size] [m] [k] [n]} matmul.state) value))
 
-  (arr matmul.state.store-output :
+  (def matmul.state.store-output :
     (({[tile_size] [m] [k] [n]} matmul.state) value) ->
-    ([tile_size m k n .] done value))
+    ([tile_size m k n .] done value)
+    =
+    {[state.]
+      ([.state] matmul.state.unpack
+        [tile_size m k n current_tile block thread a b c tile_a tile_b acc.])
+      ([.tile_size block thread] gpu.view.group-by-tile [c_view.])
+      ([.c c_view acc] gpu.global.store [c_out.])
+      ([.tile_size m k n current_tile block thread a b c_out tile_a tile_b acc]
+        matmul.state.pack
+        [_updated_state.])
+      ([.] done [done.])
+      ([.done])
+    })
 
   # A user writes this as:
   #

@@ -40,6 +40,7 @@
   (arr gpu.block : 0 -> 1)
   (arr gpu.thread : 0 -> 1)
   (arr gpu.global : 3 -> 1)
+  (arr gpu.view : 1 -> 1)
   (arr gpu.shared : 3 -> 1)
   (arr matmul.state : 4 -> 1)
   (arr done : 0 -> 1)
@@ -55,6 +56,41 @@
 (theory data syntax {
   (arr f32.zero : [] -> (f32 value))
   (arr f32.add : {(f32 value) (f32 value)} -> (f32 value))
+  (arr gpu.view.thread :
+    ([tile_size . tile_size] {
+      (extent value)
+      (gpu.thread value)
+    }) ->
+    (([tile_size] gpu.view) value))
+  (arr gpu.view.block-row-current-tile-col :
+    ([tile_size k . tile_size k] {
+      (extent value)
+      (index value)
+      (gpu.block value)
+      (gpu.thread value)
+    }) ->
+    (([tile_size k . tile_size] gpu.view) value))
+  (arr gpu.view.current-tile-row-block-col :
+    ([tile_size k . tile_size k] {
+      (extent value)
+      (index value)
+      (gpu.block value)
+      (gpu.thread value)
+    }) ->
+    (([tile_size k . tile_size] gpu.view) value))
+  (arr gpu.global.load :
+    ([matrix tile_size . matrix tile_size] {
+      (value)
+      (([tile_size] gpu.view) value)
+    }) ->
+    ([matrix tile_size .] f32 value))
+  (arr gpu.shared.store :
+    ([tile tile_size . tile tile_size] {
+      (unique)
+      (([tile_size] gpu.view) value)
+      (f32 value)
+    }) ->
+    ([tile tile_size . tile] unique))
   (arr ceil-div :
     ([tile_size m k n . k tile_size] {
       (extent value)
@@ -196,6 +232,38 @@
         matmul.state.pack
         [state_out.])
       ([.state_out thread])
+    })
+
+  (def matmul.state.a.get :
+    (({[tile_size] [m] [k] [n]} matmul.state) value) ->
+    ([tile_size m k n . tile_size m k n m k] {
+      (matmul.state value)
+      (({f32 [m] [k]} gpu.global) value)
+    })
+    =
+    {[state.]
+      ([.state] matmul.state.unpack
+        [tile_size m k n current_tile block thread a b c tile_a tile_b acc.])
+      ([.tile_size m k n current_tile block thread a b c tile_a tile_b acc]
+        matmul.state.pack
+        [state_out.])
+      ([.state_out a])
+    })
+
+  (def matmul.state.b.get :
+    (({[tile_size] [m] [k] [n]} matmul.state) value) ->
+    ([tile_size m k n . tile_size m k n k n] {
+      (matmul.state value)
+      (({f32 [k] [n]} gpu.global) value)
+    })
+    =
+    {[state.]
+      ([.state] matmul.state.unpack
+        [tile_size m k n current_tile block thread a b c tile_a tile_b acc.])
+      ([.tile_size m k n current_tile block thread a b c tile_a tile_b acc]
+        matmul.state.pack
+        [state_out.])
+      ([.state_out b])
     })
 
   (def matmul.state.c.get :
@@ -375,6 +443,45 @@
     (({[tile_size] [m] [k] [n]} matmul.state) value) ->
     (({[tile_size] [m] [k] [n]} matmul.state) value))
 
+  # A user writes this as:
+  #
+  #   defdata cooperative-global-to-shared(s) =
+  #     s.tile_a[[s.thread]] =
+  #       s.a.block_row_current_tile_col(s.tile_size, s.current_tile,
+  #                                      s.block, s.thread)
+  #     s.tile_b[[s.thread]] =
+  #       s.b.current_tile_row_block_col(s.tile_size, s.current_tile,
+  #                                      s.block, s.thread)
+  #
+  (def matmul.state.cooperative-global-to-shared :
+    (({[tile_size] [m] [k] [n]} matmul.state) value) ->
+    (({[tile_size] [m] [k] [n]} matmul.state) value)
+    =
+    {[state.]
+      ([.state] matmul.state.unpack
+        [tile_size m k n current_tile block thread a b c tile_a tile_b acc.])
+      ([.tile_size thread] gpu.view.thread [shared_thread_view.])
+
+      ([.tile_size current_tile block thread]
+        gpu.view.block-row-current-tile-col
+        [a_view.])
+      ([.a a_view] gpu.global.load [a_val.])
+      ([.tile_a shared_thread_view a_val] gpu.shared.store
+        [tile_a_loaded.])
+
+      ([.tile_size current_tile block thread]
+        gpu.view.current-tile-row-block-col
+        [b_view.])
+      ([.b b_view] gpu.global.load [b_val.])
+      ([.tile_b shared_thread_view b_val] gpu.shared.store
+        [tile_b_loaded.])
+
+      ([.tile_size m k n current_tile block thread a b c tile_a_loaded tile_b_loaded acc]
+        matmul.state.pack
+        [state_out.])
+      ([.state_out])
+    })
+
   # A user writes this as a condition over opaque state:
   #
   #   defdata has-more-tiles(s) =
@@ -405,17 +512,34 @@
 
   (arr branch : [x] -> [x . x x])
   (arr merge : [x . x x] -> [x])
+  (arr matmul.state.barrier.sync :
+    {
+      (({[tile_size] [m] [k] [n]} matmul.state) value)
+      (({[tile_size] [m] [k] [n]} matmul.state) value)
+    } ->
+    {
+      (({[tile_size] [m] [k] [n]} matmul.state) value)
+      (({[tile_size] [m] [k] [n]} matmul.state) value)
+    })
 
   (def control-example :
-    (({[tile_size] [m] [k] [n]} matmul.state) value) ->
     ([tile_size m k n . tile_size m k n tile_size m k n] {
+      (matmul.state value)
+      (matmul.state value)
+    }) ->
+    ([tile_size m k n . tile_size m k n tile_size m k n tile_size m k n] {
+      (matmul.state value)
       (matmul.state value)
       (matmul.state value)
     })
     =
-    {[entry.]
+    {[entry after_sync_phase.]
       ([.entry] data.init-acc [initialized.])
       ([.initialized] data.matmul.state.has-more-tiles [then else.])
-      ([.then else])
+        ([.then] data.matmul.state.cooperative-global-to-shared [loaded.])
+        ([.loaded after_sync_phase]
+          matmul.state.barrier.sync
+          [synced after_sync_phase_out.])
+      ([.synced else after_sync_phase_out])
     })
 })

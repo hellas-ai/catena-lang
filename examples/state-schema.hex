@@ -67,6 +67,15 @@
       (extent value)
     }) ->
     (({[tile_size] [m] [k] [n]} condition) value))
+  (arr guard :
+    ([x c . x c] {
+      (value)
+      (value)
+    }) ->
+    ([x c . x x] ({
+      (value)
+      (value)
+    } coproduct)))
 
   # The following lenses are generated from the surface `state` schema. Each
   # lens is implemented by unpacking every field, projecting or replacing one
@@ -384,7 +393,7 @@
       ([.with_k] matmul.state.current-tile.get [with_current_tile current_tile.])
       ([.k_extent tile_size] ceil-div [num_tiles.])
       ([.current_tile num_tiles] index.lt-extent [has_more.])
-      ([.with_current_tile has_more] control.branch [branched.])
+      ([.with_current_tile has_more] guard [branched.])
       ([.branched])
     })
 })
@@ -394,9 +403,7 @@
   # fields `data.init-acc` and `data.add-to-acc` change.
   (arr done : [] -> done)
 
-  (arr branch :
-    (([x c . x c] {value value}) product) ->
-    ([x c . x x] {value value}))
+  (arr branch : [x] -> [x . x x])
   (arr merge : [x . x x] -> [x])
 
   (def control-example :

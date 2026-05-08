@@ -25,11 +25,6 @@
   # a wire labeled with const cannot be output of a box
   (arr const : 1 -> 1)
 
-  (arr product : 2 -> 1)
-  (arr coproduct : 2 -> 1)
-  (arr unit : 0 -> 1)
-  (arr counit : 0 -> 1)
-
   (arr * : 2 -> 1)
   (arr + : 2 -> 1)
   (arr 1 : 0 -> 1)

@@ -48,10 +48,6 @@
 
   (arr value : 1 -> 1)
   (arr unique : 1 -> 1)
-  (arr product : 2 -> 1)
-  (arr coproduct : 2 -> 1)
-  (arr unit : 0 -> 1)
-  (arr counit : 0 -> 1)
 
   (arr * : 2 -> 1)
   (arr + : 2 -> 1)
@@ -117,7 +113,7 @@
     ([x c . x x] ({
       (value)
       (value)
-    } coproduct)))
+    } +)))
 
   # The following lenses are generated from the surface `state` schema. Each
   # lens is implemented by unpacking every field, projecting or replacing one
@@ -510,7 +506,7 @@
     ([tile_size m k n . tile_size m k n tile_size m k n] ({
       (matmul.state value)
       (matmul.state value)
-    } coproduct))
+    } +))
     =
     {[entry.]
       ([.entry] matmul.state.tile-size.get [with_tile_size tile_size.])
@@ -539,7 +535,7 @@
       (matmul.state value)
     }) ->
     ([tile_size m k n . tile_size m k n tile_size m k n tile_size m k n] {
-      (matmul.state value)
+      ([tile_size m k n .] done value)
       (matmul.state value)
       (matmul.state value)
     })
@@ -560,7 +556,7 @@
 
         # Suspend before the next iteration can overwrite shared tiles.
         ([.computed after_compute_phase] gpu.sync [after_compute after_compute_phase_out.])
-        ([.after_compute] data.matmul.state.advance-current-tile [has_more_tiles_loopback.])
+        ([.after_compute] data.matmul.state.advance-current-tile [has_more_tiles_loopback_out.])
 
       ([.has_more_times_return] data.matmul.state.store-output [done.])
       ([.done after_loaded_phase_out after_compute_phase_out])

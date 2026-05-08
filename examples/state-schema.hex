@@ -33,6 +33,7 @@
   (arr nat : 0 -> 1)
   (arr extent : 1 -> 1)
   (arr index : 1 -> 1)
+  (arr bool : 0 -> 1)
   (arr f32 : 0 -> 1)
   (arr gpu.block : 0 -> 1)
   (arr gpu.thread : 0 -> 1)
@@ -316,6 +317,31 @@
   (arr add-to-acc :
     (({[tile_size] [m] [k] [n]} matmul.state) value) ->
     (({[tile_size] [m] [k] [n]} matmul.state) value))
+
+  # A user writes this as a condition over opaque state, for example:
+  #
+  #   defdata has-more-tiles(s) =
+  #     s.current_tile < ceil_div(s.k, s.tile_size)
+  #
+  # This example leaves the condition body opaque and focuses on the boundary:
+  # dataflow evaluates the state-dependent condition, then returns the state so
+  # control flow can branch on the same opaque state.
+  (arr matmul.state.eval-condition :
+    (({[tile_size] [m] [k] [n]} matmul.state) value) ->
+    (({[tile_size] [m] [k] [n]} matmul.state) value))
+
+  (def matmul.state.condition-branch :
+    (({[tile_size] [m] [k] [n]} matmul.state) value) ->
+    ([tile_size m k n . tile_size m k n tile_size m k n] ({
+      (matmul.state value)
+      (matmul.state value)
+    } coproduct))
+    =
+    {[entry.]
+      ([.entry] matmul.state.eval-condition [checked.])
+      ([.checked] control.branch [branched.])
+      ([.branched])
+    })
 })
 
 (theory control syntax {
@@ -323,12 +349,19 @@
   # fields `data.init-acc` and `data.add-to-acc` change.
   (arr done : [] -> done)
 
+  (arr branch : [x] -> [x . x x])
+  (arr merge : [x . x x] -> [x])
+
   (def control-example :
     (({[tile_size] [m] [k] [n]} matmul.state) value) ->
-    (({[tile_size] [m] [k] [n]} matmul.state) value)
+    ([tile_size m k n . tile_size m k n tile_size m k n] {
+      (matmul.state value)
+      (matmul.state value)
+    })
     =
     {[entry.]
       ([.entry] data.init-acc [initialized.])
-      ([.initialized])
+      ([.initialized] data.matmul.state.condition-branch [then else.])
+      ([.then else])
     })
 })

@@ -35,10 +35,15 @@ pub fn lift_with_tensor(
     prefix: &'static str,
     tensor: &str,
     unit: &str,
+    unwrap_tensors: &[&str],
     excluded_prefixes: &[&str],
 ) -> Result<Theory, LiftError> {
     let tensor_key = require_object(syntax, prefix, tensor, 2, 1)?;
     let unit_key = require_object(syntax, prefix, unit, 0, 1)?;
+    let unwrap_tensor_keys = unwrap_tensors
+        .iter()
+        .map(|object| require_object(syntax, prefix, object, 2, 1))
+        .collect::<Result<Vec<_>, _>>()?;
     let mut theory = target.clone();
     let Theory::Theory { arrows, .. } = &mut theory else {
         return Err(LiftError::TargetIsNotUserTheory { prefix });
@@ -57,9 +62,23 @@ pub fn lift_with_tensor(
                     name: lifted_name.clone(),
                 })?;
         let lifted_source =
-            lift_object_map(&arrow.type_maps.0, syntax, &tensor_key, &unit_key, prefix)?;
+            lift_object_map(
+                &arrow.type_maps.0,
+                syntax,
+                &tensor_key,
+                &unit_key,
+                &unwrap_tensor_keys,
+                prefix,
+            )?;
         let lifted_target =
-            lift_object_map(&arrow.type_maps.1, syntax, &tensor_key, &unit_key, prefix)?;
+            lift_object_map(
+                &arrow.type_maps.1,
+                syntax,
+                &tensor_key,
+                &unit_key,
+                &unwrap_tensor_keys,
+                prefix,
+            )?;
 
         let mut lifted_arrow = arrow.clone();
         lifted_arrow.name = lifted_operation.clone();
@@ -127,6 +146,7 @@ fn lift_object_map(
     syntax: &Theory,
     tensor_key: &Operation,
     unit_key: &Operation,
+    unwrap_tensor_keys: &[Operation],
     prefix: &'static str,
 ) -> Result<OpenHypergraph<(), Operation>, LiftError> {
     for op in &map.hypergraph.edges {
@@ -139,14 +159,16 @@ fn lift_object_map(
     }
 
     let mut lifted = map.clone();
+    let unwrapped_targets = unwrap_top_level_tensors(&mut lifted, unwrap_tensor_keys);
 
-    match lifted.targets.len() {
-        0 => {
+    match (lifted.targets.len(), unwrapped_targets) {
+        (0, _) => {
             let unit_node = lifted.new_node(());
             lifted.new_edge(unit_key.clone(), (Vec::new(), vec![unit_node]));
             lifted.targets = vec![unit_node];
         }
-        1 => {}
+        (1, _) => {}
+        (_, true) => {}
         _ => {
             let mut inputs = lifted.targets.clone();
             while inputs.len() > 1 {
@@ -161,4 +183,63 @@ fn lift_object_map(
     }
 
     Ok(lifted)
+}
+
+fn unwrap_top_level_tensors(
+    map: &mut OpenHypergraph<(), Operation>,
+    unwrap_tensor_keys: &[Operation],
+) -> bool {
+    if unwrap_tensor_keys.is_empty() {
+        return false;
+    }
+
+    let mut delete_edges = Vec::new();
+    let targets = map
+        .targets
+        .iter()
+        .flat_map(|target| unwrap_target(map, *target, unwrap_tensor_keys, &mut delete_edges))
+        .collect::<Vec<_>>();
+    let unwrapped = !delete_edges.is_empty();
+    map.targets = targets;
+    map.delete_edges(&delete_edges);
+    unwrapped
+}
+
+fn unwrap_target(
+    map: &OpenHypergraph<(), Operation>,
+    target: open_hypergraphs::lax::NodeId,
+    unwrap_tensor_keys: &[Operation],
+    delete_edges: &mut Vec<open_hypergraphs::lax::EdgeId>,
+) -> Vec<open_hypergraphs::lax::NodeId> {
+    let Some((edge_id, sources)) = producer_tensor_sources(map, target, unwrap_tensor_keys) else {
+        return vec![target];
+    };
+
+    delete_edges.push(edge_id);
+    sources
+        .iter()
+        .flat_map(|source| unwrap_target(map, *source, unwrap_tensor_keys, delete_edges))
+        .collect()
+}
+
+fn producer_tensor_sources(
+    map: &OpenHypergraph<(), Operation>,
+    target: open_hypergraphs::lax::NodeId,
+    unwrap_tensor_keys: &[Operation],
+) -> Option<(open_hypergraphs::lax::EdgeId, Vec<open_hypergraphs::lax::NodeId>)> {
+    map.hypergraph
+        .edges
+        .iter()
+        .zip(map.hypergraph.adjacency.iter())
+        .enumerate()
+        .find_map(|(index, (operation, edge))| {
+            if unwrap_tensor_keys.contains(operation)
+                && edge.targets.len() == 1
+                && edge.targets[0] == target
+            {
+                Some((open_hypergraphs::lax::EdgeId(index), edge.sources.clone()))
+            } else {
+                None
+            }
+        })
 }

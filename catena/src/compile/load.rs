@@ -86,6 +86,7 @@ fn lifted_declarations(
             extension.prefix,
             extension.tensor,
             extension.unit,
+            &extension.unwrap_tensors,
             &excluded_prefixes,
         )?;
         let declarations = lifted_extension_declarations(raw, &extended, extension)?;

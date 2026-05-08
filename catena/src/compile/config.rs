@@ -11,6 +11,7 @@ pub struct TheoryExtension {
     pub prefix: &'static str,
     pub tensor: &'static str,
     pub unit: &'static str,
+    pub unwrap_tensors: Vec<&'static str>,
 }
 
 impl CompileConfig {
@@ -24,6 +25,7 @@ impl CompileConfig {
                     prefix: "data",
                     tensor: "product",
                     unit: "unit",
+                    unwrap_tensors: vec!["coproduct"],
                 },
                 TheoryExtension {
                     target: "data",
@@ -31,6 +33,7 @@ impl CompileConfig {
                     prefix: "control",
                     tensor: "coproduct",
                     unit: "unit",
+                    unwrap_tensors: vec!["product"],
                 },
             ],
         }

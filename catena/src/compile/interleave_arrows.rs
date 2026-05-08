@@ -159,60 +159,60 @@ fn prepare_boundary_type_map(map: &Hexpr, syntax: &Theory, boundary: &BoundaryTe
 /// For example, when lifting data into control, a data target like `({a b} +)` already describes
 /// a control-style alternative boundary. We expose it as `{a b}` instead of packing the two wires
 /// again into one control value.
+///
+/// This only exposes terms built from the target tensor itself. Other operations are treated as
+/// opaque leaves, so `(({a b} +) value)` is left unchanged rather than rewriting under `value`.
 fn expose_boundary_tensor(map: &Hexpr, target_wire_shape: &Operation) -> Option<Hexpr> {
-    let (exposed, changed) = expose_boundary_tensors(map, target_wire_shape);
-    changed.then_some(exposed)
+    let Hexpr::Composition(steps) = map else {
+        return None;
+    };
+    let Some(last) = steps.last() else {
+        return None;
+    };
+
+    // If the final step already is the target theory's wire shape, remove it:
+    // the target theory should see the individual wires, not a repacked object.
+    if let Hexpr::Operation(op) = last
+        && op == target_wire_shape
+    {
+        let exposed = match &steps[..steps.len() - 1] {
+            [] => return None,
+            [only] => only.clone(),
+            rest => Hexpr::Composition(rest.to_vec()),
+        };
+        return Some(expose_nested_boundary_tensors(
+            &exposed,
+            target_wire_shape,
+        ));
+    }
+
+    // A boundary tensor can be the final step of a larger contextual map, for
+    // example `[i . i] ; ({a b} +)`. Recurse only through the final step so
+    // earlier operations remain opaque.
+    let exposed_last = expose_boundary_tensor(last, target_wire_shape)?;
+    let mut exposed = steps[..steps.len() - 1].to_vec();
+    exposed.push(exposed_last);
+    match exposed.as_slice() {
+        [only] => Some(only.clone()),
+        _ => Some(Hexpr::Composition(exposed)),
+    }
 }
 
-fn expose_boundary_tensors(map: &Hexpr, target_wire_shape: &Operation) -> (Hexpr, bool) {
+fn expose_nested_boundary_tensors(map: &Hexpr, target_wire_shape: &Operation) -> Hexpr {
+    if let Some(exposed) = expose_boundary_tensor(map, target_wire_shape) {
+        return exposed;
+    }
+
     match map {
-        Hexpr::Tensor(factors) => {
-            let mut changed = false;
-            let exposed = factors
+        Hexpr::Tensor(factors) => Hexpr::Tensor(
+            factors
                 .iter()
-                .map(|factor| {
-                    let (factor, factor_changed) =
-                        expose_boundary_tensors(factor, target_wire_shape);
-                    changed |= factor_changed;
-                    factor
-                })
-                .collect();
-            (Hexpr::Tensor(exposed), changed)
-        }
-        Hexpr::Composition(steps) => {
-            let Some(last) = steps.last() else {
-                return (map.clone(), false);
-            };
-
-            // If the final step already is the target theory's wire shape,
-            // remove it: the target theory should see the individual wires,
-            // not a repacked object.
-            if let Hexpr::Operation(op) = last
-                && op == target_wire_shape
-            {
-                let exposed = match &steps[..steps.len() - 1] {
-                    [] => return (map.clone(), false),
-                    [only] => only.clone(),
-                    rest => Hexpr::Composition(rest.to_vec()),
-                };
-                let (exposed, _) = expose_boundary_tensors(&exposed, target_wire_shape);
-                return (exposed, true);
-            }
-
-            // Boundary tensors may appear inside nested type expressions too,
-            // so recurse through every composition step.
-            let mut changed = false;
-            let exposed = steps
-                .iter()
-                .map(|step| {
-                    let (step, step_changed) = expose_boundary_tensors(step, target_wire_shape);
-                    changed |= step_changed;
-                    step
-                })
-                .collect();
-            (Hexpr::Composition(exposed), changed)
-        }
-        _ => (map.clone(), false),
+                .map(|factor| expose_nested_boundary_tensors(factor, target_wire_shape))
+                .collect(),
+        ),
+        // Do not recurse through arbitrary operations. Only explicit target
+        // tensor structure is exposed; all other constructors remain opaque.
+        _ => map.clone(),
     }
 }
 
@@ -410,12 +410,16 @@ mod tests {
           (arr + : 2 -> 1)
           (arr 0 : 0 -> 1)
           (arr f32 : 0 -> 1)
+          (arr value : 1 -> 1)
         })
 
         (theory data syntax {
           (arr data-to-control-long :
             ({f32 ({f32 f32} +)} +) ->
             ({({f32 f32} +) f32} +))
+          (arr data-to-control-mixed :
+            (({f32 f32} +) value) ->
+            f32)
 
           # after interleaving, this should typecheck only if every product
           # boundary is exposed when lifted into data
@@ -424,12 +428,20 @@ mod tests {
             {{f32 f32} f32}
             =
             control.control-to-data-long)
+          (def expected-control-to-data-mixed :
+            (({f32 f32} *) value) ->
+            f32
+            =
+            control.control-to-data-mixed)
         })
 
         (theory control syntax {
           (arr control-to-data-long :
             ({f32 ({f32 f32} *)} *) ->
             ({({f32 f32} *) f32} *))
+          (arr control-to-data-mixed :
+            (({f32 f32} *) value) ->
+            f32)
 
           # after interleaving, this should typecheck only if every coproduct
           # boundary is exposed when lifted into control
@@ -438,6 +450,11 @@ mod tests {
             {{f32 f32} f32}
             =
             data.data-to-control-long)
+          (def expected-data-to-control-mixed :
+            (({f32 f32} +) value) ->
+            f32
+            =
+            data.data-to-control-mixed)
         })
         "#;
 

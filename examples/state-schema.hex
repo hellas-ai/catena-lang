@@ -1,0 +1,334 @@
+# This file sketches the Catena "state schema" idea.
+#
+# Goal:
+#
+#   Control-flow diagrams should carry an opaque `matmul.state` wire:
+#
+#     matmul.state -> matmul.state
+#
+#   Dataflow definitions should still be able to describe what changes inside
+#   that state without manually unpacking and repacking every unchanged field.
+#
+# A future Catena surface syntax could be:
+#
+#   (state matmul.state(tile_size, m, k, n) {
+#     tile_size : ([.tile_size] extent value)
+#     m         : ([.m] extent value)
+#     k         : ([.k] extent value)
+#     n         : ([.n] extent value)
+#     block     : (gpu.block value)
+#     thread    : (gpu.thread value)
+#     a         : (({f32 [m] [k]} gpu.global) value)
+#     b         : (({f32 [k] [n]} gpu.global) value)
+#     c         : (({f32 [m] [n]} gpu.global) unique)
+#     tile_a    : (({f32 [tile_size] [tile_size]} gpu.shared) unique)
+#     tile_b    : (({f32 [tile_size] [tile_size]} gpu.shared) unique)
+#     acc       : (f32 value)
+#   })
+#
+# The rest of the file shows the post-expansion form that metacat sees:
+# ordinary first-order objects and arrows.
+
+(theory syntax nat {
+  (arr nat : 0 -> 1)
+  (arr extent : 1 -> 1)
+  (arr index : 1 -> 1)
+  (arr f32 : 0 -> 1)
+  (arr gpu.block : 0 -> 1)
+  (arr gpu.thread : 0 -> 1)
+  (arr gpu.global : 3 -> 1)
+  (arr gpu.shared : 3 -> 1)
+  (arr matmul.state : 4 -> 1)
+  (arr done : 0 -> 1)
+
+  (arr value : 1 -> 1)
+  (arr unique : 1 -> 1)
+  (arr product : 2 -> 1)
+  (arr coproduct : 2 -> 1)
+  (arr unit : 0 -> 1)
+  (arr counit : 0 -> 1)
+})
+
+(theory data syntax {
+  (arr f32.zero : [] -> (f32 value))
+  (arr f32.add : {(f32 value) (f32 value)} -> (f32 value))
+
+  # The following lenses are generated from the surface `state` schema. Each
+  # lens is implemented by unpacking every field, projecting or replacing one
+  # field, then packing the complete state again.
+  (arr matmul.state.pack :
+    ([tile_size m k n .
+      tile_size m k n m k k n m n tile_size tile_size tile_size tile_size] {
+      (extent value)
+      (extent value)
+      (extent value)
+      (extent value)
+      (gpu.block value)
+      (gpu.thread value)
+      (({f32 [m] [k]} gpu.global) value)
+      (({f32 [k] [n]} gpu.global) value)
+      (({f32 [m] [n]} gpu.global) unique)
+      (({f32 [tile_size] [tile_size]} gpu.shared) unique)
+      (({f32 [tile_size] [tile_size]} gpu.shared) unique)
+      (f32 value)
+    }) ->
+    (({[tile_size] [m] [k] [n]} matmul.state) value))
+
+  (arr matmul.state.unpack :
+    (({[tile_size] [m] [k] [n]} matmul.state) value) ->
+    ([tile_size m k n .
+      tile_size m k n m k k n m n tile_size tile_size tile_size tile_size] {
+      (extent value)
+      (extent value)
+      (extent value)
+      (extent value)
+      (gpu.block value)
+      (gpu.thread value)
+      (({f32 [m] [k]} gpu.global) value)
+      (({f32 [k] [n]} gpu.global) value)
+      (({f32 [m] [n]} gpu.global) unique)
+      (({f32 [tile_size] [tile_size]} gpu.shared) unique)
+      (({f32 [tile_size] [tile_size]} gpu.shared) unique)
+      (f32 value)
+    }))
+
+  (def matmul.state.tile-size.get :
+    (({[tile_size] [m] [k] [n]} matmul.state) value) ->
+    ([tile_size m k n . tile_size m k n tile_size] {
+      (matmul.state value)
+      (extent value)
+    })
+    =
+    {[state.]
+      ([.state] matmul.state.unpack
+        [tile_size m k n block thread a b c tile_a tile_b acc.])
+      ([.tile_size m k n block thread a b c tile_a tile_b acc]
+        matmul.state.pack
+        [state_out.])
+      ([.state_out tile_size])
+    })
+
+  (def matmul.state.block.get :
+    (({[tile_size] [m] [k] [n]} matmul.state) value) ->
+    ([tile_size m k n . tile_size m k n] {
+      (matmul.state value)
+      (gpu.block value)
+    })
+    =
+    {[state.]
+      ([.state] matmul.state.unpack
+        [tile_size m k n block thread a b c tile_a tile_b acc.])
+      ([.tile_size m k n block thread a b c tile_a tile_b acc]
+        matmul.state.pack
+        [state_out.])
+      ([.state_out block])
+    })
+
+  (def matmul.state.thread.get :
+    (({[tile_size] [m] [k] [n]} matmul.state) value) ->
+    ([tile_size m k n . tile_size m k n] {
+      (matmul.state value)
+      (gpu.thread value)
+    })
+    =
+    {[state.]
+      ([.state] matmul.state.unpack
+        [tile_size m k n block thread a b c tile_a tile_b acc.])
+      ([.tile_size m k n block thread a b c tile_a tile_b acc]
+        matmul.state.pack
+        [state_out.])
+      ([.state_out thread])
+    })
+
+  (def matmul.state.c.get :
+    (({[tile_size] [m] [k] [n]} matmul.state) value) ->
+    ([tile_size m k n . tile_size m k n m n] {
+      (matmul.state value)
+      (({f32 [m] [n]} gpu.global) unique)
+    })
+    =
+    {[state.]
+      ([.state] matmul.state.unpack
+        [tile_size m k n block thread a b c tile_a tile_b acc.])
+      ([.tile_size m k n block thread a b c tile_a tile_b acc]
+        matmul.state.pack
+        [state_out.])
+      ([.state_out c])
+    })
+
+  (def matmul.state.c.put :
+    ([tile_size m k n . tile_size m k n m n] {
+      (matmul.state value)
+      (({f32 [m] [n]} gpu.global) unique)
+    }) ->
+    (({[tile_size] [m] [k] [n]} matmul.state) value)
+    =
+    {[state field.]
+      ([.state] matmul.state.unpack
+        [tile_size m k n block thread a b _c tile_a tile_b acc.])
+      ([.tile_size m k n block thread a b field tile_a tile_b acc]
+        matmul.state.pack
+        [updated_state.])
+      ([.updated_state])
+    })
+
+  (def matmul.state.tile-a.get :
+    (({[tile_size] [m] [k] [n]} matmul.state) value) ->
+    ([tile_size m k n . tile_size m k n tile_size tile_size] {
+      (matmul.state value)
+      (({f32 [tile_size] [tile_size]} gpu.shared) unique)
+    })
+    =
+    {[state.]
+      ([.state] matmul.state.unpack
+        [tile_size m k n block thread a b c tile_a tile_b acc.])
+      ([.tile_size m k n block thread a b c tile_a tile_b acc]
+        matmul.state.pack
+        [state_out.])
+      ([.state_out tile_a])
+    })
+
+  (def matmul.state.tile-a.put :
+    ([tile_size m k n . tile_size m k n tile_size tile_size] {
+      (matmul.state value)
+      (({f32 [tile_size] [tile_size]} gpu.shared) unique)
+    }) ->
+    (({[tile_size] [m] [k] [n]} matmul.state) value)
+    =
+    {[state field.]
+      ([.state] matmul.state.unpack
+        [tile_size m k n block thread a b c _tile_a tile_b acc.])
+      ([.tile_size m k n block thread a b c field tile_b acc]
+        matmul.state.pack
+        [updated_state.])
+      ([.updated_state])
+    })
+
+  (def matmul.state.tile-b.get :
+    (({[tile_size] [m] [k] [n]} matmul.state) value) ->
+    ([tile_size m k n . tile_size m k n tile_size tile_size] {
+      (matmul.state value)
+      (({f32 [tile_size] [tile_size]} gpu.shared) unique)
+    })
+    =
+    {[state.]
+      ([.state] matmul.state.unpack
+        [tile_size m k n block thread a b c tile_a tile_b acc.])
+      ([.tile_size m k n block thread a b c tile_a tile_b acc]
+        matmul.state.pack
+        [state_out.])
+      ([.state_out tile_b])
+    })
+
+  (def matmul.state.tile-b.put :
+    ([tile_size m k n . tile_size m k n tile_size tile_size] {
+      (matmul.state value)
+      (({f32 [tile_size] [tile_size]} gpu.shared) unique)
+    }) ->
+    (({[tile_size] [m] [k] [n]} matmul.state) value)
+    =
+    {[state field.]
+      ([.state] matmul.state.unpack
+        [tile_size m k n block thread a b c tile_a _tile_b acc.])
+      ([.tile_size m k n block thread a b c tile_a field acc]
+        matmul.state.pack
+        [updated_state.])
+      ([.updated_state])
+    })
+
+  (def matmul.state.shared.put :
+    ([tile_size m k n . tile_size m k n tile_size tile_size tile_size tile_size] {
+      (matmul.state value)
+      (({f32 [tile_size] [tile_size]} gpu.shared) unique)
+      (({f32 [tile_size] [tile_size]} gpu.shared) unique)
+    }) ->
+    (({[tile_size] [m] [k] [n]} matmul.state) value)
+    =
+    {[state tile_a tile_b.]
+      ([.state] matmul.state.unpack
+        [tile_size m k n block thread a b c _tile_a _tile_b acc.])
+      ([.tile_size m k n block thread a b c tile_a tile_b acc]
+        matmul.state.pack
+        [updated_state.])
+      ([.updated_state])
+    })
+
+  (def matmul.state.acc.get :
+    (({[tile_size] [m] [k] [n]} matmul.state) value) ->
+    ([tile_size m k n . tile_size m k n] {
+      (matmul.state value)
+      (f32 value)
+    })
+    =
+    {[state.]
+      ([.state] matmul.state.unpack
+        [tile_size m k n block thread a b c tile_a tile_b acc.])
+      ([.tile_size m k n block thread a b c tile_a tile_b acc]
+        matmul.state.pack
+        [state_out.])
+      ([.state_out acc])
+    })
+
+  (def matmul.state.acc.put :
+    ([tile_size m k n . tile_size m k n] {
+      (matmul.state value)
+      (f32 value)
+    }) ->
+    (({[tile_size] [m] [k] [n]} matmul.state) value)
+    =
+    {[state field.]
+      ([.state] matmul.state.unpack
+        [tile_size m k n block thread a b c tile_a tile_b _acc.])
+      ([.tile_size m k n block thread a b c tile_a tile_b field]
+        matmul.state.pack
+        [updated_state.])
+      ([.updated_state])
+    })
+
+  # A user writes this as:
+  #
+  #   defdata init-acc(s) =
+  #     s.acc := 0
+  #
+  # Catena should lower it to:
+  #
+  #   f32.zero;
+  #   matmul.state.acc.put
+  #
+  # It is left as an arrow here because the exact coercion from plain `f32` to
+  # the dimension-indexed field type is also generated schema plumbing.
+  (arr init-acc :
+    (({[tile_size] [m] [k] [n]} matmul.state) value) ->
+    (({[tile_size] [m] [k] [n]} matmul.state) value))
+
+  # A user writes this as:
+  #
+  #   defdata add-to-acc(s, x) =
+  #     s.acc := s.acc + x
+  #
+  # Catena should lower it to:
+  #
+  #   matmul.state.acc.get;
+  #   f32.add;
+  #   matmul.state.acc.put
+  #
+  # The important point is that the user never rewrites the unchanged fields.
+  (arr add-to-acc :
+    (({[tile_size] [m] [k] [n]} matmul.state) value) ->
+    (({[tile_size] [m] [k] [n]} matmul.state) value))
+})
+
+(theory control syntax {
+  # Control flow only sees the opaque state. It does not know or care which
+  # fields `data.init-acc` and `data.add-to-acc` change.
+  (arr done : [] -> done)
+
+  (def control-example :
+    (({[tile_size] [m] [k] [n]} matmul.state) value) ->
+    (({[tile_size] [m] [k] [n]} matmul.state) value)
+    =
+    {[entry.]
+      ([.entry] data.init-acc [initialized.])
+      ([.initialized])
+    })
+})

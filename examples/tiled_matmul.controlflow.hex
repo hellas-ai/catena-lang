@@ -253,6 +253,22 @@
       ([.state_out current_tile])
     })
 
+  (def matmul.state.current-tile.put :
+    ([tile_size m k n . tile_size m k n k] {
+      (matmul.state value)
+      (index value)
+    }) ->
+    (({[tile_size] [m] [k] [n]} matmul.state) value)
+    =
+    {[state field.]
+      ([.state] matmul.state.unpack
+        [tile_size m k n _current_tile block thread a b c tile_a tile_b acc.])
+      ([.tile_size m k n field block thread a b c tile_a tile_b acc]
+        matmul.state.pack
+        [updated_state.])
+      ([.updated_state])
+    })
+
   (def matmul.state.block.get :
     (({[tile_size] [m] [k] [n]} matmul.state) value) ->
     ([tile_size m k n . tile_size m k n] {
@@ -487,8 +503,11 @@
     (({[tile_size] [m] [k] [n]} matmul.state) value)
     =
     {[state.]
-      ([.state] matmul.state.unpack
-        [tile_size m k n current_tile block thread a b c tile_a tile_b acc.])
+      ([.state] matmul.state.tile-size.get [with_tile_size tile_size.])
+      ([.with_tile_size] matmul.state.thread.get [with_thread thread.])
+      ([.with_thread] matmul.state.tile-a.get [with_tile_a tile_a.])
+      ([.with_tile_a] matmul.state.tile-b.get [with_tile_b tile_b.])
+      ([.with_tile_b] matmul.state.acc.get [with_acc acc.])
 
       # for tile_inner_index in range(tile_size):
       #   acc += tile_A[thread.y, tile_inner_index] * tile_B[tile_inner_index, thread.x]
@@ -510,9 +529,7 @@
         reduce
         [acc_out.])
 
-      ([.tile_size m k n current_tile block thread a b c tile_a tile_b acc_out]
-        matmul.state.pack
-        [updated_state.])
+      ([.with_acc acc_out] matmul.state.acc.put [updated_state.])
       ([.updated_state])
     })
 
@@ -521,12 +538,9 @@
     (({[tile_size] [m] [k] [n]} matmul.state) value)
     =
     {[state.]
-      ([.state] matmul.state.unpack
-        [tile_size m k n current_tile block thread a b c tile_a tile_b acc.])
+      ([.state] matmul.state.current-tile.get [with_current_tile current_tile.])
       ([.current_tile] index.succ [next_tile.])
-      ([.tile_size m k n next_tile block thread a b c tile_a tile_b acc]
-        matmul.state.pack
-        [updated_state.])
+      ([.with_current_tile next_tile] matmul.state.current-tile.put [updated_state.])
       ([.updated_state])
     })
 
@@ -535,13 +549,14 @@
     ([tile_size m k n .] done value)
     =
     {[state.]
-      ([.state] matmul.state.unpack
-        [tile_size m k n current_tile block thread a b c tile_a tile_b acc.])
+      ([.state] matmul.state.tile-size.get [with_tile_size tile_size.])
+      ([.with_tile_size] matmul.state.block.get [with_block block.])
+      ([.with_block] matmul.state.thread.get [with_thread thread.])
+      ([.with_thread] matmul.state.c.get [with_c c.])
+      ([.with_c] matmul.state.acc.get [with_acc acc.])
       ([.tile_size block thread] gpu.view.group-by-tile [c_view.])
       ([.c c_view acc] gpu.global.store [c_out.])
-      ([.tile_size m k n current_tile block thread a b c_out tile_a tile_b acc]
-        matmul.state.pack
-        [_updated_state.])
+      ([.with_acc c_out] matmul.state.c.put [_updated_state.])
       ([.] done [done.])
       ([.done])
     })
@@ -561,8 +576,14 @@
     (({[tile_size] [m] [k] [n]} matmul.state) value)
     =
     {[state.]
-      ([.state] matmul.state.unpack
-        [tile_size m k n current_tile block thread a b c tile_a tile_b acc.])
+      ([.state] matmul.state.tile-size.get [with_tile_size tile_size.])
+      ([.with_tile_size] matmul.state.current-tile.get [with_current_tile current_tile.])
+      ([.with_current_tile] matmul.state.block.get [with_block block.])
+      ([.with_block] matmul.state.thread.get [with_thread thread.])
+      ([.with_thread] matmul.state.a.get [with_a a.])
+      ([.with_a] matmul.state.b.get [with_b b.])
+      ([.with_b] matmul.state.tile-a.get [with_tile_a tile_a.])
+      ([.with_tile_a] matmul.state.tile-b.get [with_tile_b tile_b.])
       ([.tile_size thread] gpu.view.thread [shared_thread_view.])
 
       ([.tile_size current_tile block thread]
@@ -579,9 +600,7 @@
       ([.tile_b shared_thread_view b_val] gpu.shared.store
         [tile_b_loaded.])
 
-      ([.tile_size m k n current_tile block thread a b c tile_a_loaded tile_b_loaded acc]
-        matmul.state.pack
-        [state_out.])
+      ([.with_tile_b tile_a_loaded tile_b_loaded] matmul.state.shared.put [state_out.])
       ([.state_out])
     })
 

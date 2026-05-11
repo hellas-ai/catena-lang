@@ -12,7 +12,7 @@ pub(super) trait CudaPrimitiveLowering {
 pub(super) fn render_cuda(
     program: &Program,
     abi: CudaKernelAbi,
-    primitives: impl CudaPrimitiveLowering,
+    primitives: &impl CudaPrimitiveLowering,
 ) -> String {
     let mut out = String::new();
     out.push_str("#include <stdint.h>\n\n");
@@ -28,7 +28,7 @@ pub(super) fn render_cuda(
     );
     out.push_str(") {\n");
     render_prelude(&mut out, abi);
-    render_cuda_stmts(&mut out, &program.body, 1, &primitives);
+    render_cuda_stmts(&mut out, &program.body, 1, primitives);
     out.push_str("}\n\n");
     render_launch_helper(&mut out, program, abi);
     out

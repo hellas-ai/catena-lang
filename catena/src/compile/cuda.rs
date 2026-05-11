@@ -68,7 +68,7 @@ fn compile_cuda_checked(
     emit: CudaEmit,
 ) -> Result<String, CudaCompileError> {
     let entry_graph = typed_definition_graph(theory_set, theory, entry)?;
-    let target = CudaTarget::new();
+    let target = CudaTarget::new(theory_set);
     let cfg = ramsey::Cfg::from_hypergraph(&entry_graph)?;
     let body = ramsey::structure(cfg, target.control)?;
     let program = target.program(entry, body);

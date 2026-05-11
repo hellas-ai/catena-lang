@@ -663,7 +663,7 @@
 
         # Suspend before the next iteration can overwrite shared tiles.
         ([.computed after_compute_phase] gpu.sync [after_compute after_compute_phase_out.])
-        ([.after_compute] data.matmul.state.advance-current-tile [has_more_tiles_loopback_out.])
+        ([.after_compute] data.matmul.state.advance-current-tile [has_more_tiles_loopback.])
 
       ([.has_more_times_return] data.matmul.state.store-output [done.])
       ([.done after_loaded_phase_out after_compute_phase_out])

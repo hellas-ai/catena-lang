@@ -4,9 +4,9 @@ use std::path::PathBuf;
 
 use catena::{
     check::{check as check_elaborated, elaborate},
-    compile::{CompileConfig, compile_graph},
+    compile::{CompileConfig, CudaEmit, compile_cuda_source, compile_graph},
 };
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use metacat::theory::RawTheorySet;
 
 #[derive(Parser)]
@@ -58,6 +58,31 @@ enum CompileCommand {
         #[arg(short, long)]
         output: Option<PathBuf>,
     },
+
+    /// Compile one explicit entry arrow to CUDA C
+    Cuda {
+        #[arg()]
+        path: PathBuf,
+
+        #[arg(long)]
+        theory: String,
+
+        #[arg(long)]
+        entry: String,
+
+        #[arg(long, value_enum, default_value_t = CudaEmitArg::Cuda)]
+        emit: CudaEmitArg,
+
+        /// Write output to a file instead of stdout
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+enum CudaEmitArg {
+    Cuda,
+    StructuredIr,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -78,6 +103,13 @@ fn compile_command(command: CompileCommand) -> anyhow::Result<()> {
             definition,
             output,
         } => compile_graph_command(path, &theory, &definition, output),
+        CompileCommand::Cuda {
+            path,
+            theory,
+            entry,
+            emit,
+            output,
+        } => compile_cuda_command(path, &theory, &entry, emit, output),
     }
 }
 
@@ -135,4 +167,34 @@ fn compile_graph_command(
     }
 
     Ok(())
+}
+
+fn compile_cuda_command(
+    path: PathBuf,
+    theory: &str,
+    entry: &str,
+    emit: CudaEmitArg,
+    output: Option<PathBuf>,
+) -> anyhow::Result<()> {
+    let source = std::fs::read_to_string(path)?;
+    let generated = compile_cuda_source(&source, theory, entry, emit.into())?;
+
+    match output {
+        Some(output) => std::fs::write(output, generated)?,
+        None => {
+            use std::io::Write;
+            std::io::stdout().write_all(generated.as_bytes())?;
+        }
+    }
+
+    Ok(())
+}
+
+impl From<CudaEmitArg> for CudaEmit {
+    fn from(value: CudaEmitArg) -> Self {
+        match value {
+            CudaEmitArg::Cuda => CudaEmit::Cuda,
+            CudaEmitArg::StructuredIr => CudaEmit::StructuredIr,
+        }
+    }
 }

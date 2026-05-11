@@ -1,0 +1,125 @@
+use hexpr::Operation;
+use metacat::{
+    check::check,
+    theory::{RawTheorySet, TheoryId, TheorySet, ast::ParseRawError},
+};
+use open_hypergraphs::lax::OpenHypergraph;
+use thiserror::Error;
+
+mod domain;
+mod render;
+
+use domain::CudaTarget;
+
+use crate::{
+    check::{check as check_elaborated, elaborate},
+    lang::{Arr, Obj},
+    structured::{
+        ramsey,
+        StructuredError,
+    },
+};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CudaEmit {
+    Cuda,
+    StructuredIr,
+}
+
+#[derive(Debug, Error)]
+pub enum CudaCompileError {
+    #[error("failed to parse source: {0}")]
+    Parse(#[from] ParseRawError),
+    #[error("failed to elaborate or typecheck source: {0}")]
+    Check(#[from] crate::check::CheckError),
+    #[error("unknown theory `{0}`")]
+    UnknownTheory(String),
+    #[error("invalid entry arrow `{0}`")]
+    InvalidEntry(String),
+    #[error("unknown entry arrow `{0}`")]
+    UnknownEntry(String),
+    #[error("entry arrow `{0}` has no definition")]
+    MissingDefinition(String),
+    #[error("entry arrow `{entry}` failed typecheck: {detail:?}")]
+    EntryTypecheck {
+        entry: String,
+        detail: metacat::check::Error<Operation>,
+    },
+    #[error("failed to structure control graph: {0}")]
+    Structure(#[from] StructuredError),
+}
+
+pub fn compile_cuda_source(
+    source: &str,
+    theory: &str,
+    entry: &str,
+    emit: CudaEmit,
+) -> Result<String, CudaCompileError> {
+    let raw = RawTheorySet::from_text(source)?;
+    let elaborated = elaborate(&raw)?;
+    let theory_set = check_elaborated(&elaborated)?;
+    compile_cuda_checked(&theory_set, theory, entry, emit)
+}
+
+fn compile_cuda_checked(
+    theory_set: &TheorySet,
+    theory: &str,
+    entry: &str,
+    emit: CudaEmit,
+) -> Result<String, CudaCompileError> {
+    let entry_graph = typed_definition_graph(theory_set, theory, entry)?;
+    let target = CudaTarget::new();
+    let cfg = ramsey::Cfg::from_hypergraph(&entry_graph)?;
+    let body = ramsey::structure(cfg, target.control)?;
+    let program = target.program(entry, body);
+
+    match emit {
+        CudaEmit::Cuda => Ok(target.render_cuda_with_launch(&program)),
+        CudaEmit::StructuredIr => Ok(program.render_ir()),
+    }
+}
+
+fn typed_definition_graph(
+    theory_set: &TheorySet,
+    theory_name: &str,
+    entry: &str,
+) -> Result<OpenHypergraph<Obj, Arr>, CudaCompileError> {
+    let theory_id = TheoryId(
+        theory_name
+            .parse()
+            .map_err(|_| CudaCompileError::UnknownTheory(theory_name.to_string()))?,
+    );
+    let theory = theory_set
+        .theories
+        .get(&theory_id)
+        .ok_or_else(|| CudaCompileError::UnknownTheory(theory_name.to_string()))?;
+
+    let entry_key: Operation = entry
+        .parse()
+        .map_err(|_| CudaCompileError::InvalidEntry(entry.to_string()))?;
+    let arrow = theory
+        .get_arrow(&entry_key)
+        .ok_or_else(|| CudaCompileError::UnknownEntry(entry.to_string()))?;
+    let mut graph = arrow
+        .definition
+        .clone()
+        .ok_or_else(|| CudaCompileError::MissingDefinition(entry.to_string()))?;
+
+    let node_types = check(
+        theory,
+        arrow.type_maps.0.clone(),
+        arrow.type_maps.1.clone(),
+        &mut graph,
+    )
+    .map_err(|detail| CudaCompileError::EntryTypecheck {
+        entry: entry.to_string(),
+        detail,
+    })?;
+
+    graph
+        .with_nodes(|_| node_types)
+        .ok_or_else(|| CudaCompileError::EntryTypecheck {
+            entry: entry.to_string(),
+            detail: metacat::check::Error::InvalidTypeMaps,
+        })
+}

@@ -37,7 +37,9 @@ pub(super) fn render_cuda(
 fn render_prelude(out: &mut String, abi: CudaKernelAbi) {
     match abi {
         CudaKernelAbi::Unknown => {
-            out.push_str("    /* TODO: derive CUDA kernel ABI and prelude from Catena types */\n\n");
+            out.push_str(
+                "    /* TODO: derive CUDA kernel ABI and prelude from Catena types */\n\n",
+            );
         }
     }
 }

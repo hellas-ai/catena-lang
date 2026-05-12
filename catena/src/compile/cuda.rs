@@ -14,10 +14,7 @@ use domain::CudaTarget;
 use crate::{
     check::{check as check_elaborated, elaborate},
     lang::{Arr, Obj},
-    structured::{
-        ramsey,
-        StructuredError,
-    },
+    structured::{StructuredError, ramsey},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

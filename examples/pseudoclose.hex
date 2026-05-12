@@ -25,19 +25,16 @@
 
   (arr step : ([a . a] value) -> ([a . a a] {value value}))
 
-  (def loop-body :
-    ([a . a a] {bound value}) ->
+  # The two legs of the bend are alternatives: continue, or close.
+  (def pseudo-close :
+    ([a . a] value) ->
     ([a . a] value)
     =
+    (cap
     {[back current.]
-      # `current` is the forward value; `back` is just the loopback wire.
-      # `next` continues the fake loop; `exit` leaves it.
+      # `next` continues through cup; `out` exits directly.
       ([.current] step [next out.])
       ([.next back] cup [out.])
       ([.out])
-    })
-
-  # The two legs of the bend are alternatives: continue, or close.
-  (def pseudo-close : ([a . a] value) -> ([a . a] value) =
-    (cap loop-body))
+    }))
 })

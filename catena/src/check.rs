@@ -5,7 +5,7 @@ use metacat::{
 };
 use thiserror::Error;
 
-use crate::compile::interleave_arrows::interleave;
+use crate::compile::interleave_arrows::{InterleaveError, interleave};
 
 #[derive(Debug, Error)]
 pub enum CheckError {
@@ -21,21 +21,21 @@ pub enum CheckError {
         definition: String,
         error: metacat::check::Error<hexpr::Operation>,
     },
+    #[error(transparent)]
+    Interleave(#[from] InterleaveError),
 }
 
 const SYNTAX_THEORY: &str = "syntax";
 const NAT_THEORY: &str = "nat";
 
 /// Elaborate input program to interleave control/data maps.
-pub fn elaborate(raw: &RawTheorySet) -> Result<RawTheorySet, CheckError> {
+pub fn elaborate(raw: RawTheorySet) -> Result<RawTheorySet, CheckError> {
     // *Interpret* the syntax category to get a 'Theory'
-    let syntax = interpret_syntax(raw)?;
+    let syntax = interpret_syntax(&raw)?;
 
     // Elaborate the raw control (resp. data) theory by adding additional axioms corresponding to
     // all arrows in the data (resp. control) category.
-    let mut elaborated = raw.clone();
-    interleave(&syntax, &mut elaborated);
-    Ok(elaborated)
+    Ok(interleave(&syntax, raw)?)
 }
 
 /// Interpret and typecheck an already-elaborated raw theory set.
@@ -125,6 +125,8 @@ fn check_definitions(elaborated: &Theory, theory_name: &str) -> Result<(), Check
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::compile::interleave_arrows::InterleaveError;
+    use metacat::theory::model::SignatureError;
 
     #[test]
     fn elaborate_then_check_interleaves_then_typechecks() {
@@ -156,7 +158,7 @@ mod tests {
         )
         .unwrap();
 
-        let elaborated_raw = elaborate(&raw).unwrap();
+        let elaborated_raw = elaborate(raw).unwrap();
         let elaborated = check(&elaborated_raw).unwrap();
         assert!(
             elaborated
@@ -165,5 +167,133 @@ mod tests {
                 .and_then(|theory| theory.get_arrow(&"data.f32.add".parse().unwrap()))
                 .is_some()
         );
+    }
+
+    #[test]
+    fn elaborate_surfaces_interleave_type_map_errors() {
+        let raw = RawTheorySet::from_text(
+            r#"
+            (theory syntax nat {
+              (arr * : 2 -> 1)
+              (arr 1 : 0 -> 1)
+              (arr + : 2 -> 1)
+              (arr 0 : 0 -> 1)
+              (arr f32 : 0 -> 1)
+            })
+
+            (theory data syntax {
+              # bad: type is invalid - no such constructor 'value'
+              (arr bad : value -> f32)
+            })
+
+            (theory control syntax {
+              (arr pass : 1 -> 1)
+            })
+            "#,
+        )
+        .unwrap();
+
+        let error = elaborate(raw).expect_err("elaboration should return an error");
+        match error {
+            CheckError::Interleave(InterleaveError::BoundaryTypeMapInterpretation {
+                map,
+                error:
+                    hexpr::interpret::Error::Signature(op, SignatureError::NoSuchOperation(missing)),
+            }) => {
+                assert_eq!(op.as_str(), "value");
+                assert_eq!(missing.as_str(), "value");
+                assert_eq!(map.to_string(), "value");
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn elaborate_errors_when_control_theory_is_missing() {
+        let raw = RawTheorySet::from_text(
+            r#"
+            (theory syntax nat {
+              (arr * : 2 -> 1)
+              (arr 1 : 0 -> 1)
+              (arr + : 2 -> 1)
+              (arr 0 : 0 -> 1)
+              (arr f32 : 0 -> 1)
+            })
+
+            (theory data syntax {
+              (arr f32.add : {f32 f32} -> f32)
+            })
+            "#,
+        )
+        .unwrap();
+
+        let error = elaborate(raw).expect_err("elaboration should fail without control");
+        match error {
+            CheckError::Interleave(InterleaveError::MissingTheory(theory)) => {
+                assert_eq!(theory.as_str(), "control");
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn elaborate_errors_when_data_theory_is_missing() {
+        let raw = RawTheorySet::from_text(
+            r#"
+            (theory syntax nat {
+              (arr * : 2 -> 1)
+              (arr 1 : 0 -> 1)
+              (arr + : 2 -> 1)
+              (arr 0 : 0 -> 1)
+              (arr f32 : 0 -> 1)
+            })
+
+            (theory control syntax {
+              (arr branch : 1 -> f32)
+            })
+            "#,
+        )
+        .unwrap();
+
+        let error = elaborate(raw).expect_err("elaboration should fail without data");
+        match error {
+            CheckError::Interleave(InterleaveError::MissingTheory(theory)) => {
+                assert_eq!(theory.as_str(), "data");
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn elaborate_errors_when_lifted_arrow_already_exists() {
+        let raw = RawTheorySet::from_text(
+            r#"
+            (theory syntax nat {
+              (arr * : 2 -> 1)
+              (arr 1 : 0 -> 1)
+              (arr + : 2 -> 1)
+              (arr 0 : 0 -> 1)
+              (arr f32 : 0 -> 1)
+            })
+
+            (theory data syntax {
+              (arr f32.add : {f32 f32} -> f32)
+            })
+
+            (theory control syntax {
+              (arr data.f32.add : f32 -> f32)
+            })
+            "#,
+        )
+        .unwrap();
+
+        let error = elaborate(raw).expect_err("elaboration should fail on duplicate lifted arrow");
+        match error {
+            CheckError::Interleave(InterleaveError::DuplicateLiftedArrow { theory, arrow }) => {
+                assert_eq!(theory.as_str(), "control");
+                assert_eq!(arrow.as_str(), "data.f32.add");
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
     }
 }

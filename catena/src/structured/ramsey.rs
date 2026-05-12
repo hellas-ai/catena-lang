@@ -55,6 +55,7 @@ struct CfgNode {
     edge: EdgeId,
     op: String,
     successors: Vec<usize>,
+    terminal: bool,
 }
 
 impl Cfg {
@@ -90,11 +91,18 @@ impl Cfg {
         };
 
         let graph_targets: HashSet<NodeId> = f.targets.iter().copied().collect();
+        let exit_node = (!graph_targets.is_empty()).then_some(f.hypergraph.edges.len());
         let mut nodes = Vec::new();
         for (edge_index, op) in f.hypergraph.edges.iter().enumerate() {
+            let op = op.to_string();
             let mut successors = Vec::new();
             for target in &f.hypergraph.adjacency[edge_index].targets {
                 if graph_targets.contains(target) {
+                    if boundary_target_is_control_successor(&op) {
+                        if let Some(exit_node) = exit_node {
+                            push_unique_all(&mut successors, [exit_node]);
+                        }
+                    }
                     continue;
                 }
                 if let Some(edges) = consumers.get(target) {
@@ -103,8 +111,17 @@ impl Cfg {
             }
             nodes.push(CfgNode {
                 edge: EdgeId(edge_index),
-                op: op.to_string(),
+                op,
                 successors,
+                terminal: false,
+            });
+        }
+        if let Some(exit_node) = exit_node {
+            nodes.push(CfgNode {
+                edge: EdgeId(exit_node),
+                op: "__exit".to_string(),
+                successors: Vec::new(),
+                terminal: true,
             });
         }
 
@@ -273,6 +290,9 @@ impl<S: ArrowSemantics> Structurer<S> {
         }
 
         let cfg_node = self.cfg.nodes[node].clone();
+        if cfg_node.terminal {
+            return Ok(vec![Stmt::Return]);
+        }
         let mut code = self.semantics.actions(&cfg_node.op);
         match cfg_node.successors.as_slice() {
             [] => code.push(Stmt::Return),
@@ -356,6 +376,12 @@ impl<S: ArrowSemantics> Structurer<S> {
                 .counted_loop(&self.cfg.nodes[node].op)
                 .is_some()
     }
+}
+
+fn boundary_target_is_control_successor(op: &str) -> bool {
+    // `gpu.sync` exposes phase-token outputs at the graph boundary, but those
+    // are data/control products rather than alternate control exits.
+    op != "gpu.sync"
 }
 
 fn reverse_postorder(cfg: &Cfg) -> Vec<usize> {

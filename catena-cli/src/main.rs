@@ -28,8 +28,8 @@ enum Command {
 
     /// Elaborate and typecheck a multi-theory hex file
     Check {
-        #[arg()]
-        path: PathBuf,
+        #[arg(required = true)]
+        paths: Vec<PathBuf>,
 
         #[arg(long)]
         verbose: bool,
@@ -66,7 +66,7 @@ fn main() -> anyhow::Result<()> {
 
     match cli.command {
         Command::Elaborate { path } => elaborate_command(path),
-        Command::Check { path, verbose } => check_command(path, verbose),
+        Command::Check { paths, verbose } => check_command(paths, verbose),
         Command::Compile { command } => compile_command(command),
     }
 }
@@ -82,15 +82,17 @@ fn compile_command(command: CompileCommand) -> anyhow::Result<()> {
     }
 }
 
-fn check_command(path: PathBuf, verbose: bool) -> anyhow::Result<()> {
-    let path_display = path.display().to_string();
-    let source = std::fs::read_to_string(path)?;
-    let raw = RawTheorySet::from_text(&source)?;
+fn check_command(paths: Vec<PathBuf>, verbose: bool) -> anyhow::Result<()> {
+    let raw = load_raw_files(paths.clone())?;
     let elaborated = elaborate(raw)?;
     let theory_set = check_elaborated(&elaborated)?;
 
     println!("OK: check passed");
-    println!("  file: {path_display}");
+    if paths.len() == 1 {
+        println!("  file: {}", paths[0].display());
+    } else {
+        println!("  files: {}", paths.len());
+    }
     if verbose {
         for (id, theory) in &theory_set.theories {
             if let metacat::theory::Theory::Theory { arrows, .. } = theory {
@@ -103,6 +105,19 @@ fn check_command(path: PathBuf, verbose: bool) -> anyhow::Result<()> {
         }
     }
     Ok(())
+}
+
+fn load_raw_files(paths: Vec<PathBuf>) -> anyhow::Result<RawTheorySet> {
+    let mut raws = paths.into_iter();
+    let Some(first_path) = raws.next() else {
+        anyhow::bail!("at least one input file is required");
+    };
+
+    let mut merged = RawTheorySet::from_file(first_path)?;
+    for path in raws {
+        merged = merged.merge(RawTheorySet::from_file(path)?)?;
+    }
+    Ok(merged)
 }
 
 fn elaborate_command(path: PathBuf) -> anyhow::Result<()> {

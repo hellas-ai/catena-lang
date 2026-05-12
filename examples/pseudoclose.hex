@@ -6,29 +6,28 @@
 #   cup : [a a .] -> []
 #
 # are not real cartesian syntax types: [. a a] and [a a .] are not built from
-# copy/discard.  Instead, pass the type variable explicitly and mark one leg as
-# backward.
+# copy/discard.  Instead, mark one leg as the loopback wire.
 #
-#   cap : ([a . a] value) -> ([a . a a] {bound value})
-#   cup : ([a . a a] {value bound}) -> ([a . a] value)
+#   cap : state -> {(state loopback) state}
+#   cup : {state (state loopback)} -> state
 #
 # The two wires are alternatives in the fake loop, not parallel signals.
 
 (theory syntax nat {
-  (arr value : 1 -> 1)
-  (arr bound : 1 -> 1)
+  (arr state : 0 -> 1)
+  (arr loopback : 1 -> 1)
 })
 
 (theory control syntax {
-  (arr cap : ([a . a] value) -> ([a . a a] {bound value}))
-  (arr cup : ([a . a a] {value bound}) -> ([a . a] value))
+  (arr cap : state -> {(state loopback) state})
+  (arr cup : {state (state loopback)} -> state)
 
-  (arr step : ([a . a] value) -> ([a . a a] {value value}))
+  (arr step : state -> {state state})
 
   # The two legs of the bend are alternatives: continue, or close.
   (def pseudo-close :
-    ([a . a] value) ->
-    ([a . a] value)
+    state ->
+    state
     =
     (cap
     {[back current.]

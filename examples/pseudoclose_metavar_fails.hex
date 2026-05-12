@@ -1,0 +1,29 @@
+# This is the tempting polymorphic version of pseudoclose.
+#
+# It intentionally fails to check.
+#
+# The problem is that `[a]` is wiring syntax, not a concrete object variable.
+# So this does not behave like the working `state` example in
+# pseudoclose.hex.  The fake loop becomes a real SSA cycle.
+
+(theory syntax nat {
+  (arr loopback : 1 -> 1)
+})
+
+(theory control syntax {
+  (arr cap : [a] -> ([a . a a] {loopback [a]}))
+  (arr cup : ([a . a a] {[a] loopback}) -> [a])
+
+  (arr step : [a] -> [a . a a])
+
+  (def pseudo-close :
+    [a] ->
+    [a]
+    =
+    (cap
+    {[back current.]
+      ([.current] step [next out.])
+      ([.next back] cup [out.])
+      ([.out])
+    }))
+})

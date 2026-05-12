@@ -32,13 +32,18 @@ pub struct NestedCompileGraph {
     pub graph: CompileGraph,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct GraphCompileOptions {
+    pub no_inline: Vec<String>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct GraphCompileOptions {
+struct GraphCompileLimits {
     max_depth: usize,
     max_inline_iterations: usize,
 }
 
-impl Default for GraphCompileOptions {
+impl Default for GraphCompileLimits {
     fn default() -> Self {
         Self {
             max_depth: 32,
@@ -70,6 +75,7 @@ struct GraphCompileState<'a> {
     set: &'a TheorySet,
     config: &'a CompileConfig,
     options: GraphCompileOptions,
+    limits: GraphCompileLimits,
     stack: Vec<DefinitionRef>,
 }
 
@@ -104,10 +110,27 @@ pub fn compile_graph(
     theory: &str,
     definition: &str,
 ) -> Result<CompileGraph, CompileGraphError> {
+    compile_graph_with_options(
+        set,
+        config,
+        theory,
+        definition,
+        GraphCompileOptions::default(),
+    )
+}
+
+pub fn compile_graph_with_options(
+    set: &TheorySet,
+    config: &CompileConfig,
+    theory: &str,
+    definition: &str,
+    options: GraphCompileOptions,
+) -> Result<CompileGraph, CompileGraphError> {
     let mut state = GraphCompileState {
         set,
         config,
-        options: GraphCompileOptions::default(),
+        options,
+        limits: GraphCompileLimits::default(),
         stack: Vec::new(),
     };
     state.compile_nested_graph(theory, definition)
@@ -119,7 +142,7 @@ impl GraphCompileState<'_> {
         theory_name: &str,
         definition: &str,
     ) -> Result<CompileGraph, CompileGraphError> {
-        if self.stack.len() > self.options.max_depth {
+        if self.stack.len() > self.limits.max_depth {
             return Err(CompileGraphError::NestedLimit(format!(
                 "{theory_name}.{definition}"
             )));
@@ -152,7 +175,7 @@ impl GraphCompileState<'_> {
         let syntax = self.syntax_theory()?;
         let theory = self.theory(theory_name)?;
         let definition_key = parse_operation(definition)?;
-        let graph = self.compile_definition_graph(theory, syntax, &definition_key)?;
+        let graph = self.compile_definition_graph(theory_name, theory, syntax, &definition_key)?;
         let children = self.compile_nested_foreign_graphs(theory_name, &graph)?;
 
         Ok(CompileGraph {
@@ -181,6 +204,7 @@ impl GraphCompileState<'_> {
 
     fn compile_definition_graph(
         &self,
+        theory_name: &str,
         theory: &Theory,
         syntax: &Theory,
         definition_key: &Operation,
@@ -192,11 +216,11 @@ impl GraphCompileState<'_> {
             .definition
             .clone()
             .ok_or_else(|| CompileGraphError::UnknownDefinition(definition_key.to_string()))?;
-        let definitions = inline_definitions(theory)?;
+        let definitions = inline_definitions(theory, theory_name, &self.options.no_inline)?;
         graph = inline_local_definitions(
             graph,
             &definitions,
-            self.options.max_inline_iterations,
+            self.limits.max_inline_iterations,
             definition_key,
         )?;
 
@@ -251,7 +275,10 @@ impl GraphCompileState<'_> {
         local_name: &str,
     ) -> Result<CompileGraph, CompileGraphError> {
         let native_foreign_theory = self.theory(source_theory)?;
-        if definition_exists(native_foreign_theory, local_name)? {
+        let fully_qualified = format!("{source_theory}.{local_name}");
+        if definition_exists(native_foreign_theory, local_name)?
+            && !matches_any_no_inline(&fully_qualified, &self.options.no_inline)
+        {
             self.compile_nested_graph(source_theory, local_name)
         } else {
             let syntax = self.syntax_theory()?;
@@ -356,13 +383,25 @@ fn compile_primitive_child_graph(
 
 fn inline_definitions(
     theory: &Theory,
+    theory_name: &str,
+    no_inline: &[String],
 ) -> Result<HashMap<Operation, DefinitionGraph>, CompileGraphError> {
     let Theory::Theory { arrows, .. } = theory else {
         return Err(CompileGraphError::NotUserTheory("nat".to_string()));
     };
     Ok(arrows
         .iter()
-        .filter_map(|(name, arrow)| arrow.definition.clone().map(|term| (name.clone(), term)))
+        .filter_map(|(name, arrow)| {
+            let local_name = name.to_string();
+            let fully_qualified = format!("{theory_name}.{local_name}");
+            if matches_any_no_inline(&fully_qualified, no_inline)
+                || matches_any_no_inline(&local_name, no_inline)
+            {
+                None
+            } else {
+                arrow.definition.clone().map(|term| (name.clone(), term))
+            }
+        })
         .collect())
 }
 
@@ -382,4 +421,39 @@ fn inlinable_edges(
 fn parse_operation(name: &str) -> Result<Operation, CompileGraphError> {
     name.parse()
         .map_err(|_| CompileGraphError::InvalidDefinition(name.to_string()))
+}
+
+fn matches_any_no_inline(name: &str, patterns: &[String]) -> bool {
+    patterns.iter().any(|pattern| glob_match(pattern, name))
+}
+
+fn glob_match(pattern: &str, text: &str) -> bool {
+    let pattern = pattern.as_bytes();
+    let text = text.as_bytes();
+    let (mut p, mut t) = (0, 0);
+    let mut star = None;
+    let mut after_star_text = 0;
+
+    while t < text.len() {
+        if p < pattern.len() && pattern[p] == b'*' {
+            star = Some(p);
+            p += 1;
+            after_star_text = t;
+        } else if p < pattern.len() && pattern[p] == text[t] {
+            p += 1;
+            t += 1;
+        } else if let Some(star_index) = star {
+            p = star_index + 1;
+            after_star_text += 1;
+            t = after_star_text;
+        } else {
+            return false;
+        }
+    }
+
+    while p < pattern.len() && pattern[p] == b'*' {
+        p += 1;
+    }
+
+    p == pattern.len()
 }

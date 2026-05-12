@@ -45,9 +45,47 @@ use hexpr::{Hexpr, Operation};
 use metacat::theory::{
     RawTheorySet, Theory,
     ast::{RawTheory, RawTheoryArrow},
+    model::SignatureError,
 };
 use open_hypergraphs::category::Arrow;
 use std::str::FromStr;
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+pub enum InterleaveError {
+    #[error("invalid built-in operation name `{name}`: {error}")]
+    InvalidOperationName {
+        name: String,
+        error: <Operation as FromStr>::Err,
+    },
+    #[error("invalid generated variable name `{name}`: {error}")]
+    InvalidGeneratedVariableName {
+        name: String,
+        error: <hexpr::Variable as FromStr>::Err,
+    },
+    #[error("missing theory `{0}` required for interleaving")]
+    MissingTheory(Operation),
+    #[error("theory `{theory}` already defines lifted arrow `{arrow}`")]
+    DuplicateLiftedArrow { theory: Operation, arrow: Operation },
+    #[error("failed to interpret boundary type map `{map}` in syntax theory: {error}")]
+    BoundaryTypeMapInterpretation {
+        map: Hexpr,
+        error: hexpr::interpret::Error<SignatureError>,
+    },
+}
+
+fn op_name(name: &str) -> Result<Operation, InterleaveError> {
+    name.parse()
+        .map_err(|error| InterleaveError::InvalidOperationName {
+            name: name.to_string(),
+            error,
+        })
+}
+
+fn generated_var(name: String) -> Result<hexpr::Variable, InterleaveError> {
+    hexpr::Variable::from_str(&name)
+        .map_err(|error| InterleaveError::InvalidGeneratedVariableName { name, error })
+}
 
 /// Interleave "control" maps into "data" and vice-versa.
 // Sketch:
@@ -56,37 +94,39 @@ use std::str::FromStr;
 // - Compute declarations to add for "data-in-control"
 // - Add both sets to their corresponding theories
 // We compute the arrows to add before adding so that *synthesized* arrows are not copied.
-pub fn interleave(syntax: &Theory, raw: &mut RawTheorySet) {
-    let control_name: Operation = "control".parse().expect("valid operation");
-    let data_name: Operation = "data".parse().expect("valid operation");
+pub fn interleave(syntax: &Theory, mut raw: RawTheorySet) -> Result<RawTheorySet, InterleaveError> {
+    let control_name = op_name("control")?;
+    let data_name = op_name("data")?;
 
-    let Some(control) = raw.theories.get(&control_name).cloned() else {
-        return;
-    };
-    let Some(data) = raw.theories.get(&data_name).cloned() else {
-        return;
-    };
+    let control = raw
+        .theories
+        .get(&control_name)
+        .ok_or_else(|| InterleaveError::MissingTheory(control_name.clone()))?;
+    let data = raw
+        .theories
+        .get(&data_name)
+        .ok_or_else(|| InterleaveError::MissingTheory(data_name.clone()))?;
 
     let control_in_data = tensor_pack_embed(
         syntax,
         &control,
         &data,
         BoundaryTensor {
-            pack_with: "+".parse().expect("valid operation"),
-            unit: "0".parse().expect("valid operation"),
-            target_wire_shape: "*".parse().expect("valid operation"),
+            pack_with: op_name("+")?,
+            unit: op_name("0")?,
+            target_wire_shape: op_name("*")?,
         },
-    );
+    )?;
     let data_in_control = tensor_pack_embed(
         syntax,
         &data,
         &control,
         BoundaryTensor {
-            pack_with: "*".parse().expect("valid operation"),
-            unit: "1".parse().expect("valid operation"),
-            target_wire_shape: "+".parse().expect("valid operation"),
+            pack_with: op_name("*")?,
+            unit: op_name("1")?,
+            target_wire_shape: op_name("+")?,
         },
-    );
+    )?;
 
     if let Some(data_theory) = raw.theories.get_mut(&data_name) {
         for arrow in control_in_data {
@@ -98,6 +138,8 @@ pub fn interleave(syntax: &Theory, raw: &mut RawTheorySet) {
             control_theory.arrows.insert(arrow.name.clone(), arrow);
         }
     }
+
+    Ok(raw)
 }
 
 /// Let C and D be symmetric monoidal categories over the same syntax category S.
@@ -115,22 +157,22 @@ fn tensor_pack_embed(
     source: &RawTheory,
     target: &RawTheory,
     boundary: BoundaryTensor,
-) -> Vec<RawTheoryArrow> {
+) -> Result<Vec<RawTheoryArrow>, InterleaveError> {
     source
         .arrows
         .values()
-        .filter_map(|arrow| {
-            let lifted_name: Operation = format!("{}.{}", source.name, arrow.name)
-                .parse()
-                .expect("lifted operation name should parse");
+        .map(|arrow| {
+            let lifted_name = op_name(&format!("{}.{}", source.name, arrow.name))?;
             if target.arrows.contains_key(&lifted_name) {
-                return None;
+                return Err(InterleaveError::DuplicateLiftedArrow {
+                    theory: target.name.clone(),
+                    arrow: lifted_name,
+                });
             }
+            let source_map = prepare_boundary_type_map(&arrow.type_maps.0, syntax, &boundary)?;
+            let target_map = prepare_boundary_type_map(&arrow.type_maps.1, syntax, &boundary)?;
 
-            let source_map = prepare_boundary_type_map(&arrow.type_maps.0, syntax, &boundary);
-            let target_map = prepare_boundary_type_map(&arrow.type_maps.1, syntax, &boundary);
-
-            Some(RawTheoryArrow {
+            Ok(RawTheoryArrow {
                 name: lifted_name,
                 type_maps: (source_map, target_map),
                 definition: None,
@@ -146,9 +188,13 @@ struct BoundaryTensor {
     target_wire_shape: Operation,
 }
 
-fn prepare_boundary_type_map(map: &Hexpr, syntax: &Theory, boundary: &BoundaryTensor) -> Hexpr {
+fn prepare_boundary_type_map(
+    map: &Hexpr,
+    syntax: &Theory,
+    boundary: &BoundaryTensor,
+) -> Result<Hexpr, InterleaveError> {
     if let Some(exposed) = expose_boundary_tensor(map, &boundary.target_wire_shape) {
-        exposed
+        Ok(exposed)
     } else {
         pack_type_map(map, syntax, &boundary.pack_with, &boundary.unit)
     }
@@ -221,44 +267,61 @@ fn expose_nested_boundary_tensors(map: &Hexpr, target_wire_shape: &Operation) ->
 /// - `I` when `m = 0`
 /// - `A` when `m = 1`
 /// - `head(A) ● pack(tail(A))` when `m ≥ 2`
-fn pack(object_size: usize, tensor: Operation, unit: Operation) -> Hexpr {
+fn pack(object_size: usize, tensor: Operation, unit: Operation) -> Result<Hexpr, InterleaveError> {
     match object_size {
-        0 => Hexpr::Operation(unit),
+        0 => Ok(Hexpr::Operation(unit)),
         1 => identity_hexpr(0),
         n => {
             let mut steps = Vec::new();
             for first_pass_through in 2..n {
                 let mut factors = vec![Hexpr::Operation(tensor.clone())];
-                factors.extend((first_pass_through..n).map(identity_hexpr));
+                factors.extend(
+                    (first_pass_through..n)
+                        .map(identity_hexpr)
+                        .collect::<Result<Vec<_>, _>>()?,
+                );
                 steps.push(Hexpr::Tensor(factors));
             }
             steps.push(Hexpr::Operation(tensor));
-            Hexpr::Composition(steps)
+            Ok(Hexpr::Composition(steps))
         }
     }
 }
 
 // Compute the composition of a type map with its corresponding 'pack' morphism
-fn pack_type_map(map: &Hexpr, syntax: &Theory, tensor: &Operation, unit: &Operation) -> Hexpr {
-    let interpreted = hexpr::try_interpret(&syntax.local_signature(), map)
-        .expect("type map should interpret in the resolved syntax theory");
+fn pack_type_map(
+    map: &Hexpr,
+    syntax: &Theory,
+    tensor: &Operation,
+    unit: &Operation,
+) -> Result<Hexpr, InterleaveError> {
+    let interpreted = hexpr::try_interpret(&syntax.local_signature(), map).map_err(|error| {
+        InterleaveError::BoundaryTypeMapInterpretation {
+            map: map.clone(),
+            error,
+        }
+    })?;
     match interpreted.target().len() {
-        1 => map.clone(),
-        n => Hexpr::Composition(vec![map.clone(), pack(n, tensor.clone(), unit.clone())]),
+        1 => Ok(map.clone()),
+        n => Ok(Hexpr::Composition(vec![
+            map.clone(),
+            pack(n, tensor.clone(), unit.clone())?,
+        ])),
     }
 }
 
-fn identity_hexpr(var_index: usize) -> Hexpr {
+fn identity_hexpr(var_index: usize) -> Result<Hexpr, InterleaveError> {
     let name = format!("x{var_index}");
-    let var = hexpr::Variable::from_str(&name).expect("generated variable should parse");
-    Hexpr::Frobenius {
+    let var = generated_var(name)?;
+    Ok(Hexpr::Frobenius {
         sources: vec![var.clone()],
         targets: vec![var],
-    }
+    })
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::elaborate::elaborate;
     use metacat::theory::{RawTheorySet, TheoryId};
 
     #[test]
@@ -289,7 +352,7 @@ mod tests {
         "#;
 
         let raw = RawTheorySet::from_text(source).unwrap();
-        let elaborated = crate::check::elaborate(&raw).unwrap();
+        let elaborated = elaborate(raw).unwrap();
         crate::check::check(&elaborated).unwrap();
     }
 
@@ -322,7 +385,7 @@ mod tests {
         "#;
 
         let raw = RawTheorySet::from_text(source).unwrap();
-        let elaborated = crate::check::elaborate(&raw).unwrap();
+        let elaborated = elaborate(raw).unwrap();
         let checked = crate::check::check(&elaborated).unwrap();
         assert!(
             checked
@@ -378,7 +441,7 @@ mod tests {
         "#;
 
         let raw = RawTheorySet::from_text(source).unwrap();
-        let elaborated = crate::check::elaborate(&raw).unwrap();
+        let elaborated = elaborate(raw).unwrap();
         let checked = crate::check::check(&elaborated).unwrap();
         assert!(
             checked
@@ -456,7 +519,7 @@ mod tests {
         "#;
 
         let raw = RawTheorySet::from_text(source).unwrap();
-        let elaborated = crate::check::elaborate(&raw).unwrap();
+        let elaborated = elaborate(raw).unwrap();
         crate::check::check(&elaborated).unwrap();
     }
 }

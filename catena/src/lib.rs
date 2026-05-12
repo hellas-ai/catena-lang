@@ -4,6 +4,7 @@ pub mod pass;
 
 pub mod backend;
 pub mod compile;
+pub mod elaborate;
 pub mod lower;
 pub mod scope;
 pub mod shallow;

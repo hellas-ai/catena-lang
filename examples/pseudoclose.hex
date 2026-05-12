@@ -2,15 +2,15 @@
 #
 # The tempting signatures
 #
-#   cup : [] -> [. a a]
-#   cap : [a a .] -> []
+#   cap : [] -> [. a a]
+#   cup : [a a .] -> []
 #
 # are not real cartesian syntax types: [. a a] and [a a .] are not built from
 # copy/discard.  Instead, pass the type variable explicitly and mark one leg as
 # backward.
 #
-#   cup : ([a . a] value) -> ([a . a a] {bound value})
-#   cap : ([a . a a] {value bound}) -> ([a . a] value)
+#   cap : ([a . a] value) -> ([a . a a] {bound value})
+#   cup : ([a . a a] {value bound}) -> ([a . a] value)
 #
 # The two wires are alternatives in the fake loop, not parallel signals.
 
@@ -20,8 +20,8 @@
 })
 
 (theory control syntax {
-  (arr cup : ([a . a] value) -> ([a . a a] {bound value}))
-  (arr cap : ([a . a a] {value bound}) -> ([a . a] value))
+  (arr cap : ([a . a] value) -> ([a . a a] {bound value}))
+  (arr cup : ([a . a a] {value bound}) -> ([a . a] value))
 
   (arr step : ([a . a] value) -> ([a . a a] {value value}))
 
@@ -33,11 +33,11 @@
       # `current` is the forward value; `back` is just the loopback wire.
       # `next` continues the fake loop; `exit` leaves it.
       ([.current] step [next out.])
-      ([.next back] cap [out.])
+      ([.next back] cup [out.])
       ([.out])
     })
 
   # The two legs of the bend are alternatives: continue, or close.
   (def pseudo-close : ([a . a] value) -> ([a . a] value) =
-    (cup loop-body))
+    (cap loop-body))
 })

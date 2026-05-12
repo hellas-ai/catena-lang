@@ -635,18 +635,8 @@
   (arr branch : [x] -> [x . x x])
   (arr merge : [x . x x] -> [x])
   (arr gpu.sync : [x x . x x] -> [x x . x x])
-  (arr loop.cap :
-    (({[tile_size] [m] [k] [n]} matmul.state) value) ->
-    ([tile_size m k n . tile_size m k n tile_size m k n] {
-      (({[tile_size] [m] [k] [n]} matmul.state) loopback)
-      (({[tile_size] [m] [k] [n]} matmul.state) value)
-    }))
-  (arr loop.cup :
-    ([tile_size m k n . tile_size m k n tile_size m k n] {
-      (({[tile_size] [m] [k] [n]} matmul.state) value)
-      (({[tile_size] [m] [k] [n]} matmul.state) loopback)
-    }) ->
-    (({[tile_size] [m] [k] [n]} matmul.state) value))
+  (arr loop.cap : ([x] value) -> ([x . x x] {loopback value}))
+  (arr loop.cup : ([x . x x] {value loopback}) -> ([x] value))
 
   (def gpu.tiled_matmul.controlflow :
     ([tile_size m k n . tile_size m k n tile_size m k n tile_size m k n] {

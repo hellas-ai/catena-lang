@@ -633,12 +633,11 @@
   (arr done : [] -> done)
 
   (arr branch : [x] -> [x . x x])
-  (arr merge : [x . x x] -> [x])
   (arr gpu.sync : [x x . x x] -> [x x . x x])
   (arr value.with-type : ([x] value) -> ([x . x x] {value [x]}))
-  (arr loop.cap : [x] -> ([x . x x] {loopback value}))
-  (arr loop.cup : ([x . x x] {loopback value}) -> [x])
-  (arr loop.merge : (value [x . x x]) -> ([x] value))
+  (arr cap : [x] -> ([x . x x] {loopback value}))
+  (arr cup : ([x . x x] {loopback value}) -> [x])
+  (arr merge : (value [x . x x]) -> ([x] value))
 
   (def gpu.tiled_matmul.controlflow :
     ([tile_size m k n . tile_size m k n tile_size m k n tile_size m k n] {
@@ -655,8 +654,8 @@
     {[start after_loaded_phase after_compute_phase.]
       ([.start] data.init-acc [initialized.])
       ([.initialized] value.with-type [initialized_value loop_type.])
-      ([.loop_type] loop.cap [loopback loop_iter.])
-      ([.initialized_value loop_iter] loop.merge [loop_current.])
+      ([.loop_type] cap [loopback loop_iter.])
+      ([.initialized_value loop_iter] merge [loop_current.])
 
       ([.loop_current] data.matmul.state.has-more-tiles
         [has_more_tiles_iter loop_out.])
@@ -671,7 +670,7 @@
         # Suspend before the next iteration can overwrite shared tiles.
         ([.computed after_compute_phase] gpu.sync [after_compute after_compute_phase_out.])
         ([.after_compute] data.matmul.state.advance-current-tile [next_iteration.])
-        ([.loopback next_iteration] loop.cup [closed.])
+        ([.loopback next_iteration] cup [closed.])
 
       ([.loop_out] data.matmul.state.store-output [done.])
       ([.done after_loaded_phase_out after_compute_phase_out])

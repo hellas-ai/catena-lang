@@ -53,6 +53,11 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum InterleaveError {
+    #[error("invalid built-in operation name `{name}`: {error}")]
+    InvalidOperationName {
+        name: String,
+        error: <Operation as FromStr>::Err,
+    },
     #[error("missing theory `{0}` required for interleaving")]
     MissingTheory(Operation),
     #[error("theory `{theory}` already defines lifted arrow `{arrow}`")]
@@ -64,6 +69,14 @@ pub enum InterleaveError {
     },
 }
 
+fn op_name(name: &str) -> Result<Operation, InterleaveError> {
+    name.parse()
+        .map_err(|error| InterleaveError::InvalidOperationName {
+            name: name.to_string(),
+            error,
+        })
+}
+
 /// Interleave "control" maps into "data" and vice-versa.
 // Sketch:
 // - Interpret the syntax theory (so we can get type map coarities)
@@ -72,8 +85,8 @@ pub enum InterleaveError {
 // - Add both sets to their corresponding theories
 // We compute the arrows to add before adding so that *synthesized* arrows are not copied.
 pub fn interleave(syntax: &Theory, mut raw: RawTheorySet) -> Result<RawTheorySet, InterleaveError> {
-    let control_name: Operation = "control".parse().expect("valid operation");
-    let data_name: Operation = "data".parse().expect("valid operation");
+    let control_name = op_name("control")?;
+    let data_name = op_name("data")?;
 
     let control = raw
         .theories
@@ -89,9 +102,9 @@ pub fn interleave(syntax: &Theory, mut raw: RawTheorySet) -> Result<RawTheorySet
         &control,
         &data,
         BoundaryTensor {
-            pack_with: "+".parse().expect("valid operation"),
-            unit: "0".parse().expect("valid operation"),
-            target_wire_shape: "*".parse().expect("valid operation"),
+            pack_with: op_name("+")?,
+            unit: op_name("0")?,
+            target_wire_shape: op_name("*")?,
         },
     )?;
     let data_in_control = tensor_pack_embed(
@@ -99,9 +112,9 @@ pub fn interleave(syntax: &Theory, mut raw: RawTheorySet) -> Result<RawTheorySet
         &data,
         &control,
         BoundaryTensor {
-            pack_with: "*".parse().expect("valid operation"),
-            unit: "1".parse().expect("valid operation"),
-            target_wire_shape: "+".parse().expect("valid operation"),
+            pack_with: op_name("*")?,
+            unit: op_name("1")?,
+            target_wire_shape: op_name("+")?,
         },
     )?;
 
@@ -139,9 +152,7 @@ fn tensor_pack_embed(
         .arrows
         .values()
         .map(|arrow| {
-            let lifted_name: Operation = format!("{}.{}", source.name, arrow.name)
-                .parse()
-                .expect("lifted operation name should parse");
+            let lifted_name = op_name(&format!("{}.{}", source.name, arrow.name))?;
             if target.arrows.contains_key(&lifted_name) {
                 return Err(InterleaveError::DuplicateLiftedArrow {
                     theory: target.name.clone(),

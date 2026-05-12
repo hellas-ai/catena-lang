@@ -12,7 +12,8 @@ mod render;
 use domain::CudaTarget;
 
 use crate::{
-    check::{check as check_elaborated, elaborate},
+    check::check as check_elaborated,
+    elaborate::elaborate,
     lang::{Arr, Obj},
     structured::{StructuredError, ramsey},
 };
@@ -53,7 +54,7 @@ pub fn compile_cuda_source(
     emit: CudaEmit,
 ) -> Result<String, CudaCompileError> {
     let raw = RawTheorySet::from_text(source)?;
-    let elaborated = elaborate(&raw)?;
+    let elaborated = elaborate(raw)?;
     let theory_set = check_elaborated(&elaborated)?;
     compile_cuda_checked(&theory_set, theory, entry, emit)
 }

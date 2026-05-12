@@ -4,7 +4,11 @@ use std::path::PathBuf;
 
 use catena::{
     check::check as check_elaborated,
-    compile::{CompileConfig, GraphCompileOptions, compile_graph_with_options},
+    compile::{
+        CompileConfig, GraphCompileOptions,
+        cuda::{CudaEmit, compile_cuda_source},
+        compile_graph_with_options,
+    },
     elaborate::elaborate,
 };
 use clap::{Parser, Subcommand, ValueEnum};
@@ -109,6 +113,13 @@ fn compile_command(command: CompileCommand) -> anyhow::Result<()> {
             output,
             no_inline,
         } => compile_graph_command(path, &theory, &definition, output, no_inline),
+        CompileCommand::Cuda {
+            path,
+            theory,
+            entry,
+            emit,
+            output,
+        } => compile_cuda_command(path, &theory, &entry, emit, output),
     }
 }
 

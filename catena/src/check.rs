@@ -1,11 +1,11 @@
 //! Typechecking and elaboration-by-interleaving of theories
 use metacat::{
     check::check as metacat_check,
-    theory::{RawTheorySet, Theory, TheoryId, TheorySet},
+    theory::{RawTheorySet, Theory, TheorySet},
 };
 use thiserror::Error;
 
-use crate::compile::interleave_arrows::interleave;
+use crate::elaborate::interleave_arrows::InterleaveError;
 
 #[derive(Debug, Error)]
 pub enum CheckError {
@@ -21,22 +21,12 @@ pub enum CheckError {
         definition: String,
         error: metacat::check::Error<hexpr::Operation>,
     },
+    #[error(transparent)]
+    Interleave(#[from] InterleaveError),
 }
 
 const SYNTAX_THEORY: &str = "syntax";
 const NAT_THEORY: &str = "nat";
-
-/// Elaborate input program to interleave control/data maps.
-pub fn elaborate(raw: &RawTheorySet) -> Result<RawTheorySet, CheckError> {
-    // *Interpret* the syntax category to get a 'Theory'
-    let syntax = interpret_syntax(raw)?;
-
-    // Elaborate the raw control (resp. data) theory by adding additional axioms corresponding to
-    // all arrows in the data (resp. control) category.
-    let mut elaborated = raw.clone();
-    interleave(&syntax, &mut elaborated);
-    Ok(elaborated)
-}
 
 /// Interpret and typecheck an already-elaborated raw theory set.
 pub fn check(elaborated: &RawTheorySet) -> Result<TheorySet, CheckError> {
@@ -46,39 +36,6 @@ pub fn check(elaborated: &RawTheorySet) -> Result<TheorySet, CheckError> {
     // Typecheck all definitions
     check_all(&interpreted)?;
     Ok(interpreted)
-}
-
-fn interpret_syntax(raw: &RawTheorySet) -> Result<Theory, CheckError> {
-    let syntax_name: hexpr::Operation = SYNTAX_THEORY.parse().expect("valid syntax theory name");
-    let syntax_raw = raw
-        .theories
-        .get(&syntax_name)
-        .ok_or_else(|| CheckError::MissingSyntaxTheory(SYNTAX_THEORY.to_string()))?;
-
-    let mut subset = RawTheorySet {
-        theories: Default::default(),
-        extensions: Vec::new(),
-    };
-
-    let mut current = Some(syntax_raw);
-    while let Some(theory) = current {
-        if subset.theories.contains_key(&theory.name) {
-            break;
-        }
-        subset.theories.insert(theory.name.clone(), theory.clone());
-        current = if theory.syntax_category.as_str() == NAT_THEORY {
-            None
-        } else {
-            raw.theories.get(&theory.syntax_category)
-        };
-    }
-
-    let interpreted = TheorySet::from_raw(subset)?;
-    interpreted
-        .theories
-        .get(&TheoryId(syntax_name))
-        .cloned()
-        .ok_or_else(|| CheckError::MissingInterpretedSyntaxTheory(SYNTAX_THEORY.to_string()))
 }
 
 // Turn elaborated raw theories into a TheorySet.
@@ -121,49 +78,4 @@ fn check_definitions(elaborated: &Theory, theory_name: &str) -> Result<(), Check
     }
 
     Ok(())
-}
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn elaborate_then_check_interleaves_then_typechecks() {
-        let raw = RawTheorySet::from_text(
-            r#"
-            (theory syntax nat {
-              (arr * : 2 -> 1)
-              (arr 1 : 0 -> 1)
-              (arr + : 2 -> 1)
-              (arr 0 : 0 -> 1)
-              (arr f32 : 0 -> 1)
-            })
-
-            (theory data syntax {
-              (arr f32.add : {f32 f32} -> f32)
-
-              # after interleaving, this should typecheck
-              (def merge : ({1 1} +) -> 1 = control.merge)
-
-            })
-
-            (theory control syntax {
-                (arr merge : ({1 1} +) -> 1)
-
-                # after interleaving, this should typecheck
-                (def expected : ({f32 f32} *) -> f32 = data.f32.add)
-            })
-            "#,
-        )
-        .unwrap();
-
-        let elaborated_raw = elaborate(&raw).unwrap();
-        let elaborated = check(&elaborated_raw).unwrap();
-        assert!(
-            elaborated
-                .theories
-                .get(&TheoryId("control".parse().unwrap()))
-                .and_then(|theory| theory.get_arrow(&"data.f32.add".parse().unwrap()))
-                .is_some()
-        );
-    }
 }

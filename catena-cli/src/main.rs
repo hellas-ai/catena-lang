@@ -3,8 +3,9 @@ mod compile_graph_render;
 use std::path::PathBuf;
 
 use catena::{
-    check::{check as check_elaborated, elaborate},
+    check::check as check_elaborated,
     compile::{CompileConfig, compile_graph},
+    elaborate::elaborate,
 };
 use clap::{Parser, Subcommand};
 use metacat::theory::RawTheorySet;
@@ -85,7 +86,7 @@ fn check_command(path: PathBuf, verbose: bool) -> anyhow::Result<()> {
     let path_display = path.display().to_string();
     let source = std::fs::read_to_string(path)?;
     let raw = RawTheorySet::from_text(&source)?;
-    let elaborated = elaborate(&raw)?;
+    let elaborated = elaborate(raw)?;
     let theory_set = check_elaborated(&elaborated)?;
 
     println!("OK: check passed");
@@ -107,7 +108,7 @@ fn check_command(path: PathBuf, verbose: bool) -> anyhow::Result<()> {
 fn elaborate_command(path: PathBuf) -> anyhow::Result<()> {
     let source = std::fs::read_to_string(path)?;
     let raw = RawTheorySet::from_text(&source)?;
-    let elaborated = elaborate(&raw)?;
+    let elaborated = elaborate(raw)?;
     println!("{}", elaborated.to_hexpr_text());
     Ok(())
 }
@@ -120,7 +121,7 @@ fn compile_graph_command(
 ) -> anyhow::Result<()> {
     let source = std::fs::read_to_string(path)?;
     let raw = RawTheorySet::from_text(&source)?;
-    let elaborated = elaborate(&raw)?;
+    let elaborated = elaborate(raw)?;
     let config = CompileConfig::data_control();
     let theory_set = check_elaborated(&elaborated)?;
     let graph = compile_graph(&theory_set, &config, theory, definition)?;

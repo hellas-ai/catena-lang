@@ -1,0 +1,43 @@
+# Pseudo-close a feedback loop with an explicit backward wire.
+#
+# The tempting signatures
+#
+#   cup : [] -> [. a a]
+#   cap : [a a .] -> []
+#
+# are not real cartesian syntax types: [. a a] and [a a .] are not built from
+# copy/discard.  Instead, pass the type variable explicitly and mark one leg as
+# backward.
+#
+#   cup : ([a . a] value) -> ([a . a a] {bound value})
+#   cap : ([a . a a] {value bound}) -> ([a . a] value)
+#
+# The two wires are alternatives in the fake loop, not parallel signals.
+
+(theory syntax nat {
+  (arr value : 1 -> 1)
+  (arr bound : 1 -> 1)
+})
+
+(theory control syntax {
+  (arr cup : ([a . a] value) -> ([a . a a] {bound value}))
+  (arr cap : ([a . a a] {value bound}) -> ([a . a] value))
+
+  (arr step : ([a . a] value) -> ([a . a a] {value value}))
+
+  (def loop-body :
+    ([a . a a] {bound value}) ->
+    ([a . a] value)
+    =
+    {[back current.]
+      # `current` is the forward value; `back` is just the loopback wire.
+      # `next` continues the fake loop; `exit` leaves it.
+      ([.current] step [next out.])
+      ([.next back] cap [out.])
+      ([.out])
+    })
+
+  # The two legs of the bend are alternatives: continue, or close.
+  (def pseudo-close : ([a . a] value) -> ([a . a] value) =
+    (cup loop-body))
+})

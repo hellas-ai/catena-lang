@@ -5,6 +5,7 @@
 pub mod erase;
 pub mod expand_eta;
 pub mod forget_bound;
+pub mod forget_loopback;
 pub mod inline;
 
 pub mod discard_naturality;

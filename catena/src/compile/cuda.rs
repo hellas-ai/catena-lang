@@ -1,7 +1,7 @@
 use hexpr::Operation;
 use metacat::{
     check::check,
-    theory::{RawTheorySet, TheoryId, TheorySet, ast::ParseRawError},
+    theory::{ast::ParseRawError, RawTheorySet, TheoryId, TheorySet},
 };
 use open_hypergraphs::lax::OpenHypergraph;
 use thiserror::Error;
@@ -15,8 +15,10 @@ use crate::{
     check::check as check_elaborated,
     elaborate::elaborate,
     lang::{Arr, Obj},
-    structured::{StructuredError, ramsey},
+    pass::{erase::Erase, forget_loopback::ForgetLoopback},
+    structured::{ramsey, StructuredError},
 };
+use open_hypergraphs::lax::functor::Functor;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CudaEmit {
@@ -43,6 +45,8 @@ pub enum CudaCompileError {
         entry: String,
         detail: metacat::check::Error<Operation>,
     },
+    #[error("failed to normalize entry graph after typecheck: {detail}")]
+    Normalize { detail: String },
     #[error("failed to structure control graph: {0}")]
     Structure(#[from] StructuredError),
 }
@@ -66,6 +70,7 @@ fn compile_cuda_checked(
     emit: CudaEmit,
 ) -> Result<String, CudaCompileError> {
     let entry_graph = typed_definition_graph(theory_set, theory, entry)?;
+    let entry_graph = normalize_structured_cuda_graph(&entry_graph)?;
     let target = CudaTarget::new(theory_set);
     let cfg = ramsey::Cfg::from_hypergraph(&entry_graph)?;
     let body = ramsey::structure(cfg, target.control)?;
@@ -75,6 +80,26 @@ fn compile_cuda_checked(
         CudaEmit::Cuda => Ok(target.render_cuda_with_launch(&program)),
         CudaEmit::StructuredIr => Ok(program.render_ir()),
     }
+}
+
+fn normalize_structured_cuda_graph(
+    graph: &OpenHypergraph<Obj, Arr>,
+) -> Result<OpenHypergraph<Obj, Arr>, CudaCompileError> {
+    let loopback = ForgetLoopback::default_control();
+    let mut graph = Erase::with_value(loopback.config().value).map_arrow(graph);
+    quotient_normalized(&mut graph)?;
+    graph = loopback.map_arrow(&graph);
+    quotient_normalized(&mut graph)?;
+    Ok(graph)
+}
+
+fn quotient_normalized(graph: &mut OpenHypergraph<Obj, Arr>) -> Result<(), CudaCompileError> {
+    graph
+        .quotient()
+        .map_err(|detail| CudaCompileError::Normalize {
+            detail: format!("{detail:?}"),
+        })?;
+    Ok(())
 }
 
 fn typed_definition_graph(

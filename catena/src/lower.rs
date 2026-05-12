@@ -80,7 +80,10 @@ fn lower_passes() -> Result<Vec<LowerPass>, LowerError> {
     let forget_bound = ForgetBound::new(bound_key, value_key);
 
     Ok(vec![
-        (Pass::Erase, Box::new(|t| Ok(Erase.map_arrow(t)))),
+        (
+            Pass::Erase,
+            Box::new(|t| Ok(Erase::default_value().map_arrow(t))),
+        ),
         (
             Pass::ForgetBound,
             Box::new(move |t| Ok(forget_bound.map_arrow(t))),

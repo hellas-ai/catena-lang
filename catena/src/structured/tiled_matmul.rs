@@ -1,14 +1,15 @@
 use super::cuda::{
-    CudaDecl, CudaError, CudaKernelEnv, CudaLaunchConfig, CudaRenderMode, CudaStmt, render_cuda,
+    render_cuda, CudaDecl, CudaError, CudaKernelEnv, CudaLaunchConfig, CudaRenderMode, CudaStmt,
 };
 use super::ir::{EntryPoint, Param, Primitive, Program, Stmt};
-use super::ramsey::ArrowSemantics;
+use super::ramsey::{ActionNode, ArrowSemantics};
 
 #[derive(Debug, Clone, Copy)]
 pub struct TiledMatmulSemantics;
 
 impl ArrowSemantics for TiledMatmulSemantics {
-    fn actions(&self, op: &str) -> Vec<Stmt> {
+    fn actions(&self, node: &ActionNode) -> Vec<Stmt> {
+        let op = &node.op;
         if self.counted_loop(op).is_some() {
             return Vec::new();
         }
@@ -17,6 +18,8 @@ impl ArrowSemantics for TiledMatmulSemantics {
         }
         vec![Stmt::Primitive(Primitive {
             name: op.to_string(),
+            inputs: node.inputs.clone(),
+            outputs: node.outputs.clone(),
             code: String::new(),
         })]
     }

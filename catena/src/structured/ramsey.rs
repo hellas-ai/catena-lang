@@ -4,19 +4,26 @@ use open_hypergraphs::lax::{EdgeId, NodeId, OpenHypergraph};
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 pub trait ArrowSemantics {
-    fn actions(&self, op: &str) -> Vec<Stmt>;
+    fn actions(&self, node: &ActionNode) -> Vec<Stmt>;
 
-    fn condition(&self, op: &str) -> String {
-        format!("/* {} */ 1", sanitize_ident(op))
+    fn condition(&self, node: &ActionNode) -> String {
+        format!("/* {} */ 1", sanitize_ident(&node.op))
     }
 
-    fn selector(&self, op: &str) -> String {
-        format!("/* {} */ 0", sanitize_ident(op))
+    fn selector(&self, node: &ActionNode) -> String {
+        format!("/* {} */ 0", sanitize_ident(&node.op))
     }
 
     fn counted_loop(&self, _op: &str) -> Option<(String, String)> {
         None
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActionNode {
+    pub op: String,
+    pub inputs: Vec<String>,
+    pub outputs: Vec<String>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -54,6 +61,8 @@ pub struct Cfg {
 struct CfgNode {
     edge: EdgeId,
     op: String,
+    inputs: Vec<String>,
+    outputs: Vec<String>,
     successors: Vec<usize>,
     terminal: bool,
 }
@@ -112,6 +121,16 @@ impl Cfg {
             nodes.push(CfgNode {
                 edge: EdgeId(edge_index),
                 op,
+                inputs: f.hypergraph.adjacency[edge_index]
+                    .sources
+                    .iter()
+                    .map(|node| wire_name(*node))
+                    .collect(),
+                outputs: f.hypergraph.adjacency[edge_index]
+                    .targets
+                    .iter()
+                    .map(|node| wire_name(*node))
+                    .collect(),
                 successors,
                 terminal: false,
             });
@@ -120,6 +139,8 @@ impl Cfg {
             nodes.push(CfgNode {
                 edge: EdgeId(exit_node),
                 op: "__exit".to_string(),
+                inputs: Vec::new(),
+                outputs: Vec::new(),
                 successors: Vec::new(),
                 terminal: true,
             });
@@ -293,7 +314,8 @@ impl<S: ArrowSemantics> Structurer<S> {
         if cfg_node.terminal {
             return Ok(vec![Stmt::Return]);
         }
-        let mut code = self.semantics.actions(&cfg_node.op);
+        let action_node = cfg_node.action_node();
+        let mut code = self.semantics.actions(&action_node);
         match cfg_node.successors.as_slice() {
             [] => code.push(Stmt::Return),
             [target] => code.extend(self.do_branch(node, *target, context)?),
@@ -302,7 +324,7 @@ impl<S: ArrowSemantics> Structurer<S> {
                 then_context.insert(0, ContextFrame::IfThenElse);
                 let else_context = then_context.clone();
                 code.push(Stmt::If {
-                    condition: self.semantics.condition(&cfg_node.op),
+                    condition: self.semantics.condition(&action_node),
                     then_body: self.do_branch(node, *then_target, &then_context)?,
                     else_body: self.do_branch(node, *else_target, &else_context)?,
                 });
@@ -315,7 +337,7 @@ impl<S: ArrowSemantics> Structurer<S> {
                     cases.push(self.do_branch(node, *successor, &case_context)?);
                 }
                 code.push(Stmt::Switch {
-                    selector: self.semantics.selector(&cfg_node.op),
+                    selector: self.semantics.selector(&action_node),
                     cases,
                 });
             }
@@ -378,10 +400,24 @@ impl<S: ArrowSemantics> Structurer<S> {
     }
 }
 
+impl CfgNode {
+    fn action_node(&self) -> ActionNode {
+        ActionNode {
+            op: self.op.clone(),
+            inputs: self.inputs.clone(),
+            outputs: self.outputs.clone(),
+        }
+    }
+}
+
 fn boundary_target_is_control_successor(op: &str) -> bool {
     // `gpu.sync` exposes phase-token outputs at the graph boundary, but those
     // are data/control products rather than alternate control exits.
     op != "gpu.sync"
+}
+
+fn wire_name(node: NodeId) -> String {
+    format!("w{}", node.0)
 }
 
 fn reverse_postorder(cfg: &Cfg) -> Vec<usize> {

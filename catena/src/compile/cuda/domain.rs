@@ -1,8 +1,8 @@
 use crate::{
-    compile::cuda::render::{CudaKernelAbi, CudaPrimitiveLowering, render_cuda},
+    compile::cuda::render::{render_cuda, CudaKernelAbi, CudaPrimitiveLowering},
     structured::{
         ir::{EntryPoint, Primitive, Program, Stmt},
-        ramsey::ArrowSemantics,
+        ramsey::{ActionNode, ArrowSemantics},
     },
 };
 use hexpr::Operation;
@@ -44,17 +44,20 @@ impl<'a> CudaTarget<'a> {
 pub(super) struct GenericCudaControl;
 
 impl ArrowSemantics for GenericCudaControl {
-    fn actions(&self, op: &str) -> Vec<Stmt> {
-        if op == "gpu.sync" {
+    fn actions(&self, node: &ActionNode) -> Vec<Stmt> {
+        if node.op == "gpu.sync" {
             return vec![Stmt::Barrier];
         }
         vec![Stmt::Primitive(Primitive {
-            name: op.to_string(),
+            name: node.op.clone(),
+            inputs: node.inputs.clone(),
+            outputs: node.outputs.clone(),
             code: String::new(),
         })]
     }
 
-    fn condition(&self, op: &str) -> String {
+    fn condition(&self, node: &ActionNode) -> String {
+        let op = &node.op;
         format!("/* TODO: no CUDA condition lowering for Catena arrow `{op}` */ 1")
     }
 }
@@ -131,9 +134,19 @@ impl CudaPrimitiveLowering for GenericCudaPrimitives<'_> {
             }
         }
         vec![format!(
-            "/* TODO: no CUDA lowering for Catena arrow `{}` */",
-            primitive.name
+            "/* TODO: lower Catena primitive `{}` as `{}` */",
+            primitive.name,
+            primitive_assignment(primitive)
         )]
+    }
+}
+
+fn primitive_assignment(primitive: &Primitive) -> String {
+    let call = format!("{}({})", primitive.name, primitive.inputs.join(", "));
+    if primitive.outputs.is_empty() {
+        call
+    } else {
+        format!("{} = {call}", primitive.outputs.join(", "))
     }
 }
 

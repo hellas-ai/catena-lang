@@ -5,24 +5,16 @@ use metacat::{
 };
 use thiserror::Error;
 
-use crate::elaborate::interleave_arrows::InterleaveError;
-
 #[derive(Debug, Error)]
 pub enum CheckError {
     #[error(transparent)]
     Load(#[from] metacat::theory::LoadError),
-    #[error("missing syntax theory `{0}`")]
-    MissingSyntaxTheory(String),
-    #[error("missing interpreted syntax theory `{0}`")]
-    MissingInterpretedSyntaxTheory(String),
     #[error("definition check failed in theory `{theory}`, definition `{definition}`: {error:?}")]
     Definition {
         theory: String,
         definition: String,
         error: metacat::check::Error<hexpr::Operation>,
     },
-    #[error(transparent)]
-    Interleave(#[from] InterleaveError),
 }
 
 const SYNTAX_THEORY: &str = "syntax";

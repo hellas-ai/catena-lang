@@ -1,0 +1,27 @@
+# Example user programs
+#
+# Compilable user programs are control-flow maps with type `Value(X) -> Value(Y) + Value(E)`
+# where:
+#   - X is the input data
+#   - Y is the output data
+#   - E is a type representing an *error*
+
+# user.u32.identity : U32 -> U32 + 0
+# Here, the error type "0" indicates that this is an *infallible* program: it's isomorphic to `U32 -> U32`.
+(def control user.u32.identity : (u32 val) -> {(u32 val) (0 val)} = {[x] (0.type never)})
+
+# In this example, we take an input u32, and increment it unless it is the
+# maximum value, in which case the value is returned unchanged as an error.
+#
+# inc-unless-max : Val(U32) -> Val(U32) + Val(U32)
+(def data user.u32.inc-unless-max : (u32 val) -> ({(u32 val) (u32 val)} +) =
+  ([x] user.u32.is-max [is-max . is-max x] if control.user.inc-par-id)
+)
+
+# Helpers for inc-unless-max
+(def control user.inc-par-id : {(u32 val) (u32 val)} -> {(u32 val) (u32 val)} =
+  {data.user.u32.inc [x]}
+)
+
+(def data user.u32.inc : (u32 val) -> (u32 val) = ({[x] u32.one} u32.add))
+(def data user.u32.is-max : (u32 val) -> (2 val) = ({[x] u32.max} u32.eq))

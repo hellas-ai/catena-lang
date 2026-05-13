@@ -6,26 +6,42 @@
 //! - (TODO): For each `f : A -> B` in a theory, add a 'name': `name.f : I -> (A => B)`
 pub(crate) mod interleave_arrows;
 
-use metacat::theory::{RawTheorySet, Theory, TheoryId, TheorySet};
+use metacat::theory::{RawTheorySet, Theory, TheoryId, TheorySet, ast::ExtensionsError};
+use thiserror::Error;
 
-use crate::check::CheckError;
+use interleave_arrows::InterleaveError;
 use interleave_arrows::interleave;
 
 const SYNTAX_THEORY: &str = "syntax";
 const NAT_THEORY: &str = "nat";
 
+#[derive(Debug, Error)]
+pub enum ElaborateError {
+    #[error(transparent)]
+    Load(#[from] metacat::theory::LoadError),
+    #[error(transparent)]
+    Extensions(#[from] ExtensionsError),
+    #[error("missing syntax theory `{0}`")]
+    MissingSyntaxTheory(String),
+    #[error("missing syntax theory `{0}` in interpreted TheorySet")]
+    MissingInterpretedSyntaxTheory(String),
+    #[error(transparent)]
+    Interleave(#[from] InterleaveError),
+}
+
 /// Elaborate input program to interleave control/data maps.
-pub fn elaborate(raw: RawTheorySet) -> Result<RawTheorySet, CheckError> {
+pub fn elaborate(raw: RawTheorySet) -> Result<RawTheorySet, ElaborateError> {
+    let raw = raw.with_extensions()?;
     let syntax = interpret_syntax(&raw)?;
     Ok(interleave(&syntax, raw)?)
 }
 
-fn interpret_syntax(raw: &RawTheorySet) -> Result<Theory, CheckError> {
+fn interpret_syntax(raw: &RawTheorySet) -> Result<Theory, ElaborateError> {
     let syntax_name: hexpr::Operation = SYNTAX_THEORY.parse().expect("valid syntax theory name");
     let syntax_raw = raw
         .theories
         .get(&syntax_name)
-        .ok_or_else(|| CheckError::MissingSyntaxTheory(SYNTAX_THEORY.to_string()))?;
+        .ok_or_else(|| ElaborateError::MissingSyntaxTheory(SYNTAX_THEORY.to_string()))?;
 
     let mut subset = RawTheorySet {
         theories: Default::default(),
@@ -50,16 +66,13 @@ fn interpret_syntax(raw: &RawTheorySet) -> Result<Theory, CheckError> {
         .theories
         .get(&TheoryId(syntax_name))
         .cloned()
-        .ok_or_else(|| CheckError::MissingInterpretedSyntaxTheory(SYNTAX_THEORY.to_string()))
+        .ok_or_else(|| ElaborateError::MissingInterpretedSyntaxTheory(SYNTAX_THEORY.to_string()))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        check::{CheckError, check},
-        elaborate::interleave_arrows::InterleaveError,
-    };
+    use crate::{check::check, elaborate::interleave_arrows::InterleaveError};
     use metacat::theory::model::SignatureError;
 
     #[test]
@@ -129,7 +142,7 @@ mod tests {
 
         let error = elaborate(raw).expect_err("elaboration should return an error");
         match error {
-            CheckError::Interleave(InterleaveError::BoundaryTypeMapInterpretation {
+            ElaborateError::Interleave(InterleaveError::BoundaryTypeMapInterpretation {
                 map,
                 error:
                     hexpr::interpret::Error::Signature(op, SignatureError::NoSuchOperation(missing)),
@@ -163,7 +176,7 @@ mod tests {
 
         let error = elaborate(raw).expect_err("elaboration should fail without control");
         match error {
-            CheckError::Interleave(InterleaveError::MissingTheory(theory)) => {
+            ElaborateError::Interleave(InterleaveError::MissingTheory(theory)) => {
                 assert_eq!(theory.as_str(), "control");
             }
             other => panic!("unexpected error: {other:?}"),
@@ -191,7 +204,7 @@ mod tests {
 
         let error = elaborate(raw).expect_err("elaboration should fail without data");
         match error {
-            CheckError::Interleave(InterleaveError::MissingTheory(theory)) => {
+            ElaborateError::Interleave(InterleaveError::MissingTheory(theory)) => {
                 assert_eq!(theory.as_str(), "data");
             }
             other => panic!("unexpected error: {other:?}"),
@@ -223,7 +236,7 @@ mod tests {
 
         let error = elaborate(raw).expect_err("elaboration should fail on duplicate lifted arrow");
         match error {
-            CheckError::Interleave(InterleaveError::DuplicateLiftedArrow { theory, arrow }) => {
+            ElaborateError::Interleave(InterleaveError::DuplicateLiftedArrow { theory, arrow }) => {
                 assert_eq!(theory.as_str(), "control");
                 assert_eq!(arrow.as_str(), "data.f32.add");
             }

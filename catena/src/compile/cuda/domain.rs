@@ -1,8 +1,8 @@
 use crate::{
     compile::cuda::render::{CudaKernelAbi, CudaPrimitiveLowering, render_cuda},
     structured::{
+        cfg::{ArrowInstance, ArrowSemantics},
         ir::{EntryPoint, Primitive, Program, Stmt},
-        ramsey::{ArrowInstance, ArrowSemantics},
     },
 };
 use hexpr::Operation;

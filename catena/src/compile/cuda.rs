@@ -13,10 +13,11 @@ use domain::CudaTarget;
 
 use crate::{
     check::check as check_elaborated,
+    compile::{CompileConfig, CompileGraphError, GraphCompileOptions, compile_graph_with_options},
     elaborate::elaborate,
     lang::{Arr, Obj},
     pass::{erase::Erase, forget_loopback::ForgetLoopback},
-    structured::{StructuredError, ramsey},
+    structured::{StructuredError, cfg, ramsey},
 };
 use open_hypergraphs::lax::functor::Functor;
 
@@ -45,6 +46,8 @@ pub enum CudaCompileError {
         entry: String,
         detail: metacat::check::Error<Operation>,
     },
+    #[error("failed to build compile graph: {0}")]
+    CompileGraph(#[from] CompileGraphError),
     #[error("failed to normalize entry graph after typecheck: {detail}")]
     Normalize { detail: String },
     #[error("failed to structure control graph: {0}")]
@@ -69,10 +72,18 @@ fn compile_cuda_checked(
     entry: &str,
     emit: CudaEmit,
 ) -> Result<String, CudaCompileError> {
+    let compile_graph = compile_graph_with_options(
+        theory_set,
+        &CompileConfig::data_control(),
+        theory,
+        entry,
+        GraphCompileOptions::default(),
+    )?;
     let entry_graph = typed_definition_graph(theory_set, theory, entry)?;
     let entry_graph = normalize_structured_cuda_graph(&entry_graph)?;
     let target = CudaTarget::new(theory_set);
-    let cfg = ramsey::Cfg::from_hypergraph(&entry_graph, &target.control)?;
+    let context = cfg::Context::new(&compile_graph);
+    let cfg = cfg::Cfg::from_hypergraph(&entry_graph, &context, &target.control)?;
     let body = ramsey::structure(cfg)?;
     let program = target.program(entry, body);
 

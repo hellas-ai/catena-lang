@@ -22,8 +22,8 @@ struct Cli {
 enum Command {
     /// Elaborate a multi-theory hex file by interleaving control/data theories
     Elaborate {
-        #[arg()]
-        path: PathBuf,
+        #[arg(required = true)]
+        paths: Vec<PathBuf>,
     },
 
     /// Elaborate and typecheck a multi-theory hex file
@@ -65,7 +65,7 @@ fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Command::Elaborate { path } => elaborate_command(path),
+        Command::Elaborate { paths } => elaborate_command(paths),
         Command::Check { paths, verbose } => check_command(paths, verbose),
         Command::Compile { command } => compile_command(command),
     }
@@ -107,9 +107,8 @@ fn check_command(paths: Vec<PathBuf>, verbose: bool) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn elaborate_command(path: PathBuf) -> anyhow::Result<()> {
-    let source = std::fs::read_to_string(path)?;
-    let raw = RawTheorySet::from_text(&source)?;
+fn elaborate_command(paths: Vec<PathBuf>) -> anyhow::Result<()> {
+    let raw = RawTheorySet::from_files(paths)?;
     let elaborated = elaborate(raw)?;
     println!("{}", elaborated.to_hexpr_text());
     Ok(())

@@ -34,6 +34,12 @@ pub struct ArrowInstance {
     pub branch_arity: usize,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum BranchValue {
+    Opaque,
+    Coproduct(Variable),
+}
+
 pub struct Context<'a> {
     graph: &'a CompileGraph,
 }
@@ -133,10 +139,9 @@ impl Cfg {
         let graph_targets: HashSet<NodeId> = f.targets.iter().copied().collect();
         let exit_node = (!graph_targets.is_empty()).then_some(f.hypergraph.edges.len());
         let mut nodes = Vec::new();
-        let mut arrows = Vec::new();
+        let mut branches = Vec::new();
         for (edge_index, op) in f.hypergraph.edges.iter().enumerate() {
             let op = op.to_string();
-            let _nested = context.child_for_operation(&op);
             let successors =
                 edge_successors(f, edge_index, &consumers, &graph_targets, exit_node, &op);
             let arrow = ArrowInstance {
@@ -154,11 +159,13 @@ impl Cfg {
                     .collect(),
                 branch_arity: successors.len(),
             };
-            arrows.push(arrow.clone());
+            let (statements, branch) =
+                statements_for_arrow(context.child_for_operation(&op), &arrow, semantics);
+            branches.push((arrow, branch));
             nodes.push(CfgNode {
                 counted_loop: semantics.counted_loop(&op),
                 op,
-                statements: semantics.statements(&arrow),
+                statements,
                 transfer: Transfer::Return,
             });
         }
@@ -173,7 +180,7 @@ impl Cfg {
         }
 
         for edge_index in 0..f.hypergraph.edges.len() {
-            let arrow = arrows[edge_index].clone();
+            let (arrow, branch) = branches[edge_index].clone();
             let successors = edge_successors(
                 f,
                 edge_index,
@@ -183,7 +190,7 @@ impl Cfg {
                 &nodes[edge_index].op,
             );
             nodes[edge_index].transfer =
-                transfer_for_successors(&mut nodes, arrow, successors, semantics);
+                transfer_for_successors(&mut nodes, arrow, branch, successors, semantics);
         }
 
         let mut predecessors = vec![Vec::new(); nodes.len()];
@@ -220,6 +227,108 @@ impl CfgNode {
     }
 }
 
+fn statements_for_arrow(
+    child: Option<&CompileGraph>,
+    arrow: &ArrowInstance,
+    semantics: &impl ArrowSemantics,
+) -> (Vec<Stmt>, BranchValue) {
+    if let Some(child) = child {
+        return (
+            statements_for_child_graph(child, arrow),
+            branch_value_for_child_graph(child, arrow),
+        );
+    }
+    (semantics.statements(arrow), BranchValue::Opaque)
+}
+
+fn statements_for_child_graph(child: &CompileGraph, arrow: &ArrowInstance) -> Vec<Stmt> {
+    let mut variables = child_graph_variables(child, arrow);
+    (0..child.graph.h.x.0.len())
+        .map(|edge_index| {
+            let inputs = edge_sources(child, edge_index)
+                .into_iter()
+                .map(|node| variable_for_child_node(&mut variables, arrow, node))
+                .collect();
+            let outputs = edge_targets(child, edge_index)
+                .into_iter()
+                .map(|node| variable_for_child_node(&mut variables, arrow, node))
+                .collect();
+            Stmt::Primitive(super::ir::Primitive {
+                name: child.graph.h.x.0[edge_index].to_string(),
+                inputs,
+                outputs,
+                code: String::new(),
+            })
+        })
+        .collect()
+}
+
+fn branch_value_for_child_graph(child: &CompileGraph, arrow: &ArrowInstance) -> BranchValue {
+    if arrow.branch_arity <= 1 {
+        return BranchValue::Opaque;
+    }
+    let Some(target) = child.graph.t.table.first() else {
+        return BranchValue::Opaque;
+    };
+    let mut variables = child_graph_variables(child, arrow);
+    BranchValue::Coproduct(variable_for_child_node(&mut variables, arrow, *target))
+}
+
+fn child_graph_variables(child: &CompileGraph, arrow: &ArrowInstance) -> HashMap<usize, Variable> {
+    let mut variables = HashMap::new();
+    for (index, node) in child.graph.s.table.iter().enumerate() {
+        if let Some(input) = arrow.inputs.get(index) {
+            variables.insert(*node, input.clone());
+        }
+    }
+
+    if arrow.branch_arity > 1 && child.graph.t.table.len() == 1 {
+        variables.insert(child.graph.t.table[0], branch_result_variable(arrow));
+    } else {
+        for (index, node) in child.graph.t.table.iter().enumerate() {
+            if let Some(output) = arrow.outputs.get(index) {
+                variables.insert(*node, output.clone());
+            }
+        }
+    }
+    variables
+}
+
+fn variable_for_child_node(
+    variables: &mut HashMap<usize, Variable>,
+    arrow: &ArrowInstance,
+    node: usize,
+) -> Variable {
+    variables
+        .entry(node)
+        .or_insert_with(|| format!("v{}_{}", arrow.id, node))
+        .clone()
+}
+
+fn edge_sources(child: &CompileGraph, edge_index: usize) -> Vec<usize> {
+    child
+        .graph
+        .h
+        .s
+        .clone()
+        .into_iter()
+        .nth(edge_index)
+        .map(|sources| sources.table.0)
+        .unwrap_or_default()
+}
+
+fn edge_targets(child: &CompileGraph, edge_index: usize) -> Vec<usize> {
+    child
+        .graph
+        .h
+        .t
+        .clone()
+        .into_iter()
+        .nth(edge_index)
+        .map(|targets| targets.table.0)
+        .unwrap_or_default()
+}
+
 fn edge_successors(
     f: &OpenHypergraph<Obj, Arr>,
     edge_index: CfgNodeId,
@@ -248,6 +357,7 @@ fn edge_successors(
 fn transfer_for_successors(
     nodes: &mut Vec<CfgNode>,
     arrow: ArrowInstance,
+    branch: BranchValue,
     successors: Vec<CfgNodeId>,
     semantics: &impl ArrowSemantics,
 ) -> Transfer {
@@ -256,7 +366,7 @@ fn transfer_for_successors(
         [target] => Transfer::Goto(*target),
         [then_target, else_target] => {
             let condition = branch_condition_value(&arrow, 0);
-            let payload = branch_payload(&arrow);
+            let payload = branch_payload(&arrow, &branch);
             let then_target = append_binding_node(
                 nodes,
                 &arrow,
@@ -276,7 +386,7 @@ fn transfer_for_successors(
                 op: format!("{}.__branch", arrow.op),
                 statements: vec![Stmt::Assign {
                     lhs: condition.clone(),
-                    rhs: semantics.branch_condition_rhs(&arrow, 0),
+                    rhs: branch_condition_rhs(&arrow, &branch, 0, semantics),
                 }],
                 transfer: Transfer::If {
                     condition,
@@ -288,7 +398,7 @@ fn transfer_for_successors(
             Transfer::Goto(branch_node)
         }
         targets => {
-            let payload = branch_payload(&arrow);
+            let payload = branch_payload(&arrow, &branch);
             let targets = targets
                 .iter()
                 .enumerate()
@@ -307,13 +417,36 @@ fn transfer_for_successors(
                 op: format!("{}.__branch", arrow.op),
                 statements: Vec::new(),
                 transfer: Transfer::Switch {
-                    selector: semantics.selector(&arrow),
+                    selector: branch_selector(&arrow, &branch, semantics),
                     targets,
                 },
                 counted_loop: None,
             });
             Transfer::Goto(branch_node)
         }
+    }
+}
+
+fn branch_condition_rhs(
+    arrow: &ArrowInstance,
+    branch: &BranchValue,
+    output: usize,
+    semantics: &impl ArrowSemantics,
+) -> Expr {
+    match branch {
+        BranchValue::Opaque => semantics.branch_condition_rhs(arrow, output),
+        BranchValue::Coproduct(value) => format!("{value}.tag == {output}"),
+    }
+}
+
+fn branch_selector(
+    arrow: &ArrowInstance,
+    branch: &BranchValue,
+    semantics: &impl ArrowSemantics,
+) -> Variable {
+    match branch {
+        BranchValue::Opaque => semantics.selector(arrow),
+        BranchValue::Coproduct(value) => format!("{value}.tag"),
     }
 }
 
@@ -337,8 +470,15 @@ fn append_binding_node(
     node
 }
 
-fn branch_payload(arrow: &ArrowInstance) -> Variable {
-    format!("p{}", arrow.id)
+fn branch_payload(arrow: &ArrowInstance, branch: &BranchValue) -> Variable {
+    match branch {
+        BranchValue::Opaque => format!("p{}", arrow.id),
+        BranchValue::Coproduct(value) => format!("{value}.payload"),
+    }
+}
+
+fn branch_result_variable(arrow: &ArrowInstance) -> Variable {
+    format!("r{}", arrow.id)
 }
 
 fn branch_condition_value(arrow: &ArrowInstance, output: usize) -> Variable {

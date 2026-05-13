@@ -137,8 +137,6 @@ fn render_ir_stmts(out: &mut String, stmts: &[Stmt], indent: usize) {
                             primitive.inputs.join(", ")
                         ));
                     }
-                } else if primitive.inputs.is_empty() {
-                    out.push_str(&format!("{pad}{}\n", primitive.name));
                 } else {
                     out.push_str(&format!(
                         "{pad}{} = {}({})\n",

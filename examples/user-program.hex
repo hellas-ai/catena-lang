@@ -10,21 +10,18 @@
 # Here, the error type "0" indicates that this is an *infallible* program: it's isomorphic to `U32 -> U32`.
 (def control user.u32.identity : (u32 val) -> {(u32 val) (0 val)} = {[x] (0.type never)})
 
-# TODO: increment-unless-max
-# In this example, we take an input u32, and increment it unless it is the maximum value, in which case the value is returned on the error path.
-# NOTE: this uses a hack where we have 'u32.type' sort of as dataflow, even though it's within the control flow category!
-# This is because we FIRST evaluate & erase type-level values as dataflow during typechecking, THEN the map becomes valid control flow!
-# This is very confusing!!
-# Val(U32) -> Val(U32) + Val(U32)
-# (def data user.u32.inc-unless-max : (u32 val) -> ({(u32 val) (u32 val)} +) = {[x.]
-#   ([.x] data.user.u32.is-max [is-max.])
-#   ([. is-max x] if [cases.])
-#   ([.cases] control.user.inc-par-id)
-# })
-# 
-# (def control user.inc-par-id : {(u32 val) (u32 val)} -> {(u32 val) (u32 val)} =
-#   {data.user.u32.inc [x]}
-# )
-# 
-# (def data user.u32.inc : (u32 val) -> (u32 val) = ({[x] u32.one} u32.add))
-# (def data user.u32.is-max : (u32 val) -> (2 val) = ({[x] u32.max} u32.eq))
+# In this example, we take an input u32, and increment it unless it is the
+# maximum value, in which case the value is returned unchanged as an error.
+#
+# inc-unless-max : Val(U32) -> Val(U32) + Val(U32)
+(def data user.u32.inc-unless-max : (u32 val) -> ({(u32 val) (u32 val)} +) =
+  ([x] user.u32.is-max [is-max . is-max x] if control.user.inc-par-id)
+)
+
+# Helpers for inc-unless-max
+(def control user.inc-par-id : {(u32 val) (u32 val)} -> {(u32 val) (u32 val)} =
+  {data.user.u32.inc [x]}
+)
+
+(def data user.u32.inc : (u32 val) -> (u32 val) = ({[x] u32.one} u32.add))
+(def data user.u32.is-max : (u32 val) -> (2 val) = ({[x] u32.max} u32.eq))

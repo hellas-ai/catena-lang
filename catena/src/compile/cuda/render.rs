@@ -133,6 +133,7 @@ fn render_cuda_stmts(
             Stmt::Continue(label) => out.push_str(&format!("{pad}goto {label}_continue;\n")),
             Stmt::Return => out.push_str(&format!("{pad}return;\n")),
             Stmt::Barrier => out.push_str(&format!("{pad}__syncthreads();\n")),
+            Stmt::Assign { lhs, rhs } => out.push_str(&format!("{pad}{lhs} = {rhs};\n")),
             Stmt::Primitive(primitive) => {
                 for line in domain.lower_primitive_lines(primitive) {
                     out.push_str(&format!("{pad}{line}\n"));

@@ -5,9 +5,8 @@ use std::path::PathBuf;
 use catena::{
     check::check as check_elaborated,
     compile::{
-        CompileConfig, GraphCompileOptions,
+        CompileConfig, GraphCompileOptions, compile_graph_with_options,
         cuda::{CudaEmit, compile_cuda_source},
-        compile_graph_with_options,
     },
     elaborate::elaborate,
 };

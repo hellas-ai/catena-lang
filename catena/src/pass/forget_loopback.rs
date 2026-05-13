@@ -7,8 +7,8 @@ use crate::lang::{Arr, Obj};
 use hexpr::Operation;
 use metacat::tree::Tree;
 use open_hypergraphs::{
-    lax::functor::{try_define_map_arrow, Functor},
     lax::OpenHypergraph,
+    lax::functor::{Functor, try_define_map_arrow},
     strict::vec::FiniteFunction,
 };
 

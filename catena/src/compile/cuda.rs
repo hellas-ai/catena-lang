@@ -1,7 +1,7 @@
 use hexpr::Operation;
 use metacat::{
     check::check,
-    theory::{ast::ParseRawError, RawTheorySet, TheoryId, TheorySet},
+    theory::{RawTheorySet, TheoryId, TheorySet, ast::ParseRawError},
 };
 use open_hypergraphs::lax::OpenHypergraph;
 use thiserror::Error;
@@ -16,7 +16,7 @@ use crate::{
     elaborate::elaborate,
     lang::{Arr, Obj},
     pass::{erase::Erase, forget_loopback::ForgetLoopback},
-    structured::{ramsey, StructuredError},
+    structured::{StructuredError, ramsey},
 };
 use open_hypergraphs::lax::functor::Functor;
 
@@ -72,8 +72,8 @@ fn compile_cuda_checked(
     let entry_graph = typed_definition_graph(theory_set, theory, entry)?;
     let entry_graph = normalize_structured_cuda_graph(&entry_graph)?;
     let target = CudaTarget::new(theory_set);
-    let cfg = ramsey::Cfg::from_hypergraph(&entry_graph)?;
-    let body = ramsey::structure(cfg, target.control)?;
+    let cfg = ramsey::Cfg::from_hypergraph(&entry_graph, &target.control)?;
+    let body = ramsey::structure(cfg)?;
     let program = target.program(entry, body);
 
     match emit {

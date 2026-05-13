@@ -46,6 +46,10 @@ pub enum Stmt {
     Continue(String),
     Return,
     Barrier,
+    Assign {
+        lhs: String,
+        rhs: String,
+    },
     Primitive(Primitive),
     Comment(String),
 }
@@ -121,8 +125,19 @@ fn render_ir_stmts(out: &mut String, stmts: &[Stmt], indent: usize) {
             Stmt::Continue(label) => out.push_str(&format!("{pad}continue {label}\n")),
             Stmt::Return => out.push_str(&format!("{pad}return\n")),
             Stmt::Barrier => out.push_str(&format!("{pad}barrier\n")),
+            Stmt::Assign { lhs, rhs } => out.push_str(&format!("{pad}{lhs} = {rhs}\n")),
             Stmt::Primitive(primitive) => {
-                if primitive.inputs.is_empty() && primitive.outputs.is_empty() {
+                if primitive.outputs.is_empty() {
+                    if primitive.inputs.is_empty() {
+                        out.push_str(&format!("{pad}{}\n", primitive.name));
+                    } else {
+                        out.push_str(&format!(
+                            "{pad}{}({})\n",
+                            primitive.name,
+                            primitive.inputs.join(", ")
+                        ));
+                    }
+                } else if primitive.inputs.is_empty() {
                     out.push_str(&format!("{pad}{}\n", primitive.name));
                 } else {
                     out.push_str(&format!(

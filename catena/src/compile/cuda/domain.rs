@@ -1,8 +1,8 @@
 use crate::{
-    compile::cuda::render::{render_cuda, CudaKernelAbi, CudaPrimitiveLowering},
+    compile::cuda::render::{CudaKernelAbi, CudaPrimitiveLowering, render_cuda},
     structured::{
         ir::{EntryPoint, Primitive, Program, Stmt},
-        ramsey::{ActionNode, ArrowSemantics},
+        ramsey::{ArrowInstance, ArrowSemantics},
     },
 };
 use hexpr::Operation;
@@ -44,21 +44,27 @@ impl<'a> CudaTarget<'a> {
 pub(super) struct GenericCudaControl;
 
 impl ArrowSemantics for GenericCudaControl {
-    fn actions(&self, node: &ActionNode) -> Vec<Stmt> {
-        if node.op == "gpu.sync" {
+    fn statements(&self, arrow: &ArrowInstance) -> Vec<Stmt> {
+        if arrow.op == "gpu.sync" {
             return vec![Stmt::Barrier];
         }
+        let outputs = if arrow.branch_arity > 1 {
+            vec![branch_tag(arrow), branch_payload(arrow)]
+        } else if arrow.op.starts_with("data.") {
+            arrow.outputs.clone()
+        } else {
+            Vec::new()
+        };
         vec![Stmt::Primitive(Primitive {
-            name: node.op.clone(),
-            inputs: node.inputs.clone(),
-            outputs: node.outputs.clone(),
+            name: arrow.op.clone(),
+            inputs: arrow.inputs.clone(),
+            outputs,
             code: String::new(),
         })]
     }
 
-    fn condition(&self, node: &ActionNode) -> String {
-        let op = &node.op;
-        format!("/* TODO: no CUDA condition lowering for Catena arrow `{op}` */ 1")
+    fn branch_condition_rhs(&self, arrow: &ArrowInstance, output: usize) -> String {
+        format!("{} == {output}", branch_tag(arrow))
     }
 }
 
@@ -148,6 +154,14 @@ fn primitive_assignment(primitive: &Primitive) -> String {
     } else {
         format!("{} = {call}", primitive.outputs.join(", "))
     }
+}
+
+fn branch_tag(arrow: &ArrowInstance) -> String {
+    format!("b{}", arrow.id)
+}
+
+fn branch_payload(arrow: &ArrowInstance) -> String {
+    format!("p{}", arrow.id)
 }
 
 fn sanitize_ident(name: &str) -> String {

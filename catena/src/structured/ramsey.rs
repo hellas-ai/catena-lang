@@ -1,29 +1,36 @@
 use super::ir::Stmt;
 use crate::lang::{Arr, Obj};
-use open_hypergraphs::lax::{EdgeId, NodeId, OpenHypergraph};
+use open_hypergraphs::lax::{NodeId, OpenHypergraph};
 use std::collections::{BTreeSet, HashMap, HashSet};
 
+pub type CfgNodeId = usize;
+pub type Expr = String;
+pub type OperationName = String;
+pub type SsaValue = String;
+
 pub trait ArrowSemantics {
-    fn actions(&self, node: &ActionNode) -> Vec<Stmt>;
+    fn statements(&self, arrow: &ArrowInstance) -> Vec<Stmt>;
 
-    fn condition(&self, node: &ActionNode) -> String {
-        format!("/* {} */ 1", sanitize_ident(&node.op))
+    fn branch_condition_rhs(&self, arrow: &ArrowInstance, output: usize) -> Expr {
+        format!("/* {} output {output} */ 1", sanitize_ident(&arrow.op))
     }
 
-    fn selector(&self, node: &ActionNode) -> String {
-        format!("/* {} */ 0", sanitize_ident(&node.op))
+    fn selector(&self, arrow: &ArrowInstance) -> SsaValue {
+        format!("/* {} */ 0", sanitize_ident(&arrow.op))
     }
 
-    fn counted_loop(&self, _op: &str) -> Option<(String, String)> {
+    fn counted_loop(&self, _op: &str) -> Option<(SsaValue, Expr)> {
         None
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ActionNode {
-    pub op: String,
-    pub inputs: Vec<String>,
-    pub outputs: Vec<String>,
+pub struct ArrowInstance {
+    pub id: CfgNodeId,
+    pub op: OperationName,
+    pub inputs: Vec<SsaValue>,
+    pub outputs: Vec<SsaValue>,
+    pub branch_arity: usize,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -38,13 +45,9 @@ pub enum StructuredError {
     UnsupportedEntry { node: String, successors: usize },
 }
 
-pub fn structure(cfg: Cfg, semantics: impl ArrowSemantics) -> Result<Vec<Stmt>, StructuredError> {
+pub fn structure(cfg: Cfg) -> Result<Vec<Stmt>, StructuredError> {
     let analyses = Analyses::new(&cfg)?;
-    let mut structurer = Structurer {
-        cfg,
-        analyses,
-        semantics,
-    };
+    let mut structurer = Structurer { cfg, analyses };
     let mut body = structurer.do_tree(structurer.cfg.entry, &[])?;
     drop_redundant_terminal_continues(&mut body);
     Ok(body)
@@ -52,24 +55,40 @@ pub fn structure(cfg: Cfg, semantics: impl ArrowSemantics) -> Result<Vec<Stmt>, 
 
 #[derive(Debug, Clone)]
 pub struct Cfg {
-    entry: usize,
+    entry: CfgNodeId,
     nodes: Vec<CfgNode>,
-    predecessors: Vec<Vec<usize>>,
+    predecessors: Vec<Vec<CfgNodeId>>,
 }
 
 #[derive(Debug, Clone)]
 struct CfgNode {
-    edge: EdgeId,
-    op: String,
-    inputs: Vec<String>,
-    outputs: Vec<String>,
-    successors: Vec<usize>,
-    terminal: bool,
+    op: OperationName,
+    statements: Vec<Stmt>,
+    transfer: Transfer,
+    counted_loop: Option<(SsaValue, Expr)>,
+}
+
+#[derive(Debug, Clone)]
+enum Transfer {
+    Goto(CfgNodeId),
+    If {
+        condition: SsaValue,
+        then_target: CfgNodeId,
+        else_target: CfgNodeId,
+    },
+    Switch {
+        selector: SsaValue,
+        targets: Vec<CfgNodeId>,
+    },
+    Return,
 }
 
 impl Cfg {
-    pub fn from_hypergraph(f: &OpenHypergraph<Obj, Arr>) -> Result<Self, StructuredError> {
-        let mut consumers: HashMap<NodeId, Vec<usize>> = HashMap::new();
+    pub fn from_hypergraph(
+        f: &OpenHypergraph<Obj, Arr>,
+        semantics: &impl ArrowSemantics,
+    ) -> Result<Self, StructuredError> {
+        let mut consumers: HashMap<NodeId, Vec<CfgNodeId>> = HashMap::new();
         for (edge_index, adjacency) in f.hypergraph.adjacency.iter().enumerate() {
             for source in &adjacency.sources {
                 consumers.entry(*source).or_default().push(edge_index);
@@ -102,25 +121,14 @@ impl Cfg {
         let graph_targets: HashSet<NodeId> = f.targets.iter().copied().collect();
         let exit_node = (!graph_targets.is_empty()).then_some(f.hypergraph.edges.len());
         let mut nodes = Vec::new();
+        let mut arrows = Vec::new();
         for (edge_index, op) in f.hypergraph.edges.iter().enumerate() {
             let op = op.to_string();
-            let mut successors = Vec::new();
-            for target in &f.hypergraph.adjacency[edge_index].targets {
-                if graph_targets.contains(target) {
-                    if boundary_target_is_control_successor(&op) {
-                        if let Some(exit_node) = exit_node {
-                            push_unique_all(&mut successors, [exit_node]);
-                        }
-                    }
-                    continue;
-                }
-                if let Some(edges) = consumers.get(target) {
-                    push_unique_all(&mut successors, edges.iter().copied());
-                }
-            }
-            nodes.push(CfgNode {
-                edge: EdgeId(edge_index),
-                op,
+            let successors =
+                edge_successors(f, edge_index, &consumers, &graph_targets, exit_node, &op);
+            let arrow = ArrowInstance {
+                id: edge_index,
+                op: op.clone(),
                 inputs: f.hypergraph.adjacency[edge_index]
                     .sources
                     .iter()
@@ -131,25 +139,44 @@ impl Cfg {
                     .iter()
                     .map(|node| wire_name(*node))
                     .collect(),
-                successors,
-                terminal: false,
-            });
-        }
-        if let Some(exit_node) = exit_node {
+                branch_arity: successors.len(),
+            };
+            arrows.push(arrow.clone());
             nodes.push(CfgNode {
-                edge: EdgeId(exit_node),
-                op: "__exit".to_string(),
-                inputs: Vec::new(),
-                outputs: Vec::new(),
-                successors: Vec::new(),
-                terminal: true,
+                counted_loop: semantics.counted_loop(&op),
+                op,
+                statements: semantics.statements(&arrow),
+                transfer: Transfer::Return,
             });
         }
 
+        if !graph_targets.is_empty() {
+            nodes.push(CfgNode {
+                op: "__exit".to_string(),
+                statements: Vec::new(),
+                transfer: Transfer::Return,
+                counted_loop: None,
+            });
+        }
+
+        for edge_index in 0..f.hypergraph.edges.len() {
+            let arrow = arrows[edge_index].clone();
+            let successors = edge_successors(
+                f,
+                edge_index,
+                &consumers,
+                &graph_targets,
+                (!graph_targets.is_empty()).then_some(f.hypergraph.edges.len()),
+                &nodes[edge_index].op,
+            );
+            nodes[edge_index].transfer =
+                transfer_for_successors(&mut nodes, arrow, successors, semantics);
+        }
+
         let mut predecessors = vec![Vec::new(); nodes.len()];
-        for node in &nodes {
-            for successor in &node.successors {
-                predecessors[*successor].push(node.edge.0);
+        for (node_index, node) in nodes.iter().enumerate() {
+            for successor in node.successors() {
+                predecessors[successor].push(node_index);
             }
         }
 
@@ -160,7 +187,7 @@ impl Cfg {
         })
     }
 
-    fn label(&self, node: usize) -> String {
+    fn label(&self, node: CfgNodeId) -> String {
         format!("n{node}")
     }
 }
@@ -168,9 +195,9 @@ impl Cfg {
 #[derive(Debug, Clone)]
 struct Analyses {
     rpo_index: Vec<usize>,
-    children: Vec<Vec<usize>>,
-    merge_nodes: HashSet<usize>,
-    loop_headers: HashSet<usize>,
+    children: Vec<Vec<CfgNodeId>>,
+    merge_nodes: HashSet<CfgNodeId>,
+    loop_headers: HashSet<CfgNodeId>,
 }
 
 impl Analyses {
@@ -195,18 +222,18 @@ impl Analyses {
 
         let mut forward_inedges = vec![0usize; cfg.nodes.len()];
         let mut loop_headers = HashSet::new();
-        for node in &cfg.nodes {
-            for successor in &node.successors {
-                if rpo_index[*successor] <= rpo_index[node.edge.0] {
-                    if !dominators[node.edge.0].contains(successor) {
+        for (node_index, node) in cfg.nodes.iter().enumerate() {
+            for successor in node.successors() {
+                if rpo_index[successor] <= rpo_index[node_index] {
+                    if !dominators[node_index].contains(&successor) {
                         return Err(StructuredError::IrreducibleBackEdge {
-                            from: cfg.label(node.edge.0),
-                            to: cfg.label(*successor),
+                            from: cfg.label(node_index),
+                            to: cfg.label(successor),
                         });
                     }
-                    loop_headers.insert(*successor);
+                    loop_headers.insert(successor);
                 } else {
-                    forward_inedges[*successor] += 1;
+                    forward_inedges[successor] += 1;
                 }
             }
         }
@@ -229,20 +256,19 @@ impl Analyses {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ContextFrame {
     IfThenElse,
-    LoopHeadedBy(usize),
-    BlockFollowedBy(usize),
+    LoopHeadedBy(CfgNodeId),
+    BlockFollowedBy(CfgNodeId),
 }
 
-struct Structurer<S> {
+struct Structurer {
     cfg: Cfg,
     analyses: Analyses,
-    semantics: S,
 }
 
-impl<S: ArrowSemantics> Structurer<S> {
+impl Structurer {
     fn do_tree(
         &mut self,
-        node: usize,
+        node: CfgNodeId,
         context: &[ContextFrame],
     ) -> Result<Vec<Stmt>, StructuredError> {
         if self.is_counted_loop(node) {
@@ -265,10 +291,10 @@ impl<S: ArrowSemantics> Structurer<S> {
 
     fn do_counted_loop(
         &mut self,
-        node: usize,
+        node: CfgNodeId,
         context: &[ContextFrame],
     ) -> Result<Vec<Stmt>, StructuredError> {
-        let successors = self.cfg.nodes[node].successors.clone();
+        let successors = self.cfg.nodes[node].successors();
         let [body_target, exit_target] = successors.as_slice() else {
             return self.node_within(node, self.merge_children(node), context);
         };
@@ -276,9 +302,9 @@ impl<S: ArrowSemantics> Structurer<S> {
         let mut loop_context = context.to_vec();
         loop_context.insert(0, ContextFrame::LoopHeadedBy(node));
 
-        let (var, extent) = self
-            .semantics
-            .counted_loop(&self.cfg.nodes[node].op)
+        let (var, extent) = self.cfg.nodes[node]
+            .counted_loop
+            .clone()
             .expect("is_counted_loop checked counted_loop");
         let mut body = self.do_branch(node, *body_target, &loop_context)?;
         drop_redundant_terminal_continues(&mut body);
@@ -295,8 +321,8 @@ impl<S: ArrowSemantics> Structurer<S> {
 
     fn node_within(
         &mut self,
-        node: usize,
-        mut merge_children: Vec<usize>,
+        node: CfgNodeId,
+        mut merge_children: Vec<CfgNodeId>,
         context: &[ContextFrame],
     ) -> Result<Vec<Stmt>, StructuredError> {
         if let Some(merge_child) = merge_children.pop() {
@@ -311,34 +337,34 @@ impl<S: ArrowSemantics> Structurer<S> {
         }
 
         let cfg_node = self.cfg.nodes[node].clone();
-        if cfg_node.terminal {
-            return Ok(vec![Stmt::Return]);
-        }
-        let action_node = cfg_node.action_node();
-        let mut code = self.semantics.actions(&action_node);
-        match cfg_node.successors.as_slice() {
-            [] => code.push(Stmt::Return),
-            [target] => code.extend(self.do_branch(node, *target, context)?),
-            [then_target, else_target] => {
+        let mut code = cfg_node.statements;
+        match cfg_node.transfer {
+            Transfer::Return => code.push(Stmt::Return),
+            Transfer::Goto(target) => code.extend(self.do_branch(node, target, context)?),
+            Transfer::If {
+                condition,
+                then_target,
+                else_target,
+            } => {
                 let mut then_context = context.to_vec();
                 then_context.insert(0, ContextFrame::IfThenElse);
                 let else_context = then_context.clone();
                 code.push(Stmt::If {
-                    condition: self.semantics.condition(&action_node),
-                    then_body: self.do_branch(node, *then_target, &then_context)?,
-                    else_body: self.do_branch(node, *else_target, &else_context)?,
+                    condition,
+                    then_body: self.do_branch(node, then_target, &then_context)?,
+                    else_body: self.do_branch(node, else_target, &else_context)?,
                 });
             }
-            successors => {
-                let mut cases = Vec::new();
-                for successor in successors {
+            Transfer::Switch { selector, targets } => {
+                let mut case_bodies = Vec::new();
+                for target in targets {
                     let mut case_context = context.to_vec();
                     case_context.insert(0, ContextFrame::IfThenElse);
-                    cases.push(self.do_branch(node, *successor, &case_context)?);
+                    case_bodies.push(self.do_branch(node, target, &case_context)?);
                 }
                 code.push(Stmt::Switch {
-                    selector: self.semantics.selector(&action_node),
-                    cases,
+                    selector,
+                    cases: case_bodies,
                 });
             }
         }
@@ -347,8 +373,8 @@ impl<S: ArrowSemantics> Structurer<S> {
 
     fn do_branch(
         &mut self,
-        source: usize,
-        target: usize,
+        source: CfgNodeId,
+        target: CfgNodeId,
         context: &[ContextFrame],
     ) -> Result<Vec<Stmt>, StructuredError> {
         if self.is_backward(source, target) {
@@ -361,7 +387,7 @@ impl<S: ArrowSemantics> Structurer<S> {
         self.do_tree(target, context)
     }
 
-    fn merge_children(&self, node: usize) -> Vec<usize> {
+    fn merge_children(&self, node: CfgNodeId) -> Vec<CfgNodeId> {
         let mut children = self.analyses.children[node]
             .iter()
             .copied()
@@ -371,11 +397,11 @@ impl<S: ArrowSemantics> Structurer<S> {
         children
     }
 
-    fn is_backward(&self, source: usize, target: usize) -> bool {
+    fn is_backward(&self, source: CfgNodeId, target: CfgNodeId) -> bool {
         self.analyses.rpo_index[target] <= self.analyses.rpo_index[source]
     }
 
-    fn index(&self, target: usize, context: &[ContextFrame]) -> Result<usize, StructuredError> {
+    fn index(&self, target: CfgNodeId, context: &[ContextFrame]) -> Result<usize, StructuredError> {
         for (index, frame) in context.iter().enumerate() {
             let matches = match frame {
                 ContextFrame::IfThenElse => false,
@@ -390,24 +416,162 @@ impl<S: ArrowSemantics> Structurer<S> {
         Err(StructuredError::MissingContext(self.cfg.label(target)))
     }
 
-    fn is_counted_loop(&self, node: usize) -> bool {
+    fn is_counted_loop(&self, node: CfgNodeId) -> bool {
         self.analyses.loop_headers.contains(&node)
-            && self.cfg.nodes[node].successors.len() == 2
-            && self
-                .semantics
-                .counted_loop(&self.cfg.nodes[node].op)
-                .is_some()
+            && self.cfg.nodes[node].successors().len() == 2
+            && self.cfg.nodes[node].counted_loop.is_some()
     }
 }
 
 impl CfgNode {
-    fn action_node(&self) -> ActionNode {
-        ActionNode {
-            op: self.op.clone(),
-            inputs: self.inputs.clone(),
-            outputs: self.outputs.clone(),
+    fn successors(&self) -> Vec<CfgNodeId> {
+        match &self.transfer {
+            Transfer::Goto(target) => vec![*target],
+            Transfer::If {
+                then_target,
+                else_target,
+                ..
+            } => vec![*then_target, *else_target],
+            Transfer::Switch { targets, .. } => targets.clone(),
+            Transfer::Return => Vec::new(),
         }
     }
+}
+
+fn edge_successors(
+    f: &OpenHypergraph<Obj, Arr>,
+    edge_index: CfgNodeId,
+    consumers: &HashMap<NodeId, Vec<CfgNodeId>>,
+    graph_targets: &HashSet<NodeId>,
+    exit_node: Option<CfgNodeId>,
+    op: &str,
+) -> Vec<CfgNodeId> {
+    let mut successors = Vec::new();
+    for target in &f.hypergraph.adjacency[edge_index].targets {
+        if graph_targets.contains(target) {
+            if boundary_target_is_control_successor(op) {
+                if let Some(exit_node) = exit_node {
+                    push_unique_all(&mut successors, [exit_node]);
+                }
+            }
+            continue;
+        }
+        if let Some(edges) = consumers.get(target) {
+            push_unique_all(&mut successors, edges.iter().copied());
+        }
+    }
+    successors
+}
+
+fn transfer_for_successors(
+    nodes: &mut Vec<CfgNode>,
+    arrow: ArrowInstance,
+    successors: Vec<CfgNodeId>,
+    semantics: &impl ArrowSemantics,
+) -> Transfer {
+    match successors.as_slice() {
+        [] => Transfer::Return,
+        [target] => Transfer::Goto(*target),
+        [then_target, else_target] => {
+            let condition = branch_condition_value(&arrow, 0);
+            let payload = branch_payload(&arrow);
+            let then_target = append_binding_node(
+                nodes,
+                &arrow,
+                0,
+                branch_binding(&arrow, 0, &payload),
+                *then_target,
+            );
+            let else_target = append_binding_node(
+                nodes,
+                &arrow,
+                1,
+                branch_binding(&arrow, 1, &payload),
+                *else_target,
+            );
+            let branch_node = nodes.len();
+            nodes.push(CfgNode {
+                op: format!("{}.__branch", arrow.op),
+                statements: vec![Stmt::Assign {
+                    lhs: condition.clone(),
+                    rhs: semantics.branch_condition_rhs(&arrow, 0),
+                }],
+                transfer: Transfer::If {
+                    condition,
+                    then_target,
+                    else_target,
+                },
+                counted_loop: None,
+            });
+            Transfer::Goto(branch_node)
+        }
+        targets => {
+            let payload = branch_payload(&arrow);
+            let targets = targets
+                .iter()
+                .enumerate()
+                .map(|(index, target)| {
+                    append_binding_node(
+                        nodes,
+                        &arrow,
+                        index,
+                        branch_binding(&arrow, index, &payload),
+                        *target,
+                    )
+                })
+                .collect();
+            let branch_node = nodes.len();
+            nodes.push(CfgNode {
+                op: format!("{}.__branch", arrow.op),
+                statements: Vec::new(),
+                transfer: Transfer::Switch {
+                    selector: semantics.selector(&arrow),
+                    targets,
+                },
+                counted_loop: None,
+            });
+            Transfer::Goto(branch_node)
+        }
+    }
+}
+
+fn append_binding_node(
+    nodes: &mut Vec<CfgNode>,
+    arrow: &ArrowInstance,
+    output: usize,
+    bind: Option<(SsaValue, SsaValue)>,
+    target: CfgNodeId,
+) -> CfgNodeId {
+    let Some((lhs, rhs)) = bind else {
+        return target;
+    };
+    let node = nodes.len();
+    nodes.push(CfgNode {
+        op: format!("{}.__bind{output}", arrow.op),
+        statements: vec![Stmt::Assign { lhs, rhs }],
+        transfer: Transfer::Goto(target),
+        counted_loop: None,
+    });
+    node
+}
+
+fn branch_payload(arrow: &ArrowInstance) -> SsaValue {
+    format!("p{}", arrow.id)
+}
+
+fn branch_condition_value(arrow: &ArrowInstance, output: usize) -> SsaValue {
+    format!("c{}_{}", arrow.id, output)
+}
+
+fn branch_binding(
+    arrow: &ArrowInstance,
+    output: usize,
+    payload: &str,
+) -> Option<(SsaValue, SsaValue)> {
+    arrow
+        .outputs
+        .get(output)
+        .map(|wire| (wire.clone(), payload.to_string()))
 }
 
 fn boundary_target_is_control_successor(op: &str) -> bool {
@@ -416,18 +580,18 @@ fn boundary_target_is_control_successor(op: &str) -> bool {
     op != "gpu.sync"
 }
 
-fn wire_name(node: NodeId) -> String {
+fn wire_name(node: NodeId) -> SsaValue {
     format!("w{}", node.0)
 }
 
-fn reverse_postorder(cfg: &Cfg) -> Vec<usize> {
-    fn visit(cfg: &Cfg, node: usize, seen: &mut [bool], postorder: &mut Vec<usize>) {
+fn reverse_postorder(cfg: &Cfg) -> Vec<CfgNodeId> {
+    fn visit(cfg: &Cfg, node: CfgNodeId, seen: &mut [bool], postorder: &mut Vec<CfgNodeId>) {
         if seen[node] {
             return;
         }
         seen[node] = true;
-        for successor in &cfg.nodes[node].successors {
-            visit(cfg, *successor, seen, postorder);
+        for successor in cfg.nodes[node].successors() {
+            visit(cfg, successor, seen, postorder);
         }
         postorder.push(node);
     }
@@ -439,7 +603,7 @@ fn reverse_postorder(cfg: &Cfg) -> Vec<usize> {
     postorder
 }
 
-fn dominators(cfg: &Cfg, rpo: &[usize]) -> Vec<BTreeSet<usize>> {
+fn dominators(cfg: &Cfg, rpo: &[CfgNodeId]) -> Vec<BTreeSet<CfgNodeId>> {
     let all_reachable = rpo.iter().copied().collect::<BTreeSet<_>>();
     let mut doms = vec![BTreeSet::new(); cfg.nodes.len()];
     for node in rpo {
@@ -479,7 +643,7 @@ fn dominators(cfg: &Cfg, rpo: &[usize]) -> Vec<BTreeSet<usize>> {
     doms
 }
 
-fn immediate_dominators(cfg: &Cfg, doms: &[BTreeSet<usize>]) -> Vec<Option<usize>> {
+fn immediate_dominators(cfg: &Cfg, doms: &[BTreeSet<CfgNodeId>]) -> Vec<Option<CfgNodeId>> {
     let mut idom = vec![None; cfg.nodes.len()];
     for node in 0..cfg.nodes.len() {
         if node == cfg.entry || doms[node].is_empty() {
@@ -499,7 +663,7 @@ fn immediate_dominators(cfg: &Cfg, doms: &[BTreeSet<usize>]) -> Vec<Option<usize
     idom
 }
 
-fn push_unique_all(target: &mut Vec<usize>, values: impl IntoIterator<Item = usize>) {
+fn push_unique_all(target: &mut Vec<CfgNodeId>, values: impl IntoIterator<Item = CfgNodeId>) {
     for value in values {
         if !target.contains(&value) {
             target.push(value);

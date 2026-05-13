@@ -22,6 +22,7 @@
   ########################################
   # built in type definitions
   (arr f32 : 0 -> 1)
+  (arr u32 : 0 -> 1)
 })
 
 (theory data syntax {
@@ -52,14 +53,26 @@
   # built in arrows
 
   # 2 ~= 1 + 1
+  # TODO: move this to 'control' to avoid hackery?
   (arr 2.intro : ({1 1} + val) -> (2 val))
   (arr 2.elim  : (2 val) -> ({1 1} + val))
 
   (arr f32.zero : [] -> (f32 val))
   (arr f32.add : {(f32 val) (f32 val)} -> (f32 val))
+
+  # unsigned 32-bit integers
+  (arr u32.type : [] -> u32)
+  (arr u32.zero : [] -> (u32 val))
+  (arr u32.one  : [] -> (u32 val))
+  (arr u32.max  : [] -> (u32 val))
+  (arr u32.add  : {(u32 val) (u32 val)} -> (u32 val))
+  (arr u32.eq   : {(u32 val) (u32 val)} -> (2 val))
 })
 
 (theory control syntax {
+  # Reified type for 0
+  (arr 0.type : [] -> 0)
+
   # val and packed tensors
   # Val(A + B) -> Val(A) + Val(B)
   (arr val.+.elim  : (+ val) -> {val val})
@@ -83,4 +96,6 @@
   # NOTE: 'never' takes a *type* argument, not a *value* argument!
   (arr merge : (val [x . x x]) -> val)
   (arr never : [x] -> val)
+
+  (arr u32.type : [] -> u32)
 })

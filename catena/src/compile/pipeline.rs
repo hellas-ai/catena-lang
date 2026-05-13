@@ -4,7 +4,7 @@ use metacat::theory::{RawTheorySet, TheorySet};
 use thiserror::Error;
 
 use crate::{
-    check::{CheckError, check as check_elaborated},
+    check::{CheckError, check as check_elaborated_theory},
     compile::{
         CompileConfig, CompileGraph, CompileGraphError, GraphCompileOptions, check_render,
         compile_graph,
@@ -70,7 +70,7 @@ pub fn compile(request: CompileRequest) -> Result<Vec<u8>, CompilePipelineError>
 pub struct CompilePipeline {
     request: CompileRequest,
     elaborated: Option<RawTheorySet>,
-    checked: Option<TheorySet>,
+    checked_elaborated_theory: Option<TheorySet>,
 }
 
 impl CompilePipeline {
@@ -78,7 +78,7 @@ impl CompilePipeline {
         Self {
             request,
             elaborated: None,
-            checked: None,
+            checked_elaborated_theory: None,
         }
     }
 
@@ -92,28 +92,26 @@ impl CompilePipeline {
             Emit::Checked => {
                 self.require_format(OutputFormat::Text)?;
                 self.reject_graph_options()?;
-                Ok(check_render::summary(self.checked()?).into_bytes())
+                Ok(check_render::summary(self.checked_elaborated_theory()?).into_bytes())
             }
             Emit::CompileGraph => {
                 self.require_format(OutputFormat::Svg)?;
-                let graph = self.compile_graph()?;
+                let compile_graph_request = self.compile_graph_request()?;
+                let checked_elaborated_theory = self.checked_elaborated_theory()?;
+                let graph = Self::compile_graph(checked_elaborated_theory, compile_graph_request)?;
                 Ok(graph_render::nested_svg(&graph)?)
             }
             Emit::Cuda | Emit::StructuredIr => {
                 self.require_format(OutputFormat::Text)?;
-                let theory = self.required_input(PipelineInput::Theory)?;
                 let entry = self.required_input(PipelineInput::Entry)?;
                 let emit = self.request.emit;
-                let compile_graph = self.compile_graph()?;
-                let checked = self.checked()?;
-                let program = compile_structured_program_from_graph(
-                    checked,
-                    &theory,
-                    &entry,
-                    &compile_graph,
-                )?;
+                let compile_graph_request = self.compile_graph_request()?;
+                let checked_elaborated_theory = self.checked_elaborated_theory()?;
+                let compile_graph =
+                    Self::compile_graph(checked_elaborated_theory, compile_graph_request)?;
+                let program = compile_structured_program_from_graph(&entry, &compile_graph)?;
                 Ok(match emit {
-                    Emit::Cuda => render_cuda_source(checked, &program),
+                    Emit::Cuda => render_cuda_source(checked_elaborated_theory, &program),
                     Emit::StructuredIr => program.render_ir(),
                     _ => unreachable!("only structured-backed emits are handled here"),
                 }
@@ -130,26 +128,30 @@ impl CompilePipeline {
         Ok(self.elaborated.as_ref().expect("elaborated is initialized"))
     }
 
-    pub fn checked(&mut self) -> Result<&TheorySet, CompilePipelineError> {
-        if self.checked.is_none() {
+    pub fn checked_elaborated_theory(&mut self) -> Result<&TheorySet, CompilePipelineError> {
+        if self.checked_elaborated_theory.is_none() {
             let elaborated = self.elaborated()?;
-            self.checked = Some(check_elaborated(elaborated)?);
+            self.checked_elaborated_theory = Some(check_elaborated_theory(elaborated)?);
         }
-        Ok(self.checked.as_ref().expect("checked is initialized"))
+        Ok(self
+            .checked_elaborated_theory
+            .as_ref()
+            .expect("checked elaborated theory is initialized"))
     }
 
-    pub fn compile_graph(&mut self) -> Result<CompileGraph, CompilePipelineError> {
-        let theory = self.required_input(PipelineInput::Theory)?;
-        let entry = self.required_input(PipelineInput::Entry)?;
-        let graph_options = self.request.graph_options.clone();
-        let checked = self.checked()?;
-        Ok(compile_graph(
-            checked,
-            &CompileConfig::data_control(),
-            &theory,
-            &entry,
-            graph_options,
-        )?)
+    pub fn compile_graph_request(&self) -> Result<CompileGraphRequest, CompilePipelineError> {
+        Ok(CompileGraphRequest {
+            theory: self.required_input(PipelineInput::Theory)?,
+            entry: self.required_input(PipelineInput::Entry)?,
+            graph_options: self.request.graph_options.clone(),
+        })
+    }
+
+    pub fn compile_graph(
+        checked_elaborated_theory: &TheorySet,
+        request: CompileGraphRequest,
+    ) -> Result<CompileGraph, CompilePipelineError> {
+        compile_graph_from_checked(checked_elaborated_theory, request)
     }
 
     fn required_input(&self, input: PipelineInput) -> Result<String, CompilePipelineError> {
@@ -181,6 +183,26 @@ impl CompilePipeline {
         }
         Ok(())
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CompileGraphRequest {
+    pub theory: String,
+    pub entry: String,
+    pub graph_options: GraphCompileOptions,
+}
+
+fn compile_graph_from_checked(
+    checked_elaborated_theory: &TheorySet,
+    request: CompileGraphRequest,
+) -> Result<CompileGraph, CompilePipelineError> {
+    Ok(compile_graph(
+        checked_elaborated_theory,
+        &CompileConfig::data_control(),
+        &request.theory,
+        &request.entry,
+        request.graph_options,
+    )?)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

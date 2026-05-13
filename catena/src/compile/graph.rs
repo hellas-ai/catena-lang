@@ -12,17 +12,20 @@ use open_hypergraphs::{
 };
 use thiserror::Error;
 
-use crate::{compile::config::CompileConfig, pass::inline::Inline};
+use crate::{compile::config::CompileConfig, lang::Obj, pass::inline::Inline};
 
 type DefinitionGraph = LaxOpenHypergraph<(), Operation>;
 type LabeledGraph = LaxOpenHypergraph<String, Operation>;
 type StrictLabeledGraph = StrictOpenHypergraph<String, Operation>;
+type TypedGraph = LaxOpenHypergraph<Obj, Operation>;
+type StrictTypedGraph = StrictOpenHypergraph<Obj, Operation>;
 
 #[derive(Clone, Debug)]
 pub struct CompileGraph {
     pub theory: String,
     pub definition: String,
     pub graph: StrictLabeledGraph,
+    pub typed_graph: StrictTypedGraph,
     pub children: Vec<NestedCompileGraph>,
 }
 
@@ -160,13 +163,15 @@ impl GraphCompileState<'_> {
         let syntax = self.syntax_theory()?;
         let theory = self.theory(theory_name)?;
         let definition_key = parse_operation(definition)?;
-        let graph = self.compile_definition_graph(theory_name, theory, syntax, &definition_key)?;
+        let (graph, typed_graph) =
+            self.compile_definition_graph(theory_name, theory, syntax, &definition_key)?;
         let children = self.compile_nested_foreign_graphs(theory_name, &graph)?;
 
         Ok(CompileGraph {
             theory: theory_name.to_string(),
             definition: definition.to_string(),
             graph,
+            typed_graph,
             children,
         })
     }
@@ -193,7 +198,7 @@ impl GraphCompileState<'_> {
         theory: &Theory,
         syntax: &Theory,
         definition_key: &Operation,
-    ) -> Result<StrictLabeledGraph, CompileGraphError> {
+    ) -> Result<(StrictLabeledGraph, StrictTypedGraph), CompileGraphError> {
         let arrow = theory
             .get_arrow(definition_key)
             .ok_or_else(|| CompileGraphError::UnknownDefinition(definition_key.to_string()))?;
@@ -209,7 +214,7 @@ impl GraphCompileState<'_> {
             definition_key,
         )?;
 
-        let graph = typecheck_and_label_graph(
+        let (graph, typed_graph) = annotate_and_label_graph(
             theory,
             syntax,
             definition_key.as_str(),
@@ -218,7 +223,7 @@ impl GraphCompileState<'_> {
             graph,
         )?;
 
-        Ok(graph.to_strict())
+        Ok((graph.to_strict(), typed_graph.to_strict()))
     }
 
     fn compile_nested_foreign_graphs(
@@ -294,20 +299,22 @@ fn inline_local_definitions(
     Err(CompileGraphError::InlineLimit(definition_key.to_string()))
 }
 
-fn typecheck_and_label_graph(
+fn annotate_and_label_graph(
     theory: &Theory,
     syntax: &Theory,
     definition: &str,
     source: DefinitionGraph,
     target: DefinitionGraph,
     mut graph: DefinitionGraph,
-) -> Result<LabeledGraph, CompileGraphError> {
-    let labels = check(theory, source, target, &mut graph)
-        .map_err(|error| CompileGraphError::Typecheck {
+) -> Result<(LabeledGraph, TypedGraph), CompileGraphError> {
+    let node_types = check(theory, source, target, &mut graph).map_err(|error| {
+        CompileGraphError::Typecheck {
             definition: definition.to_string(),
             error,
-        })?
-        .into_iter()
+        }
+    })?;
+    let labels = node_types
+        .iter()
         .map(|tree| {
             tree.try_pretty(Some(&|op| {
                 syntax
@@ -317,12 +324,23 @@ fn typecheck_and_label_graph(
         })
         .collect::<Result<Vec<_>, _>>()?;
 
-    graph
-        .with_nodes(|_| labels)
-        .ok_or_else(|| CompileGraphError::Typecheck {
-            definition: definition.to_string(),
-            error: metacat::check::Error::InvalidTypeMaps,
-        })
+    let labeled_graph =
+        graph
+            .clone()
+            .with_nodes(|_| labels)
+            .ok_or_else(|| CompileGraphError::Typecheck {
+                definition: definition.to_string(),
+                error: metacat::check::Error::InvalidTypeMaps,
+            })?;
+    let typed_graph =
+        graph
+            .with_nodes(|_| node_types)
+            .ok_or_else(|| CompileGraphError::Typecheck {
+                definition: definition.to_string(),
+                error: metacat::check::Error::InvalidTypeMaps,
+            })?;
+
+    Ok((labeled_graph, typed_graph))
 }
 
 fn definition_exists(theory: &Theory, local_name: &str) -> Result<bool, CompileGraphError> {
@@ -348,20 +366,20 @@ fn compile_primitive_child_graph(
         vec![(); arrow.type_maps.0.target().len()],
         vec![(); arrow.type_maps.1.target().len()],
     );
-    let graph = typecheck_and_label_graph(
+    let (graph, typed_graph) = annotate_and_label_graph(
         theory,
         syntax,
         local_name,
         arrow.type_maps.0.clone(),
         arrow.type_maps.1.clone(),
         graph,
-    )?
-    .to_strict();
+    )?;
 
     Ok(CompileGraph {
         theory: theory_name.to_string(),
         definition: local_name.to_string(),
-        graph,
+        graph: graph.to_strict(),
+        typed_graph: typed_graph.to_strict(),
         children: Vec::new(),
     })
 }

@@ -7,7 +7,7 @@ mod render;
 use domain::CudaTarget;
 
 use crate::{
-    check::check as check_elaborated,
+    check::check as typecheck_elaborated,
     compile::{
         CompileConfig, CompileGraphError, GraphCompileOptions, compile_graph,
         structured::{StructuredCompileError, compile_structured_program_from_graph},
@@ -37,7 +37,7 @@ pub fn compile_cuda_source(
 ) -> Result<String, CudaCompileError> {
     let raw = RawTheorySet::from_text(source)?;
     let elaborated = elaborate(raw)?;
-    let theory_set = check_elaborated(&elaborated)?;
+    let theory_set = typecheck_elaborated(&elaborated)?;
     compile_cuda_theory_set(&theory_set, theory, entry)
 }
 
@@ -62,7 +62,7 @@ pub fn compile_cuda_theory_set_with_options(
         entry,
         graph_options,
     )?;
-    let program = compile_structured_program_from_graph(theory_set, theory, entry, &compile_graph)?;
+    let program = compile_structured_program_from_graph(entry, &compile_graph)?;
     Ok(render_cuda_source(theory_set, &program))
 }
 

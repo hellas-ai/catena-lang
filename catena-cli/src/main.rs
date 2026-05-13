@@ -99,7 +99,7 @@ fn check_command(paths: Vec<PathBuf>, verbose: bool) -> anyhow::Result<()> {
         format: None,
         graph_options: GraphCompileOptions::default(),
     });
-    let theory_set = pipeline.checked()?;
+    let theory_set = pipeline.checked_elaborated_theory()?;
 
     println!("OK: check passed");
     if paths.len() == 1 {

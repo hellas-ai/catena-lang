@@ -9,7 +9,7 @@ use domain::CudaTarget;
 use crate::{
     check::check as check_elaborated,
     compile::{
-        CompileConfig, CompileGraphError, GraphCompileOptions, compile_graph_with_options,
+        CompileConfig, CompileGraphError, GraphCompileOptions, compile_graph,
         structured::{StructuredCompileError, compile_structured_program_from_graph},
     },
     elaborate::elaborate,
@@ -55,7 +55,7 @@ pub fn compile_cuda_theory_set_with_options(
     entry: &str,
     graph_options: GraphCompileOptions,
 ) -> Result<String, CudaCompileError> {
-    let compile_graph = compile_graph_with_options(
+    let compile_graph = compile_graph(
         theory_set,
         &CompileConfig::data_control(),
         theory,

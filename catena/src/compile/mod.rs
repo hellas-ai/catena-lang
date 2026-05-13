@@ -6,9 +6,7 @@ pub mod pipeline;
 pub mod structured;
 
 pub use config::{CompileConfig, TheoryExtension};
-pub use graph::{
-    CompileGraph, CompileGraphError, GraphCompileOptions, compile_graph, compile_graph_with_options,
-};
+pub use graph::{CompileGraph, CompileGraphError, GraphCompileOptions, compile_graph};
 pub use pipeline::{
     CompilePipeline, CompilePipelineError, CompileRequest, Emit, OutputFormat, check_summary,
     compile,

@@ -109,21 +109,6 @@ pub fn compile_graph(
     config: &CompileConfig,
     theory: &str,
     definition: &str,
-) -> Result<CompileGraph, CompileGraphError> {
-    compile_graph_with_options(
-        set,
-        config,
-        theory,
-        definition,
-        GraphCompileOptions::default(),
-    )
-}
-
-pub fn compile_graph_with_options(
-    set: &TheorySet,
-    config: &CompileConfig,
-    theory: &str,
-    definition: &str,
     options: GraphCompileOptions,
 ) -> Result<CompileGraph, CompileGraphError> {
     let mut state = GraphCompileState {

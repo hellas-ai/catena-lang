@@ -6,8 +6,7 @@ use thiserror::Error;
 use crate::{
     check::{CheckError, check as check_elaborated},
     compile::{
-        CompileConfig, CompileGraph, CompileGraphError, GraphCompileOptions,
-        compile_graph_with_options,
+        CompileConfig, CompileGraph, CompileGraphError, GraphCompileOptions, compile_graph,
         cuda::render_cuda_source,
         graph_render,
         structured::{StructuredCompileError, compile_structured_program_from_graph},
@@ -142,8 +141,9 @@ impl CompilePipeline {
         let theory = self.required_input(PipelineInput::Theory)?;
         let entry = self.required_input(PipelineInput::Entry)?;
         let graph_options = self.request.graph_options.clone();
-        Ok(compile_graph_with_options(
-            self.checked()?,
+        let checked = self.checked()?;
+        Ok(compile_graph(
+            checked,
             &CompileConfig::data_control(),
             &theory,
             &entry,

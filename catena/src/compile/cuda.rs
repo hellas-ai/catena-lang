@@ -31,6 +31,8 @@ pub enum CudaEmit {
 pub enum CudaCompileError {
     #[error("failed to parse source: {0}")]
     Parse(#[from] ParseRawError),
+    #[error("failed to elaborate source: {0}")]
+    Elaborate(#[from] crate::elaborate::ElaborateError),
     #[error("failed to elaborate or typecheck source: {0}")]
     Check(#[from] crate::check::CheckError),
     #[error("unknown theory `{0}`")]
@@ -63,21 +65,37 @@ pub fn compile_cuda_source(
     let raw = RawTheorySet::from_text(source)?;
     let elaborated = elaborate(raw)?;
     let theory_set = check_elaborated(&elaborated)?;
-    compile_cuda_checked(&theory_set, theory, entry, emit)
+    compile_cuda_theory_set(&theory_set, theory, entry, emit)
 }
 
-fn compile_cuda_checked(
+pub fn compile_cuda_theory_set(
     theory_set: &TheorySet,
     theory: &str,
     entry: &str,
     emit: CudaEmit,
+) -> Result<String, CudaCompileError> {
+    compile_cuda_theory_set_with_options(
+        theory_set,
+        theory,
+        entry,
+        emit,
+        GraphCompileOptions::default(),
+    )
+}
+
+pub fn compile_cuda_theory_set_with_options(
+    theory_set: &TheorySet,
+    theory: &str,
+    entry: &str,
+    emit: CudaEmit,
+    graph_options: GraphCompileOptions,
 ) -> Result<String, CudaCompileError> {
     let compile_graph = compile_graph_with_options(
         theory_set,
         &CompileConfig::data_control(),
         theory,
         entry,
-        GraphCompileOptions::default(),
+        graph_options,
     )?;
     let entry_graph = typed_definition_graph(theory_set, theory, entry)?;
     let entry_graph = normalize_structured_cuda_graph(&entry_graph)?;

@@ -1,16 +1,12 @@
 use crate::{
     compile::cuda::render::{CudaKernelAbi, CudaPrimitiveLowering, render_cuda},
-    structured::{
-        cfg::{ArrowInstance, ArrowSemantics},
-        ir::{EntryPoint, Primitive, Program, Stmt},
-    },
+    structured::ir::{Primitive, Program},
 };
 use hexpr::Operation;
 use metacat::theory::{Theory, TheoryId, TheorySet};
 
 #[derive(Debug, Clone, Copy)]
 pub(super) struct CudaTarget<'a> {
-    pub(super) control: GenericCudaControl,
     abi: CudaKernelAbi,
     primitives: GenericCudaPrimitives<'a>,
 }
@@ -18,53 +14,13 @@ pub(super) struct CudaTarget<'a> {
 impl<'a> CudaTarget<'a> {
     pub(super) fn new(theory_set: &'a TheorySet) -> Self {
         Self {
-            control: GenericCudaControl,
             abi: CudaKernelAbi::Unknown,
             primitives: GenericCudaPrimitives::new(theory_set),
         }
     }
 
-    pub(super) fn program(&self, entry: &str, body: Vec<Stmt>) -> Program {
-        Program {
-            name: sanitize_ident(entry),
-            entry: EntryPoint {
-                name: sanitize_ident(entry),
-                params: Vec::new(),
-            },
-            body,
-        }
-    }
-
     pub(super) fn render_cuda_with_launch(&self, program: &Program) -> String {
         render_cuda(program, self.abi, &self.primitives)
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub(super) struct GenericCudaControl;
-
-impl ArrowSemantics for GenericCudaControl {
-    fn statements(&self, arrow: &ArrowInstance) -> Vec<Stmt> {
-        if arrow.op == "gpu.sync" {
-            return vec![Stmt::Barrier];
-        }
-        let outputs = if arrow.branch_arity > 1 {
-            vec![branch_tag(arrow), branch_payload(arrow)]
-        } else if arrow.op.starts_with("data.") {
-            arrow.outputs.clone()
-        } else {
-            Vec::new()
-        };
-        vec![Stmt::Primitive(Primitive {
-            name: arrow.op.clone(),
-            inputs: arrow.inputs.clone(),
-            outputs,
-            code: String::new(),
-        })]
-    }
-
-    fn branch_condition_rhs(&self, arrow: &ArrowInstance, output: usize) -> String {
-        format!("{} == {output}", branch_tag(arrow))
     }
 }
 
@@ -154,20 +110,6 @@ fn primitive_assignment(primitive: &Primitive) -> String {
     } else {
         format!("{} = {call}", primitive.outputs.join(", "))
     }
-}
-
-fn branch_tag(arrow: &ArrowInstance) -> String {
-    format!("b{}", arrow.id)
-}
-
-fn branch_payload(arrow: &ArrowInstance) -> String {
-    format!("p{}", arrow.id)
-}
-
-fn sanitize_ident(name: &str) -> String {
-    name.chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
-        .collect()
 }
 
 fn theory<'a>(theory_set: &'a TheorySet, name: &str) -> Option<&'a Theory> {

@@ -8,8 +8,9 @@ use crate::{
     compile::{
         CompileConfig, CompileGraph, CompileGraphError, GraphCompileOptions,
         compile_graph_with_options,
-        cuda::{CudaCompileError, CudaOutput, compile_cuda_from_graph},
+        cuda::render_cuda_source,
         graph_render,
+        structured::{StructuredCompileError, compile_structured_program_from_graph},
     },
     elaborate::{ElaborateError, elaborate},
 };
@@ -52,7 +53,7 @@ pub enum CompilePipelineError {
     #[error("failed to render compile graph: {0}")]
     RenderGraph(#[from] std::io::Error),
     #[error(transparent)]
-    Cuda(#[from] CudaCompileError),
+    Structured(#[from] StructuredCompileError),
     #[error("{argument} is required when emitting {emit:?}")]
     MissingArgument { argument: &'static str, emit: Emit },
     #[error("--format {format:?} is not supported when emitting {emit:?}")]
@@ -102,17 +103,21 @@ impl CompilePipeline {
                 self.require_format(OutputFormat::Text)?;
                 let theory = self.required_input(PipelineInput::Theory)?;
                 let entry = self.required_input(PipelineInput::Entry)?;
-                let output = match self.request.emit {
-                    Emit::Cuda => CudaOutput::Source,
-                    Emit::StructuredIr => CudaOutput::StructuredIr,
-                    _ => unreachable!("only CUDA-backed emits are handled here"),
-                };
+                let emit = self.request.emit;
                 let compile_graph = self.compile_graph()?;
                 let checked = self.checked()?;
-                Ok(
-                    compile_cuda_from_graph(checked, &theory, &entry, &compile_graph, output)?
-                        .into_bytes(),
-                )
+                let program = compile_structured_program_from_graph(
+                    checked,
+                    &theory,
+                    &entry,
+                    &compile_graph,
+                )?;
+                Ok(match emit {
+                    Emit::Cuda => render_cuda_source(checked, &program),
+                    Emit::StructuredIr => program.render_ir(),
+                    _ => unreachable!("only structured-backed emits are handled here"),
+                }
+                .into_bytes())
             }
         }
     }

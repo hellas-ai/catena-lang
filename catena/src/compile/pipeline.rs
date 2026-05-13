@@ -6,7 +6,8 @@ use thiserror::Error;
 use crate::{
     check::{CheckError, check as check_elaborated},
     compile::{
-        CompileConfig, CompileGraph, CompileGraphError, GraphCompileOptions, compile_graph,
+        CompileConfig, CompileGraph, CompileGraphError, GraphCompileOptions, check_render,
+        compile_graph,
         cuda::render_cuda_source,
         graph_render,
         structured::{StructuredCompileError, compile_structured_program_from_graph},
@@ -91,7 +92,7 @@ impl CompilePipeline {
             Emit::Checked => {
                 self.require_format(OutputFormat::Text)?;
                 self.reject_graph_options()?;
-                Ok(check_summary(self.checked()?).into_bytes())
+                Ok(check_render::summary(self.checked()?).into_bytes())
             }
             Emit::CompileGraph => {
                 self.require_format(OutputFormat::Svg)?;
@@ -195,19 +196,4 @@ impl PipelineInput {
             PipelineInput::Entry => "entry",
         }
     }
-}
-
-pub fn check_summary(theory_set: &TheorySet) -> String {
-    let mut lines = vec!["OK: check passed".to_string()];
-    for (id, theory) in &theory_set.theories {
-        if let metacat::theory::Theory::Theory { arrows, .. } = theory {
-            let definitions = arrows
-                .values()
-                .filter(|arrow| arrow.definition.is_some())
-                .count();
-            lines.push(format!("  {id}: {definitions} definitions"));
-        }
-    }
-    lines.push(String::new());
-    lines.join("\n")
 }

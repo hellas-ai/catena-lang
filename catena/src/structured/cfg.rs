@@ -79,7 +79,6 @@ pub struct Cfg {
 
 #[derive(Debug, Clone)]
 pub(super) struct CfgNode {
-    pub(super) op: OperationName,
     pub(super) statements: Vec<Stmt>,
     pub(super) transfer: Transfer,
     pub(super) counted_loop: Option<(Variable, Expr)>,
@@ -142,8 +141,7 @@ impl Cfg {
         let mut branches = Vec::new();
         for (edge_index, op) in f.hypergraph.edges.iter().enumerate() {
             let op = op.to_string();
-            let successors =
-                edge_successors(f, edge_index, &consumers, &graph_targets, exit_node, &op);
+            let successors = edge_successors(f, edge_index, &consumers, &graph_targets, exit_node);
             let arrow = ArrowInstance {
                 id: edge_index,
                 op: op.clone(),
@@ -164,7 +162,6 @@ impl Cfg {
             branches.push((arrow, branch));
             nodes.push(CfgNode {
                 counted_loop: semantics.counted_loop(&op),
-                op,
                 statements,
                 transfer: Transfer::Return,
             });
@@ -172,7 +169,6 @@ impl Cfg {
 
         if !graph_targets.is_empty() {
             nodes.push(CfgNode {
-                op: "__exit".to_string(),
                 statements: Vec::new(),
                 transfer: Transfer::Return,
                 counted_loop: None,
@@ -187,7 +183,6 @@ impl Cfg {
                 &consumers,
                 &graph_targets,
                 (!graph_targets.is_empty()).then_some(f.hypergraph.edges.len()),
-                &nodes[edge_index].op,
             );
             nodes[edge_index].transfer =
                 transfer_for_successors(&mut nodes, arrow, branch, successors, semantics);
@@ -335,15 +330,12 @@ fn edge_successors(
     consumers: &HashMap<NodeId, Vec<CfgNodeId>>,
     graph_targets: &HashSet<NodeId>,
     exit_node: Option<CfgNodeId>,
-    op: &str,
 ) -> Vec<CfgNodeId> {
     let mut successors = Vec::new();
     for target in &f.hypergraph.adjacency[edge_index].targets {
         if graph_targets.contains(target) {
-            if boundary_target_is_control_successor(op) {
-                if let Some(exit_node) = exit_node {
-                    push_unique_all(&mut successors, [exit_node]);
-                }
+            if let Some(exit_node) = exit_node {
+                push_unique_all(&mut successors, [exit_node]);
             }
             continue;
         }
@@ -367,23 +359,12 @@ fn transfer_for_successors(
         [then_target, else_target] => {
             let condition = branch_condition_value(&arrow, 0);
             let payload = branch_payload(&arrow, &branch);
-            let then_target = append_binding_node(
-                nodes,
-                &arrow,
-                0,
-                branch_binding(&arrow, 0, &payload),
-                *then_target,
-            );
-            let else_target = append_binding_node(
-                nodes,
-                &arrow,
-                1,
-                branch_binding(&arrow, 1, &payload),
-                *else_target,
-            );
+            let then_target =
+                append_binding_node(nodes, branch_binding(&arrow, 0, &payload), *then_target);
+            let else_target =
+                append_binding_node(nodes, branch_binding(&arrow, 1, &payload), *else_target);
             let branch_node = nodes.len();
             nodes.push(CfgNode {
-                op: format!("{}.__branch", arrow.op),
                 statements: vec![Stmt::Assign {
                     lhs: condition.clone(),
                     rhs: branch_condition_rhs(&arrow, &branch, 0, semantics),
@@ -403,18 +384,11 @@ fn transfer_for_successors(
                 .iter()
                 .enumerate()
                 .map(|(index, target)| {
-                    append_binding_node(
-                        nodes,
-                        &arrow,
-                        index,
-                        branch_binding(&arrow, index, &payload),
-                        *target,
-                    )
+                    append_binding_node(nodes, branch_binding(&arrow, index, &payload), *target)
                 })
                 .collect();
             let branch_node = nodes.len();
             nodes.push(CfgNode {
-                op: format!("{}.__branch", arrow.op),
                 statements: Vec::new(),
                 transfer: Transfer::Switch {
                     selector: branch_selector(&arrow, &branch, semantics),
@@ -452,8 +426,6 @@ fn branch_selector(
 
 fn append_binding_node(
     nodes: &mut Vec<CfgNode>,
-    arrow: &ArrowInstance,
-    output: usize,
     bind: Option<(Variable, Variable)>,
     target: CfgNodeId,
 ) -> CfgNodeId {
@@ -462,7 +434,6 @@ fn append_binding_node(
     };
     let node = nodes.len();
     nodes.push(CfgNode {
-        op: format!("{}.__bind{output}", arrow.op),
         statements: vec![Stmt::Assign { lhs, rhs }],
         transfer: Transfer::Goto(target),
         counted_loop: None,
@@ -494,12 +465,6 @@ fn branch_binding(
         .outputs
         .get(output)
         .map(|wire| (wire.clone(), payload.to_string()))
-}
-
-fn boundary_target_is_control_successor(op: &str) -> bool {
-    // `gpu.sync` exposes phase-token outputs at the graph boundary, but those
-    // are data/control products rather than alternate control exits.
-    op != "gpu.sync"
 }
 
 fn wire_name(node: NodeId) -> Variable {

@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 hexpr = "0.2.0"
+graphviz-rust = "0.9.7"
 metacat = { workspace = true }
 open-hypergraphs = { workspace = true }
 thiserror = "2.0.18"

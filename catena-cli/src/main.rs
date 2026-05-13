@@ -1,17 +1,9 @@
-mod compile_graph_render;
-
 use std::path::PathBuf;
 
-use catena::{
-    check::check as check_elaborated,
-    compile::{
-        CompileConfig, GraphCompileOptions, compile_graph_with_options,
-        cuda::{CudaEmit, compile_cuda_theory_set_with_options},
-    },
-    elaborate::elaborate,
+use catena::compile::{
+    CompilePipeline, CompileRequest, Emit, GraphCompileOptions, OutputFormat, compile,
 };
 use clap::{Parser, Subcommand, ValueEnum};
-use metacat::theory::RawTheorySet;
 
 #[derive(Parser)]
 #[command(name = "catena", version = env!("CARGO_PKG_VERSION"))]
@@ -99,9 +91,15 @@ fn main() -> anyhow::Result<()> {
 }
 
 fn check_command(paths: Vec<PathBuf>, verbose: bool) -> anyhow::Result<()> {
-    let raw = RawTheorySet::from_files(paths.clone())?;
-    let elaborated = elaborate(raw)?;
-    let theory_set = check_elaborated(&elaborated)?;
+    let mut pipeline = CompilePipeline::new(CompileRequest {
+        paths: paths.clone(),
+        emit: Emit::Checked,
+        theory: None,
+        entry: None,
+        format: None,
+        graph_options: GraphCompileOptions::default(),
+    });
+    let theory_set = pipeline.checked()?;
 
     println!("OK: check passed");
     if paths.len() == 1 {
@@ -124,9 +122,15 @@ fn check_command(paths: Vec<PathBuf>, verbose: bool) -> anyhow::Result<()> {
 }
 
 fn elaborate_command(paths: Vec<PathBuf>) -> anyhow::Result<()> {
-    let elaborated = load_elaborated(paths)?;
-    println!("{}", elaborated.to_hexpr_text());
-    Ok(())
+    let generated = compile(CompileRequest {
+        paths,
+        emit: Emit::Elaborated,
+        theory: None,
+        entry: None,
+        format: None,
+        graph_options: GraphCompileOptions::default(),
+    })?;
+    write_output(None, &generated)
 }
 
 fn compile_command(
@@ -138,47 +142,14 @@ fn compile_command(
     output: Option<PathBuf>,
     no_inline: Vec<String>,
 ) -> anyhow::Result<()> {
-    let generated = match emit {
-        EmitArg::Elaborated => {
-            require_format(format, OutputFormatArg::Text, emit)?;
-            reject_no_inline(&no_inline, emit)?;
-            load_elaborated(paths)?.to_hexpr_text().into_bytes()
-        }
-        EmitArg::Checked => {
-            require_format(format, OutputFormatArg::Text, emit)?;
-            reject_no_inline(&no_inline, emit)?;
-            let theory_set = load_checked(paths)?;
-            check_summary(&theory_set).into_bytes()
-        }
-        EmitArg::CompileGraph => {
-            require_format(format, OutputFormatArg::Svg, emit)?;
-            let theory = required_arg(theory, "--theory", emit)?;
-            let entry = required_arg(entry, "--entry", emit)?;
-            let theory_set = load_checked(paths)?;
-            let graph = compile_graph_with_options(
-                &theory_set,
-                &CompileConfig::data_control(),
-                &theory,
-                &entry,
-                GraphCompileOptions { no_inline },
-            )?;
-            compile_graph_render::nested_svg(&graph)?
-        }
-        EmitArg::Cuda | EmitArg::StructuredIr => {
-            require_format(format, OutputFormatArg::Text, emit)?;
-            let theory = required_arg(theory, "--theory", emit)?;
-            let entry = required_arg(entry, "--entry", emit)?;
-            let theory_set = load_checked(paths)?;
-            compile_cuda_theory_set_with_options(
-                &theory_set,
-                &theory,
-                &entry,
-                emit.into(),
-                GraphCompileOptions { no_inline },
-            )?
-            .into_bytes()
-        }
-    };
+    let generated = compile(CompileRequest {
+        paths,
+        emit: emit.into(),
+        theory,
+        entry,
+        format: format.map(Into::into),
+        graph_options: GraphCompileOptions { no_inline },
+    })?;
 
     write_output(output, &generated)
 }
@@ -195,63 +166,23 @@ fn write_output(output: Option<PathBuf>, generated: &[u8]) -> anyhow::Result<()>
     Ok(())
 }
 
-fn load_elaborated(paths: Vec<PathBuf>) -> anyhow::Result<RawTheorySet> {
-    let raw = RawTheorySet::from_files(paths)?;
-    Ok(elaborate(raw)?)
-}
-
-fn load_checked(paths: Vec<PathBuf>) -> anyhow::Result<metacat::theory::TheorySet> {
-    let elaborated = load_elaborated(paths)?;
-    Ok(check_elaborated(&elaborated)?)
-}
-
-fn check_summary(theory_set: &metacat::theory::TheorySet) -> String {
-    let mut lines = vec!["OK: check passed".to_string()];
-    for (id, theory) in &theory_set.theories {
-        if let metacat::theory::Theory::Theory { arrows, .. } = theory {
-            let definitions = arrows
-                .values()
-                .filter(|arrow| arrow.definition.is_some())
-                .count();
-            lines.push(format!("  {id}: {definitions} definitions"));
-        }
-    }
-    lines.push(String::new());
-    lines.join("\n")
-}
-
-fn required_arg(value: Option<String>, name: &str, emit: EmitArg) -> anyhow::Result<String> {
-    value.ok_or_else(|| anyhow::anyhow!("{name} is required when emitting {emit:?}"))
-}
-
-fn require_format(
-    format: Option<OutputFormatArg>,
-    expected: OutputFormatArg,
-    emit: EmitArg,
-) -> anyhow::Result<()> {
-    if let Some(format) = format
-        && format != expected
-    {
-        anyhow::bail!("--format {format:?} is not supported when emitting {emit:?}");
-    }
-    Ok(())
-}
-
-fn reject_no_inline(no_inline: &[String], emit: EmitArg) -> anyhow::Result<()> {
-    if !no_inline.is_empty() {
-        anyhow::bail!(
-            "--no-inline is only supported for emits that build a compile graph, not {emit:?}"
-        );
-    }
-    Ok(())
-}
-
-impl From<EmitArg> for CudaEmit {
+impl From<EmitArg> for Emit {
     fn from(value: EmitArg) -> Self {
         match value {
-            EmitArg::Cuda => CudaEmit::Cuda,
-            EmitArg::StructuredIr => CudaEmit::StructuredIr,
-            _ => unreachable!("only cuda emit variants can be converted to CudaEmit"),
+            EmitArg::Cuda => Emit::Cuda,
+            EmitArg::CompileGraph => Emit::CompileGraph,
+            EmitArg::Elaborated => Emit::Elaborated,
+            EmitArg::Checked => Emit::Checked,
+            EmitArg::StructuredIr => Emit::StructuredIr,
+        }
+    }
+}
+
+impl From<OutputFormatArg> for OutputFormat {
+    fn from(value: OutputFormatArg) -> Self {
+        match value {
+            OutputFormatArg::Svg => OutputFormat::Svg,
+            OutputFormatArg::Text => OutputFormat::Text,
         }
     }
 }

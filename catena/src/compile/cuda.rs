@@ -13,7 +13,10 @@ use domain::CudaTarget;
 
 use crate::{
     check::check as check_elaborated,
-    compile::{CompileConfig, CompileGraphError, GraphCompileOptions, compile_graph_with_options},
+    compile::{
+        CompileConfig, CompileGraph, CompileGraphError, GraphCompileOptions,
+        compile_graph_with_options,
+    },
     elaborate::elaborate,
     lang::{Arr, Obj},
     pass::{erase::Erase, forget_loopback::ForgetLoopback},
@@ -22,8 +25,8 @@ use crate::{
 use open_hypergraphs::lax::functor::Functor;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CudaEmit {
-    Cuda,
+pub enum CudaOutput {
+    Source,
     StructuredIr,
 }
 
@@ -60,25 +63,25 @@ pub fn compile_cuda_source(
     source: &str,
     theory: &str,
     entry: &str,
-    emit: CudaEmit,
+    output: CudaOutput,
 ) -> Result<String, CudaCompileError> {
     let raw = RawTheorySet::from_text(source)?;
     let elaborated = elaborate(raw)?;
     let theory_set = check_elaborated(&elaborated)?;
-    compile_cuda_theory_set(&theory_set, theory, entry, emit)
+    compile_cuda_theory_set(&theory_set, theory, entry, output)
 }
 
 pub fn compile_cuda_theory_set(
     theory_set: &TheorySet,
     theory: &str,
     entry: &str,
-    emit: CudaEmit,
+    output: CudaOutput,
 ) -> Result<String, CudaCompileError> {
     compile_cuda_theory_set_with_options(
         theory_set,
         theory,
         entry,
-        emit,
+        output,
         GraphCompileOptions::default(),
     )
 }
@@ -87,7 +90,7 @@ pub fn compile_cuda_theory_set_with_options(
     theory_set: &TheorySet,
     theory: &str,
     entry: &str,
-    emit: CudaEmit,
+    output: CudaOutput,
     graph_options: GraphCompileOptions,
 ) -> Result<String, CudaCompileError> {
     let compile_graph = compile_graph_with_options(
@@ -97,17 +100,27 @@ pub fn compile_cuda_theory_set_with_options(
         entry,
         graph_options,
     )?;
+    compile_cuda_from_graph(theory_set, theory, entry, &compile_graph, output)
+}
+
+pub fn compile_cuda_from_graph(
+    theory_set: &TheorySet,
+    theory: &str,
+    entry: &str,
+    compile_graph: &CompileGraph,
+    output: CudaOutput,
+) -> Result<String, CudaCompileError> {
     let entry_graph = typed_definition_graph(theory_set, theory, entry)?;
     let entry_graph = normalize_structured_cuda_graph(&entry_graph)?;
     let target = CudaTarget::new(theory_set);
-    let context = cfg::Context::new(&compile_graph);
+    let context = cfg::Context::new(compile_graph);
     let cfg = cfg::Cfg::from_hypergraph(&entry_graph, &context, &target.control)?;
     let body = ramsey::structure(cfg)?;
     let program = target.program(entry, body);
 
-    match emit {
-        CudaEmit::Cuda => Ok(target.render_cuda_with_launch(&program)),
-        CudaEmit::StructuredIr => Ok(program.render_ir()),
+    match output {
+        CudaOutput::Source => Ok(target.render_cuda_with_launch(&program)),
+        CudaOutput::StructuredIr => Ok(program.render_ir()),
     }
 }
 

@@ -84,6 +84,7 @@ name = "catena"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "graphviz-rust",
  "hexpr",
  "libffi",
  "libloading",
@@ -100,11 +101,7 @@ dependencies = [
  "anyhow",
  "catena",
  "clap",
- "graphviz-rust",
- "hexpr",
  "metacat",
- "open-hypergraphs",
- "thiserror",
 ]
 
 [[package]]

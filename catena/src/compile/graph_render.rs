@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use catena::compile::CompileGraph;
+use crate::compile::CompileGraph;
 use graphviz_rust::{
     cmd::{CommandArg, Format},
     dot_structures::{

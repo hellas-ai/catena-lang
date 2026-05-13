@@ -7,8 +7,4 @@ edition = "2024"
 anyhow = "1.0.101"
 catena = { version = "0.1.0", path = "../catena" }
 clap = { version = "4.5.57", features = ["derive"] }
-hexpr = "0.2.0"
-graphviz-rust = "0.9.7"
 metacat.workspace = true
-open-hypergraphs.workspace = true
-thiserror = "2.0.18"

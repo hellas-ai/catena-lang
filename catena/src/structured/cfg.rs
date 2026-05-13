@@ -19,10 +19,6 @@ pub trait ArrowSemantics {
     fn selector(&self, arrow: &ArrowInstance) -> Variable {
         format!("/* {} */ 0", sanitize_ident(&arrow.op))
     }
-
-    fn counted_loop(&self, _op: &str) -> Option<(Variable, Expr)> {
-        None
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -81,7 +77,6 @@ pub struct Cfg {
 pub(super) struct CfgNode {
     pub(super) statements: Vec<Stmt>,
     pub(super) transfer: Transfer,
-    pub(super) counted_loop: Option<(Variable, Expr)>,
 }
 
 #[derive(Debug, Clone)]
@@ -161,7 +156,6 @@ impl Cfg {
                 statements_for_arrow(context.child_for_operation(&op), &arrow, semantics);
             branches.push((arrow, branch));
             nodes.push(CfgNode {
-                counted_loop: semantics.counted_loop(&op),
                 statements,
                 transfer: Transfer::Return,
             });
@@ -171,7 +165,6 @@ impl Cfg {
             nodes.push(CfgNode {
                 statements: Vec::new(),
                 transfer: Transfer::Return,
-                counted_loop: None,
             });
         }
 
@@ -374,7 +367,6 @@ fn transfer_for_successors(
                     then_target,
                     else_target,
                 },
-                counted_loop: None,
             });
             Transfer::Goto(branch_node)
         }
@@ -394,7 +386,6 @@ fn transfer_for_successors(
                     selector: branch_selector(&arrow, &branch, semantics),
                     targets,
                 },
-                counted_loop: None,
             });
             Transfer::Goto(branch_node)
         }
@@ -436,7 +427,6 @@ fn append_binding_node(
     nodes.push(CfgNode {
         statements: vec![Stmt::Assign { lhs, rhs }],
         transfer: Transfer::Goto(target),
-        counted_loop: None,
     });
     node
 }

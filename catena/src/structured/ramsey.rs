@@ -91,10 +91,6 @@ impl Structurer {
         node: CfgNodeId,
         context: &[ContextFrame],
     ) -> Result<Vec<Stmt>, StructuredError> {
-        if self.is_counted_loop(node) {
-            return self.do_counted_loop(node, context);
-        }
-
         let mut inner_context = context.to_vec();
         let mut code = if self.analyses.loop_headers.contains(&node) {
             inner_context.insert(0, ContextFrame::LoopHeadedBy(node));
@@ -106,36 +102,6 @@ impl Structurer {
             self.node_within(node, self.merge_children(node), context)?
         };
         drop_redundant_terminal_continues(&mut code);
-        Ok(code)
-    }
-
-    fn do_counted_loop(
-        &mut self,
-        node: CfgNodeId,
-        context: &[ContextFrame],
-    ) -> Result<Vec<Stmt>, StructuredError> {
-        let successors = self.cfg.nodes[node].successors();
-        let [body_target, exit_target] = successors.as_slice() else {
-            return self.node_within(node, self.merge_children(node), context);
-        };
-
-        let mut loop_context = context.to_vec();
-        loop_context.insert(0, ContextFrame::LoopHeadedBy(node));
-
-        let (var, extent) = self.cfg.nodes[node]
-            .counted_loop
-            .clone()
-            .expect("is_counted_loop checked counted_loop");
-        let mut body = self.do_branch(node, *body_target, &loop_context)?;
-        drop_redundant_terminal_continues(&mut body);
-
-        let mut code = vec![Stmt::For {
-            label: self.cfg.label(node),
-            var,
-            extent,
-            body,
-        }];
-        code.extend(self.do_branch(node, *exit_target, context)?);
         Ok(code)
     }
 
@@ -234,12 +200,6 @@ impl Structurer {
             }
         }
         Err(StructuredError::MissingContext(self.cfg.label(target)))
-    }
-
-    fn is_counted_loop(&self, node: CfgNodeId) -> bool {
-        self.analyses.loop_headers.contains(&node)
-            && self.cfg.nodes[node].successors().len() == 2
-            && self.cfg.nodes[node].counted_loop.is_some()
     }
 }
 

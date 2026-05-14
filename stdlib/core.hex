@@ -23,6 +23,7 @@
   # built in type definitions
   (arr f32 : 0 -> 1)
   (arr u32 : 0 -> 1)
+  (arr extent : 1 -> 1)
 })
 
 (theory data syntax {
@@ -58,6 +59,7 @@
   (arr 2.elim  : (2 val) -> ({1 1} + val))
 
   (arr f32.zero : [] -> (f32 val))
+  (arr f32.one : [] -> (f32 val))
   (arr f32.add : {(f32 val) (f32 val)} -> (f32 val))
 
   # unsigned 32-bit integers

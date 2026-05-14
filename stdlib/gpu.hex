@@ -1,0 +1,20 @@
+(theory syntax nat {
+
+  (arr gpu.block : 0 -> 1)
+  (arr gpu.thread : 0 -> 1)
+  (arr gpu.global : 3 -> 1)
+  (arr gpu.view : 1 -> 1)
+  (arr gpu.shared : 3 -> 1)
+
+})
+
+(theory data syntax {
+
+  (arr gpu.view.group_by_tile :
+    {(([tile_size] extent) val) (gpu.block val) (gpu.thread val)} ->
+    (([tile_size] gpu.view) val))
+
+  (arr gpu.global.store :
+    {([matrix] val) (([tile_size] gpu.view) val) (f32 val)} ->
+    ([matrix tile_size . matrix] val))
+})

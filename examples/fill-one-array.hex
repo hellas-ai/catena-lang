@@ -1,0 +1,19 @@
+#
+# Set every element of an array to 1.0
+#
+
+(def data user.f32.fill-one : 
+    {
+      (([.tile_size] extent) val)
+      (([.m] extent) val)
+      (([.k] extent) val)
+      (gpu.block val)
+      (gpu.thread val)
+      (({f32 [m] [k]} gpu.global) val)
+     } -> (({f32 [m] [k]} gpu.global) val)
+    = {[tile_size m k block thread out.]
+      ([.] f32.one [one.])
+      ([.tile_size block thread] gpu.view.group_by_tile [out_view.])
+      ([.out out_view one] gpu.global.store [out_filled.])
+      [.out_filled]}
+)

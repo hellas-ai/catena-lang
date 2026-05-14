@@ -27,7 +27,7 @@ pub fn compile_structured_program_from_graph(
     let control = GenericControl;
     let context = cfg::Context::new(&graph);
     let cfg = match &compile_graph.theory {
-        CompileTheory::Data => cfg::Cfg::from_dataflow_context(&context)?,
+        CompileTheory::Data => cfg::Cfg::from_dataflow_context(&context, &control)?,
         CompileTheory::Control => cfg::Cfg::from_control_context(&context, &control)?,
     };
     let body = ramsey::structure(cfg)?;
@@ -104,6 +104,7 @@ fn quotient_normalized(graph: &mut OpenHypergraph<Obj, Arr>) -> Result<(), Struc
 fn structured_graph(graph: &CompileGraph) -> Result<cfg::Graph, StructuredCompileError> {
     let typed_graph = OpenHypergraph::from_strict(graph.typed_graph.clone());
     let graph = cfg::Graph {
+        kind: graph_kind(&graph.theory),
         name: graph.definition.clone(),
         graph: normalize_structured_graph(&typed_graph)?,
         children: graph
@@ -118,6 +119,13 @@ fn structured_graph(graph: &CompileGraph) -> Result<cfg::Graph, StructuredCompil
             .collect::<Result<Vec<_>, StructuredCompileError>>()?,
     };
     Ok(graph)
+}
+
+fn graph_kind(theory: &CompileTheory) -> cfg::GraphKind {
+    match theory {
+        CompileTheory::Data => cfg::GraphKind::Data,
+        CompileTheory::Control => cfg::GraphKind::Control,
+    }
 }
 
 fn sanitize_ident(name: &str) -> String {

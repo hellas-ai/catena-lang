@@ -1,5 +1,4 @@
 use super::ir::Stmt;
-use crate::compile::CompileGraph;
 use crate::lang::{Arr, Obj};
 use open_hypergraphs::lax::{NodeId, OpenHypergraph};
 use std::collections::{HashMap, HashSet};
@@ -36,16 +35,33 @@ enum BranchValue {
     Coproduct(Variable),
 }
 
+#[derive(Debug, Clone)]
+pub struct Graph {
+    pub name: String,
+    pub graph: OpenHypergraph<Obj, Arr>,
+    pub children: Vec<ChildGraph>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ChildGraph {
+    pub operation: String,
+    pub graph: Graph,
+}
+
 pub struct Context<'a> {
-    graph: &'a CompileGraph,
+    graph: &'a Graph,
 }
 
 impl<'a> Context<'a> {
-    pub fn new(graph: &'a CompileGraph) -> Self {
+    pub fn new(graph: &'a Graph) -> Self {
         Self { graph }
     }
 
-    pub fn child_for_operation(&self, operation: &str) -> Option<&'a CompileGraph> {
+    pub fn graph(&self) -> &'a OpenHypergraph<Obj, Arr> {
+        &self.graph.graph
+    }
+
+    pub fn child_for_operation(&self, operation: &str) -> Option<&'a Graph> {
         self.graph
             .children
             .iter()
@@ -95,6 +111,13 @@ pub(super) enum Transfer {
 }
 
 impl Cfg {
+    pub fn from_context(
+        context: &Context<'_>,
+        semantics: &impl ArrowSemantics,
+    ) -> Result<Self, StructuredError> {
+        Self::from_hypergraph(context.graph(), context, semantics)
+    }
+
     pub fn from_hypergraph(
         f: &OpenHypergraph<Obj, Arr>,
         context: &Context<'_>,
@@ -216,7 +239,7 @@ impl CfgNode {
 }
 
 fn statements_for_arrow(
-    child: Option<&CompileGraph>,
+    child: Option<&Graph>,
     arrow: &ArrowInstance,
     semantics: &impl ArrowSemantics,
 ) -> (Vec<Stmt>, BranchValue) {
@@ -229,9 +252,9 @@ fn statements_for_arrow(
     (semantics.statements(arrow), BranchValue::Opaque)
 }
 
-fn statements_for_child_graph(child: &CompileGraph, arrow: &ArrowInstance) -> Vec<Stmt> {
+fn statements_for_child_graph(child: &Graph, arrow: &ArrowInstance) -> Vec<Stmt> {
     let mut variables = child_graph_variables(child, arrow);
-    (0..child.graph.h.x.0.len())
+    (0..child.graph.hypergraph.edges.len())
         .map(|edge_index| {
             let inputs = edge_sources(child, edge_index)
                 .into_iter()
@@ -242,7 +265,7 @@ fn statements_for_child_graph(child: &CompileGraph, arrow: &ArrowInstance) -> Ve
                 .map(|node| variable_for_child_node(&mut variables, arrow, node))
                 .collect();
             Stmt::Primitive(super::ir::Primitive {
-                name: child.graph.h.x.0[edge_index].to_string(),
+                name: child.graph.hypergraph.edges[edge_index].to_string(),
                 inputs,
                 outputs,
                 code: String::new(),
@@ -251,29 +274,29 @@ fn statements_for_child_graph(child: &CompileGraph, arrow: &ArrowInstance) -> Ve
         .collect()
 }
 
-fn branch_value_for_child_graph(child: &CompileGraph, arrow: &ArrowInstance) -> BranchValue {
+fn branch_value_for_child_graph(child: &Graph, arrow: &ArrowInstance) -> BranchValue {
     if arrow.branch_arity <= 1 {
         return BranchValue::Opaque;
     }
-    let Some(target) = child.graph.t.table.first() else {
+    let Some(target) = child.graph.targets.first() else {
         return BranchValue::Opaque;
     };
     let mut variables = child_graph_variables(child, arrow);
     BranchValue::Coproduct(variable_for_child_node(&mut variables, arrow, *target))
 }
 
-fn child_graph_variables(child: &CompileGraph, arrow: &ArrowInstance) -> HashMap<usize, Variable> {
+fn child_graph_variables(child: &Graph, arrow: &ArrowInstance) -> HashMap<NodeId, Variable> {
     let mut variables = HashMap::new();
-    for (index, node) in child.graph.s.table.iter().enumerate() {
+    for (index, node) in child.graph.sources.iter().enumerate() {
         if let Some(input) = arrow.inputs.get(index) {
             variables.insert(*node, input.clone());
         }
     }
 
-    if arrow.branch_arity > 1 && child.graph.t.table.len() == 1 {
-        variables.insert(child.graph.t.table[0], branch_result_variable(arrow));
+    if arrow.branch_arity > 1 && child.graph.targets.len() == 1 {
+        variables.insert(child.graph.targets[0], branch_result_variable(arrow));
     } else {
-        for (index, node) in child.graph.t.table.iter().enumerate() {
+        for (index, node) in child.graph.targets.iter().enumerate() {
             if let Some(output) = arrow.outputs.get(index) {
                 variables.insert(*node, output.clone());
             }
@@ -283,37 +306,33 @@ fn child_graph_variables(child: &CompileGraph, arrow: &ArrowInstance) -> HashMap
 }
 
 fn variable_for_child_node(
-    variables: &mut HashMap<usize, Variable>,
+    variables: &mut HashMap<NodeId, Variable>,
     arrow: &ArrowInstance,
-    node: usize,
+    node: NodeId,
 ) -> Variable {
     variables
         .entry(node)
-        .or_insert_with(|| format!("v{}_{}", arrow.id, node))
+        .or_insert_with(|| format!("v{}_{}", arrow.id, node.0))
         .clone()
 }
 
-fn edge_sources(child: &CompileGraph, edge_index: usize) -> Vec<usize> {
+fn edge_sources(child: &Graph, edge_index: usize) -> Vec<NodeId> {
     child
         .graph
-        .h
-        .s
-        .clone()
-        .into_iter()
-        .nth(edge_index)
-        .map(|sources| sources.table.0)
+        .hypergraph
+        .adjacency
+        .get(edge_index)
+        .map(|adjacency| adjacency.sources.clone())
         .unwrap_or_default()
 }
 
-fn edge_targets(child: &CompileGraph, edge_index: usize) -> Vec<usize> {
+fn edge_targets(child: &Graph, edge_index: usize) -> Vec<NodeId> {
     child
         .graph
-        .h
-        .t
-        .clone()
-        .into_iter()
-        .nth(edge_index)
-        .map(|targets| targets.table.0)
+        .hypergraph
+        .adjacency
+        .get(edge_index)
+        .map(|adjacency| adjacency.targets.clone())
         .unwrap_or_default()
 }
 

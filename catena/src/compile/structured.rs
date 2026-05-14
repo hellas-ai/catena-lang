@@ -21,16 +21,14 @@ pub enum StructuredCompileError {
 }
 
 pub fn compile_structured_program_from_graph(
-    entry: &str,
     compile_graph: &CompileGraph,
 ) -> Result<Program, StructuredCompileError> {
-    let entry_graph = OpenHypergraph::from_strict(compile_graph.typed_graph.clone());
-    let entry_graph = normalize_structured_graph(&entry_graph)?;
+    let graph = structured_graph(compile_graph)?;
     let control = GenericControl;
-    let context = cfg::Context::new(compile_graph);
-    let cfg = cfg::Cfg::from_hypergraph(&entry_graph, &context, &control)?;
+    let context = cfg::Context::new(&graph);
+    let cfg = cfg::Cfg::from_context(&context, &control)?;
     let body = ramsey::structure(cfg)?;
-    Ok(program(entry, body))
+    Ok(program(&compile_graph.definition, body))
 }
 
 fn program(entry: &str, body: Vec<Stmt>) -> Program {
@@ -98,6 +96,25 @@ fn quotient_normalized(graph: &mut OpenHypergraph<Obj, Arr>) -> Result<(), Struc
             detail: format!("{detail:?}"),
         })?;
     Ok(())
+}
+
+fn structured_graph(graph: &CompileGraph) -> Result<cfg::Graph, StructuredCompileError> {
+    let typed_graph = OpenHypergraph::from_strict(graph.typed_graph.clone());
+    let graph = cfg::Graph {
+        name: graph.definition.clone(),
+        graph: normalize_structured_graph(&typed_graph)?,
+        children: graph
+            .children
+            .iter()
+            .map(|child| {
+                Ok(cfg::ChildGraph {
+                    operation: child.operation.clone(),
+                    graph: structured_graph(&child.graph)?,
+                })
+            })
+            .collect::<Result<Vec<_>, StructuredCompileError>>()?,
+    };
+    Ok(graph)
 }
 
 fn sanitize_ident(name: &str) -> String {

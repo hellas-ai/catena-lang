@@ -62,7 +62,7 @@ pub fn compile_cuda_theory_set_with_options(
         entry,
         graph_options,
     )?;
-    let program = compile_structured_program_from_graph(entry, &compile_graph)?;
+    let program = compile_structured_program_from_graph(&compile_graph)?;
     Ok(render_cuda_source(theory_set, &program))
 }
 

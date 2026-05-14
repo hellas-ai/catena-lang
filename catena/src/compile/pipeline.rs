@@ -103,13 +103,12 @@ impl CompilePipeline {
             }
             Emit::Cuda | Emit::StructuredIr => {
                 self.require_format(OutputFormat::Text)?;
-                let entry = self.required_input(PipelineInput::Entry)?;
                 let emit = self.request.emit;
                 let compile_graph_request = self.compile_graph_request()?;
                 let checked_elaborated_theory = self.checked_elaborated_theory()?;
                 let compile_graph =
                     Self::compile_graph(checked_elaborated_theory, compile_graph_request)?;
-                let program = compile_structured_program_from_graph(&entry, &compile_graph)?;
+                let program = compile_structured_program_from_graph(&compile_graph)?;
                 Ok(match emit {
                     Emit::Cuda => render_cuda_source(checked_elaborated_theory, &program),
                     Emit::StructuredIr => program.render_ir(),

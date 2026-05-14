@@ -2,7 +2,7 @@ use open_hypergraphs::lax::{OpenHypergraph, functor::Functor};
 use thiserror::Error;
 
 use crate::{
-    compile::CompileGraph,
+    compile::{CompileGraph, CompileTheory},
     lang::{Arr, Obj},
     pass::{erase::Erase, forget_loopback::ForgetLoopback},
     structured::{
@@ -26,7 +26,10 @@ pub fn compile_structured_program_from_graph(
     let graph = structured_graph(compile_graph)?;
     let control = GenericControl;
     let context = cfg::Context::new(&graph);
-    let cfg = cfg::Cfg::from_context(&context, &control)?;
+    let cfg = match &compile_graph.theory {
+        CompileTheory::Data => cfg::Cfg::from_dataflow_context(&context)?,
+        CompileTheory::Control => cfg::Cfg::from_control_context(&context, &control)?,
+    };
     let body = ramsey::structure(cfg)?;
     Ok(program(&compile_graph.definition, body))
 }

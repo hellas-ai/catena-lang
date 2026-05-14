@@ -1,4 +1,7 @@
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt,
+};
 
 use hexpr::Operation;
 use metacat::{
@@ -22,11 +25,40 @@ type StrictTypedGraph = StrictOpenHypergraph<Obj, Operation>;
 
 #[derive(Clone, Debug)]
 pub struct CompileGraph {
-    pub theory: String,
+    pub theory: CompileTheory,
     pub definition: String,
     pub graph: StrictLabeledGraph,
     pub typed_graph: StrictTypedGraph,
     pub children: Vec<NestedCompileGraph>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum CompileTheory {
+    Data,
+    Control,
+}
+
+impl CompileTheory {
+    fn parse(name: &str) -> Result<Self, CompileGraphError> {
+        match name {
+            "data" => Ok(Self::Data),
+            "control" => Ok(Self::Control),
+            other => Err(CompileGraphError::UnknownTheory(other.to_string())),
+        }
+    }
+
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Data => "data",
+            Self::Control => "control",
+        }
+    }
+}
+
+impl fmt::Display for CompileTheory {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -168,7 +200,7 @@ impl GraphCompileState<'_> {
         let children = self.compile_nested_foreign_graphs(theory_name, &graph)?;
 
         Ok(CompileGraph {
-            theory: theory_name.to_string(),
+            theory: CompileTheory::parse(theory_name)?,
             definition: definition.to_string(),
             graph,
             typed_graph,
@@ -376,7 +408,7 @@ fn compile_primitive_child_graph(
     )?;
 
     Ok(CompileGraph {
-        theory: theory_name.to_string(),
+        theory: CompileTheory::parse(theory_name)?,
         definition: local_name.to_string(),
         graph: graph.to_strict(),
         typed_graph: typed_graph.to_strict(),

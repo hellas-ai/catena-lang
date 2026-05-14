@@ -76,6 +76,8 @@ pub enum StructuredError {
     MissingEntry,
     #[error("control-flow graph has an irreducible back edge from {from} to {to}")]
     IrreducibleBackEdge { from: String, to: String },
+    #[error("dataflow graph has a cycle or depends on unavailable wires")]
+    DataflowCycle,
     #[error("branch target {0} is not in the structured context")]
     MissingContext(String),
     #[error("control node {node} has {successors} entry successors; only one entry is supported")]
@@ -111,18 +113,11 @@ pub(super) enum Transfer {
 }
 
 impl Cfg {
-    pub fn from_context(
+    pub fn from_control_context(
         context: &Context<'_>,
         semantics: &impl ArrowSemantics,
     ) -> Result<Self, StructuredError> {
-        Self::from_hypergraph(context.graph(), context, semantics)
-    }
-
-    pub fn from_hypergraph(
-        f: &OpenHypergraph<Obj, Arr>,
-        context: &Context<'_>,
-        semantics: &impl ArrowSemantics,
-    ) -> Result<Self, StructuredError> {
+        let f = context.graph();
         let mut consumers: HashMap<NodeId, Vec<CfgNodeId>> = HashMap::new();
         for (edge_index, adjacency) in f.hypergraph.adjacency.iter().enumerate() {
             for source in &adjacency.sources {
@@ -215,6 +210,68 @@ impl Cfg {
             entry,
             nodes,
             predecessors,
+        })
+    }
+
+    // Schedule dataflow edges with a topological sort over wire dependencies, then place the resulting SSA-like primitive statements in one CFG node.
+    // for now we assume dataflow graphs are acyclic
+    // but we may want to relax this condition
+    pub fn from_dataflow_context(context: &Context<'_>) -> Result<Self, StructuredError> {
+        let f = context.graph();
+        let mut available = f.sources.iter().copied().collect::<HashSet<_>>();
+        let mut remaining = (0..f.hypergraph.edges.len()).collect::<Vec<_>>();
+        let mut statements = Vec::new();
+
+        // For now structured dataflow assumes an acyclic dependency graph.
+        while !remaining.is_empty() {
+            let Some(index) = remaining.iter().position(|edge| {
+                f.hypergraph.adjacency[*edge]
+                    .sources
+                    .iter()
+                    .all(|source| available.contains(source))
+            }) else {
+                return Err(StructuredError::DataflowCycle);
+            };
+
+            let edge_index = remaining.remove(index);
+            let op = f.hypergraph.edges[edge_index].to_string();
+            let adjacency = &f.hypergraph.adjacency[edge_index];
+            let arrow = ArrowInstance {
+                id: edge_index,
+                op: op.clone(),
+                inputs: adjacency
+                    .sources
+                    .iter()
+                    .map(|node| wire_name(*node))
+                    .collect(),
+                outputs: adjacency
+                    .targets
+                    .iter()
+                    .map(|node| wire_name(*node))
+                    .collect(),
+                branch_arity: 0,
+            };
+
+            if let Some(child) = context.child_for_operation(&op) {
+                statements.extend(statements_for_child_graph(child, &arrow));
+            } else {
+                statements.push(Stmt::Primitive(super::ir::Primitive {
+                    name: op,
+                    inputs: arrow.inputs,
+                    outputs: arrow.outputs,
+                    code: String::new(),
+                }));
+            }
+            available.extend(adjacency.targets.iter().copied());
+        }
+
+        Ok(Self {
+            entry: 0,
+            nodes: vec![CfgNode {
+                statements,
+                transfer: Transfer::Return,
+            }],
+            predecessors: vec![Vec::new()],
         })
     }
 

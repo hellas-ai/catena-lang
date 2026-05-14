@@ -26,7 +26,7 @@ impl Default for ForgetLoopbackConfig {
             cap: "cap",
             cup: "cup",
             loopback: "loopback",
-            value: "value",
+            value: "val",
         }
     }
 }

@@ -121,7 +121,7 @@ fn launch_config(tile_size: Option<String>, element_count: Option<String>) -> Cu
 
 fn global_dimension_leaf_names(variables: &[&Variable]) -> HashMap<usize, String> {
     let mut names = HashMap::new();
-    let dimension_names = ["m", "k", "n"];
+    let dimension_names = ["n", "m", "k"];
 
     for variable in variables {
         let Some(global) = gpu_global(&variable.ty) else {
@@ -225,7 +225,11 @@ fn gpu_global(obj: &Obj) -> Option<GpuGlobal<'_>> {
     let Tree::Node(global, 0, children) = global else {
         return None;
     };
-    if global.to_string() != "gpu.global" {
+    let global_name = global.to_string();
+    if !matches!(
+        global_name.as_str(),
+        "gpu.global.1d" | "gpu.global.2d" | "gpu.global.3d"
+    ) {
         return None;
     }
     let Some(Tree::Node(element, 0, _)) = children.first() else {

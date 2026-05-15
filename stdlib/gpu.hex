@@ -2,7 +2,9 @@
 
   (arr gpu.block : 0 -> 1)
   (arr gpu.thread : 0 -> 1)
-  (arr gpu.global : 3 -> 1)
+  (arr gpu.global.1d : 2 -> 1)
+  (arr gpu.global.2d : 3 -> 1)
+  (arr gpu.global.3d : 4 -> 1)
   (arr gpu.view : 1 -> 1)
   (arr gpu.shared : 3 -> 1)
 

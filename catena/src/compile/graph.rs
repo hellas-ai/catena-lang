@@ -3,14 +3,14 @@ use std::{
     fmt,
 };
 
-use hexpr::Operation;
+use hexpr::{Hexpr, Operation, Variable, interpret::Signature};
 use metacat::{
     check::check,
     theory::{Theory, TheoryId, TheorySet},
 };
 use open_hypergraphs::{
     category::Arrow,
-    lax::{OpenHypergraph as LaxOpenHypergraph, functor::Functor},
+    lax::{Interface, NodeId, OpenHypergraph as LaxOpenHypergraph, functor::Functor},
     strict::vec::OpenHypergraph as StrictOpenHypergraph,
 };
 use thiserror::Error;
@@ -29,6 +29,7 @@ pub struct CompileGraph {
     pub definition: String,
     pub graph: StrictLabeledGraph,
     pub typed_graph: StrictTypedGraph,
+    pub variable_names: HashMap<usize, String>,
     pub children: Vec<NestedCompileGraph>,
 }
 
@@ -195,7 +196,7 @@ impl GraphCompileState<'_> {
         let syntax = self.syntax_theory()?;
         let theory = self.theory(theory_name)?;
         let definition_key = parse_operation(definition)?;
-        let (graph, typed_graph) =
+        let (graph, typed_graph, variable_names) =
             self.compile_definition_graph(theory_name, theory, syntax, &definition_key)?;
         let children = self.compile_nested_foreign_graphs(theory_name, &graph)?;
 
@@ -204,6 +205,7 @@ impl GraphCompileState<'_> {
             definition: definition.to_string(),
             graph,
             typed_graph,
+            variable_names,
             children,
         })
     }
@@ -230,10 +232,18 @@ impl GraphCompileState<'_> {
         theory: &Theory,
         syntax: &Theory,
         definition_key: &Operation,
-    ) -> Result<(StrictLabeledGraph, StrictTypedGraph), CompileGraphError> {
+    ) -> Result<(StrictLabeledGraph, StrictTypedGraph, HashMap<usize, String>), CompileGraphError>
+    {
         let arrow = theory
             .get_arrow(definition_key)
             .ok_or_else(|| CompileGraphError::UnknownDefinition(definition_key.to_string()))?;
+        let variable_names = arrow
+            .raw
+            .definition
+            .as_ref()
+            .map(|definition| named_variables(theory, definition))
+            .transpose()?
+            .unwrap_or_default();
         let mut graph = arrow
             .definition
             .clone()
@@ -255,7 +265,7 @@ impl GraphCompileState<'_> {
             graph,
         )?;
 
-        Ok((graph.to_strict(), typed_graph.to_strict()))
+        Ok((graph.to_strict(), typed_graph.to_strict(), variable_names))
     }
 
     fn compile_nested_foreign_graphs(
@@ -412,8 +422,130 @@ fn compile_primitive_child_graph(
         definition: local_name.to_string(),
         graph: graph.to_strict(),
         typed_graph: typed_graph.to_strict(),
+        variable_names: HashMap::new(),
         children: Vec::new(),
     })
+}
+
+fn named_variables(
+    theory: &Theory,
+    definition: &Hexpr,
+) -> Result<HashMap<usize, String>, CompileGraphError> {
+    let graph =
+        interpret_named_variables(&theory.local_signature(), definition).map_err(|_error| {
+            CompileGraphError::Typecheck {
+                definition: "<variable names>".to_string(),
+                error: metacat::check::Error::InvalidTypeMaps,
+            }
+        })?;
+    let quotient = graph.hypergraph.coequalizer();
+    let mut names = HashMap::new();
+    for (node, name) in graph.hypergraph.nodes.iter().enumerate() {
+        let Some(name) = name else {
+            continue;
+        };
+        names
+            .entry(quotient.table[node])
+            .or_insert_with(|| name.clone());
+    }
+    Ok(names)
+}
+
+fn interpret_named_variables<S>(
+    signature: &S,
+    hexpr: &Hexpr,
+) -> Result<LaxOpenHypergraph<Option<String>, Operation>, hexpr::interpret::Error<S::Error>>
+where
+    S: Signature<Arr = Operation>,
+{
+    let mut state = LaxOpenHypergraph::empty();
+    let mut env = HashMap::new();
+    let (sources, targets) = interpret_named_stack(signature, &mut state, &mut env, hexpr)?;
+    state.sources = sources;
+    state.targets = targets;
+    Ok(state)
+}
+
+fn interpret_named_stack<S>(
+    signature: &S,
+    state: &mut LaxOpenHypergraph<Option<String>, Operation>,
+    env: &mut HashMap<Variable, NodeId>,
+    hexpr: &Hexpr,
+) -> Result<Interface, hexpr::interpret::Error<S::Error>>
+where
+    S: Signature<Arr = Operation>,
+{
+    match hexpr {
+        Hexpr::Composition(hexprs) => {
+            let mut iter = hexprs.iter();
+            let Some(mut current) = iter.next() else {
+                return Ok((vec![], vec![]));
+            };
+            let (sources, mut current_targets) =
+                interpret_named_stack(signature, state, env, current)?;
+            for next in iter {
+                let (next_sources, next_targets) =
+                    interpret_named_stack(signature, state, env, next)?;
+                if current_targets.len() != next_sources.len() {
+                    return Err(hexpr::interpret::Error::Composition(
+                        current.clone(),
+                        next.clone(),
+                    ));
+                }
+                for (&target, &source) in current_targets.iter().zip(&next_sources) {
+                    state.unify(target, source);
+                }
+                current_targets = next_targets;
+                current = next;
+            }
+            Ok((sources, current_targets))
+        }
+        Hexpr::Tensor(hexprs) => {
+            let mut sources = Vec::new();
+            let mut targets = Vec::new();
+            for hexpr in hexprs {
+                let (next_sources, next_targets) =
+                    interpret_named_stack(signature, state, env, hexpr)?;
+                sources.extend(next_sources);
+                targets.extend(next_targets);
+            }
+            Ok((sources, targets))
+        }
+        Hexpr::Operation(op) => {
+            let arr = signature
+                .try_parse_op(op)
+                .map_err(|error| hexpr::interpret::Error::Signature(op.clone(), error))?;
+            let (sources, targets) = signature.profile(&arr);
+            let sources = vec![None; sources.len()];
+            let targets = vec![None; targets.len()];
+            let (_, interface) = state.new_operation(arr, sources, targets);
+            Ok(interface)
+        }
+        Hexpr::Frobenius { sources, targets } => {
+            let sources = named_frobenius_variables(sources, env, state);
+            let targets = named_frobenius_variables(targets, env, state);
+            Ok((sources, targets))
+        }
+    }
+}
+
+fn named_frobenius_variables(
+    variables: &[Variable],
+    env: &mut HashMap<Variable, NodeId>,
+    state: &mut LaxOpenHypergraph<Option<String>, Operation>,
+) -> Vec<NodeId> {
+    variables
+        .iter()
+        .map(|variable| {
+            if let Some(node) = env.get(variable) {
+                *node
+            } else {
+                let node = state.new_node(Some(variable.to_string()));
+                env.insert(variable.clone(), node);
+                node
+            }
+        })
+        .collect()
 }
 
 fn inline_definitions(

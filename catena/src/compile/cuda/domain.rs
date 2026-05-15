@@ -33,12 +33,16 @@ impl<'a> CudaTarget<'a> {
 #[derive(Debug, Clone, Copy)]
 struct GenericCudaPrimitives<'a> {
     data_theory: Option<&'a Theory>,
+    f32: F32Primitives,
+    gpu: GpuPrimitives,
 }
 
 impl<'a> GenericCudaPrimitives<'a> {
     fn new(theory_set: &'a TheorySet) -> Self {
         Self {
             data_theory: theory(theory_set, "data"),
+            f32: F32Primitives,
+            gpu: GpuPrimitives,
         }
     }
 
@@ -96,17 +100,113 @@ impl<'a> GenericCudaPrimitives<'a> {
 
 impl CudaPrimitiveLowering for GenericCudaPrimitives<'_> {
     fn lower_primitive_lines(&self, primitive: &Primitive) -> Vec<String> {
-        if let Some(local_name) = primitive.name.strip_prefix("data.") {
-            if let Some(lines) = self.expand_data_arrow(local_name) {
-                return lines;
-            }
+        let Some((namespace, local_name)) = primitive.name.split_once('.') else {
+            return fallback_primitive_lines(primitive);
+        };
+
+        let local = PrimitiveLocalName::new(local_name);
+        let lines = match namespace {
+            "data" => self.expand_data_arrow(local_name),
+            "f32" => self.f32.lower(&local, primitive),
+            "gpu" => self.gpu.lower(&local, primitive),
+            _ => None,
+        };
+
+        if let Some(lines) = lines {
+            return lines;
         }
-        vec![format!(
-            "/* TODO: lower Catena primitive `{}` as `{}` */",
-            primitive.name,
-            primitive_assignment(primitive)
-        )]
+
+        fallback_primitive_lines(primitive)
     }
+}
+
+#[derive(Debug, Clone)]
+struct PrimitiveLocalName<'a> {
+    segments: Vec<&'a str>,
+}
+
+impl<'a> PrimitiveLocalName<'a> {
+    fn new(name: &'a str) -> Self {
+        let segments = name.split('.').collect();
+        Self { segments }
+    }
+
+    fn matches(&self, segments: &[&str]) -> bool {
+        self.segments == segments
+    }
+}
+
+trait NamespaceLowering {
+    fn lower(&self, local: &PrimitiveLocalName<'_>, primitive: &Primitive) -> Option<Vec<String>>;
+}
+
+#[derive(Debug, Clone, Copy)]
+struct F32Primitives;
+
+impl NamespaceLowering for F32Primitives {
+    fn lower(&self, local: &PrimitiveLocalName<'_>, primitive: &Primitive) -> Option<Vec<String>> {
+        let [out] = primitive.outputs.as_slice() else {
+            return None;
+        };
+
+        if local.matches(&["one"]) {
+            return Some(vec![format!("float {out} = 1.0f;")]);
+        }
+        if local.matches(&["zero"]) {
+            return Some(vec![format!("float {out} = 0.0f;")]);
+        }
+        if local.matches(&["add"]) {
+            let [lhs, rhs] = primitive.inputs.as_slice() else {
+                return None;
+            };
+            return Some(vec![format!("float {out} = {lhs} + {rhs};")]);
+        }
+
+        None
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct GpuPrimitives;
+
+impl NamespaceLowering for GpuPrimitives {
+    fn lower(&self, local: &PrimitiveLocalName<'_>, primitive: &Primitive) -> Option<Vec<String>> {
+        if local.matches(&["view", "group_by_tile"]) {
+            let [tile_size, block, thread] = primitive.inputs.as_slice() else {
+                return None;
+            };
+            let [out] = primitive.outputs.as_slice() else {
+                return None;
+            };
+            return Some(vec![format!(
+                "uint64_t {out} = (uint64_t){block}.x * {tile_size} + {thread}.x;"
+            )]);
+        }
+
+        if local.matches(&["global", "store"]) {
+            let [global, view, value] = primitive.inputs.as_slice() else {
+                return None;
+            };
+            let output = primitive.outputs.first();
+            let mut lines = vec![format!("{global}[{view}] = {value};")];
+            if let Some(output) = output
+                && output != global
+            {
+                lines.push(format!("auto {output} = {global};"));
+            }
+            return Some(lines);
+        }
+
+        None
+    }
+}
+
+fn fallback_primitive_lines(primitive: &Primitive) -> Vec<String> {
+    vec![format!(
+        "/* TODO: lower Catena primitive `{}` as `{}` */",
+        primitive.name,
+        primitive_assignment(primitive)
+    )]
 }
 
 fn primitive_assignment(primitive: &Primitive) -> String {

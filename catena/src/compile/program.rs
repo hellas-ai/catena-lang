@@ -93,7 +93,7 @@ fn build_definition(
     *next_id += 1;
 
     let cfg_context = cfg_context(compile_graph);
-    let context = context_for_cfg_context(&cfg_context);
+    let context = context_for_cfg_context(compile_graph, &cfg_context);
     let semantics = ProgramSemantics;
     let cfg_context = cfg_context.with_variables(variables_for_context(&context));
     let body = match cfg_context.kind() {
@@ -130,7 +130,8 @@ fn build_definition(
     Ok(id)
 }
 
-fn context_for_cfg_context(context: &cfg::BuildContext) -> Context {
+fn context_for_cfg_context(compile_graph: &CompileGraph, context: &cfg::BuildContext) -> Context {
+    let mut used_names = HashMap::new();
     Context::new(
         context
             .graph()
@@ -141,17 +142,47 @@ fn context_for_cfg_context(context: &cfg::BuildContext) -> Context {
             .enumerate()
             .map(|(index, ty)| {
                 let id = VariableId(index);
-                (
-                    id,
-                    Variable {
-                        id,
-                        name: format!("w{index}"),
-                        ty,
-                    },
-                )
+                let name = variable_name(index, compile_graph, &mut used_names);
+                (id, Variable { id, name, ty })
             })
             .collect(),
     )
+}
+
+fn variable_name(
+    index: usize,
+    compile_graph: &CompileGraph,
+    used_names: &mut HashMap<String, usize>,
+) -> String {
+    let base = compile_graph
+        .variable_names
+        .get(&index)
+        .map(|name| sanitize_ident(name))
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| format!("w{index}"));
+    unique_name(base, used_names)
+}
+
+fn unique_name(base: String, used_names: &mut HashMap<String, usize>) -> String {
+    let count = used_names.entry(base.clone()).or_insert(0);
+    if *count == 0 {
+        *count += 1;
+        return base;
+    }
+    let name = format!("{base}{count}");
+    *count += 1;
+    name
+}
+
+fn sanitize_ident(name: &str) -> String {
+    let mut ident = name
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+        .collect::<String>();
+    if ident.chars().next().is_some_and(|c| c.is_ascii_digit()) {
+        ident.insert(0, '_');
+    }
+    ident
 }
 
 fn variables_for_context(context: &Context) -> HashMap<NodeId, String> {

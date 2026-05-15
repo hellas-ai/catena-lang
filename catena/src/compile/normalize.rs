@@ -20,6 +20,7 @@ pub fn normalize_graph(graph: &CompileGraph) -> Result<CompileGraph, NormalizeGr
         definition: graph.definition.clone(),
         graph: graph.graph.clone(),
         typed_graph: normalize_graph_hypergraph(&typed_graph)?.to_strict(),
+        variable_names: graph.variable_names.clone(),
         children: graph
             .children
             .iter()

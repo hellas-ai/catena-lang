@@ -10,9 +10,9 @@
 
 (theory data syntax {
 
-  (arr gpu.view.group_by_tile :
-    {(([tile_size] extent) val) (gpu.block val) (gpu.thread val)} ->
-    (([tile_size] gpu.view) val))
+  (arr gpu.view.group :
+    {(gpu.block val) (gpu.thread val) (([block_size] extent) val)} ->
+    (([block_size] gpu.view) val))
 
   (arr gpu.global.store :
     {([matrix] val) (([tile_size] gpu.view) val) (f32 val)} ->

@@ -171,15 +171,15 @@ struct GpuPrimitives;
 
 impl NamespaceLowering for GpuPrimitives {
     fn lower(&self, local: &PrimitiveLocalName<'_>, primitive: &Primitive) -> Option<Vec<String>> {
-        if local.matches(&["view", "group_by_tile"]) {
-            let [tile_size, block, thread] = primitive.inputs.as_slice() else {
+        if local.matches(&["view", "group"]) {
+            let [block, thread, _block_size] = primitive.inputs.as_slice() else {
                 return None;
             };
             let [out] = primitive.outputs.as_slice() else {
                 return None;
             };
             return Some(vec![format!(
-                "uint64_t {out} = (uint64_t){block}.x * {tile_size} + {thread}.x;"
+                "uint64_t {out} = (uint64_t){block}.x * blockDim.x + {thread}.x;"
             )]);
         }
 

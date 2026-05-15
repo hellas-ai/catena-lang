@@ -13,7 +13,7 @@
      } -> (({f32 [m] [k]} gpu.global) val)
     = {[tile_size m k block thread out.]
       ([.] f32.one [one.])
-      ([.tile_size block thread] gpu.view.group_by_tile [out_view.])
+      ([.block thread tile_size] gpu.view.group [out_view.])
       ([.out out_view one] gpu.global.store [out_filled.])
       [.out_filled]}
 )

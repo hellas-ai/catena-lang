@@ -34,7 +34,10 @@ fn render_prelude(out: &mut String, abi: &CudaKernelAbi) {
     for line in &abi.prelude {
         out.push_str(&format!("    {line}\n"));
     }
-    if !abi.prelude.is_empty() {
+    if let Some(element_count) = &abi.launch.element_count {
+        out.push_str(&format!("    uint64_t __elements = {element_count};\n"));
+    }
+    if !abi.prelude.is_empty() || abi.launch.element_count.is_some() {
         out.push('\n');
     }
 }
@@ -62,10 +65,9 @@ fn render_launch_helper(out: &mut String, program: &StructuredProgram, abi: &Cud
     out.push_str("}\n");
 }
 
-fn render_launch_config(out: &mut String, _abi: &CudaKernelAbi) {
-    out.push_str("    /* TODO: derive CUDA launch configuration from Catena types */\n");
-    out.push_str("    dim3 block(1);\n");
-    out.push_str("    dim3 grid(1);\n");
+fn render_launch_config(out: &mut String, abi: &CudaKernelAbi) {
+    out.push_str(&format!("    dim3 block({});\n", abi.launch.block_expr));
+    out.push_str(&format!("    dim3 grid({});\n", abi.launch.grid_expr));
 }
 
 fn render_cuda_stmts(

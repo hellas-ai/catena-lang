@@ -188,7 +188,11 @@ impl NamespaceLowering for GpuPrimitives {
                 return None;
             };
             let output = primitive.outputs.first();
-            let mut lines = vec![format!("{global}[{view}] = {value};")];
+            let mut lines = vec![
+                format!("if ({view} < __elements) {{"),
+                format!("    {global}[{view}] = {value};"),
+                "}".to_string(),
+            ];
             if let Some(output) = output
                 && output != global
             {

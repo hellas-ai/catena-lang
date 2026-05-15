@@ -12,7 +12,15 @@ use crate::{
 pub(super) struct CudaKernelAbi {
     pub(super) params: Vec<Param>,
     pub(super) prelude: Vec<String>,
+    pub(super) launch: CudaLaunch,
     names: HashMap<String, String>,
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct CudaLaunch {
+    pub(super) block_expr: String,
+    pub(super) grid_expr: String,
+    pub(super) element_count: Option<String>,
 }
 
 impl CudaKernelAbi {
@@ -30,6 +38,8 @@ impl CudaKernelAbi {
         let mut params = Vec::new();
         let mut prelude = Vec::new();
         let mut names = HashMap::new();
+        let mut launch_tile_size = None;
+        let mut launch_element_count = None;
 
         for id in &definition.params {
             let Some(variable) = definition.context.variable(*id) else {
@@ -45,6 +55,26 @@ impl CudaKernelAbi {
             if let Some(param_ty) = cuda_param_type(&variable.ty) {
                 let name = unique_name(&alias, &mut used_param_names);
                 names.insert(variable.name.clone(), name.clone());
+                if extent_leaf(&variable.ty).is_some()
+                    && !dimension_leaf_names
+                        .values()
+                        .any(|dim_name| dim_name == &name)
+                    && launch_tile_size.is_none()
+                {
+                    launch_tile_size = Some(name.clone());
+                }
+                if launch_element_count.is_none()
+                    && let Some(global) = gpu_global(&variable.ty)
+                {
+                    let dimensions = global
+                        .dimensions
+                        .iter()
+                        .filter_map(|dimension| dimension_name(dimension, &dimension_leaf_names))
+                        .collect::<Vec<_>>();
+                    if !dimensions.is_empty() {
+                        launch_element_count = Some(dimensions.join(" * "));
+                    }
+                }
                 params.push(Param {
                     ty: param_ty.to_string(),
                     name,
@@ -61,6 +91,7 @@ impl CudaKernelAbi {
         Self {
             params,
             prelude,
+            launch: launch_config(launch_tile_size, launch_element_count),
             names,
         }
     }
@@ -70,6 +101,21 @@ impl CudaKernelAbi {
             .get(name)
             .cloned()
             .unwrap_or_else(|| name.to_string())
+    }
+}
+
+fn launch_config(tile_size: Option<String>, element_count: Option<String>) -> CudaLaunch {
+    match (tile_size, element_count) {
+        (Some(tile_size), Some(element_count)) => CudaLaunch {
+            block_expr: tile_size.clone(),
+            grid_expr: format!("({element_count} + {tile_size} - 1) / {tile_size}"),
+            element_count: Some(element_count),
+        },
+        _ => CudaLaunch {
+            block_expr: "1".to_string(),
+            grid_expr: "1".to_string(),
+            element_count: None,
+        },
     }
 }
 
@@ -93,6 +139,16 @@ fn global_dimension_leaf_names(variables: &[&Variable]) -> HashMap<usize, String
     }
 
     names
+}
+
+fn dimension_name(
+    dimension: &Obj,
+    dimension_leaf_names: &HashMap<usize, String>,
+) -> Option<String> {
+    let Tree::Leaf(leaf, _) = dimension else {
+        return None;
+    };
+    dimension_leaf_names.get(leaf).cloned()
 }
 
 fn value_name(

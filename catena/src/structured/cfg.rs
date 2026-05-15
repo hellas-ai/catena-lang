@@ -35,14 +35,6 @@ enum BranchValue {
     Coproduct(Variable),
 }
 
-#[derive(Debug, Clone)]
-pub struct Graph {
-    pub kind: GraphKind,
-    pub name: String,
-    pub graph: OpenHypergraph<Obj, Arr>,
-    pub children: Vec<ChildGraph>,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GraphKind {
     Data,
@@ -50,32 +42,49 @@ pub enum GraphKind {
 }
 
 #[derive(Debug, Clone)]
-pub struct ChildGraph {
+struct ChildContext {
     pub operation: String,
-    pub graph: Graph,
+    pub context: BuildContext,
 }
 
-pub struct Context<'a> {
-    graph: &'a Graph,
+#[derive(Debug, Clone)]
+pub struct BuildContext {
+    kind: GraphKind,
+    graph: OpenHypergraph<Obj, Arr>,
+    children: Vec<ChildContext>,
     variables: HashMap<NodeId, Variable>,
     prefix: String,
 }
 
-impl<'a> Context<'a> {
-    pub fn new(graph: &'a Graph) -> Self {
+impl BuildContext {
+    pub fn new(
+        kind: GraphKind,
+        graph: OpenHypergraph<Obj, Arr>,
+        children: Vec<(String, BuildContext)>,
+    ) -> Self {
         Self {
+            kind,
             graph,
+            children: children
+                .into_iter()
+                .map(|(operation, context)| ChildContext { operation, context })
+                .collect(),
             variables: HashMap::new(),
             prefix: "w".to_string(),
         }
     }
 
-    pub fn graph(&self) -> &'a OpenHypergraph<Obj, Arr> {
-        &self.graph.graph
+    pub fn with_variables(mut self, variables: HashMap<NodeId, Variable>) -> Self {
+        self.variables = variables;
+        self
     }
 
-    fn kind(&self) -> GraphKind {
-        self.graph.kind
+    pub fn graph(&self) -> &OpenHypergraph<Obj, Arr> {
+        &self.graph
+    }
+
+    pub fn kind(&self) -> GraphKind {
+        self.kind
     }
 
     fn variable(&self, node: NodeId) -> Variable {
@@ -85,12 +94,21 @@ impl<'a> Context<'a> {
             .unwrap_or_else(|| format!("{}{}", self.prefix, node.0))
     }
 
-    pub fn child_for_operation(&self, operation: &str) -> Option<&'a Graph> {
-        self.graph
-            .children
+    fn child_for_operation(&self, operation: &str) -> Option<&BuildContext> {
+        self.children
             .iter()
             .find(|child| child.operation == operation)
-            .map(|child| &child.graph)
+            .map(|child| &child.context)
+    }
+
+    fn with_child_variables(&self, variables: HashMap<NodeId, Variable>, prefix: String) -> Self {
+        Self {
+            kind: self.kind,
+            graph: self.graph.clone(),
+            children: self.children.clone(),
+            variables,
+            prefix,
+        }
     }
 }
 
@@ -104,7 +122,9 @@ pub enum StructuredError {
     DataflowCycle,
     #[error("branch target {0} is not in the structured context")]
     MissingContext(String),
-    #[error("expected alternating structured graph layers, but {parent:?} graph contains {child:?} child")]
+    #[error(
+        "expected alternating structured graph layers, but {parent:?} graph contains {child:?} child"
+    )]
     InvalidLayer { parent: GraphKind, child: GraphKind },
     #[error("control node {node} has {successors} entry successors; only one entry is supported")]
     UnsupportedEntry { node: String, successors: usize },
@@ -140,7 +160,7 @@ pub(super) enum Transfer {
 
 impl Cfg {
     pub fn from_control_context(
-        context: &Context<'_>,
+        context: &BuildContext,
         semantics: &impl ArrowSemantics,
     ) -> Result<Self, StructuredError> {
         let f = context.graph();
@@ -242,7 +262,7 @@ impl Cfg {
     // for now we assume dataflow graphs are acyclic
     // but we may want to relax this condition
     pub fn from_dataflow_context(
-        context: &Context<'_>,
+        context: &BuildContext,
         semantics: &impl ArrowSemantics,
     ) -> Result<Self, StructuredError> {
         let statements = dataflow_statements(context, semantics)?;
@@ -277,7 +297,7 @@ impl CfgNode {
 }
 
 fn statements_for_arrow(
-    context: &Context<'_>,
+    context: &BuildContext,
     op: &str,
     arrow: &ArrowInstance,
     semantics: &impl ArrowSemantics,
@@ -293,33 +313,31 @@ fn statements_for_arrow(
 
 fn statements_for_child_graph(
     parent: GraphKind,
-    child: &Graph,
+    child: &BuildContext,
     arrow: &ArrowInstance,
     semantics: &impl ArrowSemantics,
 ) -> Result<Vec<Stmt>, StructuredError> {
-    if child.kind == parent {
+    if child.kind() == parent {
         return Err(StructuredError::InvalidLayer {
             parent,
-            child: child.kind,
+            child: child.kind(),
         });
     }
 
-    let child_context = Context {
-        graph: child,
-        variables: child_graph_variables(child, arrow),
-        prefix: format!("v{}_", arrow.id),
-    };
-    match child.kind {
+    let child_context = child.with_child_variables(
+        child_graph_variables(child, arrow),
+        format!("v{}_", arrow.id),
+    );
+    match child.kind() {
         GraphKind::Data => dataflow_statements(&child_context, semantics),
-        GraphKind::Control => super::ramsey::structure(Cfg::from_control_context(
-            &child_context,
-            semantics,
-        )?),
+        GraphKind::Control => {
+            super::ramsey::structure(Cfg::from_control_context(&child_context, semantics)?)
+        }
     }
 }
 
 fn dataflow_statements(
-    context: &Context<'_>,
+    context: &BuildContext,
     semantics: &impl ArrowSemantics,
 ) -> Result<Vec<Stmt>, StructuredError> {
     let f = context.graph();
@@ -379,11 +397,11 @@ fn dataflow_statements(
     Ok(statements)
 }
 
-fn branch_value_for_child_graph(child: &Graph, arrow: &ArrowInstance) -> BranchValue {
+fn branch_value_for_child_graph(child: &BuildContext, arrow: &ArrowInstance) -> BranchValue {
     if arrow.branch_arity <= 1 {
         return BranchValue::Opaque;
     }
-    let Some(target) = child.graph.targets.first() else {
+    let Some(target) = child.graph().targets.first() else {
         return BranchValue::Opaque;
     };
     let mut variables = child_graph_variables(child, arrow);
@@ -394,18 +412,18 @@ fn branch_value_for_child_graph(child: &Graph, arrow: &ArrowInstance) -> BranchV
     ))
 }
 
-fn child_graph_variables(child: &Graph, arrow: &ArrowInstance) -> HashMap<NodeId, Variable> {
+fn child_graph_variables(child: &BuildContext, arrow: &ArrowInstance) -> HashMap<NodeId, Variable> {
     let mut variables = HashMap::new();
-    for (index, node) in child.graph.sources.iter().enumerate() {
+    for (index, node) in child.graph().sources.iter().enumerate() {
         if let Some(input) = arrow.inputs.get(index) {
             variables.insert(*node, input.clone());
         }
     }
 
-    if arrow.branch_arity > 1 && child.graph.targets.len() == 1 {
-        variables.insert(child.graph.targets[0], branch_result_variable(arrow));
+    if arrow.branch_arity > 1 && child.graph().targets.len() == 1 {
+        variables.insert(child.graph().targets[0], branch_result_variable(arrow));
     } else {
-        for (index, node) in child.graph.targets.iter().enumerate() {
+        for (index, node) in child.graph().targets.iter().enumerate() {
             if let Some(output) = arrow.outputs.get(index) {
                 variables.insert(*node, output.clone());
             }

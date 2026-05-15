@@ -1,6 +1,7 @@
 use metacat::theory::{RawTheorySet, TheorySet, ast::ParseRawError};
 use thiserror::Error;
 
+mod abi;
 mod domain;
 mod render;
 
@@ -9,11 +10,13 @@ use domain::CudaTarget;
 use crate::{
     check::check as typecheck_elaborated,
     compile::{
-        CompileConfig, CompileGraphError, GraphCompileOptions, compile_graph,
-        structured::{StructuredCompileError, compile_structured_program_from_graph},
+        CompileConfig, CompileGraphError, GraphCompileOptions, Program, compile_graph,
+        normalize::{NormalizeGraphError, normalize_graph},
+        program::{ProgramCompileError, compile_program_from_graph},
+        structured::{StructuredCompileError, compile_structured_program},
     },
     elaborate::elaborate,
-    structured::ir::Program,
+    structured::ir::StructuredProgram,
 };
 
 #[derive(Debug, Error)]
@@ -26,6 +29,10 @@ pub enum CudaCompileError {
     Check(#[from] crate::check::CheckError),
     #[error("failed to build compile graph: {0}")]
     CompileGraph(#[from] CompileGraphError),
+    #[error(transparent)]
+    Normalize(#[from] NormalizeGraphError),
+    #[error(transparent)]
+    Program(#[from] ProgramCompileError),
     #[error(transparent)]
     Structured(#[from] StructuredCompileError),
 }
@@ -62,11 +69,17 @@ pub fn compile_cuda_theory_set_with_options(
         entry,
         graph_options,
     )?;
-    let program = compile_structured_program_from_graph(&compile_graph)?;
-    Ok(render_cuda_source(theory_set, &program))
+    let graph = normalize_graph(&compile_graph)?;
+    let program = compile_program_from_graph(&graph)?;
+    let structured = compile_structured_program(&program)?;
+    Ok(render_cuda_source(theory_set, &program, &structured))
 }
 
-pub fn render_cuda_source(theory_set: &TheorySet, program: &Program) -> String {
-    let target = CudaTarget::new(theory_set);
-    target.render_cuda_with_launch(program)
+pub fn render_cuda_source(
+    theory_set: &TheorySet,
+    program: &Program,
+    structured: &StructuredProgram,
+) -> String {
+    let target = CudaTarget::new(theory_set, program.entry_definition());
+    target.render_cuda_with_launch(structured)
 }

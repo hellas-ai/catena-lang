@@ -1,5 +1,5 @@
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Program {
+pub struct StructuredProgram {
     pub name: String,
     pub entry: EntryPoint,
     pub body: Vec<Stmt>,
@@ -62,7 +62,7 @@ pub struct Primitive {
     pub code: String,
 }
 
-impl Program {
+impl StructuredProgram {
     pub fn render_ir(&self) -> String {
         let mut out = String::new();
         out.push_str(&format!("program {}(", self.name));

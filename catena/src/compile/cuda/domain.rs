@@ -1,26 +1,32 @@
 use crate::{
-    compile::cuda::render::{CudaKernelAbi, CudaPrimitiveLowering, render_cuda},
-    structured::ir::{Primitive, Program},
+    compile::{
+        cuda::{
+            abi::CudaKernelAbi,
+            render::{CudaPrimitiveLowering, render_cuda},
+        },
+        program::Definition,
+    },
+    structured::ir::{Primitive, StructuredProgram},
 };
 use hexpr::Operation;
 use metacat::theory::{Theory, TheoryId, TheorySet};
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub(super) struct CudaTarget<'a> {
     abi: CudaKernelAbi,
     primitives: GenericCudaPrimitives<'a>,
 }
 
 impl<'a> CudaTarget<'a> {
-    pub(super) fn new(theory_set: &'a TheorySet) -> Self {
+    pub(super) fn new(theory_set: &'a TheorySet, entry: &Definition) -> Self {
         Self {
-            abi: CudaKernelAbi::Unknown,
+            abi: CudaKernelAbi::from_definition(entry),
             primitives: GenericCudaPrimitives::new(theory_set),
         }
     }
 
-    pub(super) fn render_cuda_with_launch(&self, program: &Program) -> String {
-        render_cuda(program, self.abi, &self.primitives)
+    pub(super) fn render_cuda_with_launch(&self, program: &StructuredProgram) -> String {
+        render_cuda(program, &self.abi, &self.primitives)
     }
 }
 

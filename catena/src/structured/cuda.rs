@@ -1,4 +1,4 @@
-use super::ir::{Param, Primitive, Program, Stmt};
+use super::ir::{Param, Primitive, Stmt, StructuredProgram};
 use std::collections::HashSet;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -55,7 +55,7 @@ pub enum CudaError {
 }
 
 pub fn render_cuda(
-    program: &Program,
+    program: &StructuredProgram,
     env: &CudaKernelEnv,
     mode: CudaRenderMode,
     lower_primitive: impl Fn(&Primitive) -> Result<Vec<CudaStmt>, CudaError>,
@@ -108,7 +108,7 @@ fn render_kernel_preamble(out: &mut String, env: &CudaKernelEnv) {
     out.push('\n');
 }
 
-fn render_launch_helper(out: &mut String, program: &Program, launch: &CudaLaunchConfig) {
+fn render_launch_helper(out: &mut String, program: &StructuredProgram, launch: &CudaLaunchConfig) {
     out.push_str(&format!("void launch_{}(", program.entry.name));
     out.push_str(
         &program

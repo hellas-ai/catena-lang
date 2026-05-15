@@ -10,7 +10,9 @@ use crate::{
         compile_graph,
         cuda::render_cuda_source,
         graph_render,
-        structured::{StructuredCompileError, compile_structured_program_from_graph},
+        normalize::{NormalizeGraphError, normalize_graph},
+        program::{ProgramCompileError, compile_program_from_graph},
+        structured::{StructuredCompileError, compile_structured_program},
     },
     elaborate::{ElaborateError, elaborate},
 };
@@ -52,6 +54,10 @@ pub enum CompilePipelineError {
     CompileGraph(#[from] CompileGraphError),
     #[error("failed to render compile graph: {0}")]
     RenderGraph(#[from] std::io::Error),
+    #[error(transparent)]
+    Normalize(#[from] NormalizeGraphError),
+    #[error(transparent)]
+    Program(#[from] ProgramCompileError),
     #[error(transparent)]
     Structured(#[from] StructuredCompileError),
     #[error("{argument} is required when emitting {emit:?}")]
@@ -108,10 +114,14 @@ impl CompilePipeline {
                 let checked_elaborated_theory = self.checked_elaborated_theory()?;
                 let compile_graph =
                     Self::compile_graph(checked_elaborated_theory, compile_graph_request)?;
-                let program = compile_structured_program_from_graph(&compile_graph)?;
+                let graph = normalize_graph(&compile_graph)?;
+                let program = compile_program_from_graph(&graph)?;
+                let structured = compile_structured_program(&program)?;
                 Ok(match emit {
-                    Emit::Cuda => render_cuda_source(checked_elaborated_theory, &program),
-                    Emit::StructuredIr => program.render_ir(),
+                    Emit::Cuda => {
+                        render_cuda_source(checked_elaborated_theory, &program, &structured)
+                    }
+                    Emit::StructuredIr => structured.render_ir(),
                     _ => unreachable!("only structured-backed emits are handled here"),
                 }
                 .into_bytes())

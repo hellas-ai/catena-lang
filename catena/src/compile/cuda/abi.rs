@@ -38,7 +38,7 @@ impl CudaKernelAbi {
         let mut params = Vec::new();
         let mut prelude = Vec::new();
         let mut names = HashMap::new();
-        let mut launch_tile_size = None;
+        let mut launch_block_size = None;
         let mut launch_element_count = None;
 
         for id in &definition.params {
@@ -59,9 +59,9 @@ impl CudaKernelAbi {
                     && !dimension_leaf_names
                         .values()
                         .any(|dim_name| dim_name == &name)
-                    && launch_tile_size.is_none()
+                    && launch_block_size.is_none()
                 {
-                    launch_tile_size = Some(name.clone());
+                    launch_block_size = Some(name.clone());
                 }
                 if launch_element_count.is_none()
                     && let Some(global) = gpu_global(&variable.ty)
@@ -91,7 +91,7 @@ impl CudaKernelAbi {
         Self {
             params,
             prelude,
-            launch: launch_config(launch_tile_size, launch_element_count),
+            launch: launch_config(launch_block_size, launch_element_count),
             names,
         }
     }
@@ -104,11 +104,11 @@ impl CudaKernelAbi {
     }
 }
 
-fn launch_config(tile_size: Option<String>, element_count: Option<String>) -> CudaLaunch {
-    match (tile_size, element_count) {
-        (Some(tile_size), Some(element_count)) => CudaLaunch {
-            block_expr: tile_size.clone(),
-            grid_expr: format!("({element_count} + {tile_size} - 1) / {tile_size}"),
+fn launch_config(block_size: Option<String>, element_count: Option<String>) -> CudaLaunch {
+    match (block_size, element_count) {
+        (Some(block_size), Some(element_count)) => CudaLaunch {
+            block_expr: block_size.clone(),
+            grid_expr: format!("({element_count} + {block_size} - 1) / {block_size}"),
             element_count: Some(element_count),
         },
         _ => CudaLaunch {
@@ -162,7 +162,7 @@ fn value_name(
             return name.clone();
         }
         let name = if *unnamed_extent_count == 0 {
-            "tile_size".to_string()
+            "block_size".to_string()
         } else {
             format!("extent{}", unnamed_extent_count)
         };

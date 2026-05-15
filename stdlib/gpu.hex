@@ -17,6 +17,6 @@
     (([block_size] gpu.view) val))
 
   (arr gpu.global.store :
-    {([matrix] val) (([tile_size] gpu.view) val) (f32 val)} ->
-    ([matrix tile_size . matrix] val))
+    {([matrix] val) (([block_size] gpu.view) val) (f32 val)} ->
+    ([matrix block_size . matrix] val))
 })

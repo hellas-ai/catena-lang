@@ -38,9 +38,10 @@ impl CudaKernelAbi {
         let mut params = Vec::new();
         let mut prelude = Vec::new();
         let mut names = HashMap::new();
+        let mut extent_param_names = HashMap::new();
         let mut launch_block_size = None;
         let mut launch_element_count = None;
-        let mut launch_grid = None;
+        let mut grid_shape = None;
 
         for id in &definition.params {
             let Some(variable) = definition.context.variable(*id) else {
@@ -59,16 +60,8 @@ impl CudaKernelAbi {
             if let Some(param_ty) = cuda_param_type(&variable.ty) {
                 let name = unique_name(&alias, &mut used_param_names);
                 names.insert(variable.name.clone(), name.clone());
-                match variable.name.as_str() {
-                    "block_count" => {
-                        launch_grid.get_or_insert_with(GridLaunch::default).grid =
-                            vec![name.clone()];
-                    }
-                    "thread_count" => {
-                        launch_grid.get_or_insert_with(GridLaunch::default).block =
-                            vec![name.clone()];
-                    }
-                    _ => {}
+                if let Some(leaf) = extent_leaf(&variable.ty) {
+                    extent_param_names.insert(leaf, name.clone());
                 }
                 if extent_leaf(&variable.ty).is_some()
                     && !dimension_leaf_names
@@ -95,10 +88,10 @@ impl CudaKernelAbi {
                     name,
                 });
             } else if let Some(gpu_grid) = gpu_grid(&variable.ty) {
-                let grid = dimension_names_for_dim(gpu_grid.grid, &dimension_leaf_names);
-                let block = dimension_names_for_dim(gpu_grid.block, &dimension_leaf_names);
+                let grid = dimension_leaves(gpu_grid.grid);
+                let block = dimension_leaves(gpu_grid.block);
                 if let (Some(grid), Some(block)) = (grid, block) {
-                    launch_grid = Some(GridLaunch { grid, block });
+                    grid_shape = Some(GridShape { grid, block });
                 }
             } else if is_wrapped_type(&variable.ty, "gpu.block") {
                 names.insert(variable.name.clone(), "block".to_string());
@@ -112,7 +105,11 @@ impl CudaKernelAbi {
         Self {
             params,
             prelude,
-            launch: launch_config(launch_grid, launch_block_size, launch_element_count),
+            launch: launch_config(
+                grid_shape.and_then(|shape| resolve_grid_launch(&shape, &extent_param_names)),
+                launch_block_size,
+                launch_element_count,
+            ),
             names,
         }
     }
@@ -131,13 +128,30 @@ struct GridLaunch {
     block: Vec<String>,
 }
 
-impl Default for GridLaunch {
-    fn default() -> Self {
-        Self {
-            grid: Vec::new(),
-            block: Vec::new(),
-        }
-    }
+#[derive(Debug, Clone)]
+struct GridShape {
+    grid: Vec<usize>,
+    block: Vec<usize>,
+}
+
+fn resolve_grid_launch(
+    shape: &GridShape,
+    extent_param_names: &HashMap<usize, String>,
+) -> Option<GridLaunch> {
+    Some(GridLaunch {
+        grid: resolve_dimension_names(&shape.grid, extent_param_names)?,
+        block: resolve_dimension_names(&shape.block, extent_param_names)?,
+    })
+}
+
+fn resolve_dimension_names(
+    leaves: &[usize],
+    extent_param_names: &HashMap<usize, String>,
+) -> Option<Vec<String>> {
+    leaves
+        .iter()
+        .map(|leaf| extent_param_names.get(leaf).cloned())
+        .collect()
 }
 
 fn launch_config(
@@ -187,11 +201,6 @@ fn dimension_leaf_names(variables: &[&Variable]) -> HashMap<usize, String> {
     let dimension_names = ["n", "m", "k"];
 
     for variable in variables {
-        if let Some(grid) = gpu_grid(&variable.ty) {
-            insert_dimension_names(grid.grid, "block_count", &mut names);
-            insert_dimension_names(grid.block, "thread_count", &mut names);
-        }
-
         if let Some(global) = gpu_global(&variable.ty) {
             for (index, dim) in global.dimensions.iter().enumerate() {
                 if let Tree::Leaf(leaf, _) = dim {
@@ -206,33 +215,6 @@ fn dimension_leaf_names(variables: &[&Variable]) -> HashMap<usize, String> {
     }
 
     names
-}
-
-fn insert_dimension_names(dim: &Obj, name: &str, names: &mut HashMap<usize, String>) {
-    let Some(leaves) = dimension_leaves(dim) else {
-        return;
-    };
-    if leaves.len() == 1 {
-        names.entry(leaves[0]).or_insert_with(|| name.to_string());
-        return;
-    }
-    let axes = ["x", "y", "z"];
-    for (index, leaf) in leaves.into_iter().enumerate() {
-        let axis = axes.get(index).copied().unwrap_or("dim");
-        names
-            .entry(leaf)
-            .or_insert_with(|| format!("{name}_{axis}"));
-    }
-}
-
-fn dimension_names_for_dim(
-    dim: &Obj,
-    dimension_leaf_names: &HashMap<usize, String>,
-) -> Option<Vec<String>> {
-    dimension_leaves(dim)?
-        .into_iter()
-        .map(|leaf| dimension_leaf_names.get(&leaf).cloned())
-        .collect()
 }
 
 fn dimension_leaves(dimension: &Obj) -> Option<Vec<usize>> {

@@ -1,0 +1,5 @@
+# Function pointers
+(theory type nat {
+  # (A ~> B) is a function *pointer* - has no captured vars
+  (arr -> : 2 -> 1)
+})

@@ -1,0 +1,11 @@
+# basic datatypes
+(theory type nat { 
+  # booleans
+  (arr bool : 0 -> 1)
+})
+
+(theory program type {
+  # Boolean operations
+  (arr bool.not : bool -> bool)
+  (arr bool.or  : {bool bool} -> bool)
+})

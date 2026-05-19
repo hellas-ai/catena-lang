@@ -16,7 +16,7 @@ pub(super) fn render_cuda(
     out.push_str("#include <stdint.h>\n\n");
     out.push_str(&format!("__global__ void {}(", program.entry.name));
     out.push_str(
-        &abi.params
+        &abi.kernel_params
             .iter()
             .map(|p| format!("{} {}", p.ty, p.name))
             .collect::<Vec<_>>()
@@ -45,20 +45,26 @@ fn render_prelude(out: &mut String, abi: &CudaKernelAbi) {
 fn render_launch_helper(out: &mut String, program: &StructuredProgram, abi: &CudaKernelAbi) {
     out.push_str(&format!("void launch_{}(", program.entry.name));
     out.push_str(
-        &abi.params
+        &abi.launch_params
             .iter()
             .map(|p| format!("{} {}", p.ty, p.name))
             .collect::<Vec<_>>()
             .join(", "),
     );
     out.push_str(") {\n");
+    for line in &abi.launch_prelude {
+        out.push_str(&format!("    {line}\n"));
+    }
+    if !abi.launch_prelude.is_empty() {
+        out.push('\n');
+    }
     render_launch_config(out, abi);
     out.push_str(&format!(
         "    {}<<<grid, block>>>({});\n",
         program.entry.name,
-        abi.params
+        abi.kernel_args
             .iter()
-            .map(|p| p.name.as_str())
+            .map(String::as_str)
             .collect::<Vec<_>>()
             .join(", ")
     ));

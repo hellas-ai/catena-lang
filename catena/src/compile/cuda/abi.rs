@@ -3,12 +3,19 @@ use std::collections::{HashMap, HashSet};
 use metacat::tree::Tree;
 use thiserror::Error;
 
-use crate::{compile::program::Definition, lang::Obj, structured::ir::Param};
+use crate::{
+    compile::program::{Definition, Variable},
+    lang::Obj,
+    structured::ir::Param,
+};
 
 #[derive(Debug, Clone)]
 pub(super) struct CudaKernelAbi {
-    pub(super) params: Vec<Param>,
+    pub(super) kernel_params: Vec<Param>,
+    pub(super) launch_params: Vec<Param>,
+    pub(super) kernel_args: Vec<String>,
     pub(super) prelude: Vec<String>,
+    pub(super) launch_prelude: Vec<String>,
     pub(super) launch: CudaLaunch,
     names: HashMap<String, String>,
 }
@@ -36,6 +43,8 @@ pub enum CudaAbiError {
         "gpu.global boundary values must be gpu.global element dimensions with 1d, 2d, or 3d dimensions"
     )]
     InvalidGlobalShape,
+    #[error("gpu.global dimension leaf {0} is not backed by an extent argument")]
+    MissingGlobalExtent(usize),
     #[error("unsupported CUDA global memory element type `{0}`")]
     UnsupportedGlobalElement(String),
     #[error("unsupported CUDA kernel boundary argument `{name}` of type `{ty}`")]
@@ -57,46 +66,60 @@ impl CudaKernelAbi {
             })
             .collect::<Result<Vec<_>, _>>()?;
 
-        let mut used_param_names = HashSet::new();
-        let mut global_count = 0usize;
-        let mut params = Vec::new();
+        let discovery = discover_boundary(&boundary)?;
+        let mut used_kernel_names = HashSet::new();
+        let mut used_launch_names = discovery.used_launch_names;
+        let mut kernel_params = Vec::new();
+        let mut launch_params = Vec::new();
+        let mut kernel_args = Vec::new();
+        let mut launch_prelude = Vec::new();
         let mut names = HashMap::new();
-        let mut extent_param_names = HashMap::new();
+        let mut emitted_extent_params = HashSet::new();
+        let mut element_count = None;
 
-        // The grid value is an erased runtime contract: it is not passed to the
-        // CUDA kernel, but its first dimension is the launch grid and its second
-        // dimension is the launch block/thread shape.
-        let mut grid_shape = None;
-        for variable in &boundary {
-            let Some(shape) = GridShape::from_type(&variable.ty)? else {
-                continue;
-            };
-            if grid_shape.replace(shape).is_some() {
-                return Err(CudaAbiError::DuplicateGrid);
-            }
-        }
-        let grid_shape = grid_shape.ok_or(CudaAbiError::MissingGrid)?;
-
+        // Emit the host launch ABI and the device kernel ABI in boundary order.
+        // Extents stay on the host side; globals become device kernel pointers
+        // plus size values derived from their gpu.global dimensions.
         for variable in boundary {
             if let Some(leaf) = extent_leaf(&variable.ty) {
-                let name = unique_name(&sanitize_ident(&variable.name), &mut used_param_names);
+                let Some(name) = discovery.extent_param_names.get(&leaf).cloned() else {
+                    return Err(CudaAbiError::MissingGridExtent(leaf));
+                };
                 names.insert(variable.name.clone(), name.clone());
-                extent_param_names.insert(leaf, name.clone());
-                params.push(Param {
-                    ty: "uint64_t".to_string(),
-                    name,
-                });
+                if emitted_extent_params.insert(leaf) {
+                    launch_params.push(Param {
+                        ty: "uint64_t".to_string(),
+                        name,
+                    });
+                }
                 continue;
             };
 
             if let Some(global) = gpu_global(&variable.ty)? {
                 let param_ty = cuda_global_param_type(&global)?;
-                let name = unique_name(global_param_name(&mut global_count), &mut used_param_names);
-                names.insert(variable.name.clone(), name.clone());
-                params.push(Param {
-                    ty: param_ty.to_string(),
-                    name,
+                let base_name = sanitize_ident(&variable.name);
+                let kernel_name = unique_name(&base_name, &mut used_kernel_names);
+                let launch_name = unique_name(&base_name, &mut used_launch_names);
+                let size_name = unique_name(&format!("{kernel_name}_size"), &mut used_kernel_names);
+                let size_expr = global_size_expr(&global, &discovery.extent_param_names)?;
+
+                names.insert(variable.name.clone(), kernel_name.clone());
+                kernel_params.push(Param {
+                    ty: "uint64_t".to_string(),
+                    name: size_name.clone(),
                 });
+                kernel_params.push(Param {
+                    ty: param_ty.to_string(),
+                    name: kernel_name,
+                });
+                launch_params.push(Param {
+                    ty: param_ty.to_string(),
+                    name: launch_name.clone(),
+                });
+                element_count.get_or_insert_with(|| size_name.clone());
+                launch_prelude.push(format!("uint64_t {size_name} = {size_expr};"));
+                kernel_args.push(size_name);
+                kernel_args.push(launch_name);
                 continue;
             };
 
@@ -117,11 +140,17 @@ impl CudaKernelAbi {
             });
         }
 
-        let launch = launch_config(resolve_grid_launch(&grid_shape, &extent_param_names)?);
+        let launch = launch_config(
+            resolve_grid_launch(&discovery.grid_shape, &discovery.extent_param_names)?,
+            element_count,
+        );
 
         Ok(Self {
-            params,
+            kernel_params,
+            launch_params,
+            kernel_args,
             prelude: Vec::new(),
+            launch_prelude,
             launch,
             names,
         })
@@ -133,6 +162,43 @@ impl CudaKernelAbi {
             .cloned()
             .unwrap_or_else(|| name.to_string())
     }
+}
+
+struct BoundaryDiscovery {
+    grid_shape: GridShape,
+    extent_param_names: HashMap<usize, String>,
+    used_launch_names: HashSet<String>,
+}
+
+fn discover_boundary(boundary: &[&Variable]) -> Result<BoundaryDiscovery, CudaAbiError> {
+    let mut grid_shape = None;
+    let mut extent_param_names = HashMap::new();
+    let mut used_launch_names = HashSet::new();
+
+    // This pass only discovers facts needed before ABI emission. In particular,
+    // gpu.global sizes may reference extent leaves that appear anywhere in the
+    // boundary, so extent names must be known before globals are lowered.
+    for variable in boundary {
+        if let Some(shape) = GridShape::from_type(&variable.ty)? {
+            if grid_shape.replace(shape).is_some() {
+                return Err(CudaAbiError::DuplicateGrid);
+            }
+        }
+
+        // Extents remain host-side launch inputs. gpu.grid and gpu.global
+        // dimensions refer to these leaves, so collect their stable parameter
+        // names before emitting either launch config or global-size expressions.
+        if let Some(leaf) = extent_leaf(&variable.ty) {
+            let name = unique_name(&sanitize_ident(&variable.name), &mut used_launch_names);
+            extent_param_names.insert(leaf, name);
+        }
+    }
+
+    Ok(BoundaryDiscovery {
+        grid_shape: grid_shape.ok_or(CudaAbiError::MissingGrid)?,
+        extent_param_names,
+        used_launch_names,
+    })
 }
 
 #[derive(Debug, Clone)]
@@ -184,20 +250,13 @@ fn resolve_dimension_names(
         .collect()
 }
 
-fn launch_config(grid: GridLaunch) -> CudaLaunch {
+fn launch_config(grid: GridLaunch, element_count: Option<String>) -> CudaLaunch {
     let grid_expr = cuda_dim3_expr(&grid.grid);
     let block_expr = cuda_dim3_expr(&grid.block);
-    let element_count = grid
-        .grid
-        .iter()
-        .chain(grid.block.iter())
-        .cloned()
-        .collect::<Vec<_>>()
-        .join(" * ");
     CudaLaunch {
         block_expr,
         grid_expr,
-        element_count: Some(element_count),
+        element_count,
     }
 }
 
@@ -277,12 +336,6 @@ fn sanitize_ident(name: &str) -> String {
     ident
 }
 
-fn global_param_name(global_count: &mut usize) -> &str {
-    let name = if *global_count == 0 { "out" } else { "global" };
-    *global_count += 1;
-    name
-}
-
 fn cuda_global_param_type(global: &GpuGlobal<'_>) -> Result<&'static str, CudaAbiError> {
     match global.element {
         "f32" => Ok("float*"),
@@ -295,6 +348,7 @@ fn cuda_global_param_type(global: &GpuGlobal<'_>) -> Result<&'static str, CudaAb
 #[derive(Debug, Clone)]
 struct GpuGlobal<'a> {
     element: &'a str,
+    dimensions: Vec<&'a Obj>,
 }
 
 fn gpu_global(obj: &Obj) -> Result<Option<GpuGlobal<'_>>, CudaAbiError> {
@@ -310,13 +364,51 @@ fn gpu_global(obj: &Obj) -> Result<Option<GpuGlobal<'_>>, CudaAbiError> {
         let [Tree::Node(element, 0, _), dimensions] = children.as_slice() else {
             return Err(CudaAbiError::InvalidGlobalShape);
         };
-        global_dimensions(dimensions).ok_or(CudaAbiError::InvalidGlobalShape)?;
+        let dimensions = global_dimensions(dimensions).ok_or(CudaAbiError::InvalidGlobalShape)?;
         return Ok(Some(GpuGlobal {
             element: element.as_str(),
+            dimensions,
         }));
     };
 
     Ok(None)
+}
+
+fn global_size_expr(
+    global: &GpuGlobal<'_>,
+    extent_param_names: &HashMap<usize, String>,
+) -> Result<String, CudaAbiError> {
+    let dimensions = global
+        .dimensions
+        .iter()
+        .map(|dimension| dimension_expr(dimension, extent_param_names))
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(dimensions.join(" * "))
+}
+
+fn dimension_expr(
+    dimension: &Obj,
+    extent_param_names: &HashMap<usize, String>,
+) -> Result<String, CudaAbiError> {
+    match dimension {
+        Tree::Leaf(leaf, _) => extent_param_names
+            .get(leaf)
+            .cloned()
+            .ok_or(CudaAbiError::MissingGlobalExtent(*leaf)),
+        Tree::Node(op, 0, children)
+            if matches!(op.to_string().as_str(), "nat.mul" | "*") && children.len() == 2 =>
+        {
+            let lhs = dimension_expr(&children[0], extent_param_names)?;
+            let rhs = dimension_expr(&children[1], extent_param_names)?;
+            Ok(format!("({lhs} * {rhs})"))
+        }
+        _ => {
+            // TODO: allow literal dimension values. At the moment every global
+            // memory dimension must be expressed in terms of extent-backed
+            // hypergraph leaves and supported nat operations.
+            Err(CudaAbiError::InvalidGlobalShape)
+        }
+    }
 }
 
 fn global_dimensions(dimensions: &Obj) -> Option<Vec<&Obj>> {

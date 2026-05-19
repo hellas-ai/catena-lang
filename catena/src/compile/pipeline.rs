@@ -8,7 +8,7 @@ use crate::{
     compile::{
         CompileConfig, CompileGraph, CompileGraphError, GraphCompileOptions, check_render,
         compile_graph,
-        cuda::render_cuda_source,
+        cuda::{CudaAbiError, render_cuda_source},
         graph_render,
         normalize::{NormalizeGraphError, normalize_graph},
         program::{ProgramCompileError, compile_program_from_graph},
@@ -60,6 +60,8 @@ pub enum CompilePipelineError {
     Program(#[from] ProgramCompileError),
     #[error(transparent)]
     Structured(#[from] StructuredCompileError),
+    #[error(transparent)]
+    CudaAbi(#[from] CudaAbiError),
     #[error("{argument} is required when emitting {emit:?}")]
     MissingArgument { argument: &'static str, emit: Emit },
     #[error("--format {format:?} is not supported when emitting {emit:?}")]
@@ -119,7 +121,7 @@ impl CompilePipeline {
                 let structured = compile_structured_program(&program)?;
                 Ok(match emit {
                     Emit::Cuda => {
-                        render_cuda_source(checked_elaborated_theory, &program, &structured)
+                        render_cuda_source(checked_elaborated_theory, &program, &structured)?
                     }
                     Emit::StructuredIr => structured.render_ir(),
                     _ => unreachable!("only structured-backed emits are handled here"),

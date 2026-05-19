@@ -1,7 +1,7 @@
 use crate::{
     compile::{
         cuda::{
-            abi::CudaKernelAbi,
+            abi::{CudaAbiError, CudaKernelAbi},
             render::{CudaPrimitiveLowering, render_cuda},
         },
         program::Definition,
@@ -18,11 +18,11 @@ pub(super) struct CudaTarget<'a> {
 }
 
 impl<'a> CudaTarget<'a> {
-    pub(super) fn new(theory_set: &'a TheorySet, entry: &Definition) -> Self {
-        Self {
-            abi: CudaKernelAbi::from_definition(entry),
+    pub(super) fn new(theory_set: &'a TheorySet, entry: &Definition) -> Result<Self, CudaAbiError> {
+        Ok(Self {
+            abi: CudaKernelAbi::from_definition(entry)?,
             primitives: GenericCudaPrimitives::new(theory_set),
-        }
+        })
     }
 
     pub(super) fn render_cuda_with_launch(&self, program: &StructuredProgram) -> String {

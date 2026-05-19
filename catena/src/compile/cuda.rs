@@ -5,6 +5,7 @@ mod abi;
 mod domain;
 mod render;
 
+pub use abi::CudaAbiError;
 use domain::CudaTarget;
 
 use crate::{
@@ -35,6 +36,8 @@ pub enum CudaCompileError {
     Program(#[from] ProgramCompileError),
     #[error(transparent)]
     Structured(#[from] StructuredCompileError),
+    #[error(transparent)]
+    Abi(#[from] CudaAbiError),
 }
 
 pub fn compile_cuda_source(
@@ -72,14 +75,14 @@ pub fn compile_cuda_theory_set_with_options(
     let graph = normalize_graph(&compile_graph)?;
     let program = compile_program_from_graph(&graph)?;
     let structured = compile_structured_program(&program)?;
-    Ok(render_cuda_source(theory_set, &program, &structured))
+    Ok(render_cuda_source(theory_set, &program, &structured)?)
 }
 
 pub fn render_cuda_source(
     theory_set: &TheorySet,
     program: &Program,
     structured: &StructuredProgram,
-) -> String {
-    let target = CudaTarget::new(theory_set, program.entry_definition());
-    target.render_cuda_with_launch(structured)
+) -> Result<String, CudaAbiError> {
+    let target = CudaTarget::new(theory_set, program.entry_definition())?;
+    Ok(target.render_cuda_with_launch(structured))
 }

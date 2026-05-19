@@ -15,12 +15,12 @@
 (theory data syntax {
 
   (arr gpu.grid.schedule :
-    ({([block_count] 1d) ([thread_count] 1d)} gpu.grid) ->
-    ([block_count thread_count .] {(gpu.block val) (gpu.thread val)}))
+    (({[block_dim] [thread_dim]} gpu.grid) val) ->
+    ([block_dim thread_dim .] {(gpu.block val) (gpu.thread val)}))
 
   (arr gpu.view.group :
-    {(gpu.block val) (gpu.thread val) ({([block_count] 1d) ([thread_count] 1d)} gpu.grid)} ->
-    ((({[block_count] [thread_count]} nat.mul) gpu.view) val))
+    {(gpu.block val) (gpu.thread val) (([block_size] extent) val)} ->
+    (([block_size] gpu.view) val))
 
   (arr gpu.global.store :
     {([matrix] val) (([n] gpu.view) val) (f32 val)} ->

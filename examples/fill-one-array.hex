@@ -6,17 +6,17 @@
     {
       (([.block_count] extent) val)
       (([.thread_count] extent) val)
-      ({([block_count] 1d) ([thread_count] 1d)} gpu.grid)
+      (({([block_count] 1d) ([thread_count] 1d)} gpu.grid) val)
       (({f32 (({[block_count] [thread_count]} nat.mul) 1d)} gpu.global) val)
     } ->
     {
-      ({([block_count] 1d) ([thread_count] 1d)} gpu.grid)
+      (({([block_count] 1d) ([thread_count] 1d)} gpu.grid) val)
       (({f32 (({[block_count] [thread_count]} nat.mul) 1d)} gpu.global) val)
     }
     = {[block_count thread_count grid out.]
       ([.grid] gpu.grid.schedule [block thread.])
       ([.] f32.one [one.])
-      ([.block thread grid] gpu.view.group [out_view.])
+      ([.block thread thread_count] gpu.view.group [out_view.])
       ([.out out_view one] gpu.global.store [out_filled.])
       [.grid out_filled]}
 )

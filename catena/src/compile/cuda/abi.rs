@@ -11,11 +11,11 @@ use crate::{
 
 #[derive(Debug, Clone)]
 pub(super) struct CudaKernelAbi {
-    pub(super) kernel_params: Vec<Param>,
-    pub(super) launch_params: Vec<Param>,
-    pub(super) kernel_args: Vec<String>,
+    pub(super) device_params: Vec<Param>,
+    pub(super) host_params: Vec<Param>,
+    pub(super) device_call_args: Vec<String>,
     pub(super) prelude: Vec<String>,
-    pub(super) launch_prelude: Vec<String>,
+    pub(super) host_prelude: Vec<String>,
     pub(super) launch: CudaLaunch,
     names: HashMap<String, String>,
 }
@@ -67,12 +67,12 @@ impl CudaKernelAbi {
             .collect::<Result<Vec<_>, _>>()?;
 
         let discovery = discover_boundary(&boundary)?;
-        let mut used_kernel_names = HashSet::new();
-        let mut used_launch_names = discovery.used_launch_names;
-        let mut kernel_params = Vec::new();
-        let mut launch_params = Vec::new();
-        let mut kernel_args = Vec::new();
-        let mut launch_prelude = Vec::new();
+        let mut used_device_names = HashSet::new();
+        let mut used_host_names = discovery.used_host_names;
+        let mut device_params = Vec::new();
+        let mut host_params = Vec::new();
+        let mut device_call_args = Vec::new();
+        let mut host_prelude = Vec::new();
         let mut names = HashMap::new();
         let mut emitted_extent_params = HashSet::new();
         let mut element_count = None;
@@ -87,7 +87,7 @@ impl CudaKernelAbi {
                 };
                 names.insert(variable.name.clone(), name.clone());
                 if emitted_extent_params.insert(leaf) {
-                    launch_params.push(Param {
+                    host_params.push(Param {
                         ty: "uint64_t".to_string(),
                         name,
                     });
@@ -98,28 +98,28 @@ impl CudaKernelAbi {
             if let Some(global) = gpu_global(&variable.ty)? {
                 let param_ty = cuda_global_param_type(&global)?;
                 let base_name = sanitize_ident(&variable.name);
-                let kernel_name = unique_name(&base_name, &mut used_kernel_names);
-                let launch_name = unique_name(&base_name, &mut used_launch_names);
-                let size_name = unique_name(&format!("{kernel_name}_size"), &mut used_kernel_names);
+                let device_name = unique_name(&base_name, &mut used_device_names);
+                let host_name = unique_name(&base_name, &mut used_host_names);
+                let size_name = unique_name(&format!("{device_name}_size"), &mut used_device_names);
                 let size_expr = global_size_expr(&global, &discovery.extent_param_names)?;
 
-                names.insert(variable.name.clone(), kernel_name.clone());
-                kernel_params.push(Param {
+                names.insert(variable.name.clone(), device_name.clone());
+                device_params.push(Param {
                     ty: "uint64_t".to_string(),
                     name: size_name.clone(),
                 });
-                kernel_params.push(Param {
+                device_params.push(Param {
                     ty: param_ty.to_string(),
-                    name: kernel_name,
+                    name: device_name,
                 });
-                launch_params.push(Param {
+                host_params.push(Param {
                     ty: param_ty.to_string(),
-                    name: launch_name.clone(),
+                    name: host_name.clone(),
                 });
                 element_count.get_or_insert_with(|| size_name.clone());
-                launch_prelude.push(format!("uint64_t {size_name} = {size_expr};"));
-                kernel_args.push(size_name);
-                kernel_args.push(launch_name);
+                host_prelude.push(format!("uint64_t {size_name} = {size_expr};"));
+                device_call_args.push(size_name);
+                device_call_args.push(host_name);
                 continue;
             };
 
@@ -146,11 +146,11 @@ impl CudaKernelAbi {
         );
 
         Ok(Self {
-            kernel_params,
-            launch_params,
-            kernel_args,
+            device_params,
+            host_params,
+            device_call_args,
             prelude: Vec::new(),
-            launch_prelude,
+            host_prelude,
             launch,
             names,
         })
@@ -167,13 +167,13 @@ impl CudaKernelAbi {
 struct BoundaryDiscovery {
     grid_shape: GridShape,
     extent_param_names: HashMap<usize, String>,
-    used_launch_names: HashSet<String>,
+    used_host_names: HashSet<String>,
 }
 
 fn discover_boundary(boundary: &[&Variable]) -> Result<BoundaryDiscovery, CudaAbiError> {
     let mut grid_shape = None;
     let mut extent_param_names = HashMap::new();
-    let mut used_launch_names = HashSet::new();
+    let mut used_host_names = HashSet::new();
 
     // This pass only discovers facts needed before ABI emission. In particular,
     // gpu.global sizes may reference extent leaves that appear anywhere in the
@@ -189,7 +189,7 @@ fn discover_boundary(boundary: &[&Variable]) -> Result<BoundaryDiscovery, CudaAb
         // dimensions refer to these leaves, so collect their stable parameter
         // names before emitting either launch config or global-size expressions.
         if let Some(leaf) = extent_leaf(&variable.ty) {
-            let name = unique_name(&sanitize_ident(&variable.name), &mut used_launch_names);
+            let name = unique_name(&sanitize_ident(&variable.name), &mut used_host_names);
             extent_param_names.insert(leaf, name);
         }
     }
@@ -197,7 +197,7 @@ fn discover_boundary(boundary: &[&Variable]) -> Result<BoundaryDiscovery, CudaAb
     Ok(BoundaryDiscovery {
         grid_shape: grid_shape.ok_or(CudaAbiError::MissingGrid)?,
         extent_param_names,
-        used_launch_names,
+        used_host_names,
     })
 }
 

@@ -1,18 +1,22 @@
 #
-# Set every element of an array to 1.0
+# Set every element of an array to 1.0 with exact tiling
 #
 
 (def data user.f32.fill-one : 
     {
-      (([.block_size] extent) val)
-      (([.n] extent) val)
-      (gpu.block val)
-      (gpu.thread val)
-      (({f32 [n]} gpu.global.1d) val)
-     } -> (({f32 [n]} gpu.global.1d) val)
-    = {[block_size n block thread out.]
+      (([.block_count] extent) val)
+      (([.thread_count] extent) val)
+      ({([block_count] 1d) ([thread_count] 1d)} gpu.grid)
+      (({f32 (({[block_count] [thread_count]} nat.mul) 1d)} gpu.global) val)
+    } ->
+    {
+      ({([block_count] 1d) ([thread_count] 1d)} gpu.grid)
+      (({f32 (({[block_count] [thread_count]} nat.mul) 1d)} gpu.global) val)
+    }
+    = {[block_count thread_count grid out.]
+      ([.grid] gpu.grid.schedule [block thread.])
       ([.] f32.one [one.])
-      ([.block thread block_size] gpu.view.group [out_view.])
+      ([.block thread grid] gpu.view.group [out_view.])
       ([.out out_view one] gpu.global.store [out_filled.])
-      [.out_filled]}
+      [.grid out_filled]}
 )

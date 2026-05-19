@@ -24,6 +24,7 @@
   (arr f32 : 0 -> 1)
   (arr u32 : 0 -> 1)
   (arr extent : 1 -> 1)
+  (arr nat.mul : 2 -> 1)
 })
 
 (theory data syntax {

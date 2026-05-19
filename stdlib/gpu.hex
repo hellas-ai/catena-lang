@@ -2,21 +2,27 @@
 
   (arr gpu.block : 0 -> 1)
   (arr gpu.thread : 0 -> 1)
-  (arr gpu.global.1d : 2 -> 1)
-  (arr gpu.global.2d : 3 -> 1)
-  (arr gpu.global.3d : 4 -> 1)
+  (arr gpu.global : 2 -> 1)
   (arr gpu.view : 1 -> 1)
   (arr gpu.shared : 3 -> 1)
+  (arr 1d : 1 -> 1)
+  (arr 2d : 2 -> 1)
+  (arr 3d : 3 -> 1)
+  (arr gpu.grid : 2 -> 1)
 
 })
 
 (theory data syntax {
 
+  (arr gpu.grid.schedule :
+    ({([block_count] 1d) ([thread_count] 1d)} gpu.grid) ->
+    ([block_count thread_count .] {(gpu.block val) (gpu.thread val)}))
+
   (arr gpu.view.group :
-    {(gpu.block val) (gpu.thread val) (([block_size] extent) val)} ->
-    (([block_size] gpu.view) val))
+    {(gpu.block val) (gpu.thread val) ({([block_count] 1d) ([thread_count] 1d)} gpu.grid)} ->
+    ((({[block_count] [thread_count]} nat.mul) gpu.view) val))
 
   (arr gpu.global.store :
-    {([matrix] val) (([block_size] gpu.view) val) (f32 val)} ->
-    ([matrix block_size . matrix] val))
+    {([matrix] val) (([n] gpu.view) val) (f32 val)} ->
+    ([matrix n . matrix] val))
 })

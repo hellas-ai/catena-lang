@@ -118,11 +118,12 @@ impl CudaKernelAbi {
         let mut shared_layout = SharedMemoryLayout::new();
 
         // Emit the host launch ABI and the device kernel ABI in boundary order.
-        // Extents are either host launch inputs or compile-time macros from
-        // --cuda-static. Globals become device kernel pointers plus size values
-        // derived from their gpu.global dimensions. Shared memory is static
-        // when all of its dimensions are static; otherwise it slices CUDA's
-        // dynamic shared-memory buffer.
+        // - Extents are either host launch inputs or compile-time macros from
+        //   --cuda-static.
+        // - Globals become device kernel pointers plus size values
+        //   derived from their gpu.global dimensions.
+        // - Shared memory is static when all of its dimensions are static; otherwise it slices CUDA's
+        //   dynamic shared-memory buffer.
         for variable in boundary {
             if let Some(leaf) = extent_leaf(&variable.ty) {
                 let Some(name) = discovery.extent_param_names.get(&leaf).cloned() else {
@@ -186,31 +187,33 @@ impl CudaKernelAbi {
             };
 
             if let Some(shared) = gpu_shared(&variable.ty)? {
-                // Shared memory is device-local per block. If all shape
-                // dimensions are static, emit a CUDA `__shared__` array;
-                // otherwise bind it to a slice of dynamic shared memory.
-                let binding = shared_layout.bind(
-                    variable,
+                let base_name = sanitize_ident(&variable.name);
+                let device_name = unique_name(&base_name, &mut used_device_names);
+                let memory = SharedMemory::from_gpu_shared(
                     &shared,
                     &discovery.extent_param_names,
                     &discovery.static_extent_leaves,
-                    &mut used_device_names,
-                    &mut used_host_names,
                 )?;
+
+                // Static shared memory has compile-time dimensions and becomes
+                // a CUDA `__shared__` array. Dynamic shared memory keeps its
+                // previous flat-buffer ABI and contributes to the launch byte
+                // count.
+                let binding = match memory {
+                    SharedMemory::Static(memory) => bind_static_shared(device_name, memory),
+                    SharedMemory::Dynamic(memory) => shared_layout.bind_dynamic(
+                        device_name,
+                        memory,
+                        &mut used_device_names,
+                        &mut used_host_names,
+                    ),
+                };
+
                 names.insert(variable.name.clone(), binding.device_name.clone());
                 shared_indexing.insert(binding.device_name.clone(), binding.indexing);
-                if let Some(device_size_name) = binding.device_size_name {
-                    device_params.push(Param {
-                        ty: "uint64_t".to_string(),
-                        name: device_size_name,
-                    });
-                }
-                if let Some(host_size_decl) = binding.host_size_decl {
-                    host_prelude.push(host_size_decl);
-                }
-                if let Some(host_size_name) = binding.host_size_name {
-                    device_call_args.push(host_size_name);
-                }
+                device_params.extend(binding.device_params);
+                host_prelude.extend(binding.host_prelude);
+                device_call_args.extend(binding.device_call_args);
                 prelude.extend(binding.device_prelude);
                 continue;
             }
@@ -460,10 +463,48 @@ struct SharedMemoryLayout {
 struct SharedBinding {
     device_name: String,
     indexing: SharedIndexing,
-    device_size_name: Option<String>,
-    host_size_name: Option<String>,
-    host_size_decl: Option<String>,
+    device_params: Vec<Param>,
+    host_prelude: Vec<String>,
+    device_call_args: Vec<String>,
     device_prelude: Vec<String>,
+}
+
+struct StaticSharedMemory {
+    element_ty: &'static str,
+    dimensions: Vec<DimensionExpr>,
+}
+
+struct DynamicSharedMemory {
+    element_ty: &'static str,
+    size_expr: String,
+}
+
+enum SharedMemory {
+    Static(StaticSharedMemory),
+    Dynamic(DynamicSharedMemory),
+}
+
+impl SharedMemory {
+    fn from_gpu_shared(
+        shared: &GpuShared<'_>,
+        extent_param_names: &HashMap<usize, String>,
+        static_extent_leaves: &HashSet<usize>,
+    ) -> Result<Self, CudaAbiError> {
+        let element_ty = cuda_shared_element_type(shared)?;
+        let size = shared_size_expr(shared, extent_param_names, static_extent_leaves)?;
+
+        if size.is_static {
+            Ok(Self::Static(StaticSharedMemory {
+                element_ty,
+                dimensions: size.dimensions,
+            }))
+        } else {
+            Ok(Self::Dynamic(DynamicSharedMemory {
+                element_ty,
+                size_expr: size.expr,
+            }))
+        }
+    }
 }
 
 impl SharedMemoryLayout {
@@ -474,39 +515,13 @@ impl SharedMemoryLayout {
         }
     }
 
-    fn bind(
+    fn bind_dynamic(
         &mut self,
-        variable: &Variable,
-        shared: &GpuShared<'_>,
-        extent_param_names: &HashMap<usize, String>,
-        static_extent_leaves: &HashSet<usize>,
+        device_name: String,
+        memory: DynamicSharedMemory,
         used_device_names: &mut HashSet<String>,
         used_host_names: &mut HashSet<String>,
-    ) -> Result<SharedBinding, CudaAbiError> {
-        let element_ty = cuda_shared_element_type(shared)?;
-        let base_name = sanitize_ident(&variable.name);
-        let device_name = unique_name(&base_name, used_device_names);
-        let size = shared_size_expr(shared, extent_param_names, static_extent_leaves)?;
-
-        if size.is_static {
-            // Static shared memory is emitted as a normal CUDA `__shared__`
-            // allocation. It needs no host launch byte count and no device
-            // size parameter because all dimensions are compile-time macros.
-            return Ok(SharedBinding {
-                device_name: device_name.clone(),
-                indexing: SharedIndexing::Static {
-                    rank: size.dimensions.len(),
-                },
-                device_size_name: None,
-                host_size_name: None,
-                host_size_decl: None,
-                device_prelude: vec![format!(
-                    "__shared__ {element_ty} {device_name}{};",
-                    cuda_array_dimensions(&size.dimensions)
-                )],
-            });
-        }
-
+    ) -> SharedBinding {
         let device_size_name = unique_name(&format!("{device_name}_size"), used_device_names);
         let host_size_name = unique_name(&format!("{device_name}_size"), used_host_names);
         let offset_expr = self.device_offset_expr();
@@ -518,26 +533,36 @@ impl SharedMemoryLayout {
         if self.device_size_names.is_empty() {
             // First shared value starts at the beginning of the CUDA dynamic
             // shared-memory region.
-            device_prelude.push(format!("extern __shared__ {element_ty} __shared_mem[];"));
-            device_prelude.push(format!("{element_ty}* {device_name} = __shared_mem;"));
+            device_prelude.push(format!(
+                "extern __shared__ {} __shared_mem[];",
+                memory.element_ty
+            ));
+            device_prelude.push(format!(
+                "{}* {device_name} = __shared_mem;",
+                memory.element_ty
+            ));
         } else {
             // Later shared values start after all previously bound slices.
             device_prelude.push(format!(
-                "{element_ty}* {device_name} = __shared_mem + ({offset_expr});"
+                "{}* {device_name} = __shared_mem + ({offset_expr});",
+                memory.element_ty
             ));
         }
 
         self.device_size_names.push(device_size_name.clone());
         self.host_size_names.push(host_size_name.clone());
 
-        Ok(SharedBinding {
+        SharedBinding {
             device_name,
             indexing: SharedIndexing::Flat,
-            device_size_name: Some(device_size_name),
-            host_size_name: Some(host_size_name.clone()),
-            host_size_decl: Some(format!("uint64_t {host_size_name} = {};", size.expr)),
+            device_params: vec![Param {
+                ty: "uint64_t".to_string(),
+                name: device_size_name,
+            }],
+            host_prelude: vec![format!("uint64_t {host_size_name} = {};", memory.size_expr)],
+            device_call_args: vec![host_size_name],
             device_prelude,
-        })
+        }
     }
 
     fn dynamic_shared_bytes(&self) -> Option<String> {
@@ -552,6 +577,26 @@ impl SharedMemoryLayout {
 
     fn device_offset_expr(&self) -> String {
         self.device_size_names.join(" + ")
+    }
+}
+
+fn bind_static_shared(device_name: String, memory: StaticSharedMemory) -> SharedBinding {
+    // Static shared memory is emitted as a normal CUDA `__shared__` allocation.
+    // It has no host launch byte count and no device size parameter because all
+    // dimensions are compile-time expressions.
+    SharedBinding {
+        device_name: device_name.clone(),
+        indexing: SharedIndexing::Static {
+            rank: memory.dimensions.len(),
+        },
+        device_params: Vec::new(),
+        host_prelude: Vec::new(),
+        device_call_args: Vec::new(),
+        device_prelude: vec![format!(
+            "__shared__ {} {device_name}{};",
+            memory.element_ty,
+            cuda_array_dimensions(&memory.dimensions)
+        )],
     }
 }
 
@@ -854,7 +899,7 @@ fn shared_size_expr(
     shared: &GpuShared<'_>,
     extent_param_names: &HashMap<usize, String>,
     static_extent_leaves: &HashSet<usize>,
-) -> Result<StaticExpr, CudaAbiError> {
+) -> Result<SharedSizeExpr, CudaAbiError> {
     let dimensions = shared
         .dimensions
         .iter()
@@ -868,7 +913,7 @@ fn shared_size_expr(
             )
         })
         .collect::<Result<Vec<_>, _>>()?;
-    Ok(StaticExpr {
+    Ok(SharedSizeExpr {
         expr: product_expr(&dimensions),
         is_static: dimensions.iter().all(|dimension| dimension.is_static),
         dimensions,
@@ -876,13 +921,19 @@ fn shared_size_expr(
 }
 
 #[derive(Debug, Clone)]
-struct StaticExpr {
+struct SharedSizeExpr {
     expr: String,
     is_static: bool,
-    dimensions: Vec<StaticExpr>,
+    dimensions: Vec<DimensionExpr>,
 }
 
-fn product_expr(dimensions: &[StaticExpr]) -> String {
+#[derive(Debug, Clone)]
+struct DimensionExpr {
+    expr: String,
+    is_static: bool,
+}
+
+fn product_expr(dimensions: &[DimensionExpr]) -> String {
     dimensions
         .iter()
         .map(|dimension| dimension.expr.as_str())
@@ -890,7 +941,7 @@ fn product_expr(dimensions: &[StaticExpr]) -> String {
         .join(" * ")
 }
 
-fn cuda_array_dimensions(dimensions: &[StaticExpr]) -> String {
+fn cuda_array_dimensions(dimensions: &[DimensionExpr]) -> String {
     dimensions
         .iter()
         .map(|dimension| format!("[{}]", dimension.expr))
@@ -957,15 +1008,14 @@ fn dimension_expr_with_static(
     static_extent_leaves: &HashSet<usize>,
     missing_extent: impl Fn(usize) -> CudaAbiError + Copy,
     invalid_shape: impl Fn() -> CudaAbiError + Copy,
-) -> Result<StaticExpr, CudaAbiError> {
+) -> Result<DimensionExpr, CudaAbiError> {
     match dimension {
-        Tree::Leaf(leaf, _) => Ok(StaticExpr {
+        Tree::Leaf(leaf, _) => Ok(DimensionExpr {
             expr: extent_param_names
                 .get(leaf)
                 .cloned()
                 .ok_or_else(|| missing_extent(*leaf))?,
             is_static: static_extent_leaves.contains(leaf),
-            dimensions: Vec::new(),
         }),
         Tree::Node(op, 0, children)
             if matches!(op.to_string().as_str(), "nat.mul" | "*") && children.len() == 2 =>
@@ -984,10 +1034,9 @@ fn dimension_expr_with_static(
                 missing_extent,
                 invalid_shape,
             )?;
-            Ok(StaticExpr {
+            Ok(DimensionExpr {
                 expr: format!("({} * {})", lhs.expr, rhs.expr),
                 is_static: lhs.is_static && rhs.is_static,
-                dimensions: Vec::new(),
             })
         }
         Tree::Node(op, 0, children) if op.to_string() == "nat.ceil-div" && children.len() == 2 => {
@@ -1005,13 +1054,12 @@ fn dimension_expr_with_static(
                 missing_extent,
                 invalid_shape,
             )?;
-            Ok(StaticExpr {
+            Ok(DimensionExpr {
                 expr: format!(
                     "(({} + {} - 1) / {})",
                     numerator.expr, denominator.expr, denominator.expr
                 ),
                 is_static: numerator.is_static && denominator.is_static,
-                dimensions: Vec::new(),
             })
         }
         _ => {

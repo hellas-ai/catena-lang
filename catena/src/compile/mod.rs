@@ -9,6 +9,7 @@ pub mod program;
 pub mod structured;
 
 pub use config::{CompileConfig, TheoryExtension};
+pub use cuda::CudaOptions;
 pub use graph::{
     CompileGraph, CompileGraphError, CompileTheory, GraphCompileOptions, compile_graph,
 };

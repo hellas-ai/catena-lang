@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use metacat::theory::{RawTheorySet, TheorySet, ast::ParseRawError};
 use thiserror::Error;
 
@@ -19,6 +21,11 @@ use crate::{
     elaborate::elaborate,
     structured::ir::StructuredProgram,
 };
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CudaOptions {
+    pub static_values: HashMap<String, u64>,
+}
 
 #[derive(Debug, Error)]
 pub enum CudaCompileError {
@@ -75,14 +82,20 @@ pub fn compile_cuda_theory_set_with_options(
     let graph = normalize_graph(&compile_graph)?;
     let program = compile_program_from_graph(&graph)?;
     let structured = compile_structured_program(&program)?;
-    Ok(render_cuda_source(theory_set, &program, &structured)?)
+    Ok(render_cuda_source(
+        theory_set,
+        &program,
+        &structured,
+        &CudaOptions::default(),
+    )?)
 }
 
 pub fn render_cuda_source(
     theory_set: &TheorySet,
     program: &Program,
     structured: &StructuredProgram,
+    options: &CudaOptions,
 ) -> Result<String, CudaAbiError> {
-    let target = CudaTarget::new(theory_set, program.entry_definition(), structured)?;
+    let target = CudaTarget::new(theory_set, program.entry_definition(), structured, options)?;
     Ok(target.render_cuda_with_launch(structured))
 }

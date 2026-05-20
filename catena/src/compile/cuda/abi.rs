@@ -4,7 +4,10 @@ use metacat::tree::Tree;
 use thiserror::Error;
 
 use crate::{
-    compile::program::{Definition, Variable},
+    compile::{
+        cuda::CudaOptions,
+        program::{Definition, Variable},
+    },
     lang::Obj,
     structured::ir::{Param, Primitive, Stmt, StructuredProgram},
 };
@@ -16,9 +19,24 @@ pub(super) struct CudaKernelAbi {
     pub(super) device_call_args: Vec<String>,
     pub(super) prelude: Vec<String>,
     pub(super) host_prelude: Vec<String>,
+    pub(super) macros: Vec<CudaMacro>,
     pub(super) launch: CudaLaunch,
     pub(super) dynamic_shared_bytes: Option<String>,
+    shared_indexing: HashMap<String, SharedIndexing>,
+    static_view_ranks: HashMap<String, usize>,
     names: HashMap<String, String>,
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct CudaMacro {
+    pub(super) name: String,
+    pub(super) value: u64,
+}
+
+#[derive(Debug, Clone)]
+pub(super) enum SharedIndexing {
+    Flat,
+    Static { rank: usize },
 }
 
 #[derive(Debug, Clone)]
@@ -56,6 +74,10 @@ pub enum CudaAbiError {
     UnsupportedSharedElement(String),
     #[error("unsupported CUDA global memory element type `{0}`")]
     UnsupportedGlobalElement(String),
+    #[error("--cuda-static `{0}` does not match any CUDA kernel boundary argument")]
+    UnknownStaticValue(String),
+    #[error("--cuda-static `{0}` was provided for a non-extent CUDA boundary argument")]
+    StaticValueNotExtent(String),
     #[error("unsupported CUDA kernel boundary argument `{name}` of type `{ty}`")]
     UnsupportedBoundaryArgument { name: String, ty: String },
 }
@@ -64,6 +86,7 @@ impl CudaKernelAbi {
     pub(super) fn from_definition(
         definition: &Definition,
         program: &StructuredProgram,
+        options: &CudaOptions,
     ) -> Result<Self, CudaAbiError> {
         // We are compiling a Catena arrow as a CUDA kernel. Its boundary tells us
         // both the C ABI of the kernel and the launch shape.
@@ -78,7 +101,7 @@ impl CudaKernelAbi {
             })
             .collect::<Result<Vec<_>, _>>()?;
 
-        let discovery = discover_boundary(&boundary)?;
+        let discovery = discover_boundary(&boundary, options)?;
         let mut used_device_names = HashSet::new();
         let mut used_host_names = discovery.used_host_names;
         let mut device_params = Vec::new();
@@ -87,21 +110,28 @@ impl CudaKernelAbi {
         let mut prelude = Vec::new();
         let mut host_prelude = Vec::new();
         let mut names = HashMap::new();
+        let mut shared_indexing = HashMap::new();
+        let mut static_view_ranks = HashMap::new();
         let mut emitted_extent_params = HashSet::new();
         let device_extent_names = device_extent_names(program);
         let mut element_count = None;
         let mut shared_layout = SharedMemoryLayout::new();
 
         // Emit the host launch ABI and the device kernel ABI in boundary order.
-        // Extents stay on the host side; globals become device kernel pointers
-        // plus size values derived from their gpu.global dimensions. Shared
-        // memory is device-local and slices a dynamic shared-memory allocation.
+        // Extents are either host launch inputs or compile-time macros from
+        // --cuda-static. Globals become device kernel pointers plus size values
+        // derived from their gpu.global dimensions. Shared memory is static
+        // when all of its dimensions are static; otherwise it slices CUDA's
+        // dynamic shared-memory buffer.
         for variable in boundary {
             if let Some(leaf) = extent_leaf(&variable.ty) {
                 let Some(name) = discovery.extent_param_names.get(&leaf).cloned() else {
                     return Err(CudaAbiError::MissingGridExtent(leaf));
                 };
                 names.insert(variable.name.clone(), name.clone());
+                if discovery.static_extent_leaves.contains(&leaf) {
+                    continue;
+                }
                 if emitted_extent_params.insert(leaf) {
                     host_params.push(Param {
                         ty: "uint64_t".to_string(),
@@ -156,23 +186,31 @@ impl CudaKernelAbi {
             };
 
             if let Some(shared) = gpu_shared(&variable.ty)? {
-                // Shared memory is allocated per block at launch time as one
-                // dynamic buffer. Each Catena gpu.shared value becomes a typed
-                // pointer into a non-overlapping slice of that buffer.
+                // Shared memory is device-local per block. If all shape
+                // dimensions are static, emit a CUDA `__shared__` array;
+                // otherwise bind it to a slice of dynamic shared memory.
                 let binding = shared_layout.bind(
                     variable,
                     &shared,
                     &discovery.extent_param_names,
+                    &discovery.static_extent_leaves,
                     &mut used_device_names,
                     &mut used_host_names,
                 )?;
-                names.insert(variable.name.clone(), binding.device_name);
-                device_params.push(Param {
-                    ty: "uint64_t".to_string(),
-                    name: binding.device_size_name,
-                });
-                host_prelude.push(binding.host_size_decl);
-                device_call_args.push(binding.host_size_name);
+                names.insert(variable.name.clone(), binding.device_name.clone());
+                shared_indexing.insert(binding.device_name.clone(), binding.indexing);
+                if let Some(device_size_name) = binding.device_size_name {
+                    device_params.push(Param {
+                        ty: "uint64_t".to_string(),
+                        name: device_size_name,
+                    });
+                }
+                if let Some(host_size_decl) = binding.host_size_decl {
+                    host_prelude.push(host_size_decl);
+                }
+                if let Some(host_size_name) = binding.host_size_name {
+                    device_call_args.push(host_size_name);
+                }
                 prelude.extend(binding.device_prelude);
                 continue;
             }
@@ -195,6 +233,13 @@ impl CudaKernelAbi {
             element_count,
         );
         let dynamic_shared_bytes = shared_layout.dynamic_shared_bytes();
+        collect_shared_aliases(&program.body, &names, &mut shared_indexing);
+        collect_static_shared_views(
+            &program.body,
+            &names,
+            &shared_indexing,
+            &mut static_view_ranks,
+        );
 
         Ok(Self {
             device_params,
@@ -202,8 +247,11 @@ impl CudaKernelAbi {
             device_call_args,
             prelude,
             host_prelude,
+            macros: discovery.macros,
             launch,
             dynamic_shared_bytes,
+            shared_indexing,
+            static_view_ranks,
             names,
         })
     }
@@ -213,6 +261,134 @@ impl CudaKernelAbi {
             .get(name)
             .cloned()
             .unwrap_or_else(|| name.to_string())
+    }
+
+    pub(super) fn shared_access(&self, shared: &str, view: &str) -> String {
+        match self.shared_indexing.get(shared) {
+            Some(SharedIndexing::Static { rank: 1 }) => {
+                format!("{shared}[{}]", view_component(view, "x"))
+            }
+            Some(SharedIndexing::Static { rank: 2 }) => {
+                format!(
+                    "{shared}[{}][{}]",
+                    view_component(view, "x"),
+                    view_component(view, "y")
+                )
+            }
+            Some(SharedIndexing::Static { rank: 3 }) => {
+                format!(
+                    "{shared}[{}][{}][{}]",
+                    view_component(view, "x"),
+                    view_component(view, "y"),
+                    view_component(view, "z")
+                )
+            }
+            _ => format!("{shared}[{view}]"),
+        }
+    }
+
+    pub(super) fn static_view_rank(&self, view: &str) -> Option<usize> {
+        self.static_view_ranks.get(view).copied()
+    }
+}
+
+fn view_component(view: &str, component: &str) -> String {
+    format!("{view}_{component}")
+}
+
+fn collect_shared_aliases(
+    stmts: &[Stmt],
+    names: &HashMap<String, String>,
+    shared_indexing: &mut HashMap<String, SharedIndexing>,
+) {
+    for stmt in stmts {
+        match stmt {
+            Stmt::Block { body, .. } | Stmt::Loop { body, .. } | Stmt::For { body, .. } => {
+                collect_shared_aliases(body, names, shared_indexing);
+            }
+            Stmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                collect_shared_aliases(then_body, names, shared_indexing);
+                collect_shared_aliases(else_body, names, shared_indexing);
+            }
+            Stmt::Switch { cases, .. } => {
+                for case in cases {
+                    collect_shared_aliases(case, names, shared_indexing);
+                }
+            }
+            Stmt::Primitive(primitive) if primitive.name == "gpu.shared.store" => {
+                let Some(shared) = primitive.inputs.first() else {
+                    continue;
+                };
+                let Some(output) = primitive.outputs.first() else {
+                    continue;
+                };
+                let shared = names.get(shared).unwrap_or(shared);
+                let output = names.get(output).unwrap_or(output);
+                if let Some(indexing) = shared_indexing.get(shared).cloned() {
+                    shared_indexing.insert(output.clone(), indexing);
+                }
+            }
+            Stmt::Primitive(_)
+            | Stmt::Break(_)
+            | Stmt::Continue(_)
+            | Stmt::Return
+            | Stmt::Barrier
+            | Stmt::Assign { .. }
+            | Stmt::Comment(_) => {}
+        }
+    }
+}
+
+fn collect_static_shared_views(
+    stmts: &[Stmt],
+    names: &HashMap<String, String>,
+    shared_indexing: &HashMap<String, SharedIndexing>,
+    static_view_ranks: &mut HashMap<String, usize>,
+) {
+    for stmt in stmts {
+        match stmt {
+            Stmt::Block { body, .. } | Stmt::Loop { body, .. } | Stmt::For { body, .. } => {
+                collect_static_shared_views(body, names, shared_indexing, static_view_ranks);
+            }
+            Stmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                collect_static_shared_views(then_body, names, shared_indexing, static_view_ranks);
+                collect_static_shared_views(else_body, names, shared_indexing, static_view_ranks);
+            }
+            Stmt::Switch { cases, .. } => {
+                for case in cases {
+                    collect_static_shared_views(case, names, shared_indexing, static_view_ranks);
+                }
+            }
+            Stmt::Primitive(primitive)
+                if primitive.name == "gpu.shared.load" || primitive.name == "gpu.shared.store" =>
+            {
+                let Some(shared) = primitive.inputs.first() else {
+                    continue;
+                };
+                let Some(view) = primitive.inputs.get(1) else {
+                    continue;
+                };
+                let shared = names.get(shared).unwrap_or(shared);
+                if let Some(SharedIndexing::Static { rank }) = shared_indexing.get(shared) {
+                    static_view_ranks.insert(view.clone(), *rank);
+                }
+            }
+            Stmt::Primitive(_)
+            | Stmt::Break(_)
+            | Stmt::Continue(_)
+            | Stmt::Return
+            | Stmt::Barrier
+            | Stmt::Assign { .. }
+            | Stmt::Comment(_) => {}
+        }
     }
 }
 
@@ -263,12 +439,15 @@ fn collect_primitive_device_extents(primitive: &Primitive, names: &mut HashSet<S
 struct BoundaryDiscovery {
     grid_shape: GridShape,
     extent_param_names: HashMap<usize, String>,
+    static_extent_leaves: HashSet<usize>,
     used_host_names: HashSet<String>,
+    macros: Vec<CudaMacro>,
 }
 
-// Tracks the dynamic shared-memory layout while boundary values are emitted.
-// CUDA exposes one `extern __shared__` buffer, so multiple Catena gpu.shared
-// resources are represented as adjacent slices of that buffer.
+// Tracks the dynamic shared-memory portion while boundary values are emitted.
+// Static gpu.shared values are emitted independently as `__shared__` arrays;
+// dynamic values share CUDA's single `extern __shared__` buffer as adjacent
+// slices.
 struct SharedMemoryLayout {
     // Device-side size params are used in the kernel prelude to compute slice
     // offsets, e.g. `tile_b = __shared_mem + tile_a_size`.
@@ -280,9 +459,10 @@ struct SharedMemoryLayout {
 
 struct SharedBinding {
     device_name: String,
-    device_size_name: String,
-    host_size_name: String,
-    host_size_decl: String,
+    indexing: SharedIndexing,
+    device_size_name: Option<String>,
+    host_size_name: Option<String>,
+    host_size_decl: Option<String>,
     device_prelude: Vec<String>,
 }
 
@@ -299,15 +479,36 @@ impl SharedMemoryLayout {
         variable: &Variable,
         shared: &GpuShared<'_>,
         extent_param_names: &HashMap<usize, String>,
+        static_extent_leaves: &HashSet<usize>,
         used_device_names: &mut HashSet<String>,
         used_host_names: &mut HashSet<String>,
     ) -> Result<SharedBinding, CudaAbiError> {
         let element_ty = cuda_shared_element_type(shared)?;
         let base_name = sanitize_ident(&variable.name);
         let device_name = unique_name(&base_name, used_device_names);
+        let size = shared_size_expr(shared, extent_param_names, static_extent_leaves)?;
+
+        if size.is_static {
+            // Static shared memory is emitted as a normal CUDA `__shared__`
+            // allocation. It needs no host launch byte count and no device
+            // size parameter because all dimensions are compile-time macros.
+            return Ok(SharedBinding {
+                device_name: device_name.clone(),
+                indexing: SharedIndexing::Static {
+                    rank: size.dimensions.len(),
+                },
+                device_size_name: None,
+                host_size_name: None,
+                host_size_decl: None,
+                device_prelude: vec![format!(
+                    "__shared__ {element_ty} {device_name}{};",
+                    cuda_array_dimensions(&size.dimensions)
+                )],
+            });
+        }
+
         let device_size_name = unique_name(&format!("{device_name}_size"), used_device_names);
         let host_size_name = unique_name(&format!("{device_name}_size"), used_host_names);
-        let size_expr = shared_size_expr(shared, extent_param_names)?;
         let offset_expr = self.device_offset_expr();
 
         // The host computes each shared allocation size from the original extent
@@ -331,9 +532,10 @@ impl SharedMemoryLayout {
 
         Ok(SharedBinding {
             device_name,
-            device_size_name,
-            host_size_name: host_size_name.clone(),
-            host_size_decl: format!("uint64_t {host_size_name} = {size_expr};"),
+            indexing: SharedIndexing::Flat,
+            device_size_name: Some(device_size_name),
+            host_size_name: Some(host_size_name.clone()),
+            host_size_decl: Some(format!("uint64_t {host_size_name} = {};", size.expr)),
             device_prelude,
         })
     }
@@ -353,10 +555,17 @@ impl SharedMemoryLayout {
     }
 }
 
-fn discover_boundary(boundary: &[&Variable]) -> Result<BoundaryDiscovery, CudaAbiError> {
+fn discover_boundary(
+    boundary: &[&Variable],
+    options: &CudaOptions,
+) -> Result<BoundaryDiscovery, CudaAbiError> {
     let mut grid_shape = None;
     let mut extent_param_names = HashMap::new();
+    let mut static_extent_leaves = HashSet::new();
     let mut used_host_names = HashSet::new();
+    let mut used_macro_names = HashSet::new();
+    let mut macros = Vec::new();
+    let mut seen_static_names = HashSet::new();
 
     // This pass only discovers facts needed before ABI emission. In particular,
     // gpu.global sizes may reference extent leaves that appear anywhere in the
@@ -368,19 +577,45 @@ fn discover_boundary(boundary: &[&Variable]) -> Result<BoundaryDiscovery, CudaAb
             }
         }
 
-        // Extents remain host-side launch inputs. gpu.grid and gpu.global
-        // dimensions refer to these leaves, so collect their stable parameter
-        // names before emitting either launch config or global-size expressions.
+        let requested_static = options.static_values.get(&variable.name).copied();
+        if requested_static.is_some() {
+            seen_static_names.insert(variable.name.clone());
+        }
+
+        // gpu.grid, gpu.global, and gpu.shared dimensions refer to extent
+        // leaves. A leaf resolves either to a host parameter or, when the user
+        // provided --cuda-static for that boundary name, to a preprocessor
+        // macro that specializes the generated CUDA.
         if let Some(leaf) = extent_leaf(&variable.ty) {
-            let name = unique_name(&sanitize_ident(&variable.name), &mut used_host_names);
+            let name = if let Some(value) = requested_static {
+                let name = unique_name(&macro_ident(&variable.name), &mut used_macro_names);
+                macros.push(CudaMacro {
+                    name: name.clone(),
+                    value,
+                });
+                static_extent_leaves.insert(leaf);
+                name
+            } else {
+                unique_name(&sanitize_ident(&variable.name), &mut used_host_names)
+            };
             extent_param_names.insert(leaf, name);
+        } else if requested_static.is_some() {
+            return Err(CudaAbiError::StaticValueNotExtent(variable.name.clone()));
+        }
+    }
+
+    for name in options.static_values.keys() {
+        if !seen_static_names.contains(name) {
+            return Err(CudaAbiError::UnknownStaticValue(name.clone()));
         }
     }
 
     Ok(BoundaryDiscovery {
         grid_shape: grid_shape.ok_or(CudaAbiError::MissingGrid)?,
         extent_param_names,
+        static_extent_leaves,
         used_host_names,
+        macros,
     })
 }
 
@@ -512,6 +747,14 @@ fn sanitize_ident(name: &str) -> String {
     ident
 }
 
+fn macro_ident(name: &str) -> String {
+    let mut ident = sanitize_ident(name).to_ascii_uppercase();
+    if ident.is_empty() {
+        ident.push_str("STATIC_VALUE");
+    }
+    ident
+}
+
 fn cuda_global_param_type(global: &GpuGlobal<'_>) -> Result<&'static str, CudaAbiError> {
     match global.element {
         "f32" => Ok("float*"),
@@ -610,20 +853,48 @@ fn global_size_expr(
 fn shared_size_expr(
     shared: &GpuShared<'_>,
     extent_param_names: &HashMap<usize, String>,
-) -> Result<String, CudaAbiError> {
+    static_extent_leaves: &HashSet<usize>,
+) -> Result<StaticExpr, CudaAbiError> {
     let dimensions = shared
         .dimensions
         .iter()
         .map(|dimension| {
-            dimension_expr(
+            dimension_expr_with_static(
                 dimension,
                 extent_param_names,
+                static_extent_leaves,
                 CudaAbiError::MissingSharedExtent,
                 || CudaAbiError::InvalidSharedShape,
             )
         })
         .collect::<Result<Vec<_>, _>>()?;
-    Ok(dimensions.join(" * "))
+    Ok(StaticExpr {
+        expr: product_expr(&dimensions),
+        is_static: dimensions.iter().all(|dimension| dimension.is_static),
+        dimensions,
+    })
+}
+
+#[derive(Debug, Clone)]
+struct StaticExpr {
+    expr: String,
+    is_static: bool,
+    dimensions: Vec<StaticExpr>,
+}
+
+fn product_expr(dimensions: &[StaticExpr]) -> String {
+    dimensions
+        .iter()
+        .map(|dimension| dimension.expr.as_str())
+        .collect::<Vec<_>>()
+        .join(" * ")
+}
+
+fn cuda_array_dimensions(dimensions: &[StaticExpr]) -> String {
+    dimensions
+        .iter()
+        .map(|dimension| format!("[{}]", dimension.expr))
+        .collect::<String>()
 }
 
 fn dimension_expr(
@@ -675,6 +946,77 @@ fn dimension_expr(
             // TODO: allow literal dimension values. At the moment dimensions
             // must be expressed in terms of extent-backed hypergraph leaves and
             // supported nat operations.
+            Err(invalid_shape())
+        }
+    }
+}
+
+fn dimension_expr_with_static(
+    dimension: &Obj,
+    extent_param_names: &HashMap<usize, String>,
+    static_extent_leaves: &HashSet<usize>,
+    missing_extent: impl Fn(usize) -> CudaAbiError + Copy,
+    invalid_shape: impl Fn() -> CudaAbiError + Copy,
+) -> Result<StaticExpr, CudaAbiError> {
+    match dimension {
+        Tree::Leaf(leaf, _) => Ok(StaticExpr {
+            expr: extent_param_names
+                .get(leaf)
+                .cloned()
+                .ok_or_else(|| missing_extent(*leaf))?,
+            is_static: static_extent_leaves.contains(leaf),
+            dimensions: Vec::new(),
+        }),
+        Tree::Node(op, 0, children)
+            if matches!(op.to_string().as_str(), "nat.mul" | "*") && children.len() == 2 =>
+        {
+            let lhs = dimension_expr_with_static(
+                &children[0],
+                extent_param_names,
+                static_extent_leaves,
+                missing_extent,
+                invalid_shape,
+            )?;
+            let rhs = dimension_expr_with_static(
+                &children[1],
+                extent_param_names,
+                static_extent_leaves,
+                missing_extent,
+                invalid_shape,
+            )?;
+            Ok(StaticExpr {
+                expr: format!("({} * {})", lhs.expr, rhs.expr),
+                is_static: lhs.is_static && rhs.is_static,
+                dimensions: Vec::new(),
+            })
+        }
+        Tree::Node(op, 0, children) if op.to_string() == "nat.ceil-div" && children.len() == 2 => {
+            let numerator = dimension_expr_with_static(
+                &children[0],
+                extent_param_names,
+                static_extent_leaves,
+                missing_extent,
+                invalid_shape,
+            )?;
+            let denominator = dimension_expr_with_static(
+                &children[1],
+                extent_param_names,
+                static_extent_leaves,
+                missing_extent,
+                invalid_shape,
+            )?;
+            Ok(StaticExpr {
+                expr: format!(
+                    "(({} + {} - 1) / {})",
+                    numerator.expr, denominator.expr, denominator.expr
+                ),
+                is_static: numerator.is_static && denominator.is_static,
+                dimensions: Vec::new(),
+            })
+        }
+        _ => {
+            // TODO: allow literal dimension values and mark them static. Today
+            // static shared memory is driven by --cuda-static extent names.
             Err(invalid_shape())
         }
     }

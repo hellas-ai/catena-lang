@@ -4,7 +4,7 @@ use crate::{
 };
 
 pub(super) trait CudaPrimitiveLowering {
-    fn lower_primitive_lines(&self, primitive: &Primitive) -> Vec<String>;
+    fn lower_primitive_lines(&self, primitive: &Primitive, abi: &CudaKernelAbi) -> Vec<String>;
 }
 
 pub(super) fn render_cuda(
@@ -14,6 +14,7 @@ pub(super) fn render_cuda(
 ) -> String {
     let mut out = String::new();
     out.push_str("#include <stdint.h>\n\n");
+    render_macros(&mut out, abi);
     out.push_str(&format!("__global__ void {}(", program.entry.name));
     out.push_str(
         &abi.device_params
@@ -28,6 +29,17 @@ pub(super) fn render_cuda(
     out.push_str("}\n\n");
     render_launch_helper(&mut out, program, abi);
     out
+}
+
+fn render_macros(out: &mut String, abi: &CudaKernelAbi) {
+    for macro_def in &abi.macros {
+        out.push_str(&format!("#ifndef {}\n", macro_def.name));
+        out.push_str(&format!("#define {} {}\n", macro_def.name, macro_def.value));
+        out.push_str("#endif\n");
+    }
+    if !abi.macros.is_empty() {
+        out.push('\n');
+    }
 }
 
 fn render_prelude(out: &mut String, abi: &CudaKernelAbi) {
@@ -137,7 +149,7 @@ fn render_cuda_stmts(
             Stmt::Assign { lhs, rhs } => out.push_str(&format!("{pad}{lhs} = {rhs};\n")),
             Stmt::Primitive(primitive) => {
                 let primitive = rename_primitive(primitive, abi);
-                for line in domain.lower_primitive_lines(&primitive) {
+                for line in domain.lower_primitive_lines(&primitive, abi) {
                     out.push_str(&format!("{pad}{line}\n"));
                 }
             }

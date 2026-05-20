@@ -8,6 +8,7 @@ use crate::{
     compile::{
         CompileConfig, CompileGraph, CompileGraphError, GraphCompileOptions, check_render,
         compile_graph,
+        cuda::CudaOptions,
         cuda::{CudaAbiError, render_cuda_source},
         graph_render,
         normalize::{NormalizeGraphError, normalize_graph},
@@ -40,6 +41,7 @@ pub struct CompileRequest {
     pub entry: Option<String>,
     pub format: Option<OutputFormat>,
     pub graph_options: GraphCompileOptions,
+    pub cuda_options: CudaOptions,
 }
 
 #[derive(Debug, Error)]
@@ -112,6 +114,7 @@ impl CompilePipeline {
             Emit::Cuda | Emit::StructuredIr => {
                 self.require_format(OutputFormat::Text)?;
                 let emit = self.request.emit;
+                let cuda_options = self.request.cuda_options.clone();
                 let compile_graph_request = self.compile_graph_request()?;
                 let checked_elaborated_theory = self.checked_elaborated_theory()?;
                 let compile_graph =
@@ -120,9 +123,12 @@ impl CompilePipeline {
                 let program = compile_program_from_graph(&graph)?;
                 let structured = compile_structured_program(&program)?;
                 Ok(match emit {
-                    Emit::Cuda => {
-                        render_cuda_source(checked_elaborated_theory, &program, &structured)?
-                    }
+                    Emit::Cuda => render_cuda_source(
+                        checked_elaborated_theory,
+                        &program,
+                        &structured,
+                        &cuda_options,
+                    )?,
                     Emit::StructuredIr => structured.render_ir(),
                     _ => unreachable!("only structured-backed emits are handled here"),
                 }

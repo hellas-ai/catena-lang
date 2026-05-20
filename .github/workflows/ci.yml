@@ -26,3 +26,6 @@ jobs:
 
       - name: Run tests
         run: cargo test --all
+
+      - name: Run examples
+        run: bash scripts/e2e.sh

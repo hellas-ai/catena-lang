@@ -6,7 +6,7 @@ use thiserror::Error;
 use crate::{
     compile::program::{Definition, Variable},
     lang::Obj,
-    structured::ir::Param,
+    structured::ir::{Param, Primitive, Stmt, StructuredProgram},
 };
 
 #[derive(Debug, Clone)]
@@ -17,6 +17,7 @@ pub(super) struct CudaKernelAbi {
     pub(super) prelude: Vec<String>,
     pub(super) host_prelude: Vec<String>,
     pub(super) launch: CudaLaunch,
+    pub(super) dynamic_shared_bytes: Option<String>,
     names: HashMap<String, String>,
 }
 
@@ -45,6 +46,14 @@ pub enum CudaAbiError {
     InvalidGlobalShape,
     #[error("gpu.global dimension leaf {0} is not backed by an extent argument")]
     MissingGlobalExtent(usize),
+    #[error(
+        "gpu.shared boundary values must be gpu.shared element dimensions with 1d, 2d, or 3d dimensions"
+    )]
+    InvalidSharedShape,
+    #[error("gpu.shared dimension leaf {0} is not backed by an extent argument")]
+    MissingSharedExtent(usize),
+    #[error("unsupported CUDA shared memory element type `{0}`")]
+    UnsupportedSharedElement(String),
     #[error("unsupported CUDA global memory element type `{0}`")]
     UnsupportedGlobalElement(String),
     #[error("unsupported CUDA kernel boundary argument `{name}` of type `{ty}`")]
@@ -52,7 +61,10 @@ pub enum CudaAbiError {
 }
 
 impl CudaKernelAbi {
-    pub(super) fn from_definition(definition: &Definition) -> Result<Self, CudaAbiError> {
+    pub(super) fn from_definition(
+        definition: &Definition,
+        program: &StructuredProgram,
+    ) -> Result<Self, CudaAbiError> {
         // We are compiling a Catena arrow as a CUDA kernel. Its boundary tells us
         // both the C ABI of the kernel and the launch shape.
         let boundary = definition
@@ -72,14 +84,18 @@ impl CudaKernelAbi {
         let mut device_params = Vec::new();
         let mut host_params = Vec::new();
         let mut device_call_args = Vec::new();
+        let mut prelude = Vec::new();
         let mut host_prelude = Vec::new();
         let mut names = HashMap::new();
         let mut emitted_extent_params = HashSet::new();
+        let device_extent_names = device_extent_names(program);
         let mut element_count = None;
+        let mut shared_layout = SharedMemoryLayout::new();
 
         // Emit the host launch ABI and the device kernel ABI in boundary order.
         // Extents stay on the host side; globals become device kernel pointers
-        // plus size values derived from their gpu.global dimensions.
+        // plus size values derived from their gpu.global dimensions. Shared
+        // memory is device-local and slices a dynamic shared-memory allocation.
         for variable in boundary {
             if let Some(leaf) = extent_leaf(&variable.ty) {
                 let Some(name) = discovery.extent_param_names.get(&leaf).cloned() else {
@@ -91,6 +107,22 @@ impl CudaKernelAbi {
                         ty: "uint64_t".to_string(),
                         name,
                     });
+                }
+                if device_extent_names.contains(&variable.name) {
+                    let device_name =
+                        unique_name(&sanitize_ident(&variable.name), &mut used_device_names);
+                    names.insert(variable.name.clone(), device_name.clone());
+                    device_params.push(Param {
+                        ty: "uint64_t".to_string(),
+                        name: device_name,
+                    });
+                    device_call_args.push(
+                        discovery
+                            .extent_param_names
+                            .get(&leaf)
+                            .cloned()
+                            .ok_or(CudaAbiError::MissingGridExtent(leaf))?,
+                    );
                 }
                 continue;
             };
@@ -123,15 +155,33 @@ impl CudaKernelAbi {
                 continue;
             };
 
+            if let Some(shared) = gpu_shared(&variable.ty)? {
+                // Shared memory is allocated per block at launch time as one
+                // dynamic buffer. Each Catena gpu.shared value becomes a typed
+                // pointer into a non-overlapping slice of that buffer.
+                let binding = shared_layout.bind(
+                    variable,
+                    &shared,
+                    &discovery.extent_param_names,
+                    &mut used_device_names,
+                    &mut used_host_names,
+                )?;
+                names.insert(variable.name.clone(), binding.device_name);
+                device_params.push(Param {
+                    ty: "uint64_t".to_string(),
+                    name: binding.device_size_name,
+                });
+                host_prelude.push(binding.host_size_decl);
+                device_call_args.push(binding.host_size_name);
+                prelude.extend(binding.device_prelude);
+                continue;
+            }
+
             // gpu.grid values are handled above as launch contracts and erased
             // from the CUDA parameter list.
             if gpu_grid(&variable.ty)?.is_some() {
                 continue;
             }
-            //
-            // TODO: support gpu.shared boundary values. Shared memory should be
-            // emitted as kernel-local/shared declarations, not host ABI params.
-            //
             // Other generic kernel arguments are intentionally unsupported in
             // this first CUDA path.
             return Err(CudaAbiError::UnsupportedBoundaryArgument {
@@ -144,14 +194,16 @@ impl CudaKernelAbi {
             resolve_grid_launch(&discovery.grid_shape, &discovery.extent_param_names)?,
             element_count,
         );
+        let dynamic_shared_bytes = shared_layout.dynamic_shared_bytes();
 
         Ok(Self {
             device_params,
             host_params,
             device_call_args,
-            prelude: Vec::new(),
+            prelude,
             host_prelude,
             launch,
+            dynamic_shared_bytes,
             names,
         })
     }
@@ -164,10 +216,141 @@ impl CudaKernelAbi {
     }
 }
 
+fn device_extent_names(program: &StructuredProgram) -> HashSet<String> {
+    let mut names = HashSet::new();
+    collect_device_extent_names(&program.body, &mut names);
+    names
+}
+
+fn collect_device_extent_names(stmts: &[Stmt], names: &mut HashSet<String>) {
+    for stmt in stmts {
+        match stmt {
+            Stmt::Block { body, .. } | Stmt::Loop { body, .. } | Stmt::For { body, .. } => {
+                collect_device_extent_names(body, names);
+            }
+            Stmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                collect_device_extent_names(then_body, names);
+                collect_device_extent_names(else_body, names);
+            }
+            Stmt::Switch { cases, .. } => {
+                for case in cases {
+                    collect_device_extent_names(case, names);
+                }
+            }
+            Stmt::Primitive(primitive) => collect_primitive_device_extents(primitive, names),
+            Stmt::Break(_)
+            | Stmt::Continue(_)
+            | Stmt::Return
+            | Stmt::Barrier
+            | Stmt::Assign { .. }
+            | Stmt::Comment(_) => {}
+        }
+    }
+}
+
+fn collect_primitive_device_extents(primitive: &Primitive, names: &mut HashSet<String>) {
+    if primitive.name == "gpu.view.group"
+        && let Some(thread_count) = primitive.inputs.get(2)
+    {
+        names.insert(thread_count.clone());
+    }
+}
+
 struct BoundaryDiscovery {
     grid_shape: GridShape,
     extent_param_names: HashMap<usize, String>,
     used_host_names: HashSet<String>,
+}
+
+// Tracks the dynamic shared-memory layout while boundary values are emitted.
+// CUDA exposes one `extern __shared__` buffer, so multiple Catena gpu.shared
+// resources are represented as adjacent slices of that buffer.
+struct SharedMemoryLayout {
+    // Device-side size params are used in the kernel prelude to compute slice
+    // offsets, e.g. `tile_b = __shared_mem + tile_a_size`.
+    device_size_names: Vec<String>,
+    // Host-side size locals are used to compute the third CUDA launch argument,
+    // e.g. `<<<grid, block, (tile_a_size + tile_b_size) * sizeof(float)>>>`.
+    host_size_names: Vec<String>,
+}
+
+struct SharedBinding {
+    device_name: String,
+    device_size_name: String,
+    host_size_name: String,
+    host_size_decl: String,
+    device_prelude: Vec<String>,
+}
+
+impl SharedMemoryLayout {
+    fn new() -> Self {
+        Self {
+            device_size_names: Vec::new(),
+            host_size_names: Vec::new(),
+        }
+    }
+
+    fn bind(
+        &mut self,
+        variable: &Variable,
+        shared: &GpuShared<'_>,
+        extent_param_names: &HashMap<usize, String>,
+        used_device_names: &mut HashSet<String>,
+        used_host_names: &mut HashSet<String>,
+    ) -> Result<SharedBinding, CudaAbiError> {
+        let element_ty = cuda_shared_element_type(shared)?;
+        let base_name = sanitize_ident(&variable.name);
+        let device_name = unique_name(&base_name, used_device_names);
+        let device_size_name = unique_name(&format!("{device_name}_size"), used_device_names);
+        let host_size_name = unique_name(&format!("{device_name}_size"), used_host_names);
+        let size_expr = shared_size_expr(shared, extent_param_names)?;
+        let offset_expr = self.device_offset_expr();
+
+        // The host computes each shared allocation size from the original extent
+        // parameters, then passes that size into the device kernel. The device
+        // uses those size params only for pointer arithmetic between slices.
+        let mut device_prelude = Vec::new();
+        if self.device_size_names.is_empty() {
+            // First shared value starts at the beginning of the CUDA dynamic
+            // shared-memory region.
+            device_prelude.push(format!("extern __shared__ {element_ty} __shared_mem[];"));
+            device_prelude.push(format!("{element_ty}* {device_name} = __shared_mem;"));
+        } else {
+            // Later shared values start after all previously bound slices.
+            device_prelude.push(format!(
+                "{element_ty}* {device_name} = __shared_mem + ({offset_expr});"
+            ));
+        }
+
+        self.device_size_names.push(device_size_name.clone());
+        self.host_size_names.push(host_size_name.clone());
+
+        Ok(SharedBinding {
+            device_name,
+            device_size_name,
+            host_size_name: host_size_name.clone(),
+            host_size_decl: format!("uint64_t {host_size_name} = {size_expr};"),
+            device_prelude,
+        })
+    }
+
+    fn dynamic_shared_bytes(&self) -> Option<String> {
+        if self.host_size_names.is_empty() {
+            return None;
+        }
+        Some(format!(
+            "({}) * sizeof(float)",
+            self.host_size_names.join(" + ")
+        ))
+    }
+
+    fn device_offset_expr(&self) -> String {
+        self.device_size_names.join(" + ")
+    }
 }
 
 fn discover_boundary(boundary: &[&Variable]) -> Result<BoundaryDiscovery, CudaAbiError> {
@@ -345,33 +528,71 @@ fn cuda_global_param_type(global: &GpuGlobal<'_>) -> Result<&'static str, CudaAb
     }
 }
 
+fn cuda_shared_element_type(shared: &GpuShared<'_>) -> Result<&'static str, CudaAbiError> {
+    match shared.element {
+        "f32" => Ok("float"),
+        _ => Err(CudaAbiError::UnsupportedSharedElement(
+            shared.element.to_string(),
+        )),
+    }
+}
+
 #[derive(Debug, Clone)]
 struct GpuGlobal<'a> {
     element: &'a str,
     dimensions: Vec<&'a Obj>,
 }
 
+#[derive(Debug, Clone)]
+struct GpuShared<'a> {
+    element: &'a str,
+    dimensions: Vec<&'a Obj>,
+}
+
 fn gpu_global(obj: &Obj) -> Result<Option<GpuGlobal<'_>>, CudaAbiError> {
-    let Some(global) = unwrap_val(obj) else {
+    let Some((element, dimensions)) =
+        gpu_memory(obj, "gpu.global", CudaAbiError::InvalidGlobalShape)?
+    else {
         return Ok(None);
     };
-    let Tree::Node(global, 0, children) = global else {
+    Ok(Some(GpuGlobal {
+        element,
+        dimensions,
+    }))
+}
+
+fn gpu_shared(obj: &Obj) -> Result<Option<GpuShared<'_>>, CudaAbiError> {
+    let Some((element, dimensions)) =
+        gpu_memory(obj, "gpu.shared", CudaAbiError::InvalidSharedShape)?
+    else {
         return Ok(None);
     };
-    let global_name = global.to_string();
+    Ok(Some(GpuShared {
+        element,
+        dimensions,
+    }))
+}
 
-    if global_name == "gpu.global" {
-        let [Tree::Node(element, 0, _), dimensions] = children.as_slice() else {
-            return Err(CudaAbiError::InvalidGlobalShape);
-        };
-        let dimensions = global_dimensions(dimensions).ok_or(CudaAbiError::InvalidGlobalShape)?;
-        return Ok(Some(GpuGlobal {
-            element: element.as_str(),
-            dimensions,
-        }));
+fn gpu_memory<'a>(
+    obj: &'a Obj,
+    expected_name: &str,
+    invalid_shape: CudaAbiError,
+) -> Result<Option<(&'a str, Vec<&'a Obj>)>, CudaAbiError> {
+    let Some(memory) = unwrap_val(obj) else {
+        return Ok(None);
     };
+    let Tree::Node(memory, 0, children) = memory else {
+        return Ok(None);
+    };
+    if memory.to_string() != expected_name {
+        return Ok(None);
+    }
+    let [Tree::Node(element, 0, _), dimensions] = children.as_slice() else {
+        return Err(invalid_shape);
+    };
+    let dimensions = memory_dimensions(dimensions).ok_or(invalid_shape)?;
 
-    Ok(None)
+    Ok(Some((element.as_str(), dimensions)))
 }
 
 fn global_size_expr(
@@ -381,7 +602,33 @@ fn global_size_expr(
     let dimensions = global
         .dimensions
         .iter()
-        .map(|dimension| dimension_expr(dimension, extent_param_names))
+        .map(|dimension| {
+            dimension_expr(
+                dimension,
+                extent_param_names,
+                CudaAbiError::MissingGlobalExtent,
+                || CudaAbiError::InvalidGlobalShape,
+            )
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(dimensions.join(" * "))
+}
+
+fn shared_size_expr(
+    shared: &GpuShared<'_>,
+    extent_param_names: &HashMap<usize, String>,
+) -> Result<String, CudaAbiError> {
+    let dimensions = shared
+        .dimensions
+        .iter()
+        .map(|dimension| {
+            dimension_expr(
+                dimension,
+                extent_param_names,
+                CudaAbiError::MissingSharedExtent,
+                || CudaAbiError::InvalidSharedShape,
+            )
+        })
         .collect::<Result<Vec<_>, _>>()?;
     Ok(dimensions.join(" * "))
 }
@@ -389,29 +636,41 @@ fn global_size_expr(
 fn dimension_expr(
     dimension: &Obj,
     extent_param_names: &HashMap<usize, String>,
+    missing_extent: impl Fn(usize) -> CudaAbiError + Copy,
+    invalid_shape: impl Fn() -> CudaAbiError + Copy,
 ) -> Result<String, CudaAbiError> {
     match dimension {
         Tree::Leaf(leaf, _) => extent_param_names
             .get(leaf)
             .cloned()
-            .ok_or(CudaAbiError::MissingGlobalExtent(*leaf)),
+            .ok_or_else(|| missing_extent(*leaf)),
         Tree::Node(op, 0, children)
             if matches!(op.to_string().as_str(), "nat.mul" | "*") && children.len() == 2 =>
         {
-            let lhs = dimension_expr(&children[0], extent_param_names)?;
-            let rhs = dimension_expr(&children[1], extent_param_names)?;
+            let lhs = dimension_expr(
+                &children[0],
+                extent_param_names,
+                missing_extent,
+                invalid_shape,
+            )?;
+            let rhs = dimension_expr(
+                &children[1],
+                extent_param_names,
+                missing_extent,
+                invalid_shape,
+            )?;
             Ok(format!("({lhs} * {rhs})"))
         }
         _ => {
             // TODO: allow literal dimension values. At the moment every global
             // memory dimension must be expressed in terms of extent-backed
             // hypergraph leaves and supported nat operations.
-            Err(CudaAbiError::InvalidGlobalShape)
+            Err(invalid_shape())
         }
     }
 }
 
-fn global_dimensions(dimensions: &Obj) -> Option<Vec<&Obj>> {
+fn memory_dimensions(dimensions: &Obj) -> Option<Vec<&Obj>> {
     let Tree::Node(rank, 0, children) = dimensions else {
         return None;
     };

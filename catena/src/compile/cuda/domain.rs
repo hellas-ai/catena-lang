@@ -18,9 +18,13 @@ pub(super) struct CudaTarget<'a> {
 }
 
 impl<'a> CudaTarget<'a> {
-    pub(super) fn new(theory_set: &'a TheorySet, entry: &Definition) -> Result<Self, CudaAbiError> {
+    pub(super) fn new(
+        theory_set: &'a TheorySet,
+        entry: &Definition,
+        program: &StructuredProgram,
+    ) -> Result<Self, CudaAbiError> {
         Ok(Self {
-            abi: CudaKernelAbi::from_definition(entry)?,
+            abi: CudaKernelAbi::from_definition(entry, program)?,
             primitives: GenericCudaPrimitives::new(theory_set),
         })
     }
@@ -185,15 +189,25 @@ impl NamespaceLowering for GpuPrimitives {
         }
 
         if local.matches(&["view", "group"]) {
-            let [block, thread, _block_size] = primitive.inputs.as_slice() else {
+            let [block, thread, thread_count] = primitive.inputs.as_slice() else {
                 return None;
             };
             let [out] = primitive.outputs.as_slice() else {
                 return None;
             };
             return Some(vec![format!(
-                "uint64_t {out} = (uint64_t){block}.x * blockDim.x + {thread}.x;"
+                "uint64_t {out} = (uint64_t){block}.x * {thread_count} + {thread}.x;"
             )]);
+        }
+
+        if local.matches(&["view", "element"]) {
+            let [thread] = primitive.inputs.as_slice() else {
+                return None;
+            };
+            let [out] = primitive.outputs.as_slice() else {
+                return None;
+            };
+            return Some(vec![format!("uint64_t {out} = {thread}.x;")]);
         }
 
         if local.matches(&["global", "store"]) {
@@ -210,6 +224,30 @@ impl NamespaceLowering for GpuPrimitives {
                 && output != global
             {
                 lines.push(format!("auto {output} = {global};"));
+            }
+            return Some(lines);
+        }
+
+        if local.matches(&["shared", "load"]) {
+            let [shared, view] = primitive.inputs.as_slice() else {
+                return None;
+            };
+            let [out] = primitive.outputs.as_slice() else {
+                return None;
+            };
+            return Some(vec![format!("float {out} = {shared}[{view}];")]);
+        }
+
+        if local.matches(&["shared", "store"]) {
+            let [shared, view, value] = primitive.inputs.as_slice() else {
+                return None;
+            };
+            let output = primitive.outputs.first();
+            let mut lines = vec![format!("{shared}[{view}] = {value};")];
+            if let Some(output) = output
+                && output != shared
+            {
+                lines.push(format!("auto {output} = {shared};"));
             }
             return Some(lines);
         }

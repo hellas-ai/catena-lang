@@ -3,8 +3,8 @@
   (arr gpu.block : 0 -> 1)
   (arr gpu.thread : 0 -> 1)
   (arr gpu.global : 2 -> 1)
-  (arr gpu.view : 1 -> 1)
-  (arr gpu.shared : 3 -> 1)
+  (arr gpu.view : 0 -> 1)
+  (arr gpu.shared : 2 -> 1)
   (arr 1d : 1 -> 1)
   (arr 2d : 2 -> 1)
   (arr 3d : 3 -> 1)
@@ -20,9 +20,21 @@
 
   (arr gpu.view.group :
     {(gpu.block val) (gpu.thread val) (([block_size] extent) val)} ->
-    (([block_size] gpu.view) val))
+    ([block_size .] (gpu.view val)))
+
+  (arr gpu.view.element :
+    (gpu.thread val) ->
+    (gpu.view val))
 
   (arr gpu.global.store :
-    {([matrix] val) (([n] gpu.view) val) (f32 val)} ->
-    ([matrix n . matrix] val))
+    {([matrix] val) (gpu.view val) (f32 val)} ->
+    ([matrix . matrix] val))
+
+  (arr gpu.shared.load :
+    {([tile] val) (gpu.view val)} ->
+    ([tile.] (f32 val)))
+
+  (arr gpu.shared.store :
+    {([tile] val) (gpu.view val) (f32 val)} ->
+    ([tile . tile] val))
 })

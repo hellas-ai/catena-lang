@@ -59,8 +59,13 @@ fn render_launch_helper(out: &mut String, program: &StructuredProgram, abi: &Cud
         out.push('\n');
     }
     render_launch_config(out, abi);
+    let launch_args = if let Some(shared_bytes) = &abi.dynamic_shared_bytes {
+        format!("grid, block, {shared_bytes}")
+    } else {
+        "grid, block".to_string()
+    };
     out.push_str(&format!(
-        "    {}<<<grid, block>>>({});\n",
+        "    {}<<<{launch_args}>>>({});\n",
         program.entry.name,
         abi.device_call_args
             .iter()

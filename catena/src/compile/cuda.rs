@@ -83,6 +83,6 @@ pub fn render_cuda_source(
     program: &Program,
     structured: &StructuredProgram,
 ) -> Result<String, CudaAbiError> {
-    let target = CudaTarget::new(theory_set, program.entry_definition())?;
+    let target = CudaTarget::new(theory_set, program.entry_definition(), structured)?;
     Ok(target.render_cuda_with_launch(structured))
 }

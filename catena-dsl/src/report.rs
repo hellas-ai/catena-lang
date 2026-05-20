@@ -2,6 +2,7 @@ mod svg;
 
 use std::{fs, io, path::Path};
 
+use catena::structured::StructuredProgram;
 use hexpr::Operation;
 use metacat::{
     theory::{RawTheorySet, TheoryId, TheorySet},
@@ -14,6 +15,8 @@ use std::collections::BTreeMap;
 pub type AnnotatedTerm = OpenHypergraph<Tree<(), Operation>, Operation>;
 /// Generic storage for per-theory, per-definition graph results produced by compiler passes.
 pub type TheoryTermMap = BTreeMap<TheoryId, BTreeMap<Operation, AnnotatedTerm>>;
+/// Generic storage for per-theory, per-definition structured codegen results.
+pub type StructuredProgramMap = BTreeMap<TheoryId, BTreeMap<Operation, StructuredProgram>>;
 
 pub struct CompileReport {
     pub raw_theories: RawTheorySet,
@@ -21,6 +24,7 @@ pub struct CompileReport {
     pub theory_set: TheorySet,
     pub definition_types: BTreeMap<TheoryId, BTreeMap<Operation, Vec<Tree<(), Operation>>>>,
     pub forgotten_closures: TheoryTermMap,
+    pub structured_programs: StructuredProgramMap,
 }
 
 impl CompileReport {

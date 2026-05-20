@@ -1,3 +1,4 @@
+mod c;
 mod svg;
 
 use std::{fs, io, path::Path};
@@ -37,6 +38,7 @@ impl CompileReport {
         )?;
         fs::write(dir.join("elaborated.hex"), self.elaborated.to_hexpr_text())?;
         svg::dump_svgs(self, &dir.join("svgs"))?;
+        c::dump_c(self, &dir.join("c"))?;
         Ok(())
     }
 }

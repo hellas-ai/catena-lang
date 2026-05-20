@@ -13,6 +13,7 @@
 //! - Keep the mapping of catena-dsl types to CUDA types as its own file: for now, just pick one
 //!   for bool, and synth a function type for (A -> B) fns.
 
+pub mod c;
 mod types;
 
 use std::collections::BTreeMap;
@@ -48,6 +49,8 @@ pub fn codegen(terms: &TheoryTermMap) -> Result<StructuredProgramMap, CodegenErr
 pub enum CodegenError {
     #[error(transparent)]
     Ssa(#[from] SSAError),
+    #[error("failed to quotient transformed term before codegen: {0:?}")]
+    Quotient(open_hypergraphs::strict::vec::FiniteFunction),
     #[error("unsupported CUDA type for node {node}: {ty}")]
     UnsupportedType { node: usize, ty: String },
 }
@@ -56,13 +59,16 @@ fn codegen_definition(
     qualified_name: &str,
     term: &AnnotatedTerm,
 ) -> Result<StructuredProgram, CodegenError> {
+    let mut term = term.clone();
+    term.quotient().map_err(CodegenError::Quotient)?;
+
     let mut params = Vec::new();
     let mut body = Vec::new();
 
     for source in &term.sources {
         let node = source.0;
         params.push(Param {
-            ty: types::param_type(&term.hypergraph.nodes[node], false).ok_or_else(|| {
+            ty: types::structured_param_type(&term.hypergraph.nodes[node], false).ok_or_else(|| {
                 CodegenError::UnsupportedType {
                     node,
                     ty: format!("{:?}", term.hypergraph.nodes[node]),
@@ -75,7 +81,7 @@ fn codegen_definition(
     for target in &term.targets {
         let node = target.0;
         params.push(Param {
-            ty: types::param_type(&term.hypergraph.nodes[node], true).ok_or_else(|| {
+            ty: types::structured_param_type(&term.hypergraph.nodes[node], true).ok_or_else(|| {
                 CodegenError::UnsupportedType {
                     node,
                     ty: format!("{:?}", term.hypergraph.nodes[node]),

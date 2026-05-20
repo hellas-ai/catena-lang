@@ -392,8 +392,8 @@ struct GridLaunch {
 
 #[derive(Debug, Clone)]
 struct GridShape {
-    grid: Vec<usize>,
-    block: Vec<usize>,
+    grid: Vec<Obj>,
+    block: Vec<Obj>,
 }
 
 impl GridShape {
@@ -402,8 +402,8 @@ impl GridShape {
             return Ok(None);
         };
         Ok(Some(Self {
-            grid: dimension_leaves(gpu_grid.grid).ok_or(CudaAbiError::InvalidGridShape)?,
-            block: dimension_leaves(gpu_grid.block).ok_or(CudaAbiError::InvalidGridShape)?,
+            grid: dimension_terms(gpu_grid.grid).ok_or(CudaAbiError::InvalidGridShape)?,
+            block: dimension_terms(gpu_grid.block).ok_or(CudaAbiError::InvalidGridShape)?,
         }))
     }
 }
@@ -419,16 +419,18 @@ fn resolve_grid_launch(
 }
 
 fn resolve_dimension_names(
-    leaves: &[usize],
+    dimensions: &[Obj],
     extent_param_names: &HashMap<usize, String>,
 ) -> Result<Vec<String>, CudaAbiError> {
-    leaves
+    dimensions
         .iter()
-        .map(|leaf| {
-            extent_param_names
-                .get(leaf)
-                .cloned()
-                .ok_or(CudaAbiError::MissingGridExtent(*leaf))
+        .map(|dimension| {
+            dimension_expr(
+                dimension,
+                extent_param_names,
+                CudaAbiError::MissingGridExtent,
+                || CudaAbiError::InvalidGridShape,
+            )
         })
         .collect()
 }
@@ -447,7 +449,7 @@ fn cuda_dim3_expr(dimensions: &[String]) -> String {
     dimensions.join(", ")
 }
 
-fn dimension_leaves(dimension: &Obj) -> Option<Vec<usize>> {
+fn dimension_terms(dimension: &Obj) -> Option<Vec<Obj>> {
     let Tree::Node(op, 0, children) = dimension else {
         return None;
     };
@@ -460,16 +462,7 @@ fn dimension_leaves(dimension: &Obj) -> Option<Vec<usize>> {
     if children.len() != expected {
         return None;
     };
-    // TODO: allow literal dimension values in addition to shared hypergraph
-    // leaves. For now each launch dimension must be backed by an extent
-    // argument with the same leaf.
-    children
-        .iter()
-        .map(|child| match child {
-            Tree::Leaf(leaf, _) => Some(*leaf),
-            _ => None,
-        })
-        .collect()
+    Some(children.clone())
 }
 
 #[derive(Debug, Clone)]
@@ -661,10 +654,27 @@ fn dimension_expr(
             )?;
             Ok(format!("({lhs} * {rhs})"))
         }
+        Tree::Node(op, 0, children) if op.to_string() == "nat.ceil-div" && children.len() == 2 => {
+            let numerator = dimension_expr(
+                &children[0],
+                extent_param_names,
+                missing_extent,
+                invalid_shape,
+            )?;
+            let denominator = dimension_expr(
+                &children[1],
+                extent_param_names,
+                missing_extent,
+                invalid_shape,
+            )?;
+            Ok(format!(
+                "(({numerator} + {denominator} - 1) / {denominator})"
+            ))
+        }
         _ => {
-            // TODO: allow literal dimension values. At the moment every global
-            // memory dimension must be expressed in terms of extent-backed
-            // hypergraph leaves and supported nat operations.
+            // TODO: allow literal dimension values. At the moment dimensions
+            // must be expressed in terms of extent-backed hypergraph leaves and
+            // supported nat operations.
             Err(invalid_shape())
         }
     }

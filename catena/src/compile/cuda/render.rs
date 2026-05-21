@@ -46,10 +46,7 @@ fn render_prelude(out: &mut String, abi: &CudaKernelAbi) {
     for line in &abi.kernel_prelude {
         out.push_str(&format!("    {line}\n"));
     }
-    if let Some(element_count) = &abi.launch.element_count {
-        out.push_str(&format!("    uint64_t __elements = {element_count};\n"));
-    }
-    if !abi.kernel_prelude.is_empty() || abi.launch.element_count.is_some() {
+    if !abi.kernel_prelude.is_empty() {
         out.push('\n');
     }
 }

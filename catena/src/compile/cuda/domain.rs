@@ -239,9 +239,10 @@ impl NamespaceLowering for GpuPrimitives {
             let [global, view, value] = primitive.inputs.as_slice() else {
                 return None;
             };
+            let size = abi.global_size(global);
             let output = primitive.outputs.first();
             let mut lines = vec![
-                format!("if ({view} < __elements) {{"),
+                format!("if ({view} < {size}) {{"),
                 format!("    {global}[{view}] = {value};"),
                 "}".to_string(),
             ];
@@ -260,9 +261,10 @@ impl NamespaceLowering for GpuPrimitives {
             let [out] = primitive.outputs.as_slice() else {
                 return None;
             };
+            let size = abi.global_size(global);
             return Some(vec![
                 format!("float {out} = 0.0f;"),
-                format!("if ({view} < __elements) {{"),
+                format!("if ({view} < {size}) {{"),
                 format!("    {out} = {global}[{view}];"),
                 "}".to_string(),
             ]);

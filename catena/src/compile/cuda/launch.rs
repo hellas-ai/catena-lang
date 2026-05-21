@@ -12,13 +12,11 @@ use crate::{
 pub(super) fn launch_from_grid_contract(
     grid_shape: &GridShape,
     extent_cuda_names: &HashMap<usize, String>,
-    element_count: Option<String>,
 ) -> Result<CudaLaunch, CudaAbiError> {
     let grid = resolve_grid_launch(grid_shape, extent_cuda_names)?;
     Ok(CudaLaunch {
         block_expr: grid.block.join(", "),
         grid_expr: grid.grid.join(", "),
-        element_count,
     })
 }
 

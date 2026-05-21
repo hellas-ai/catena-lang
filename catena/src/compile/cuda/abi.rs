@@ -61,6 +61,7 @@ pub(super) struct CudaKernelAbi {
     pub(super) dynamic_shared_memory_bytes: Option<String>,
     views: ViewAnalysis,
     cuda_names: HashMap<String, String>,
+    global_sizes: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone)]
@@ -73,7 +74,6 @@ pub(super) struct CudaMacro {
 pub(super) struct CudaLaunch {
     pub(super) block_expr: String,
     pub(super) grid_expr: String,
-    pub(super) element_count: Option<String>,
 }
 
 #[derive(Debug, Error)]
@@ -112,6 +112,8 @@ pub enum CudaAbiError {
     StaticValueNotExtent(String),
     #[error("unsupported CUDA kernel source parameter `{name}` of type `{ty}`")]
     UnsupportedSourceParameter { name: String, ty: String },
+    #[error("gpu.global `{0}` has no associated size, so CUDA cannot guard accesses safely")]
+    MissingGlobalSize(String),
 }
 
 impl CudaKernelAbi {
@@ -152,7 +154,6 @@ impl CudaKernelAbi {
         let launch = launch_from_grid_contract(
             &source_parameter_abi.kernel_interface.grid_shape,
             &source_parameter_abi.kernel_interface.extent_cuda_names,
-            source_parameter_abi.element_count.clone(),
         )?;
 
         // Collect any dynamic shared-memory byte count requested by
@@ -180,6 +181,7 @@ impl CudaKernelAbi {
             dynamic_shared_memory_bytes,
             views,
             cuda_names: source_parameter_abi.names,
+            global_sizes: source_parameter_abi.global_sizes,
         })
     }
 
@@ -196,6 +198,13 @@ impl CudaKernelAbi {
 
     pub(super) fn static_view_rank(&self, view: &str) -> Option<usize> {
         self.views.static_view_rank(view)
+    }
+
+    pub(super) fn global_size(&self, global: &str) -> &str {
+        self.global_sizes
+            .get(global)
+            .unwrap_or_else(|| panic!("CUDA global `{global}` has no registered size"))
+            .as_str()
     }
 }
 
@@ -220,7 +229,7 @@ struct SourceParameterAbi {
     prelude: Vec<String>,
     host_prelude: Vec<String>,
     names: HashMap<String, String>,
-    element_count: Option<String>,
+    global_sizes: HashMap<String, String>,
     shared_layout: SharedMemoryLayout,
     shared_indexing: HashMap<String, SharedIndexing>,
 }
@@ -246,7 +255,7 @@ fn collect_source_parameter_abi(
             prelude: Vec::new(),
             host_prelude: Vec::new(),
             names: HashMap::new(),
-            element_count: None,
+            global_sizes: HashMap::new(),
             shared_layout: SharedMemoryLayout::new(),
             shared_indexing: HashMap::new(),
         },
@@ -366,9 +375,12 @@ impl SourceParameterAbiState {
         self.source_parameter_abi
             .names
             .insert(source_param.name.clone(), binding.device_name.clone());
+        if binding.size_name.is_empty() {
+            return Err(CudaAbiError::MissingGlobalSize(binding.device_name));
+        }
         self.source_parameter_abi
-            .element_count
-            .get_or_insert_with(|| binding.size_name.clone());
+            .global_sizes
+            .insert(binding.device_name.clone(), binding.size_name.clone());
         self.source_parameter_abi
             .device_params
             .extend(binding.device_params);

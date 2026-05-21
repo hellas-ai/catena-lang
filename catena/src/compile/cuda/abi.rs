@@ -62,8 +62,27 @@ pub(super) struct CudaKernelAbi {
     views: ViewAnalysis,
     cuda_names: HashMap<String, String>,
     view_guards: HashMap<String, String>,
+    access_guards: HashMap<(String, String), String>,
+    value_guards: HashMap<String, String>,
     view_ranks: HashMap<String, usize>,
     global_shapes: HashMap<String, Vec<String>>,
+    guard_strategy: GuardStrategy,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum GuardStrategy {
+    /// Kernels without block-wide synchronization can cheaply discard extra
+    /// launch threads once their global view is known to be out of bounds.
+    EarlyReturn,
+    /// Kernels with `__syncthreads()` cannot return from only some threads in
+    /// a block. In that case every thread must continue to the barrier, so
+    /// bounds checks are emitted around individual global-memory operations.
+    ///
+    /// This is more precise and barrier-safe, but it has a real cost: loaded
+    /// values may only be defined under a condition. Later lowering must either
+    /// keep uses under the same condition or prove that an out-of-bounds value
+    /// is never observed. That is why the two guard paths are kept explicit.
+    LocalMemoryAccess,
 }
 
 #[derive(Debug, Clone)]
@@ -188,6 +207,11 @@ impl CudaKernelAbi {
             &mut global_sizes,
             &mut global_shapes,
         )?;
+        let guard_strategy = if program_contains_sync(program) {
+            GuardStrategy::LocalMemoryAccess
+        } else {
+            GuardStrategy::EarlyReturn
+        };
 
         Ok(CudaKernelAbi {
             kernel_params: source_parameter_abi.device_params,
@@ -201,8 +225,11 @@ impl CudaKernelAbi {
             views,
             cuda_names: source_parameter_abi.names,
             view_guards: view_analysis.guards,
+            access_guards: view_analysis.access_guards,
+            value_guards: view_analysis.value_guards,
             view_ranks: view_analysis.ranks,
             global_shapes: source_parameter_abi.global_shapes,
+            guard_strategy,
         })
     }
 
@@ -221,8 +248,27 @@ impl CudaKernelAbi {
         self.views.static_view_rank(view)
     }
 
-    pub(super) fn view_guard(&self, view: &str) -> Option<&str> {
+    pub(super) fn early_return_view_guard(&self, view: &str) -> Option<&str> {
+        if self.guard_strategy != GuardStrategy::EarlyReturn {
+            return None;
+        }
         self.view_guards.get(view).map(String::as_str)
+    }
+
+    pub(super) fn memory_access_guard(&self, global: &str, view: &str) -> Option<&str> {
+        if self.guard_strategy != GuardStrategy::LocalMemoryAccess {
+            return None;
+        }
+        self.access_guards
+            .get(&(global.to_string(), view.to_string()))
+            .map(String::as_str)
+    }
+
+    pub(super) fn value_guard(&self, value: &str) -> Option<&str> {
+        if self.guard_strategy != GuardStrategy::LocalMemoryAccess {
+            return None;
+        }
+        self.value_guards.get(value).map(String::as_str)
     }
 
     pub(super) fn global_access(&self, global: &str, view: &str) -> String {
@@ -273,6 +319,31 @@ fn stmts_use_tiled_view(stmts: &[Stmt]) -> bool {
     })
 }
 
+fn program_contains_sync(program: &StructuredProgram) -> bool {
+    stmts_contain_sync(&program.body)
+}
+
+fn stmts_contain_sync(stmts: &[Stmt]) -> bool {
+    stmts.iter().any(|stmt| match stmt {
+        Stmt::Block { body, .. } | Stmt::Loop { body, .. } | Stmt::For { body, .. } => {
+            stmts_contain_sync(body)
+        }
+        Stmt::If {
+            then_body,
+            else_body,
+            ..
+        } => stmts_contain_sync(then_body) || stmts_contain_sync(else_body),
+        Stmt::Switch { cases, .. } => cases.iter().any(|case| stmts_contain_sync(case)),
+        Stmt::Barrier => true,
+        Stmt::Primitive(primitive) => primitive.name == "gpu.sync",
+        Stmt::Break(_)
+        | Stmt::Continue(_)
+        | Stmt::Return
+        | Stmt::Assign { .. }
+        | Stmt::Comment(_) => false,
+    })
+}
+
 fn collect_view_guards(
     program: &StructuredProgram,
     names: &HashMap<String, String>,
@@ -281,6 +352,8 @@ fn collect_view_guards(
 ) -> Result<CudaViewGuardAnalysis, CudaAbiError> {
     let mut defined_views = HashSet::new();
     let mut guard_conditions = HashMap::new();
+    let mut access_guards = HashMap::new();
+    let mut value_guards = HashMap::new();
     let mut view_ranks = HashMap::new();
     collect_view_guard_inputs(
         &program.body,
@@ -289,6 +362,8 @@ fn collect_view_guards(
         global_shapes,
         &mut defined_views,
         &mut guard_conditions,
+        &mut access_guards,
+        &mut value_guards,
         &mut view_ranks,
     )?;
 
@@ -305,12 +380,16 @@ fn collect_view_guards(
     }
     Ok(CudaViewGuardAnalysis {
         guards,
+        access_guards,
+        value_guards,
         ranks: view_ranks,
     })
 }
 
 struct CudaViewGuardAnalysis {
     guards: HashMap<String, String>,
+    access_guards: HashMap<(String, String), String>,
+    value_guards: HashMap<String, String>,
     ranks: HashMap<String, usize>,
 }
 
@@ -321,6 +400,8 @@ fn collect_view_guard_inputs(
     global_shapes: &mut HashMap<String, Vec<String>>,
     defined_views: &mut HashSet<String>,
     guard_conditions: &mut HashMap<String, Vec<String>>,
+    access_guards: &mut HashMap<(String, String), String>,
+    value_guards: &mut HashMap<String, String>,
     view_ranks: &mut HashMap<String, usize>,
 ) -> Result<(), CudaAbiError> {
     for stmt in stmts {
@@ -333,6 +414,8 @@ fn collect_view_guard_inputs(
                     global_shapes,
                     defined_views,
                     guard_conditions,
+                    access_guards,
+                    value_guards,
                     view_ranks,
                 )?;
             }
@@ -348,6 +431,8 @@ fn collect_view_guard_inputs(
                     global_shapes,
                     defined_views,
                     guard_conditions,
+                    access_guards,
+                    value_guards,
                     view_ranks,
                 )?;
                 collect_view_guard_inputs(
@@ -357,6 +442,8 @@ fn collect_view_guard_inputs(
                     global_shapes,
                     defined_views,
                     guard_conditions,
+                    access_guards,
+                    value_guards,
                     view_ranks,
                 )?;
             }
@@ -369,6 +456,8 @@ fn collect_view_guard_inputs(
                         global_shapes,
                         defined_views,
                         guard_conditions,
+                        access_guards,
+                        value_guards,
                         view_ranks,
                     )?;
                 }
@@ -381,6 +470,8 @@ fn collect_view_guard_inputs(
                     global_shapes,
                     defined_views,
                     guard_conditions,
+                    access_guards,
+                    value_guards,
                     view_ranks,
                 )?;
             }
@@ -402,6 +493,8 @@ fn collect_primitive_view_guard_inputs(
     global_shapes: &mut HashMap<String, Vec<String>>,
     defined_views: &mut HashSet<String>,
     guard_conditions: &mut HashMap<String, Vec<String>>,
+    access_guards: &mut HashMap<(String, String), String>,
+    value_guards: &mut HashMap<String, String>,
     view_ranks: &mut HashMap<String, usize>,
 ) -> Result<(), CudaAbiError> {
     if primitive.name == "gpu.view.group-by-tile" {
@@ -463,10 +556,11 @@ fn collect_primitive_view_guard_inputs(
         }
         _ => format!("{view} < {size}"),
     };
-    let conditions = guard_conditions.entry(view).or_default();
+    let conditions = guard_conditions.entry(view.clone()).or_default();
     if !conditions.contains(&condition) {
-        conditions.push(condition);
+        conditions.push(condition.clone());
     }
+    access_guards.insert((global.clone(), view.clone()), condition.clone());
 
     if primitive.name == "gpu.global.store"
         && let Some(output) = primitive.outputs.first()
@@ -476,6 +570,12 @@ fn collect_primitive_view_guard_inputs(
         if let Some(shape) = global_shapes.get(&global).cloned() {
             global_shapes.insert(output, shape);
         }
+    }
+
+    if primitive.name == "gpu.global.load"
+        && let Some(output) = primitive.outputs.first()
+    {
+        value_guards.insert(rename_with(names, output), condition);
     }
 
     Ok(())

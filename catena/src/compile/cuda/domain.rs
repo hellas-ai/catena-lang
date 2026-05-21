@@ -311,7 +311,16 @@ impl NamespaceLowering for GpuPrimitives {
                 return None;
             };
             let output = primitive.outputs.first();
-            let mut lines = vec![format!("{} = {value};", abi.global_access(global, view))];
+            let store = format!("{} = {value};", abi.global_access(global, view));
+            let mut lines = if let Some(guard) = abi.memory_access_guard(global, view) {
+                vec![
+                    format!("if ({guard}) {{"),
+                    format!("    {store}"),
+                    "}".to_string(),
+                ]
+            } else {
+                vec![store]
+            };
             if let Some(output) = output
                 && output != global
             {
@@ -327,10 +336,16 @@ impl NamespaceLowering for GpuPrimitives {
             let [out] = primitive.outputs.as_slice() else {
                 return None;
             };
-            return Some(vec![format!(
-                "float {out} = {};",
-                abi.global_access(global, view)
-            )]);
+            let access = abi.global_access(global, view);
+            if let Some(guard) = abi.memory_access_guard(global, view) {
+                return Some(vec![
+                    format!("float {out};"),
+                    format!("if ({guard}) {{"),
+                    format!("    {out} = {access};"),
+                    "}".to_string(),
+                ]);
+            }
+            return Some(vec![format!("float {out} = {access};")]);
         }
 
         if local.matches(&["shared", "load"]) {
@@ -351,13 +366,77 @@ impl NamespaceLowering for GpuPrimitives {
                 return None;
             };
             let output = primitive.outputs.first();
-            let mut lines = vec![format!("{} = {value};", abi.shared_access(shared, view))];
+            let store = format!("{} = {value};", abi.shared_access(shared, view));
+            let mut lines = if let Some(guard) = abi.value_guard(value) {
+                vec![
+                    format!("if ({guard}) {{"),
+                    format!("    {store}"),
+                    "}".to_string(),
+                ]
+            } else {
+                vec![store]
+            };
             if let Some(output) = output
                 && output != shared
             {
                 lines.push(format!("auto {output} = {shared};"));
             }
             return Some(lines);
+        }
+
+        if local.matches(&["sync"]) {
+            let [input] = primitive.inputs.as_slice() else {
+                return None;
+            };
+            let [output] = primitive.outputs.as_slice() else {
+                return None;
+            };
+            return Some(vec![
+                "__syncthreads();".to_string(),
+                format!("auto {output} = {input};"),
+            ]);
+        }
+
+        if local.matches(&["pool1d", "sum-window"]) {
+            let [
+                global_view,
+                local_view,
+                input_size,
+                thread_count,
+                window_radius,
+                scratch,
+                input,
+            ] = primitive.inputs.as_slice()
+            else {
+                return None;
+            };
+            let [out] = primitive.outputs.as_slice() else {
+                return None;
+            };
+            return Some(vec![
+                format!("float {out} = 0.0f;"),
+                format!("if ({global_view} < {input_size}) {{"),
+                format!(
+                    "    for (int64_t pool_offset = -(int64_t){window_radius}; pool_offset <= (int64_t){window_radius}; ++pool_offset) {{"
+                ),
+                format!("        int64_t pool_neighbor = (int64_t){global_view} + pool_offset;"),
+                format!(
+                    "        if (pool_neighbor >= 0 && pool_neighbor < (int64_t){input_size}) {{"
+                ),
+                format!(
+                    "            int64_t pool_local_neighbor = (int64_t){local_view} + pool_offset;"
+                ),
+                format!(
+                    "            if (pool_local_neighbor >= 0 && pool_local_neighbor < (int64_t){thread_count}) {{"
+                ),
+                format!("                {out} += {scratch}[pool_local_neighbor];"),
+                "            } else {".to_string(),
+                format!("                {out} += {input}[pool_neighbor];"),
+                "            }".to_string(),
+                "        }".to_string(),
+                "    }".to_string(),
+                "}".to_string(),
+            ]);
         }
 
         None
@@ -373,7 +452,7 @@ fn view_coordinate_lines(view: &str, thread: &str) -> Vec<String> {
 }
 
 fn view_guard_lines(abi: &CudaKernelAbi, view: &str) -> Vec<String> {
-    let Some(guard) = abi.view_guard(view) else {
+    let Some(guard) = abi.early_return_view_guard(view) else {
         return Vec::new();
     };
     vec![

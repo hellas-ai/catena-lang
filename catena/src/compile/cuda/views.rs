@@ -222,4 +222,9 @@ fn collect_primitive_extents_required_by_device_code(
             names.insert(extent.clone());
         }
     }
+    if primitive.name == "gpu.pool1d.sum-window" {
+        for extent in primitive.inputs.iter().skip(2).take(3) {
+            names.insert(extent.clone());
+        }
+    }
 }

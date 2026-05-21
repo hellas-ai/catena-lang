@@ -64,4 +64,20 @@
   (arr gpu.shared.store :
     {([tile] val) (gpu.view val) (f32 val)} ->
     ([tile . tile] val))
+
+  (arr gpu.sync :
+    ([x] val) ->
+    ([x] val))
+
+  (arr gpu.pool1d.sum-window :
+    {
+      (gpu.view val)
+      (gpu.view val)
+      (([input_size] extent) val)
+      (([thread_count] extent) val)
+      (([window_radius] extent) val)
+      ([scratch] val)
+      ([input] val)
+    } ->
+    ([input_size thread_count window_radius scratch input.] (f32 val)))
 })

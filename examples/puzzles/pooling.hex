@@ -1,0 +1,35 @@
+#
+# Sum-pooling over a 1D array using shared memory.
+# window_radius is provided through the launcher/CLI and gives a window of
+# [global_index - window_radius, global_index + window_radius].
+#
+
+(def data user.f32.pool1d-sum :
+    {
+      (([.element_count] extent) val)
+      (([.thread_count] extent) val)
+      (([.window_radius] extent) val)
+      (({(({[element_count] [thread_count]} nat.ceil-div) 1d) ([thread_count] 1d)} gpu.grid) val)
+      (({f32 ([thread_count] 1d)} gpu.shared) val)
+      (({f32 ([element_count] 1d)} gpu.global) val)
+      (({f32 ([element_count] 1d)} gpu.global) val)
+    } ->
+    {
+      [element_count thread_count window_radius.]
+      (({f32 ([thread_count] 1d)} gpu.shared) val)
+      (({f32 ([element_count] 1d)} gpu.global) val)
+      (({f32 ([element_count] 1d)} gpu.global) val)
+    }
+    = {[element_count thread_count window_radius grid scratch input output.]
+      ([.grid] gpu.grid.schedule [block thread.])
+      ([.block thread thread_count] gpu.view.group [global_view.])
+      ([.thread] gpu.view.element [local_view.])
+      ([.input global_view] gpu.global.load [input_value.])
+      ([.scratch local_view input_value] gpu.shared.store [scratch_loaded.])
+      ([.scratch_loaded] gpu.sync [scratch_synced.])
+      ([.global_view local_view element_count thread_count window_radius scratch_synced input]
+        gpu.pool1d.sum-window
+        [pooled.])
+      ([.output global_view pooled] gpu.global.store [output_pooled.])
+      [.scratch_synced input output_pooled]}
+)

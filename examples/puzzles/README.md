@@ -13,3 +13,4 @@ Inspirations
 - generated code has a lot of `auto output_summed = output`. The reason is that the hypergraph representation is basically SSA, that is, each assignment creates a new variable. In CUDA code we should identify wires that represent the same variable and remove those expressions.
 
 * Should we allocate global memory in launcher? Now it looks quite unsafe since we compute the size in the launcher, but we don't allocate the memory.
+* We add guards to ensure that indices are not out of bound. This could happen if launches have extra threads. In general, threads/blocks are configured at run time. I don't know if we can be smarter and detect unsafety at compile time.

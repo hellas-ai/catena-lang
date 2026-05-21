@@ -218,6 +218,7 @@ impl NamespaceLowering for GpuPrimitives {
             if abi.static_view_rank(out).is_some() {
                 lines.extend(view_coordinate_lines(out, thread));
             }
+            lines.extend(view_guard_lines(abi, out));
             return Some(lines);
         }
 
@@ -232,6 +233,7 @@ impl NamespaceLowering for GpuPrimitives {
             if abi.static_view_rank(out).is_some() {
                 lines.extend(view_coordinate_lines(out, thread));
             }
+            lines.extend(view_guard_lines(abi, out));
             return Some(lines);
         }
 
@@ -239,13 +241,8 @@ impl NamespaceLowering for GpuPrimitives {
             let [global, view, value] = primitive.inputs.as_slice() else {
                 return None;
             };
-            let size = abi.global_size(global);
             let output = primitive.outputs.first();
-            let mut lines = vec![
-                format!("if ({view} < {size}) {{"),
-                format!("    {global}[{view}] = {value};"),
-                "}".to_string(),
-            ];
+            let mut lines = vec![format!("{global}[{view}] = {value};")];
             if let Some(output) = output
                 && output != global
             {
@@ -261,13 +258,7 @@ impl NamespaceLowering for GpuPrimitives {
             let [out] = primitive.outputs.as_slice() else {
                 return None;
             };
-            let size = abi.global_size(global);
-            return Some(vec![
-                format!("float {out} = 0.0f;"),
-                format!("if ({view} < {size}) {{"),
-                format!("    {out} = {global}[{view}];"),
-                "}".to_string(),
-            ]);
+            return Some(vec![format!("float {out} = {global}[{view}];")]);
         }
 
         if local.matches(&["shared", "load"]) {
@@ -306,6 +297,17 @@ fn view_coordinate_lines(view: &str, thread: &str) -> Vec<String> {
         format!("uint64_t {view}_x = {thread}.x;"),
         format!("uint64_t {view}_y = {thread}.y;"),
         format!("uint64_t {view}_z = {thread}.z;"),
+    ]
+}
+
+fn view_guard_lines(abi: &CudaKernelAbi, view: &str) -> Vec<String> {
+    let Some(guard) = abi.view_guard(view) else {
+        return Vec::new();
+    };
+    vec![
+        format!("if (!({guard})) {{"),
+        "    return;".to_string(),
+        "}".to_string(),
     ]
 }
 

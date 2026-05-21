@@ -46,7 +46,7 @@ use crate::{
         },
         program::{Definition, Variable},
     },
-    structured::ir::{Param, StructuredProgram},
+    structured::ir::{Param, Primitive, Stmt, StructuredProgram},
 };
 
 #[derive(Debug, Clone)]
@@ -61,7 +61,7 @@ pub(super) struct CudaKernelAbi {
     pub(super) dynamic_shared_memory_bytes: Option<String>,
     views: ViewAnalysis,
     cuda_names: HashMap<String, String>,
-    global_sizes: HashMap<String, String>,
+    view_guards: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone)]
@@ -114,6 +114,8 @@ pub enum CudaAbiError {
     UnsupportedSourceParameter { name: String, ty: String },
     #[error("gpu.global `{0}` has no associated size, so CUDA cannot guard accesses safely")]
     MissingGlobalSize(String),
+    #[error("gpu.global access uses view `{0}`, but no CUDA view primitive defines it")]
+    MissingGlobalAccessView(String),
 }
 
 impl CudaKernelAbi {
@@ -169,6 +171,9 @@ impl CudaKernelAbi {
             &source_parameter_abi.names,
             source_parameter_abi.shared_indexing.clone(),
         );
+        let mut global_sizes = source_parameter_abi.global_sizes.clone();
+        let view_guards =
+            collect_view_guards(program, &source_parameter_abi.names, &mut global_sizes)?;
 
         Ok(CudaKernelAbi {
             kernel_params: source_parameter_abi.device_params,
@@ -181,7 +186,7 @@ impl CudaKernelAbi {
             dynamic_shared_memory_bytes,
             views,
             cuda_names: source_parameter_abi.names,
-            global_sizes: source_parameter_abi.global_sizes,
+            view_guards,
         })
     }
 
@@ -200,11 +205,8 @@ impl CudaKernelAbi {
         self.views.static_view_rank(view)
     }
 
-    pub(super) fn global_size(&self, global: &str) -> &str {
-        self.global_sizes
-            .get(global)
-            .unwrap_or_else(|| panic!("CUDA global `{global}` has no registered size"))
-            .as_str()
+    pub(super) fn view_guard(&self, view: &str) -> Option<&str> {
+        self.view_guards.get(view).map(String::as_str)
     }
 }
 
@@ -219,6 +221,147 @@ fn source_parameters(definition: &Definition) -> Result<Vec<&Variable>, CudaAbiE
                 .ok_or(CudaAbiError::MissingParamVariable(*id))
         })
         .collect()
+}
+
+fn collect_view_guards(
+    program: &StructuredProgram,
+    names: &HashMap<String, String>,
+    global_sizes: &mut HashMap<String, String>,
+) -> Result<HashMap<String, String>, CudaAbiError> {
+    let mut defined_views = HashSet::new();
+    let mut guard_sizes = HashMap::new();
+    collect_view_guard_inputs(
+        &program.body,
+        names,
+        global_sizes,
+        &mut defined_views,
+        &mut guard_sizes,
+    )?;
+
+    let mut guards = HashMap::new();
+    for (view, sizes) in guard_sizes {
+        if !defined_views.contains(&view) {
+            return Err(CudaAbiError::MissingGlobalAccessView(view));
+        }
+        let predicate = sizes
+            .into_iter()
+            .map(|size| format!("{view} < {size}"))
+            .collect::<Vec<_>>()
+            .join(" && ");
+        guards.insert(view, predicate);
+    }
+    Ok(guards)
+}
+
+fn collect_view_guard_inputs(
+    stmts: &[Stmt],
+    names: &HashMap<String, String>,
+    global_sizes: &mut HashMap<String, String>,
+    defined_views: &mut HashSet<String>,
+    guard_sizes: &mut HashMap<String, Vec<String>>,
+) -> Result<(), CudaAbiError> {
+    for stmt in stmts {
+        match stmt {
+            Stmt::Block { body, .. } | Stmt::Loop { body, .. } | Stmt::For { body, .. } => {
+                collect_view_guard_inputs(body, names, global_sizes, defined_views, guard_sizes)?;
+            }
+            Stmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                collect_view_guard_inputs(
+                    then_body,
+                    names,
+                    global_sizes,
+                    defined_views,
+                    guard_sizes,
+                )?;
+                collect_view_guard_inputs(
+                    else_body,
+                    names,
+                    global_sizes,
+                    defined_views,
+                    guard_sizes,
+                )?;
+            }
+            Stmt::Switch { cases, .. } => {
+                for case in cases {
+                    collect_view_guard_inputs(
+                        case,
+                        names,
+                        global_sizes,
+                        defined_views,
+                        guard_sizes,
+                    )?;
+                }
+            }
+            Stmt::Primitive(primitive) => {
+                collect_primitive_view_guard_inputs(
+                    primitive,
+                    names,
+                    global_sizes,
+                    defined_views,
+                    guard_sizes,
+                )?;
+            }
+            Stmt::Break(_)
+            | Stmt::Continue(_)
+            | Stmt::Return
+            | Stmt::Barrier
+            | Stmt::Assign { .. }
+            | Stmt::Comment(_) => {}
+        }
+    }
+    Ok(())
+}
+
+fn collect_primitive_view_guard_inputs(
+    primitive: &Primitive,
+    names: &HashMap<String, String>,
+    global_sizes: &mut HashMap<String, String>,
+    defined_views: &mut HashSet<String>,
+    guard_sizes: &mut HashMap<String, Vec<String>>,
+) -> Result<(), CudaAbiError> {
+    if primitive.name == "gpu.view.group" || primitive.name == "gpu.view.element" {
+        if let Some(view) = primitive.outputs.first() {
+            defined_views.insert(rename_with(names, view));
+        }
+        return Ok(());
+    }
+
+    if primitive.name != "gpu.global.load" && primitive.name != "gpu.global.store" {
+        return Ok(());
+    }
+
+    let Some(global) = primitive.inputs.first() else {
+        return Ok(());
+    };
+    let Some(view) = primitive.inputs.get(1) else {
+        return Ok(());
+    };
+    let global = rename_with(names, global);
+    let view = rename_with(names, view);
+    let Some(size) = global_sizes.get(&global).cloned() else {
+        return Err(CudaAbiError::MissingGlobalSize(global));
+    };
+
+    let sizes = guard_sizes.entry(view).or_default();
+    if !sizes.contains(&size) {
+        sizes.push(size.clone());
+    }
+
+    if primitive.name == "gpu.global.store"
+        && let Some(output) = primitive.outputs.first()
+    {
+        global_sizes.insert(rename_with(names, output), size);
+    }
+
+    Ok(())
+}
+
+fn rename_with(names: &HashMap<String, String>, name: &str) -> String {
+    names.get(name).cloned().unwrap_or_else(|| name.to_string())
 }
 
 struct SourceParameterAbi {

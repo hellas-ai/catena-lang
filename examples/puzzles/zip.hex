@@ -1,0 +1,28 @@
+#
+# Zip puzzle: add each element of vector a to vector b.
+#
+
+(def data user.f32.zip-add :
+    {
+      (([.block_count] extent) val)
+      (([.thread_count] extent) val)
+      (({([block_count] 1d) ([thread_count] 1d)} gpu.grid) val)
+      (({f32 (({[block_count] [thread_count]} nat.mul) 1d)} gpu.global) val)
+      (({f32 (({[block_count] [thread_count]} nat.mul) 1d)} gpu.global) val)
+      (({f32 (({[block_count] [thread_count]} nat.mul) 1d)} gpu.global) val)
+    } ->
+    {
+      [block_count thread_count.]
+      (({f32 (({[block_count] [thread_count]} nat.mul) 1d)} gpu.global) val)
+      (({f32 (({[block_count] [thread_count]} nat.mul) 1d)} gpu.global) val)
+      (({f32 (({[block_count] [thread_count]} nat.mul) 1d)} gpu.global) val)
+    }
+    = {[block_count thread_count grid a b output.]
+      ([.grid] gpu.grid.schedule [block thread.])
+      ([.block thread thread_count] gpu.view.group [view.])
+      ([.a view] gpu.global.load [a_value.])
+      ([.b view] gpu.global.load [b_value.])
+      ([.a_value b_value] f32.add [sum.])
+      ([.output view sum] gpu.global.store [output_summed.])
+      [.a b output_summed]}
+)

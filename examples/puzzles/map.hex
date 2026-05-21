@@ -1,0 +1,30 @@
+#
+# Map puzzle: add 10.0 to each element of vector a.
+#
+
+(def data user.f32.map-add-ten :
+    {
+      (([.block_count] extent) val)
+      (([.thread_count] extent) val)
+      (({([block_count] 1d) ([thread_count] 1d)} gpu.grid) val)
+      (({f32 (({[block_count] [thread_count]} nat.mul) 1d)} gpu.global) val)
+      (({f32 (({[block_count] [thread_count]} nat.mul) 1d)} gpu.global) val)
+    } ->
+    {
+      [block_count thread_count.]
+      (({f32 (({[block_count] [thread_count]} nat.mul) 1d)} gpu.global) val)
+      (({f32 (({[block_count] [thread_count]} nat.mul) 1d)} gpu.global) val)
+    }
+    = {[block_count thread_count grid a output.]
+      ([.grid] gpu.grid.schedule [block thread.])
+      ([.block thread thread_count] gpu.view.group [view.])
+      ([.a view] gpu.global.load [a_value.])
+      ([.] f32.one [one.])
+      ([.one one] f32.add [two.])
+      ([.two two] f32.add [four.])
+      ([.four four] f32.add [eight.])
+      ([.eight two] f32.add [ten.])
+      ([.a_value ten] f32.add [mapped.])
+      ([.output view mapped] gpu.global.store [output_mapped.])
+      [.a output_mapped]}
+)

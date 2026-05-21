@@ -253,6 +253,21 @@ impl NamespaceLowering for GpuPrimitives {
             return Some(lines);
         }
 
+        if local.matches(&["global", "load"]) {
+            let [global, view] = primitive.inputs.as_slice() else {
+                return None;
+            };
+            let [out] = primitive.outputs.as_slice() else {
+                return None;
+            };
+            return Some(vec![
+                format!("float {out} = 0.0f;"),
+                format!("if ({view} < __elements) {{"),
+                format!("    {out} = {global}[{view}];"),
+                "}".to_string(),
+            ]);
+        }
+
         if local.matches(&["shared", "load"]) {
             let [shared, view] = primitive.inputs.as_slice() else {
                 return None;

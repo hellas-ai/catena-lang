@@ -30,6 +30,10 @@
     {([matrix] val) (gpu.view val) (f32 val)} ->
     ([matrix . matrix] val))
 
+  (arr gpu.global.load :
+    {([matrix] val) (gpu.view val)} ->
+    ([matrix.] (f32 val)))
+
   (arr gpu.shared.load :
     {([tile] val) (gpu.view val)} ->
     ([tile.] (f32 val)))

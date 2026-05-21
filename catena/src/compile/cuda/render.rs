@@ -17,7 +17,7 @@ pub(super) fn render_cuda(
     render_macros(&mut out, abi);
     out.push_str(&format!("__global__ void {}(", program.entry.name));
     out.push_str(
-        &abi.device_params
+        &abi.kernel_params
             .iter()
             .map(|p| format!("{} {}", p.ty, p.name))
             .collect::<Vec<_>>()
@@ -43,13 +43,13 @@ fn render_macros(out: &mut String, abi: &CudaKernelAbi) {
 }
 
 fn render_prelude(out: &mut String, abi: &CudaKernelAbi) {
-    for line in &abi.prelude {
+    for line in &abi.kernel_prelude {
         out.push_str(&format!("    {line}\n"));
     }
     if let Some(element_count) = &abi.launch.element_count {
         out.push_str(&format!("    uint64_t __elements = {element_count};\n"));
     }
-    if !abi.prelude.is_empty() || abi.launch.element_count.is_some() {
+    if !abi.kernel_prelude.is_empty() || abi.launch.element_count.is_some() {
         out.push('\n');
     }
 }
@@ -57,21 +57,21 @@ fn render_prelude(out: &mut String, abi: &CudaKernelAbi) {
 fn render_launch_helper(out: &mut String, program: &StructuredProgram, abi: &CudaKernelAbi) {
     out.push_str(&format!("void launch_{}(", program.entry.name));
     out.push_str(
-        &abi.host_params
+        &abi.launcher_params
             .iter()
             .map(|p| format!("{} {}", p.ty, p.name))
             .collect::<Vec<_>>()
             .join(", "),
     );
     out.push_str(") {\n");
-    for line in &abi.host_prelude {
+    for line in &abi.launcher_prelude {
         out.push_str(&format!("    {line}\n"));
     }
-    if !abi.host_prelude.is_empty() {
+    if !abi.launcher_prelude.is_empty() {
         out.push('\n');
     }
     render_launch_config(out, abi);
-    let launch_args = if let Some(shared_bytes) = &abi.dynamic_shared_bytes {
+    let launch_args = if let Some(shared_bytes) = &abi.dynamic_shared_memory_bytes {
         format!("grid, block, {shared_bytes}")
     } else {
         "grid, block".to_string()
@@ -79,7 +79,7 @@ fn render_launch_helper(out: &mut String, program: &StructuredProgram, abi: &Cud
     out.push_str(&format!(
         "    {}<<<{launch_args}>>>({});\n",
         program.entry.name,
-        abi.device_call_args
+        abi.kernel_arguments
             .iter()
             .map(String::as_str)
             .collect::<Vec<_>>()

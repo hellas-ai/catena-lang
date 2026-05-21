@@ -7,6 +7,7 @@ mod abi;
 mod boundary;
 mod domain;
 mod launch;
+mod parameters;
 mod render;
 mod resources;
 mod shape;

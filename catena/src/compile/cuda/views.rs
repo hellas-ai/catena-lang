@@ -217,4 +217,9 @@ fn collect_primitive_extents_required_by_device_code(
             names.insert(extent.clone());
         }
     }
+    if primitive.name == "gpu.view.group-by-shape" {
+        for extent in primitive.inputs.iter().skip(2).take(2) {
+            names.insert(extent.clone());
+        }
+    }
 }

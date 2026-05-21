@@ -26,6 +26,25 @@
     {(gpu.block val) (gpu.thread val) (([tile_rows] extent) val) (([tile_cols] extent) val)} ->
     ([tile_rows tile_cols .] (gpu.view val)))
 
+  # TODO: consolidate group-by-tile and group-by-shape into one generic
+  # grouping/index-composition primitive once view ranks/shapes are explicit.
+
+  (arr gpu.view.row :
+    (gpu.view val) ->
+    (gpu.view val))
+
+  (arr gpu.view.col :
+    (gpu.view val) ->
+    (gpu.view val))
+
+  (arr gpu.view.zero :
+    [] ->
+    (gpu.view val))
+
+  (arr gpu.view.group-by-shape :
+    {(gpu.view val) (gpu.view val) (([rows] extent) val) (([cols] extent) val)} ->
+    ([rows cols .] (gpu.view val)))
+
   (arr gpu.view.element :
     (gpu.thread val) ->
     (gpu.view val))

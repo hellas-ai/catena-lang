@@ -1,0 +1,75 @@
+#
+# Broadcast puzzle: add a row vector and a column vector into a 2D output.
+#
+
+(def data user.f32.broadcast-add :
+    {
+      (([.rows] extent) val)
+      (([.cols] extent) val)
+      (([.tile_rows] extent) val)
+      (([.tile_cols] extent) val)
+      (({
+          ({
+            (({[cols] [tile_cols]} nat.ceil-div) [grid_cols])
+            (({[rows] [tile_rows]} nat.ceil-div) [grid_rows])
+          } 2d)
+          ({[tile_cols] [tile_rows]} 2d)
+        } gpu.grid) val)
+      (({f32 ([rows] 1d)} gpu.global) val)
+      (({f32 ([cols] 1d)} gpu.global) val)
+      (({f32 ({[rows] [cols]} 2d)} gpu.global) val)
+    } ->
+    {
+      [rows cols tile_rows tile_cols grid_cols grid_rows.]
+      (({f32 ([rows] 1d)} gpu.global) val)
+      (({f32 ([cols] 1d)} gpu.global) val)
+      (({f32 ({[rows] [cols]} 2d)} gpu.global) val)
+    }
+    = {[rows cols tile_rows tile_cols grid a b output.]
+      ([.grid] gpu.grid.schedule [block thread.])
+      ([.block thread tile_rows tile_cols] gpu.view.group-by-tile [ij.])
+      ([.ij] gpu.view.row [i.])
+      ([.ij] gpu.view.col [j.])
+      ([.a i] gpu.global.load [a_value.])
+      ([.b j] gpu.global.load [b_value.])
+      ([.a_value b_value] f32.add [sum.])
+      ([.output ij sum] gpu.global.store [output_summed.])
+      [.a b output_summed]}
+)
+
+#
+# Variant where inputs are represented as [1, tile_cols] and [tile_rows, 1].
+# Use one_row = 1 and one_col = 1.
+#
+
+(def data user.f32.broadcast-add-matrix-inputs :
+    {
+      (([.one_row] extent) val)
+      (([.one_col] extent) val)
+      (([.tile_rows] extent) val)
+      (([.tile_cols] extent) val)
+      (({({[one_col] [one_row]} 2d) ({[tile_cols] [tile_rows]} 2d)} gpu.grid) val)
+      (({f32 ({[one_row] [tile_cols]} 2d)} gpu.global) val)
+      (({f32 ({[tile_rows] [one_col]} 2d)} gpu.global) val)
+      (({f32 ({[tile_rows] [tile_cols]} 2d)} gpu.global) val)
+    } ->
+    {
+      [one_row one_col tile_rows tile_cols.]
+      (({f32 ({[one_row] [tile_cols]} 2d)} gpu.global) val)
+      (({f32 ({[tile_rows] [one_col]} 2d)} gpu.global) val)
+      (({f32 ({[tile_rows] [tile_cols]} 2d)} gpu.global) val)
+    }
+    = {[one_row one_col tile_rows tile_cols grid a b output.]
+      ([.grid] gpu.grid.schedule [block thread.])
+      ([.block thread tile_rows tile_cols] gpu.view.group-by-tile [ij.])
+      ([.ij] gpu.view.row [i.])
+      ([.ij] gpu.view.col [j.])
+      ([.] gpu.view.zero [zero.])
+      ([.zero j one_row tile_cols] gpu.view.group-by-shape [a_view.])
+      ([.i zero tile_rows one_col] gpu.view.group-by-shape [b_view.])
+      ([.a a_view] gpu.global.load [a_value.])
+      ([.b b_view] gpu.global.load [b_value.])
+      ([.a_value b_value] f32.add [sum.])
+      ([.output ij sum] gpu.global.store [output_summed.])
+      [.a b output_summed]}
+)

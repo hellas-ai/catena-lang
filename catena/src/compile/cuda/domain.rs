@@ -255,6 +255,57 @@ impl NamespaceLowering for GpuPrimitives {
             return Some(lines);
         }
 
+        if local.matches(&["view", "row"]) {
+            let [view] = primitive.inputs.as_slice() else {
+                return None;
+            };
+            let [out] = primitive.outputs.as_slice() else {
+                return None;
+            };
+            let mut lines = vec![format!("uint64_t {out} = {view}_row;")];
+            lines.extend(view_guard_lines(abi, out));
+            return Some(lines);
+        }
+
+        if local.matches(&["view", "col"]) {
+            let [view] = primitive.inputs.as_slice() else {
+                return None;
+            };
+            let [out] = primitive.outputs.as_slice() else {
+                return None;
+            };
+            let mut lines = vec![format!("uint64_t {out} = {view}_col;")];
+            lines.extend(view_guard_lines(abi, out));
+            return Some(lines);
+        }
+
+        if local.matches(&["view", "zero"]) {
+            let [] = primitive.inputs.as_slice() else {
+                return None;
+            };
+            let [out] = primitive.outputs.as_slice() else {
+                return None;
+            };
+            let mut lines = vec![format!("uint64_t {out} = 0;")];
+            lines.extend(view_guard_lines(abi, out));
+            return Some(lines);
+        }
+
+        if local.matches(&["view", "group-by-shape"]) {
+            let [row, col, _rows, _cols] = primitive.inputs.as_slice() else {
+                return None;
+            };
+            let [out] = primitive.outputs.as_slice() else {
+                return None;
+            };
+            let mut lines = vec![
+                format!("uint64_t {out}_row = {row};"),
+                format!("uint64_t {out}_col = {col};"),
+            ];
+            lines.extend(view_guard_lines(abi, out));
+            return Some(lines);
+        }
+
         if local.matches(&["global", "store"]) {
             let [global, view, value] = primitive.inputs.as_slice() else {
                 return None;

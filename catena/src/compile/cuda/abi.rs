@@ -413,7 +413,28 @@ fn collect_primitive_view_guard_inputs(
         return Ok(());
     }
 
-    if primitive.name == "gpu.view.group" || primitive.name == "gpu.view.element" {
+    if primitive.name == "gpu.view.row" || primitive.name == "gpu.view.col" {
+        if let Some(view) = primitive.outputs.first() {
+            let view = rename_with(names, view);
+            defined_views.insert(view.clone());
+            view_ranks.insert(view, 1);
+        }
+        return Ok(());
+    }
+
+    if primitive.name == "gpu.view.group-by-shape" {
+        if let Some(view) = primitive.outputs.first() {
+            let view = rename_with(names, view);
+            defined_views.insert(view.clone());
+            view_ranks.insert(view, 2);
+        }
+        return Ok(());
+    }
+
+    if primitive.name == "gpu.view.group"
+        || primitive.name == "gpu.view.element"
+        || primitive.name == "gpu.view.zero"
+    {
         if let Some(view) = primitive.outputs.first() {
             defined_views.insert(rename_with(names, view));
         }

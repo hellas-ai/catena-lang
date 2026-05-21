@@ -1,5 +1,8 @@
 use super::ir::Stmt;
-use crate::lang::{Arr, Obj};
+use crate::{
+    lang::{Arr, Obj},
+    scope::ScopeError,
+};
 use open_hypergraphs::lax::{NodeId, OpenHypergraph};
 use std::collections::{HashMap, HashSet};
 
@@ -128,6 +131,8 @@ pub enum StructuredError {
     InvalidLayer { parent: GraphKind, child: GraphKind },
     #[error("control node {node} has {successors} entry successors; only one entry is supported")]
     UnsupportedEntry { node: String, successors: usize },
+    #[error("failed to infer structured dataflow scopes: {0}")]
+    Scope(#[from] ScopeError),
 }
 
 #[derive(Debug, Clone)]
@@ -340,6 +345,16 @@ fn dataflow_statements(
     context: &BuildContext,
     semantics: &impl ArrowSemantics,
 ) -> Result<Vec<Stmt>, StructuredError> {
+    if context
+        .graph()
+        .hypergraph
+        .edges
+        .iter()
+        .any(|op| op.to_string() == "reduce")
+    {
+        return scoped_dataflow_statements(context, semantics);
+    }
+
     let f = context.graph();
     let mut available = f.sources.iter().copied().collect::<HashSet<_>>();
     let mut remaining = (0..f.hypergraph.edges.len()).collect::<Vec<_>>();
@@ -395,6 +410,281 @@ fn dataflow_statements(
     }
 
     Ok(statements)
+}
+
+fn scoped_dataflow_statements(
+    context: &BuildContext,
+    semantics: &impl ArrowSemantics,
+) -> Result<Vec<Stmt>, StructuredError> {
+    reduce_dataflow_statements(context, semantics)
+}
+
+fn reduce_dataflow_statements(
+    context: &BuildContext,
+    semantics: &impl ArrowSemantics,
+) -> Result<Vec<Stmt>, StructuredError> {
+    let Some(reduce_index) = context
+        .graph()
+        .hypergraph
+        .edges
+        .iter()
+        .position(|op| op.to_string() == "reduce")
+    else {
+        return dataflow_statements_without_scopes(context, semantics);
+    };
+
+    let body_edges = reduce_body_edges(context, reduce_index);
+    let mut statements = Vec::new();
+    for edge_index in 0..context.graph().hypergraph.edges.len() {
+        let op = context.graph().hypergraph.edges[edge_index].to_string();
+        if is_scoped_reduce_helper(&op) || body_edges.contains(&edge_index) {
+            continue;
+        }
+        if edge_index == reduce_index {
+            statements.extend(reduce_statements_from_body(
+                context,
+                semantics,
+                reduce_index,
+                &body_edges,
+            )?);
+        } else {
+            statements.extend(statements_for_dataflow_edge(
+                context, semantics, edge_index, &op,
+            )?);
+        }
+    }
+    Ok(statements)
+}
+
+fn dataflow_statements_without_scopes(
+    context: &BuildContext,
+    semantics: &impl ArrowSemantics,
+) -> Result<Vec<Stmt>, StructuredError> {
+    let f = context.graph();
+    let mut available = f.sources.iter().copied().collect::<HashSet<_>>();
+    let mut remaining = (0..f.hypergraph.edges.len()).collect::<Vec<_>>();
+    let mut variables = context.variables.clone();
+    let mut statements = Vec::new();
+
+    while !remaining.is_empty() {
+        let Some(index) = remaining.iter().position(|edge| {
+            f.hypergraph.adjacency[*edge]
+                .sources
+                .iter()
+                .all(|source| available.contains(source))
+        }) else {
+            return Err(StructuredError::DataflowCycle);
+        };
+
+        let edge_index = remaining.remove(index);
+        let op = f.hypergraph.edges[edge_index].to_string();
+        let adjacency = &f.hypergraph.adjacency[edge_index];
+        let arrow = ArrowInstance {
+            id: edge_index,
+            op: op.clone(),
+            inputs: adjacency
+                .sources
+                .iter()
+                .map(|node| variable_for_child_node(&mut variables, &context.prefix, *node))
+                .collect(),
+            outputs: adjacency
+                .targets
+                .iter()
+                .map(|node| variable_for_child_node(&mut variables, &context.prefix, *node))
+                .collect(),
+            branch_arity: 0,
+        };
+
+        if let Some(child) = context.child_for_operation(&op) {
+            statements.extend(statements_for_child_graph(
+                context.kind(),
+                child,
+                &arrow,
+                semantics,
+            )?);
+        } else {
+            statements.push(Stmt::Primitive(super::ir::Primitive {
+                name: op,
+                inputs: arrow.inputs,
+                outputs: arrow.outputs,
+                code: String::new(),
+            }));
+        }
+        available.extend(adjacency.targets.iter().copied());
+    }
+
+    Ok(statements)
+}
+
+fn reduce_body_edges(context: &BuildContext, reduce_index: usize) -> HashSet<usize> {
+    let reduce_inputs = edge_input_variables(context, reduce_index);
+    let mut loop_values = HashSet::new();
+    for bound in reduce_inputs.iter().skip(2).take(2) {
+        if let Some(value) = value_for_bound(context, bound) {
+            loop_values.insert(value);
+        }
+    }
+
+    let mut body_edges = HashSet::new();
+    loop {
+        let mut changed = false;
+        for edge_index in 0..context.graph().hypergraph.edges.len() {
+            let op = context.graph().hypergraph.edges[edge_index].to_string();
+            if edge_index == reduce_index
+                || is_scoped_reduce_helper(&op)
+                || body_edges.contains(&edge_index)
+            {
+                continue;
+            }
+            let inputs = edge_input_variables(context, edge_index);
+            if inputs.iter().any(|input| loop_values.contains(input)) {
+                body_edges.insert(edge_index);
+                for output in edge_output_variables(context, edge_index) {
+                    loop_values.insert(output);
+                }
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    body_edges
+}
+
+fn reduce_statements_from_body(
+    context: &BuildContext,
+    semantics: &impl ArrowSemantics,
+    edge_index: usize,
+    body_edges: &HashSet<usize>,
+) -> Result<Vec<Stmt>, StructuredError> {
+    let inputs = edge_input_variables(context, edge_index);
+    let outputs = edge_output_variables(context, edge_index);
+
+    let extent = inputs.first().cloned().unwrap_or_else(|| "0".to_string());
+    let zero = inputs.get(1).cloned().unwrap_or_else(|| "0".to_string());
+    let accumulator_bound = inputs.get(2).cloned().unwrap_or_default();
+    let index_bound = inputs.get(3).cloned().unwrap_or_default();
+    let combined = inputs.get(4).cloned().unwrap_or_default();
+    let result = outputs
+        .first()
+        .cloned()
+        .unwrap_or_else(|| "reduce_result".to_string());
+
+    let accumulator =
+        value_for_bound(context, &accumulator_bound).unwrap_or_else(|| format!("{result}_acc"));
+    let index = value_for_bound(context, &index_bound).unwrap_or_else(|| format!("{result}_i"));
+
+    let mut body = vec![Stmt::Primitive(super::ir::Primitive {
+        name: "reduce.acc".to_string(),
+        inputs: vec![result.clone()],
+        outputs: vec![accumulator],
+        code: String::new(),
+    })];
+
+    for body_edge in sorted_edge_indices(body_edges) {
+        let op = context.graph().hypergraph.edges[body_edge].to_string();
+        body.extend(statements_for_dataflow_edge(
+            context, semantics, body_edge, &op,
+        )?);
+    }
+    body.push(Stmt::Assign {
+        lhs: result.clone(),
+        rhs: combined,
+    });
+
+    Ok(vec![
+        Stmt::Primitive(super::ir::Primitive {
+            name: "reduce.init".to_string(),
+            inputs: vec![zero],
+            outputs: vec![result.clone()],
+            code: String::new(),
+        }),
+        Stmt::For {
+            label: format!("reduce{edge_index}"),
+            var: index,
+            extent,
+            body,
+        },
+    ])
+}
+
+fn edge_input_variables(context: &BuildContext, edge_index: usize) -> Vec<String> {
+    context.graph().hypergraph.adjacency[edge_index]
+        .sources
+        .iter()
+        .map(|node| context.variable(*node))
+        .collect()
+}
+
+fn edge_output_variables(context: &BuildContext, edge_index: usize) -> Vec<String> {
+    context.graph().hypergraph.adjacency[edge_index]
+        .targets
+        .iter()
+        .map(|node| context.variable(*node))
+        .collect()
+}
+
+fn is_scoped_reduce_helper(op: &str) -> bool {
+    op == "bound.eta" || op == "extent.index-type" || op == "f32.type"
+}
+
+fn sorted_edge_indices(edges: &HashSet<usize>) -> Vec<usize> {
+    let mut edges = edges.iter().copied().collect::<Vec<_>>();
+    edges.sort_unstable();
+    edges
+}
+
+fn statements_for_dataflow_edge(
+    context: &BuildContext,
+    semantics: &impl ArrowSemantics,
+    edge_index: usize,
+    op: &str,
+) -> Result<Vec<Stmt>, StructuredError> {
+    let adjacency = &context.graph().hypergraph.adjacency[edge_index];
+    let arrow = ArrowInstance {
+        id: edge_index,
+        op: op.to_string(),
+        inputs: adjacency
+            .sources
+            .iter()
+            .map(|node| context.variable(*node))
+            .collect(),
+        outputs: adjacency
+            .targets
+            .iter()
+            .map(|node| context.variable(*node))
+            .collect(),
+        branch_arity: 0,
+    };
+
+    if let Some(child) = context.child_for_operation(op) {
+        statements_for_child_graph(context.kind(), child, &arrow, semantics)
+    } else {
+        Ok(vec![Stmt::Primitive(super::ir::Primitive {
+            name: op.to_string(),
+            inputs: arrow.inputs,
+            outputs: arrow.outputs,
+            code: String::new(),
+        })])
+    }
+}
+
+fn value_for_bound(context: &BuildContext, bound: &str) -> Option<String> {
+    for (edge_index, op) in context.graph().hypergraph.edges.iter().enumerate() {
+        if op.to_string() != "bound.eta" {
+            continue;
+        }
+        let targets = context.graph().hypergraph.adjacency[edge_index]
+            .targets
+            .iter()
+            .map(|node| context.variable(*node))
+            .collect::<Vec<_>>();
+        if targets.first().is_some_and(|target| target == bound) {
+            return targets.get(1).cloned();
+        }
+    }
+    None
 }
 
 fn branch_value_for_child_graph(child: &BuildContext, arrow: &ArrowInstance) -> BranchValue {

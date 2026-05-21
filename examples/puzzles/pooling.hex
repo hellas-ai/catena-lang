@@ -27,8 +27,29 @@
       ([.input global_view] gpu.global.load [input_value.])
       ([.scratch local_view input_value] gpu.shared.store [scratch_loaded.])
       ([.scratch_loaded] gpu.sync [scratch_synced.])
-      ([.global_view local_view element_count thread_count window_radius scratch_synced input]
-        gpu.pool1d.sum-window
+      ([.] f32.zero [zero.])
+      ([.] f32.type bound.eta [acc_r acc.])
+      ([.window_radius] extent.index-type bound.eta [offset_r offset.])
+      ([.global_view offset] gpu.view.sub [neighbor_index.])
+      ([.local_view offset] gpu.view.sub [local_neighbor_index.])
+      ([.global_view offset] gpu.view.ge [global_has_left_neighbor.])
+      ([.local_view offset] gpu.view.ge [local_has_left_neighbor.])
+      ([.neighbor_index] gpu.index.nonnegative [neighbor_nonnegative.])
+      ([.neighbor_index element_count] gpu.index.lt-extent [neighbor_in_range.])
+      ([.neighbor_nonnegative neighbor_in_range] bool.and [valid_neighbor.])
+      ([.valid_neighbor local_has_left_neighbor] bool.and [use_shared_neighbor.])
+      ([.input neighbor_index element_count zero]
+        gpu.global.load-or
+        [global_neighbor_value.])
+      ([.use_shared_neighbor scratch_synced local_neighbor_index zero]
+        gpu.shared.load-if
+        [shared_neighbor_value.])
+      ([.use_shared_neighbor shared_neighbor_value global_neighbor_value]
+        f32.select
+        [neighbor_value.])
+      ([.acc neighbor_value] f32.add [acc_next.])
+      ([.window_radius zero acc_r offset_r acc_next]
+        reduce
         [pooled.])
       ([.output global_view pooled] gpu.global.store [output_pooled.])
       [.scratch_synced input output_pooled]}

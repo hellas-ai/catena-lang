@@ -12,6 +12,8 @@
   # A 'val' is an anonymous runtime value.
   # Non-val types are erased at compile time.
   (arr val : 1 -> 1)
+  (arr bound : 1 -> 1)
+  (arr index : 1 -> 1)
 
   ########################################
   # Type definitions
@@ -63,6 +65,28 @@
   (arr f32.zero : [] -> (f32 val))
   (arr f32.one : [] -> (f32 val))
   (arr f32.add : {(f32 val) (f32 val)} -> (f32 val))
+  # Pure value selection.
+  # Example:
+  #   ([.use_shared shared_value global_value] f32.select [value.])
+  # means:
+  #   value = use_shared ? shared_value : global_value
+  # Both candidate values should already be safe/meaningful to compute.
+  (arr f32.select : {(2 val) (f32 val) (f32 val)} -> (f32 val))
+  (arr f32.type : [] -> f32)
+
+  (arr bound.eta : [t] -> ([t . t t] {bound val}))
+  (arr extent.index-type :
+    (([x] extent) val) ->
+    ([x] index))
+  (arr reduce :
+    {
+      (([n] extent) val)
+      ([x] val)
+      ([x] bound)
+      (([n] index) bound)
+      ([x] val)
+    } ->
+    ([n x x n x . x] val))
 
   # unsigned 32-bit integers
   (arr u32.type : [] -> u32)
@@ -71,6 +95,8 @@
   (arr u32.max  : [] -> (u32 val))
   (arr u32.add  : {(u32 val) (u32 val)} -> (u32 val))
   (arr u32.eq   : {(u32 val) (u32 val)} -> (2 val))
+
+  (arr bool.and : {(2 val) (2 val)} -> (2 val))
 })
 
 (theory control syntax {

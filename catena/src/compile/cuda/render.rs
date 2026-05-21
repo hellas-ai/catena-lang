@@ -114,7 +114,7 @@ fn render_cuda_stmts(
                 var, extent, body, ..
             } => {
                 out.push_str(&format!(
-                    "{pad}for (int {var} = 0; {var} < {extent}; ++{var}) {{\n"
+                    "{pad}for (uint64_t {var} = 0; {var} < {extent}; ++{var}) {{\n"
                 ));
                 render_cuda_stmts(out, body, indent + 1, abi, domain);
                 out.push_str(&format!("{pad}}}\n"));

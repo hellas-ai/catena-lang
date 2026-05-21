@@ -4,6 +4,7 @@
   (arr gpu.thread : 0 -> 1)
   (arr gpu.global : 2 -> 1)
   (arr gpu.view : 0 -> 1)
+  (arr gpu.index : 0 -> 1)
   (arr gpu.shared : 2 -> 1)
   (arr 1d : 1 -> 1)
   (arr 2d : 2 -> 1)
@@ -49,6 +50,22 @@
     (gpu.thread val) ->
     (gpu.view val))
 
+  (arr gpu.view.sub :
+    {(gpu.view val) (([offset] index) val)} ->
+    ([offset.] (gpu.index val)))
+
+  (arr gpu.view.ge :
+    {(gpu.view val) (([offset] index) val)} ->
+    ([offset.] (2 val)))
+
+  (arr gpu.index.nonnegative :
+    (gpu.index val) ->
+    (2 val))
+
+  (arr gpu.index.lt-extent :
+    {(gpu.index val) (([size] extent) val)} ->
+    ([size.] (2 val)))
+
   (arr gpu.global.store :
     {([matrix] val) (gpu.view val) (f32 val)} ->
     ([matrix . matrix] val))
@@ -57,9 +74,47 @@
     {([matrix] val) (gpu.view val)} ->
     ([matrix.] (f32 val)))
 
+  # Conditional global load with caller-chosen fallback.
+  # Example:
+  #   ([.in_bounds input i zero] gpu.global.load-if [value.])
+  # means:
+  #   value = in_bounds ? input[i] : zero
+  # Use only when the fallback is meaningful for the algorithm.
+  (arr gpu.global.load-if :
+    {(2 val) ([matrix] val) (gpu.index val) (f32 val)} ->
+    ([matrix.] (f32 val)))
+
+  # Bounds-checked global load with caller-chosen fallback.
+  # Example:
+  #   ([.input i input_size zero] gpu.global.load-or [value.])
+  # means:
+  #   value = (0 <= i < input_size) ? input[i] : zero
+  # This is memory-safe, but the fallback still defines the math.
+  (arr gpu.global.load-or :
+    {([matrix] val) (gpu.index val) (([size] extent) val) (f32 val)} ->
+    ([matrix size.] (f32 val)))
+
   (arr gpu.shared.load :
     {([tile] val) (gpu.view val)} ->
     ([tile.] (f32 val)))
+
+  # Conditional shared-memory load with caller-chosen fallback.
+  # Example:
+  #   ([.use_tile scratch local_i fallback] gpu.shared.load-if [value.])
+  # means:
+  #   value = use_tile ? scratch[local_i] : fallback
+  (arr gpu.shared.load-if :
+    {(2 val) ([tile] val) (gpu.index val) (f32 val)} ->
+    ([tile.] (f32 val)))
+
+  # Bounds-checked shared-memory load with caller-chosen fallback.
+  # Example:
+  #   ([.scratch local_i tile_size fallback] gpu.shared.load-or [value.])
+  # means:
+  #   value = (0 <= local_i < tile_size) ? scratch[local_i] : fallback
+  (arr gpu.shared.load-or :
+    {([tile] val) (gpu.index val) (([size] extent) val) (f32 val)} ->
+    ([tile size.] (f32 val)))
 
   (arr gpu.shared.store :
     {([tile] val) (gpu.view val) (f32 val)} ->
@@ -69,15 +124,4 @@
     ([x] val) ->
     ([x] val))
 
-  (arr gpu.pool1d.sum-window :
-    {
-      (gpu.view val)
-      (gpu.view val)
-      (([input_size] extent) val)
-      (([thread_count] extent) val)
-      (([window_radius] extent) val)
-      ([scratch] val)
-      ([input] val)
-    } ->
-    ([input_size thread_count window_radius scratch input.] (f32 val)))
 })

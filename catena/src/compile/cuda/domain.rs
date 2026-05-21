@@ -40,6 +40,7 @@ impl<'a> CudaTarget<'a> {
 struct GenericCudaPrimitives<'a> {
     data_theory: Option<&'a Theory>,
     f32: F32Primitives,
+    bool: BoolPrimitives,
     gpu: GpuPrimitives,
 }
 
@@ -48,6 +49,7 @@ impl<'a> GenericCudaPrimitives<'a> {
         Self {
             data_theory: theory(theory_set, "data"),
             f32: F32Primitives,
+            bool: BoolPrimitives,
             gpu: GpuPrimitives,
         }
     }
@@ -114,7 +116,9 @@ impl CudaPrimitiveLowering for GenericCudaPrimitives<'_> {
         let lines = match namespace {
             "data" => self.expand_data_arrow(local_name),
             "f32" => self.f32.lower(&local, primitive, abi),
+            "bool" => self.bool.lower(&local, primitive, abi),
             "gpu" => self.gpu.lower(&local, primitive, abi),
+            "reduce" => self.gpu.lower(&local, primitive, abi),
             _ => None,
         };
 
@@ -171,11 +175,47 @@ impl NamespaceLowering for F32Primitives {
         if local.matches(&["zero"]) {
             return Some(vec![format!("float {out} = 0.0f;")]);
         }
+        if local.matches(&["type"]) {
+            return Some(Vec::new());
+        }
         if local.matches(&["add"]) {
             let [lhs, rhs] = primitive.inputs.as_slice() else {
                 return None;
             };
             return Some(vec![format!("float {out} = {lhs} + {rhs};")]);
+        }
+        if local.matches(&["select"]) {
+            let [condition, then_value, else_value] = primitive.inputs.as_slice() else {
+                return None;
+            };
+            return Some(vec![format!(
+                "float {out} = {condition} ? {then_value} : {else_value};"
+            )]);
+        }
+
+        None
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct BoolPrimitives;
+
+impl NamespaceLowering for BoolPrimitives {
+    fn lower(
+        &self,
+        local: &PrimitiveLocalName<'_>,
+        primitive: &Primitive,
+        _abi: &CudaKernelAbi,
+    ) -> Option<Vec<String>> {
+        let [out] = primitive.outputs.as_slice() else {
+            return None;
+        };
+
+        if local.matches(&["and"]) {
+            let [lhs, rhs] = primitive.inputs.as_slice() else {
+                return None;
+            };
+            return Some(vec![format!("bool {out} = {lhs} && {rhs};")]);
         }
 
         None
@@ -253,6 +293,50 @@ impl NamespaceLowering for GpuPrimitives {
             }
             lines.extend(view_guard_lines(abi, out));
             return Some(lines);
+        }
+
+        if local.matches(&["view", "sub"]) {
+            let [view, offset] = primitive.inputs.as_slice() else {
+                return None;
+            };
+            let [out] = primitive.outputs.as_slice() else {
+                return None;
+            };
+            return Some(vec![format!(
+                "int64_t {out} = (int64_t){view} - (int64_t){offset};"
+            )]);
+        }
+
+        if local.matches(&["view", "ge"]) {
+            let [view, offset] = primitive.inputs.as_slice() else {
+                return None;
+            };
+            let [out] = primitive.outputs.as_slice() else {
+                return None;
+            };
+            return Some(vec![format!("bool {out} = {view} >= {offset};")]);
+        }
+
+        if local.matches(&["index", "nonnegative"]) {
+            let [index] = primitive.inputs.as_slice() else {
+                return None;
+            };
+            let [out] = primitive.outputs.as_slice() else {
+                return None;
+            };
+            return Some(vec![format!("bool {out} = {index} >= 0;")]);
+        }
+
+        if local.matches(&["index", "lt-extent"]) {
+            let [index, extent] = primitive.inputs.as_slice() else {
+                return None;
+            };
+            let [out] = primitive.outputs.as_slice() else {
+                return None;
+            };
+            return Some(vec![format!(
+                "bool {out} = {index} >= 0 && {index} < (int64_t){extent};"
+            )]);
         }
 
         if local.matches(&["view", "row"]) {
@@ -348,6 +432,36 @@ impl NamespaceLowering for GpuPrimitives {
             return Some(vec![format!("float {out} = {access};")]);
         }
 
+        if local.matches(&["global", "load-if"]) {
+            let [condition, global, index, fallback] = primitive.inputs.as_slice() else {
+                return None;
+            };
+            let [out] = primitive.outputs.as_slice() else {
+                return None;
+            };
+            return Some(vec![
+                format!("float {out} = {fallback};"),
+                format!("if ({condition}) {{"),
+                format!("    {out} = {global}[{index}];"),
+                "}".to_string(),
+            ]);
+        }
+
+        if local.matches(&["global", "load-or"]) {
+            let [global, index, size, fallback] = primitive.inputs.as_slice() else {
+                return None;
+            };
+            let [out] = primitive.outputs.as_slice() else {
+                return None;
+            };
+            return Some(vec![
+                format!("float {out} = {fallback};"),
+                format!("if ({index} >= 0 && {index} < (int64_t){size}) {{"),
+                format!("    {out} = {global}[{index}];"),
+                "}".to_string(),
+            ]);
+        }
+
         if local.matches(&["shared", "load"]) {
             let [shared, view] = primitive.inputs.as_slice() else {
                 return None;
@@ -359,6 +473,36 @@ impl NamespaceLowering for GpuPrimitives {
                 "float {out} = {};",
                 abi.shared_access(shared, view)
             )]);
+        }
+
+        if local.matches(&["shared", "load-if"]) {
+            let [condition, shared, index, fallback] = primitive.inputs.as_slice() else {
+                return None;
+            };
+            let [out] = primitive.outputs.as_slice() else {
+                return None;
+            };
+            return Some(vec![
+                format!("float {out} = {fallback};"),
+                format!("if ({condition}) {{"),
+                format!("    {out} = {shared}[{index}];"),
+                "}".to_string(),
+            ]);
+        }
+
+        if local.matches(&["shared", "load-or"]) {
+            let [shared, index, size, fallback] = primitive.inputs.as_slice() else {
+                return None;
+            };
+            let [out] = primitive.outputs.as_slice() else {
+                return None;
+            };
+            return Some(vec![
+                format!("float {out} = {fallback};"),
+                format!("if ({index} >= 0 && {index} < (int64_t){size}) {{"),
+                format!("    {out} = {shared}[{index}];"),
+                "}".to_string(),
+            ]);
         }
 
         if local.matches(&["shared", "store"]) {
@@ -397,46 +541,24 @@ impl NamespaceLowering for GpuPrimitives {
             ]);
         }
 
-        if local.matches(&["pool1d", "sum-window"]) {
-            let [
-                global_view,
-                local_view,
-                input_size,
-                thread_count,
-                window_radius,
-                scratch,
-                input,
-            ] = primitive.inputs.as_slice()
-            else {
+        if local.matches(&["init"]) {
+            let [zero] = primitive.inputs.as_slice() else {
                 return None;
             };
             let [out] = primitive.outputs.as_slice() else {
                 return None;
             };
-            return Some(vec![
-                format!("float {out} = 0.0f;"),
-                format!("if ({global_view} < {input_size}) {{"),
-                format!(
-                    "    for (int64_t pool_offset = -(int64_t){window_radius}; pool_offset <= (int64_t){window_radius}; ++pool_offset) {{"
-                ),
-                format!("        int64_t pool_neighbor = (int64_t){global_view} + pool_offset;"),
-                format!(
-                    "        if (pool_neighbor >= 0 && pool_neighbor < (int64_t){input_size}) {{"
-                ),
-                format!(
-                    "            int64_t pool_local_neighbor = (int64_t){local_view} + pool_offset;"
-                ),
-                format!(
-                    "            if (pool_local_neighbor >= 0 && pool_local_neighbor < (int64_t){thread_count}) {{"
-                ),
-                format!("                {out} += {scratch}[pool_local_neighbor];"),
-                "            } else {".to_string(),
-                format!("                {out} += {input}[pool_neighbor];"),
-                "            }".to_string(),
-                "        }".to_string(),
-                "    }".to_string(),
-                "}".to_string(),
-            ]);
+            return Some(vec![format!("float {out} = {zero};")]);
+        }
+
+        if local.matches(&["acc"]) {
+            let [value] = primitive.inputs.as_slice() else {
+                return None;
+            };
+            let [out] = primitive.outputs.as_slice() else {
+                return None;
+            };
+            return Some(vec![format!("float {out} = {value};")]);
         }
 
         None

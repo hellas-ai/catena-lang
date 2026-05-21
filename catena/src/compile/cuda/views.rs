@@ -174,7 +174,11 @@ fn collect_static_shared_views(
 fn collect_extents_required_by_device_code(stmts: &[Stmt], names: &mut HashSet<String>) {
     for stmt in stmts {
         match stmt {
-            Stmt::Block { body, .. } | Stmt::Loop { body, .. } | Stmt::For { body, .. } => {
+            Stmt::Block { body, .. } | Stmt::Loop { body, .. } => {
+                collect_extents_required_by_device_code(body, names);
+            }
+            Stmt::For { extent, body, .. } => {
+                names.insert(extent.clone());
                 collect_extents_required_by_device_code(body, names);
             }
             Stmt::If {
@@ -222,9 +226,19 @@ fn collect_primitive_extents_required_by_device_code(
             names.insert(extent.clone());
         }
     }
-    if primitive.name == "gpu.pool1d.sum-window" {
-        for extent in primitive.inputs.iter().skip(2).take(3) {
-            names.insert(extent.clone());
-        }
+    if primitive.name == "reduce"
+        && let Some(extent) = primitive.inputs.first()
+    {
+        names.insert(extent.clone());
+    }
+    if primitive.name == "gpu.index.lt-extent"
+        && let Some(extent) = primitive.inputs.get(1)
+    {
+        names.insert(extent.clone());
+    }
+    if (primitive.name == "gpu.global.load-or" || primitive.name == "gpu.shared.load-or")
+        && let Some(extent) = primitive.inputs.get(2)
+    {
+        names.insert(extent.clone());
     }
 }

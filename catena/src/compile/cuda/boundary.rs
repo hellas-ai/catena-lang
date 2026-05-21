@@ -17,9 +17,9 @@ use crate::{
 
 pub(super) struct KernelInterface {
     pub(super) grid_shape: GridShape,
-    pub(super) extent_names: HashMap<usize, String>,
-    pub(super) static_extent_leaves: HashSet<usize>,
-    pub(super) used_host_names: HashSet<String>,
+    pub(super) extent_cuda_names: HashMap<usize, String>,
+    pub(super) compile_time_extent_leaves: HashSet<usize>,
+    pub(super) reserved_host_names: HashSet<String>,
     pub(super) macros: Vec<CudaMacro>,
 }
 
@@ -64,9 +64,9 @@ pub(super) fn discover_kernel_interface(
     options: &CudaOptions,
 ) -> Result<KernelInterface, CudaAbiError> {
     let mut grid_shape = None;
-    let mut extent_names = HashMap::new();
-    let mut static_extent_leaves = HashSet::new();
-    let mut used_host_names = HashSet::new();
+    let mut extent_cuda_names = HashMap::new();
+    let mut compile_time_extent_leaves = HashSet::new();
+    let mut reserved_host_names = HashSet::new();
     let mut used_macro_names = HashSet::new();
     let mut macros = Vec::new();
     let mut seen_static_names = HashSet::new();
@@ -94,12 +94,15 @@ pub(super) fn discover_kernel_interface(
                     name: name.clone(),
                     value,
                 });
-                static_extent_leaves.insert(leaf);
+                compile_time_extent_leaves.insert(leaf);
                 name
             } else {
-                unique_name(&sanitize_ident(&source_param.name), &mut used_host_names)
+                unique_name(
+                    &sanitize_ident(&source_param.name),
+                    &mut reserved_host_names,
+                )
             };
-            extent_names.insert(leaf, name);
+            extent_cuda_names.insert(leaf, name);
         } else if requested_static.is_some() {
             return Err(CudaAbiError::StaticValueNotExtent(
                 source_param.name.clone(),
@@ -115,9 +118,9 @@ pub(super) fn discover_kernel_interface(
 
     Ok(KernelInterface {
         grid_shape: grid_shape.ok_or(CudaAbiError::MissingGrid)?,
-        extent_names,
-        static_extent_leaves,
-        used_host_names,
+        extent_cuda_names,
+        compile_time_extent_leaves,
+        reserved_host_names,
         macros,
     })
 }

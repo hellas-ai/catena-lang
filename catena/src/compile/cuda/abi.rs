@@ -1,3 +1,25 @@
+//! CUDA ABI construction terminology:
+//!
+//! - The **kernel** is the `__global__` CUDA function generated from one
+//!   Catena entry arrow/program.
+//! - **Device** names, parameters, and prelude code belong to that kernel and
+//!   are visible while executing on the GPU.
+//! - The **host launcher** is the CPU-side wrapper that receives runtime inputs,
+//!   computes derived sizes, and invokes the kernel with CUDA launch syntax.
+//! - The **source object** is the left-hand side of an arrow type (`source ->
+//!   target`). For CUDA kernels, we derive launch and memory information from
+//!   the source object of the entry arrow.
+//! - The **source parameters** are the variables in that source object. They
+//!   are not copied directly to CUDA. Instead, each parameter contributes to
+//!   the host ABI, device ABI, launch configuration, memory declarations, or
+//!   name rewrites.
+//! - A **kernel interface** is the structured contract discovered from those
+//!   source parameters: grid shape, global/shared memory resources, extents,
+//!   and compile-time constants supplied through CUDA options.
+//!
+//! This module assembles those pieces into `CudaKernelAbi`, which is then used
+//! by CUDA rendering and domain lowering.
+
 use std::collections::{HashMap, HashSet};
 
 use thiserror::Error;
@@ -7,14 +29,15 @@ use crate::{
         cuda::{
             CudaOptions,
             boundary::{
-                GridShape, KernelInterface, discover_kernel_interface, gpu_global, gpu_grid,
-                gpu_shared,
+                GpuGlobal, GpuShared, KernelInterface, discover_kernel_interface, gpu_global,
+                gpu_grid, gpu_shared,
             },
+            launch::launch_from_grid_contract,
             resources::SharedIndexing,
             resources::{SharedMemory, SharedMemoryLayout, bind_global, bind_static_shared},
-            shape::{dimension_expr, extent_leaf},
+            shape::extent_leaf,
             util::{sanitize_ident, unique_name},
-            views::{ViewAnalysis, device_extent_names},
+            views::{ViewAnalysis, extents_required_by_device_code},
         },
         program::{Definition, Variable},
     },
@@ -91,42 +114,65 @@ impl CudaKernelAbi {
         options: &CudaOptions,
     ) -> Result<Self, CudaAbiError> {
         let source_params = source_parameters(definition)?;
-        // The definition params are the source variables of the entry arrow.
-        // We read them as the kernel interface before processing any one param:
-        // grid/global/shared shapes may use extent leaves declared elsewhere in
-        // the source object.
+
+        // Read the source object of the entry arrow as the CUDA kernel
+        // interface. This discovers the launch contract (`gpu.grid`), memory
+        // resources (`gpu.global` / `gpu.shared`), and the extent leaves that
+        // give names to their dimensions. We do this before processing any
+        // single parameter because shapes can reference extent leaves declared
+        // elsewhere in the same source object.
         let kernel_interface = discover_kernel_interface(&source_params, options)?;
-        let device_extent_names = device_extent_names(program);
-        let source_parameter_contributions = collect_source_parameter_contributions(
+
+        // Find extent parameters that must still be available inside the
+        // generated kernel body. Most extents are host-only: they size memory
+        // or compute launch dimensions. Some primitives, such as
+        // `gpu.view.group`, use an extent to compute per-thread indices in
+        // device code, so those extents must also become kernel parameters.
+        let extents_required_by_device_code = extents_required_by_device_code(program);
+
+        // Turn each source parameter into concrete ABI pieces: host launcher
+        // parameters, device kernel parameters, call arguments, generated
+        // prelude code, and name rewrites used during rendering.
+        let source_parameter_abi = collect_source_parameter_abi(
             &source_params,
             kernel_interface,
-            device_extent_names,
+            extents_required_by_device_code,
         )?;
+
+        // Build the host launch expression from the `gpu.grid` contract. The
+        // grid itself is not passed to the kernel; it defines the
+        // `<<<grid, block, shared_bytes>>>` launch configuration.
         let launch = launch_from_grid_contract(
-            &source_parameter_contributions.kernel_interface.grid_shape,
-            &source_parameter_contributions.kernel_interface.extent_names,
-            source_parameter_contributions.element_count.clone(),
+            &source_parameter_abi.kernel_interface.grid_shape,
+            &source_parameter_abi.kernel_interface.extent_cuda_names,
+            source_parameter_abi.element_count.clone(),
         )?;
-        let dynamic_shared_bytes = source_parameter_contributions
-            .shared_layout
-            .dynamic_shared_bytes();
+
+        // Collect any dynamic shared-memory byte count requested by
+        // `gpu.shared` parameters. Static shared memory has already emitted
+        // declarations in the device prelude and does not contribute here.
+        let dynamic_shared_bytes = source_parameter_abi.shared_layout.dynamic_shared_bytes();
+
+        // Analyze view/resource relationships after names are known. Static
+        // shared arrays need structured coordinates (`view_x`, `view_y`, ...);
+        // dynamic shared/global memory continue to use flat linear indices.
         let views = ViewAnalysis::new(
             program,
-            &source_parameter_contributions.names,
-            source_parameter_contributions.shared_indexing.clone(),
+            &source_parameter_abi.names,
+            source_parameter_abi.shared_indexing.clone(),
         );
 
         Ok(CudaKernelAbi {
-            device_params: source_parameter_contributions.device_params,
-            host_params: source_parameter_contributions.host_params,
-            device_call_args: source_parameter_contributions.device_call_args,
-            prelude: source_parameter_contributions.prelude,
-            host_prelude: source_parameter_contributions.host_prelude,
-            macros: source_parameter_contributions.kernel_interface.macros,
+            device_params: source_parameter_abi.device_params,
+            host_params: source_parameter_abi.host_params,
+            device_call_args: source_parameter_abi.device_call_args,
+            prelude: source_parameter_abi.prelude,
+            host_prelude: source_parameter_abi.host_prelude,
+            macros: source_parameter_abi.kernel_interface.macros,
             launch,
             dynamic_shared_bytes,
             views,
-            names: source_parameter_contributions.names,
+            names: source_parameter_abi.names,
         })
     }
 
@@ -159,7 +205,7 @@ fn source_parameters(definition: &Definition) -> Result<Vec<&Variable>, CudaAbiE
         .collect()
 }
 
-struct SourceParameterContributions {
+struct SourceParameterAbi {
     kernel_interface: KernelInterface,
     device_params: Vec<Param>,
     host_params: Vec<Param>,
@@ -172,20 +218,20 @@ struct SourceParameterContributions {
     shared_indexing: HashMap<String, SharedIndexing>,
 }
 
-struct SourceParameterContributionState {
-    contributions: SourceParameterContributions,
+struct SourceParameterAbiState {
+    source_parameter_abi: SourceParameterAbi,
     used_device_names: HashSet<String>,
-    device_extent_names: HashSet<String>,
+    extents_required_by_device_code: HashSet<String>,
     emitted_extent_params: HashSet<usize>,
 }
 
-fn collect_source_parameter_contributions(
+fn collect_source_parameter_abi(
     source_params: &[&Variable],
     kernel_interface: KernelInterface,
-    device_extent_names: HashSet<String>,
-) -> Result<SourceParameterContributions, CudaAbiError> {
-    let mut state = SourceParameterContributionState {
-        contributions: SourceParameterContributions {
+    extents_required_by_device_code: HashSet<String>,
+) -> Result<SourceParameterAbi, CudaAbiError> {
+    let mut state = SourceParameterAbiState {
+        source_parameter_abi: SourceParameterAbi {
             kernel_interface,
             device_params: Vec::new(),
             host_params: Vec::new(),
@@ -198,7 +244,7 @@ fn collect_source_parameter_contributions(
             shared_indexing: HashMap::new(),
         },
         used_device_names: HashSet::new(),
-        device_extent_names,
+        extents_required_by_device_code,
         emitted_extent_params: HashSet::new(),
     };
 
@@ -209,35 +255,58 @@ fn collect_source_parameter_contributions(
         state.record_source_parameter_contribution(source_param)?;
     }
 
-    Ok(state.contributions)
+    Ok(state.source_parameter_abi)
 }
 
-impl SourceParameterContributionState {
-    fn record_source_parameter_contribution(
-        &mut self,
-        source_param: &Variable,
-    ) -> Result<(), CudaAbiError> {
+enum SourceParameterContribution<'a> {
+    RuntimeOrStaticExtent { leaf: usize },
+    LaunchGrid,
+    GlobalMemory(GpuGlobal<'a>),
+    SharedMemory(GpuShared<'a>),
+}
+
+impl<'a> SourceParameterContribution<'a> {
+    fn classify(source_param: &'a Variable) -> Result<Self, CudaAbiError> {
         if let Some(leaf) = extent_leaf(&source_param.ty) {
-            self.record_extent_contribution(source_param, leaf)?;
-            return Ok(());
+            return Ok(Self::RuntimeOrStaticExtent { leaf });
         }
         if let Some(global) = gpu_global(&source_param.ty)? {
-            self.record_global_memory_contribution(source_param, &global)?;
-            return Ok(());
+            return Ok(Self::GlobalMemory(global));
         }
         if let Some(shared) = gpu_shared(&source_param.ty)? {
-            self.record_shared_memory_contribution(source_param, &shared)?;
-            return Ok(());
+            return Ok(Self::SharedMemory(shared));
         }
         if gpu_grid(&source_param.ty)?.is_some() {
-            // The grid is a launch contract, not a kernel parameter.
-            return Ok(());
+            return Ok(Self::LaunchGrid);
         }
 
         Err(CudaAbiError::UnsupportedSourceParameter {
             name: source_param.name.clone(),
             ty: format!("{:?}", source_param.ty),
         })
+    }
+}
+
+impl SourceParameterAbiState {
+    fn record_source_parameter_contribution(
+        &mut self,
+        source_param: &Variable,
+    ) -> Result<(), CudaAbiError> {
+        match SourceParameterContribution::classify(source_param)? {
+            SourceParameterContribution::RuntimeOrStaticExtent { leaf } => {
+                self.record_extent_contribution(source_param, leaf)
+            }
+            SourceParameterContribution::GlobalMemory(global) => {
+                self.record_global_memory_contribution(source_param, &global)
+            }
+            SourceParameterContribution::SharedMemory(shared) => {
+                self.record_shared_memory_contribution(source_param, &shared)
+            }
+            SourceParameterContribution::LaunchGrid => {
+                // The grid is a launch contract, not a kernel parameter.
+                Ok(())
+            }
+        }
     }
 
     fn record_extent_contribution(
@@ -246,29 +315,29 @@ impl SourceParameterContributionState {
         leaf: usize,
     ) -> Result<(), CudaAbiError> {
         let Some(host_or_static_name) = self
-            .contributions
+            .source_parameter_abi
             .kernel_interface
-            .extent_names
+            .extent_cuda_names
             .get(&leaf)
             .cloned()
         else {
             return Err(CudaAbiError::MissingGridExtent(leaf));
         };
-        self.contributions
+        self.source_parameter_abi
             .names
             .insert(source_param.name.clone(), host_or_static_name.clone());
 
         if self
-            .contributions
+            .source_parameter_abi
             .kernel_interface
-            .static_extent_leaves
+            .compile_time_extent_leaves
             .contains(&leaf)
         {
             return Ok(());
         }
 
         if self.emitted_extent_params.insert(leaf) {
-            self.contributions.host_params.push(Param {
+            self.source_parameter_abi.host_params.push(Param {
                 ty: "uint64_t".to_string(),
                 name: host_or_static_name.clone(),
             });
@@ -277,19 +346,22 @@ impl SourceParameterContributionState {
         // Most extents exist only to compute launch parameters and memory sizes
         // on the host. gpu.view.group also needs its thread-count extent inside
         // the kernel, so pass that one through as a device parameter.
-        if self.device_extent_names.contains(&source_param.name) {
+        if self
+            .extents_required_by_device_code
+            .contains(&source_param.name)
+        {
             let device_name = unique_name(
                 &sanitize_ident(&source_param.name),
                 &mut self.used_device_names,
             );
-            self.contributions
+            self.source_parameter_abi
                 .names
                 .insert(source_param.name.clone(), device_name.clone());
-            self.contributions.device_params.push(Param {
+            self.source_parameter_abi.device_params.push(Param {
                 ty: "uint64_t".to_string(),
                 name: device_name,
             });
-            self.contributions
+            self.source_parameter_abi
                 .device_call_args
                 .push(host_or_static_name);
         }
@@ -305,23 +377,30 @@ impl SourceParameterContributionState {
         let binding = bind_global(
             source_param,
             global,
-            &self.contributions.kernel_interface.extent_names,
+            &self.source_parameter_abi.kernel_interface.extent_cuda_names,
             &mut self.used_device_names,
-            &mut self.contributions.kernel_interface.used_host_names,
+            &mut self
+                .source_parameter_abi
+                .kernel_interface
+                .reserved_host_names,
         )?;
 
-        self.contributions
+        self.source_parameter_abi
             .names
             .insert(source_param.name.clone(), binding.device_name.clone());
-        self.contributions
+        self.source_parameter_abi
             .element_count
             .get_or_insert_with(|| binding.size_name.clone());
-        self.contributions
+        self.source_parameter_abi
             .device_params
             .extend(binding.device_params);
-        self.contributions.host_params.extend(binding.host_params);
-        self.contributions.host_prelude.extend(binding.host_prelude);
-        self.contributions
+        self.source_parameter_abi
+            .host_params
+            .extend(binding.host_params);
+        self.source_parameter_abi
+            .host_prelude
+            .extend(binding.host_prelude);
+        self.source_parameter_abi
             .device_call_args
             .extend(binding.device_call_args);
         Ok(())
@@ -338,8 +417,11 @@ impl SourceParameterContributionState {
         );
         let memory = SharedMemory::from_gpu_shared(
             shared,
-            &self.contributions.kernel_interface.extent_names,
-            &self.contributions.kernel_interface.static_extent_leaves,
+            &self.source_parameter_abi.kernel_interface.extent_cuda_names,
+            &self
+                .source_parameter_abi
+                .kernel_interface
+                .compile_time_extent_leaves,
         )?;
 
         // This branch is the shared-memory rule:
@@ -347,77 +429,35 @@ impl SourceParameterContributionState {
         // - otherwise => a flat slice of dynamic `extern __shared__`
         let binding = match memory {
             SharedMemory::Static(memory) => bind_static_shared(device_name, memory),
-            SharedMemory::Dynamic(memory) => self.contributions.shared_layout.bind_dynamic(
+            SharedMemory::Dynamic(memory) => self.source_parameter_abi.shared_layout.bind_dynamic(
                 device_name,
                 memory,
                 &mut self.used_device_names,
-                &mut self.contributions.kernel_interface.used_host_names,
+                &mut self
+                    .source_parameter_abi
+                    .kernel_interface
+                    .reserved_host_names,
             ),
         };
 
-        self.contributions
+        self.source_parameter_abi
             .names
             .insert(source_param.name.clone(), binding.device_name.clone());
-        self.contributions
+        self.source_parameter_abi
             .shared_indexing
             .insert(binding.device_name.clone(), binding.indexing);
-        self.contributions
+        self.source_parameter_abi
             .device_params
             .extend(binding.device_params);
-        self.contributions.host_prelude.extend(binding.host_prelude);
-        self.contributions
+        self.source_parameter_abi
+            .host_prelude
+            .extend(binding.host_prelude);
+        self.source_parameter_abi
             .device_call_args
             .extend(binding.device_call_args);
-        self.contributions.prelude.extend(binding.device_prelude);
+        self.source_parameter_abi
+            .prelude
+            .extend(binding.device_prelude);
         Ok(())
-    }
-}
-
-struct GridLaunch {
-    grid: Vec<String>,
-    block: Vec<String>,
-}
-
-fn resolve_grid_launch(
-    shape: &GridShape,
-    extent_names: &HashMap<usize, String>,
-) -> Result<GridLaunch, CudaAbiError> {
-    Ok(GridLaunch {
-        grid: resolve_dimension_names(&shape.grid, extent_names)?,
-        block: resolve_dimension_names(&shape.block, extent_names)?,
-    })
-}
-
-fn resolve_dimension_names(
-    dimensions: &[crate::lang::Obj],
-    extent_names: &HashMap<usize, String>,
-) -> Result<Vec<String>, CudaAbiError> {
-    dimensions
-        .iter()
-        .map(|dimension| {
-            dimension_expr(
-                dimension,
-                extent_names,
-                CudaAbiError::MissingGridExtent,
-                || CudaAbiError::InvalidGridShape,
-            )
-        })
-        .collect()
-}
-
-fn launch_from_grid_contract(
-    grid_shape: &GridShape,
-    extent_names: &HashMap<usize, String>,
-    element_count: Option<String>,
-) -> Result<CudaLaunch, CudaAbiError> {
-    let grid = resolve_grid_launch(grid_shape, extent_names)?;
-    Ok(cuda_launch_config(grid, element_count))
-}
-
-fn cuda_launch_config(grid: GridLaunch, element_count: Option<String>) -> CudaLaunch {
-    CudaLaunch {
-        block_expr: grid.block.join(", "),
-        grid_expr: grid.grid.join(", "),
-        element_count,
     }
 }

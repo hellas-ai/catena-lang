@@ -5,6 +5,11 @@ use crate::{
     structured::ir::{Primitive, Stmt, StructuredProgram},
 };
 
+// View values are normally flat CUDA indices. Static shared memory is the
+// exception: a declaration like `__shared__ float tile[R][C]` must be indexed
+// with structured coordinates. This analysis finds the views used with static
+// shared resources so domain lowering can emit `view_x`, `view_y`, and `view_z`
+// side variables only where they are needed.
 #[derive(Debug, Clone)]
 pub(super) struct ViewAnalysis {
     shared_indexing: HashMap<String, SharedIndexing>,
@@ -60,9 +65,9 @@ impl ViewAnalysis {
     }
 }
 
-pub(super) fn device_extent_names(program: &StructuredProgram) -> HashSet<String> {
+pub(super) fn extents_required_by_device_code(program: &StructuredProgram) -> HashSet<String> {
     let mut names = HashSet::new();
-    collect_device_extent_names(&program.body, &mut names);
+    collect_extents_required_by_device_code(&program.body, &mut names);
     names
 }
 
@@ -166,26 +171,28 @@ fn collect_static_shared_views(
     }
 }
 
-fn collect_device_extent_names(stmts: &[Stmt], names: &mut HashSet<String>) {
+fn collect_extents_required_by_device_code(stmts: &[Stmt], names: &mut HashSet<String>) {
     for stmt in stmts {
         match stmt {
             Stmt::Block { body, .. } | Stmt::Loop { body, .. } | Stmt::For { body, .. } => {
-                collect_device_extent_names(body, names);
+                collect_extents_required_by_device_code(body, names);
             }
             Stmt::If {
                 then_body,
                 else_body,
                 ..
             } => {
-                collect_device_extent_names(then_body, names);
-                collect_device_extent_names(else_body, names);
+                collect_extents_required_by_device_code(then_body, names);
+                collect_extents_required_by_device_code(else_body, names);
             }
             Stmt::Switch { cases, .. } => {
                 for case in cases {
-                    collect_device_extent_names(case, names);
+                    collect_extents_required_by_device_code(case, names);
                 }
             }
-            Stmt::Primitive(primitive) => collect_primitive_device_extents(primitive, names),
+            Stmt::Primitive(primitive) => {
+                collect_primitive_extents_required_by_device_code(primitive, names);
+            }
             Stmt::Break(_)
             | Stmt::Continue(_)
             | Stmt::Return
@@ -196,7 +203,10 @@ fn collect_device_extent_names(stmts: &[Stmt], names: &mut HashSet<String>) {
     }
 }
 
-fn collect_primitive_device_extents(primitive: &Primitive, names: &mut HashSet<String>) {
+fn collect_primitive_extents_required_by_device_code(
+    primitive: &Primitive,
+    names: &mut HashSet<String>,
+) {
     if primitive.name == "gpu.view.group"
         && let Some(thread_count) = primitive.inputs.get(2)
     {

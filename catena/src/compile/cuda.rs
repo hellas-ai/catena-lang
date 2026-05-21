@@ -6,6 +6,7 @@ use thiserror::Error;
 mod abi;
 mod boundary;
 mod domain;
+mod launch;
 mod render;
 mod resources;
 mod shape;

@@ -4,8 +4,13 @@ use metacat::theory::{RawTheorySet, TheorySet, ast::ParseRawError};
 use thiserror::Error;
 
 mod abi;
+mod boundary;
 mod domain;
 mod render;
+mod resources;
+mod shape;
+mod util;
+mod views;
 
 pub use abi::CudaAbiError;
 use domain::CudaTarget;

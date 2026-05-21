@@ -1,0 +1,27 @@
+#
+# Store through shared memory before writing every global element to 1.0.
+#
+
+(def data user.f32.shared-one : 
+    {
+      (([.block_count] extent) val)
+      (([.thread_count] extent) val)
+      (({([block_count] 1d) ([thread_count] 1d)} gpu.grid) val)
+      (({f32 ([thread_count] 1d)} gpu.shared) val)
+      (({f32 (({[block_count] [thread_count]} nat.mul) 1d)} gpu.global) val)
+    } ->
+    {
+      [block_count thread_count.]
+      (({f32 ([thread_count] 1d)} gpu.shared) val)
+      (({f32 (({[block_count] [thread_count]} nat.mul) 1d)} gpu.global) val)
+    }
+    = {[block_count thread_count grid scratch out.]
+      ([.grid] gpu.grid.schedule [block thread.])
+      ([.block thread thread_count] gpu.view.group [out_view.])
+      ([.thread] gpu.view.element [scratch_view.])
+      ([.] f32.one [one.])
+      ([.scratch scratch_view one] gpu.shared.store [scratch_filled.])
+      ([.scratch_filled scratch_view] gpu.shared.load [from_scratch.])
+      ([.out out_view from_scratch] gpu.global.store [out_filled.])
+      [.scratch_filled out_filled]}
+)

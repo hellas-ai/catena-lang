@@ -4,7 +4,7 @@ use crate::{
 };
 
 pub(super) trait CudaPrimitiveLowering {
-    fn lower_primitive_lines(&self, primitive: &Primitive) -> Vec<String>;
+    fn lower_primitive_lines(&self, primitive: &Primitive, abi: &CudaKernelAbi) -> Vec<String>;
 }
 
 pub(super) fn render_cuda(
@@ -14,9 +14,10 @@ pub(super) fn render_cuda(
 ) -> String {
     let mut out = String::new();
     out.push_str("#include <stdint.h>\n\n");
+    render_macros(&mut out, abi);
     out.push_str(&format!("__global__ void {}(", program.entry.name));
     out.push_str(
-        &abi.device_params
+        &abi.kernel_params
             .iter()
             .map(|p| format!("{} {}", p.ty, p.name))
             .collect::<Vec<_>>()
@@ -30,14 +31,25 @@ pub(super) fn render_cuda(
     out
 }
 
+fn render_macros(out: &mut String, abi: &CudaKernelAbi) {
+    for macro_def in &abi.macros {
+        out.push_str(&format!("#ifndef {}\n", macro_def.name));
+        out.push_str(&format!("#define {} {}\n", macro_def.name, macro_def.value));
+        out.push_str("#endif\n");
+    }
+    if !abi.macros.is_empty() {
+        out.push('\n');
+    }
+}
+
 fn render_prelude(out: &mut String, abi: &CudaKernelAbi) {
-    for line in &abi.prelude {
+    for line in &abi.kernel_prelude {
         out.push_str(&format!("    {line}\n"));
     }
     if let Some(element_count) = &abi.launch.element_count {
         out.push_str(&format!("    uint64_t __elements = {element_count};\n"));
     }
-    if !abi.prelude.is_empty() || abi.launch.element_count.is_some() {
+    if !abi.kernel_prelude.is_empty() || abi.launch.element_count.is_some() {
         out.push('\n');
     }
 }
@@ -45,24 +57,29 @@ fn render_prelude(out: &mut String, abi: &CudaKernelAbi) {
 fn render_launch_helper(out: &mut String, program: &StructuredProgram, abi: &CudaKernelAbi) {
     out.push_str(&format!("void launch_{}(", program.entry.name));
     out.push_str(
-        &abi.host_params
+        &abi.launcher_params
             .iter()
             .map(|p| format!("{} {}", p.ty, p.name))
             .collect::<Vec<_>>()
             .join(", "),
     );
     out.push_str(") {\n");
-    for line in &abi.host_prelude {
+    for line in &abi.launcher_prelude {
         out.push_str(&format!("    {line}\n"));
     }
-    if !abi.host_prelude.is_empty() {
+    if !abi.launcher_prelude.is_empty() {
         out.push('\n');
     }
     render_launch_config(out, abi);
+    let launch_args = if let Some(shared_bytes) = &abi.dynamic_shared_memory_bytes {
+        format!("grid, block, {shared_bytes}")
+    } else {
+        "grid, block".to_string()
+    };
     out.push_str(&format!(
-        "    {}<<<grid, block>>>({});\n",
+        "    {}<<<{launch_args}>>>({});\n",
         program.entry.name,
-        abi.device_call_args
+        abi.kernel_arguments
             .iter()
             .map(String::as_str)
             .collect::<Vec<_>>()
@@ -132,7 +149,7 @@ fn render_cuda_stmts(
             Stmt::Assign { lhs, rhs } => out.push_str(&format!("{pad}{lhs} = {rhs};\n")),
             Stmt::Primitive(primitive) => {
                 let primitive = rename_primitive(primitive, abi);
-                for line in domain.lower_primitive_lines(&primitive) {
+                for line in domain.lower_primitive_lines(&primitive, abi) {
                     out.push_str(&format!("{pad}{line}\n"));
                 }
             }

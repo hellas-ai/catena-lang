@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use catena::compile::{
-    CompilePipeline, CompileRequest, Emit, GraphCompileOptions, OutputFormat, compile,
+    CompilePipeline, CompileRequest, CudaOptions, Emit, GraphCompileOptions, OutputFormat, compile,
 };
 use clap::{Parser, Subcommand, ValueEnum};
 
@@ -54,6 +54,10 @@ enum Command {
         /// Do not inline definitions matching this pattern. Supports `*`.
         #[arg(long = "no-inline")]
         no_inline: Vec<String>,
+
+        /// Provide a compile-time CUDA size value, e.g. --cuda-static tile_rows=16.
+        #[arg(long = "cuda-static", value_parser = parse_cuda_static)]
+        cuda_static: Vec<(String, u64)>,
     },
 }
 
@@ -86,7 +90,17 @@ fn main() -> anyhow::Result<()> {
             format,
             output,
             no_inline,
-        } => compile_command(paths, emit, theory, entry, format, output, no_inline),
+            cuda_static,
+        } => compile_command(
+            paths,
+            emit,
+            theory,
+            entry,
+            format,
+            output,
+            no_inline,
+            cuda_static,
+        ),
     }
 }
 
@@ -98,6 +112,7 @@ fn check_command(paths: Vec<PathBuf>, verbose: bool) -> anyhow::Result<()> {
         entry: None,
         format: None,
         graph_options: GraphCompileOptions::default(),
+        cuda_options: CudaOptions::default(),
     });
     let theory_set = pipeline.checked_elaborated_theory()?;
 
@@ -129,6 +144,7 @@ fn elaborate_command(paths: Vec<PathBuf>) -> anyhow::Result<()> {
         entry: None,
         format: None,
         graph_options: GraphCompileOptions::default(),
+        cuda_options: CudaOptions::default(),
     })?;
     write_output(None, &generated)
 }
@@ -141,7 +157,15 @@ fn compile_command(
     format: Option<OutputFormatArg>,
     output: Option<PathBuf>,
     no_inline: Vec<String>,
+    cuda_static: Vec<(String, u64)>,
 ) -> anyhow::Result<()> {
+    let mut static_values = std::collections::HashMap::new();
+    for (name, value) in cuda_static {
+        if static_values.insert(name.clone(), value).is_some() {
+            anyhow::bail!("duplicate --cuda-static value for `{name}`");
+        }
+    }
+
     let generated = compile(CompileRequest {
         paths,
         emit: emit.into(),
@@ -149,9 +173,28 @@ fn compile_command(
         entry,
         format: format.map(Into::into),
         graph_options: GraphCompileOptions { no_inline },
+        cuda_options: CudaOptions { static_values },
     })?;
 
     write_output(output, &generated)
+}
+
+fn parse_cuda_static(value: &str) -> Result<(String, u64), String> {
+    let (name, raw_value) = value
+        .split_once('=')
+        .ok_or_else(|| "expected NAME=VALUE".to_string())?;
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("static CUDA value name cannot be empty".to_string());
+    }
+    let parsed = raw_value
+        .trim()
+        .parse::<u64>()
+        .map_err(|_| "static CUDA value must be an unsigned integer".to_string())?;
+    if parsed == 0 {
+        return Err("static CUDA value must be greater than zero".to_string());
+    }
+    Ok((name.to_string(), parsed))
 }
 
 fn write_output(output: Option<PathBuf>, generated: &[u8]) -> anyhow::Result<()> {

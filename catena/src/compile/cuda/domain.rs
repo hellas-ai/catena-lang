@@ -1,6 +1,7 @@
 use crate::{
     compile::{
         cuda::{
+            CudaOptions,
             abi::{CudaAbiError, CudaKernelAbi},
             render::{CudaPrimitiveLowering, render_cuda},
         },
@@ -18,9 +19,14 @@ pub(super) struct CudaTarget<'a> {
 }
 
 impl<'a> CudaTarget<'a> {
-    pub(super) fn new(theory_set: &'a TheorySet, entry: &Definition) -> Result<Self, CudaAbiError> {
+    pub(super) fn new(
+        theory_set: &'a TheorySet,
+        entry: &Definition,
+        program: &StructuredProgram,
+        options: &CudaOptions,
+    ) -> Result<Self, CudaAbiError> {
         Ok(Self {
-            abi: CudaKernelAbi::from_definition(entry)?,
+            abi: CudaKernelAbi::from_definition(entry, program, options)?,
             primitives: GenericCudaPrimitives::new(theory_set),
         })
     }
@@ -99,7 +105,7 @@ impl<'a> GenericCudaPrimitives<'a> {
 }
 
 impl CudaPrimitiveLowering for GenericCudaPrimitives<'_> {
-    fn lower_primitive_lines(&self, primitive: &Primitive) -> Vec<String> {
+    fn lower_primitive_lines(&self, primitive: &Primitive, abi: &CudaKernelAbi) -> Vec<String> {
         let Some((namespace, local_name)) = primitive.name.split_once('.') else {
             return fallback_primitive_lines(primitive);
         };
@@ -107,8 +113,8 @@ impl CudaPrimitiveLowering for GenericCudaPrimitives<'_> {
         let local = PrimitiveLocalName::new(local_name);
         let lines = match namespace {
             "data" => self.expand_data_arrow(local_name),
-            "f32" => self.f32.lower(&local, primitive),
-            "gpu" => self.gpu.lower(&local, primitive),
+            "f32" => self.f32.lower(&local, primitive, abi),
+            "gpu" => self.gpu.lower(&local, primitive, abi),
             _ => None,
         };
 
@@ -137,14 +143,24 @@ impl<'a> PrimitiveLocalName<'a> {
 }
 
 trait NamespaceLowering {
-    fn lower(&self, local: &PrimitiveLocalName<'_>, primitive: &Primitive) -> Option<Vec<String>>;
+    fn lower(
+        &self,
+        local: &PrimitiveLocalName<'_>,
+        primitive: &Primitive,
+        abi: &CudaKernelAbi,
+    ) -> Option<Vec<String>>;
 }
 
 #[derive(Debug, Clone, Copy)]
 struct F32Primitives;
 
 impl NamespaceLowering for F32Primitives {
-    fn lower(&self, local: &PrimitiveLocalName<'_>, primitive: &Primitive) -> Option<Vec<String>> {
+    fn lower(
+        &self,
+        local: &PrimitiveLocalName<'_>,
+        primitive: &Primitive,
+        _abi: &CudaKernelAbi,
+    ) -> Option<Vec<String>> {
         let [out] = primitive.outputs.as_slice() else {
             return None;
         };
@@ -170,7 +186,12 @@ impl NamespaceLowering for F32Primitives {
 struct GpuPrimitives;
 
 impl NamespaceLowering for GpuPrimitives {
-    fn lower(&self, local: &PrimitiveLocalName<'_>, primitive: &Primitive) -> Option<Vec<String>> {
+    fn lower(
+        &self,
+        local: &PrimitiveLocalName<'_>,
+        primitive: &Primitive,
+        abi: &CudaKernelAbi,
+    ) -> Option<Vec<String>> {
         if local.matches(&["grid", "schedule"]) {
             let [_grid] = primitive.inputs.as_slice() else {
                 return None;
@@ -185,15 +206,33 @@ impl NamespaceLowering for GpuPrimitives {
         }
 
         if local.matches(&["view", "group"]) {
-            let [block, thread, _block_size] = primitive.inputs.as_slice() else {
+            let [block, thread, thread_count] = primitive.inputs.as_slice() else {
                 return None;
             };
             let [out] = primitive.outputs.as_slice() else {
                 return None;
             };
-            return Some(vec![format!(
-                "uint64_t {out} = (uint64_t){block}.x * blockDim.x + {thread}.x;"
-            )]);
+            let mut lines = vec![format!(
+                "uint64_t {out} = (uint64_t){block}.x * {thread_count} + {thread}.x;"
+            )];
+            if abi.static_view_rank(out).is_some() {
+                lines.extend(view_coordinate_lines(out, thread));
+            }
+            return Some(lines);
+        }
+
+        if local.matches(&["view", "element"]) {
+            let [thread] = primitive.inputs.as_slice() else {
+                return None;
+            };
+            let [out] = primitive.outputs.as_slice() else {
+                return None;
+            };
+            let mut lines = vec![format!("uint64_t {out} = {thread}.x;")];
+            if abi.static_view_rank(out).is_some() {
+                lines.extend(view_coordinate_lines(out, thread));
+            }
+            return Some(lines);
         }
 
         if local.matches(&["global", "store"]) {
@@ -214,8 +253,43 @@ impl NamespaceLowering for GpuPrimitives {
             return Some(lines);
         }
 
+        if local.matches(&["shared", "load"]) {
+            let [shared, view] = primitive.inputs.as_slice() else {
+                return None;
+            };
+            let [out] = primitive.outputs.as_slice() else {
+                return None;
+            };
+            return Some(vec![format!(
+                "float {out} = {};",
+                abi.shared_access(shared, view)
+            )]);
+        }
+
+        if local.matches(&["shared", "store"]) {
+            let [shared, view, value] = primitive.inputs.as_slice() else {
+                return None;
+            };
+            let output = primitive.outputs.first();
+            let mut lines = vec![format!("{} = {value};", abi.shared_access(shared, view))];
+            if let Some(output) = output
+                && output != shared
+            {
+                lines.push(format!("auto {output} = {shared};"));
+            }
+            return Some(lines);
+        }
+
         None
     }
+}
+
+fn view_coordinate_lines(view: &str, thread: &str) -> Vec<String> {
+    vec![
+        format!("uint64_t {view}_x = {thread}.x;"),
+        format!("uint64_t {view}_y = {thread}.y;"),
+        format!("uint64_t {view}_z = {thread}.z;"),
+    ]
 }
 
 fn fallback_primitive_lines(primitive: &Primitive) -> Vec<String> {

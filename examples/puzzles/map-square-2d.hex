@@ -1,0 +1,70 @@
+#
+# Map puzzle: add 10.0 to each position of a square 2D matrix.
+# Use rows == cols for the square case.
+#
+
+(def data user.f32.map-square-2d-add-ten :
+    {
+      (([.rows] extent) val)
+      (([.cols] extent) val)
+      (({([rows] 1d) ([cols] 1d)} gpu.grid) val)
+      (({f32 ({[rows] [cols]} 2d)} gpu.global) val)
+      (({f32 ({[rows] [cols]} 2d)} gpu.global) val)
+    } ->
+    {
+      [rows cols.]
+      (({f32 ({[rows] [cols]} 2d)} gpu.global) val)
+      (({f32 ({[rows] [cols]} 2d)} gpu.global) val)
+    }
+    = {[rows cols grid a output.]
+      ([.grid] gpu.grid.schedule [block thread.])
+      ([.block thread cols] gpu.view.group [view.])
+      ([.a view] gpu.global.load [a_value.])
+      ([.] f32.one [one.])
+      ([.one one] f32.add [two.])
+      ([.two two] f32.add [four.])
+      ([.four four] f32.add [eight.])
+      ([.eight two] f32.add [ten.])
+      ([.a_value ten] f32.add [mapped.])
+      ([.output view mapped] gpu.global.store [output_mapped.])
+      [.a output_mapped]}
+)
+
+#
+# Variant with a 2D thread block over matrix tiles.
+#
+
+(def data user.f32.map-square-2d-block-add-ten :
+    {
+      (([.rows] extent) val)
+      (([.cols] extent) val)
+      (([.tile_rows] extent) val)
+      (([.tile_cols] extent) val)
+      (({
+          ({
+            (({[cols] [tile_cols]} nat.ceil-div) [grid_cols])
+            (({[rows] [tile_rows]} nat.ceil-div) [grid_rows])
+          } 2d)
+          ({[tile_cols] [tile_rows]} 2d)
+        } gpu.grid) val)
+      (({f32 ({[rows] [cols]} 2d)} gpu.global) val)
+      (({f32 ({[rows] [cols]} 2d)} gpu.global) val)
+    } ->
+    {
+      [rows cols tile_rows tile_cols grid_cols grid_rows.]
+      (({f32 ({[rows] [cols]} 2d)} gpu.global) val)
+      (({f32 ({[rows] [cols]} 2d)} gpu.global) val)
+    }
+    = {[rows cols tile_rows tile_cols grid a output.]
+      ([.grid] gpu.grid.schedule [block thread.])
+      ([.block thread tile_rows tile_cols] gpu.view.group-by-tile [ij.])
+      ([.a ij] gpu.global.load [a_value.])
+      ([.] f32.one [one.])
+      ([.one one] f32.add [two.])
+      ([.two two] f32.add [four.])
+      ([.four four] f32.add [eight.])
+      ([.eight two] f32.add [ten.])
+      ([.a_value ten] f32.add [mapped.])
+      ([.output ij mapped] gpu.global.store [output_mapped.])
+      [.a output_mapped]}
+)

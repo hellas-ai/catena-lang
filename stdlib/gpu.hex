@@ -22,6 +22,10 @@
     {(gpu.block val) (gpu.thread val) (([block_size] extent) val)} ->
     ([block_size .] (gpu.view val)))
 
+  (arr gpu.view.group-by-tile :
+    {(gpu.block val) (gpu.thread val) (([tile_rows] extent) val) (([tile_cols] extent) val)} ->
+    ([tile_rows tile_cols .] (gpu.view val)))
+
   (arr gpu.view.element :
     (gpu.thread val) ->
     (gpu.view val))

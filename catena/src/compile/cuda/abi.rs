@@ -62,6 +62,8 @@ pub(super) struct CudaKernelAbi {
     views: ViewAnalysis,
     cuda_names: HashMap<String, String>,
     view_guards: HashMap<String, String>,
+    view_ranks: HashMap<String, usize>,
+    global_shapes: HashMap<String, Vec<String>>,
 }
 
 #[derive(Debug, Clone)]
@@ -139,7 +141,14 @@ impl CudaKernelAbi {
         // or compute launch dimensions. Some primitives, such as
         // `gpu.view.group`, use an extent to compute per-thread indices in
         // device code, so those extents must also become kernel parameters.
-        let extents_required_by_device_code = extents_required_by_device_code(program);
+        let mut extents_required_by_device_code = extents_required_by_device_code(program);
+        if program_uses_tiled_view(program) {
+            for source_param in &source_params {
+                if crate::compile::cuda::shape::extent_leaf(&source_param.ty).is_some() {
+                    extents_required_by_device_code.insert(source_param.name.clone());
+                }
+            }
+        }
 
         // Turn each source parameter into concrete ABI pieces: host launcher
         // parameters, device kernel parameters, call arguments, generated
@@ -172,8 +181,13 @@ impl CudaKernelAbi {
             source_parameter_abi.shared_indexing.clone(),
         );
         let mut global_sizes = source_parameter_abi.global_sizes.clone();
-        let view_guards =
-            collect_view_guards(program, &source_parameter_abi.names, &mut global_sizes)?;
+        let mut global_shapes = source_parameter_abi.global_shapes.clone();
+        let view_analysis = collect_view_guards(
+            program,
+            &source_parameter_abi.names,
+            &mut global_sizes,
+            &mut global_shapes,
+        )?;
 
         Ok(CudaKernelAbi {
             kernel_params: source_parameter_abi.device_params,
@@ -186,7 +200,9 @@ impl CudaKernelAbi {
             dynamic_shared_memory_bytes,
             views,
             cuda_names: source_parameter_abi.names,
-            view_guards,
+            view_guards: view_analysis.guards,
+            view_ranks: view_analysis.ranks,
+            global_shapes: source_parameter_abi.global_shapes,
         })
     }
 
@@ -208,6 +224,15 @@ impl CudaKernelAbi {
     pub(super) fn view_guard(&self, view: &str) -> Option<&str> {
         self.view_guards.get(view).map(String::as_str)
     }
+
+    pub(super) fn global_access(&self, global: &str, view: &str) -> String {
+        match (self.view_ranks.get(view), self.global_shapes.get(global)) {
+            (Some(2), Some(shape)) if shape.len() == 2 => {
+                format!("{global}[{view}_row * {} + {view}_col]", shape[1])
+            }
+            _ => format!("{global}[{view}]"),
+        }
+    }
 }
 
 fn source_parameters(definition: &Definition) -> Result<Vec<&Variable>, CudaAbiError> {
@@ -223,47 +248,93 @@ fn source_parameters(definition: &Definition) -> Result<Vec<&Variable>, CudaAbiE
         .collect()
 }
 
+fn program_uses_tiled_view(program: &StructuredProgram) -> bool {
+    stmts_use_tiled_view(&program.body)
+}
+
+fn stmts_use_tiled_view(stmts: &[Stmt]) -> bool {
+    stmts.iter().any(|stmt| match stmt {
+        Stmt::Block { body, .. } | Stmt::Loop { body, .. } | Stmt::For { body, .. } => {
+            stmts_use_tiled_view(body)
+        }
+        Stmt::If {
+            then_body,
+            else_body,
+            ..
+        } => stmts_use_tiled_view(then_body) || stmts_use_tiled_view(else_body),
+        Stmt::Switch { cases, .. } => cases.iter().any(|case| stmts_use_tiled_view(case)),
+        Stmt::Primitive(primitive) => primitive.name == "gpu.view.group-by-tile",
+        Stmt::Break(_)
+        | Stmt::Continue(_)
+        | Stmt::Return
+        | Stmt::Barrier
+        | Stmt::Assign { .. }
+        | Stmt::Comment(_) => false,
+    })
+}
+
 fn collect_view_guards(
     program: &StructuredProgram,
     names: &HashMap<String, String>,
     global_sizes: &mut HashMap<String, String>,
-) -> Result<HashMap<String, String>, CudaAbiError> {
+    global_shapes: &mut HashMap<String, Vec<String>>,
+) -> Result<CudaViewGuardAnalysis, CudaAbiError> {
     let mut defined_views = HashSet::new();
-    let mut guard_sizes = HashMap::new();
+    let mut guard_conditions = HashMap::new();
+    let mut view_ranks = HashMap::new();
     collect_view_guard_inputs(
         &program.body,
         names,
         global_sizes,
+        global_shapes,
         &mut defined_views,
-        &mut guard_sizes,
+        &mut guard_conditions,
+        &mut view_ranks,
     )?;
 
     let mut guards = HashMap::new();
-    for (view, sizes) in guard_sizes {
+    for (view, conditions) in guard_conditions {
         if !defined_views.contains(&view) {
             return Err(CudaAbiError::MissingGlobalAccessView(view));
         }
-        let predicate = sizes
-            .into_iter()
-            .map(|size| format!("{view} < {size}"))
-            .collect::<Vec<_>>()
-            .join(" && ");
+        if guards.contains_key(&view) {
+            continue;
+        }
+        let predicate = conditions.join(" && ");
         guards.insert(view, predicate);
     }
-    Ok(guards)
+    Ok(CudaViewGuardAnalysis {
+        guards,
+        ranks: view_ranks,
+    })
+}
+
+struct CudaViewGuardAnalysis {
+    guards: HashMap<String, String>,
+    ranks: HashMap<String, usize>,
 }
 
 fn collect_view_guard_inputs(
     stmts: &[Stmt],
     names: &HashMap<String, String>,
     global_sizes: &mut HashMap<String, String>,
+    global_shapes: &mut HashMap<String, Vec<String>>,
     defined_views: &mut HashSet<String>,
-    guard_sizes: &mut HashMap<String, Vec<String>>,
+    guard_conditions: &mut HashMap<String, Vec<String>>,
+    view_ranks: &mut HashMap<String, usize>,
 ) -> Result<(), CudaAbiError> {
     for stmt in stmts {
         match stmt {
             Stmt::Block { body, .. } | Stmt::Loop { body, .. } | Stmt::For { body, .. } => {
-                collect_view_guard_inputs(body, names, global_sizes, defined_views, guard_sizes)?;
+                collect_view_guard_inputs(
+                    body,
+                    names,
+                    global_sizes,
+                    global_shapes,
+                    defined_views,
+                    guard_conditions,
+                    view_ranks,
+                )?;
             }
             Stmt::If {
                 then_body,
@@ -274,15 +345,19 @@ fn collect_view_guard_inputs(
                     then_body,
                     names,
                     global_sizes,
+                    global_shapes,
                     defined_views,
-                    guard_sizes,
+                    guard_conditions,
+                    view_ranks,
                 )?;
                 collect_view_guard_inputs(
                     else_body,
                     names,
                     global_sizes,
+                    global_shapes,
                     defined_views,
-                    guard_sizes,
+                    guard_conditions,
+                    view_ranks,
                 )?;
             }
             Stmt::Switch { cases, .. } => {
@@ -291,8 +366,10 @@ fn collect_view_guard_inputs(
                         case,
                         names,
                         global_sizes,
+                        global_shapes,
                         defined_views,
-                        guard_sizes,
+                        guard_conditions,
+                        view_ranks,
                     )?;
                 }
             }
@@ -301,8 +378,10 @@ fn collect_view_guard_inputs(
                     primitive,
                     names,
                     global_sizes,
+                    global_shapes,
                     defined_views,
-                    guard_sizes,
+                    guard_conditions,
+                    view_ranks,
                 )?;
             }
             Stmt::Break(_)
@@ -320,9 +399,20 @@ fn collect_primitive_view_guard_inputs(
     primitive: &Primitive,
     names: &HashMap<String, String>,
     global_sizes: &mut HashMap<String, String>,
+    global_shapes: &mut HashMap<String, Vec<String>>,
     defined_views: &mut HashSet<String>,
-    guard_sizes: &mut HashMap<String, Vec<String>>,
+    guard_conditions: &mut HashMap<String, Vec<String>>,
+    view_ranks: &mut HashMap<String, usize>,
 ) -> Result<(), CudaAbiError> {
+    if primitive.name == "gpu.view.group-by-tile" {
+        if let Some(view) = primitive.outputs.first() {
+            let view = rename_with(names, view);
+            defined_views.insert(view.clone());
+            view_ranks.insert(view, 2);
+        }
+        return Ok(());
+    }
+
     if primitive.name == "gpu.view.group" || primitive.name == "gpu.view.element" {
         if let Some(view) = primitive.outputs.first() {
             defined_views.insert(rename_with(names, view));
@@ -346,15 +436,25 @@ fn collect_primitive_view_guard_inputs(
         return Err(CudaAbiError::MissingGlobalSize(global));
     };
 
-    let sizes = guard_sizes.entry(view).or_default();
-    if !sizes.contains(&size) {
-        sizes.push(size.clone());
+    let condition = match (view_ranks.get(&view), global_shapes.get(&global)) {
+        (Some(2), Some(shape)) if shape.len() == 2 => {
+            format!("{view}_row < {} && {view}_col < {}", shape[0], shape[1])
+        }
+        _ => format!("{view} < {size}"),
+    };
+    let conditions = guard_conditions.entry(view).or_default();
+    if !conditions.contains(&condition) {
+        conditions.push(condition);
     }
 
     if primitive.name == "gpu.global.store"
         && let Some(output) = primitive.outputs.first()
     {
-        global_sizes.insert(rename_with(names, output), size);
+        let output = rename_with(names, output);
+        global_sizes.insert(output.clone(), size);
+        if let Some(shape) = global_shapes.get(&global).cloned() {
+            global_shapes.insert(output, shape);
+        }
     }
 
     Ok(())
@@ -373,6 +473,7 @@ struct SourceParameterAbi {
     host_prelude: Vec<String>,
     names: HashMap<String, String>,
     global_sizes: HashMap<String, String>,
+    global_shapes: HashMap<String, Vec<String>>,
     shared_layout: SharedMemoryLayout,
     shared_indexing: HashMap<String, SharedIndexing>,
 }
@@ -399,6 +500,7 @@ fn collect_source_parameter_abi(
             host_prelude: Vec::new(),
             names: HashMap::new(),
             global_sizes: HashMap::new(),
+            global_shapes: HashMap::new(),
             shared_layout: SharedMemoryLayout::new(),
             shared_indexing: HashMap::new(),
         },
@@ -524,6 +626,9 @@ impl SourceParameterAbiState {
         self.source_parameter_abi
             .global_sizes
             .insert(binding.device_name.clone(), binding.size_name.clone());
+        self.source_parameter_abi
+            .global_shapes
+            .insert(binding.device_name.clone(), binding.dimensions.clone());
         self.source_parameter_abi
             .device_params
             .extend(binding.device_params);

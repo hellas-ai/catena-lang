@@ -222,6 +222,28 @@ impl NamespaceLowering for GpuPrimitives {
             return Some(lines);
         }
 
+        if local.matches(&["view", "group-by-tile"]) {
+            let [block, thread, tile_rows, tile_cols] = primitive.inputs.as_slice() else {
+                return None;
+            };
+            let [out] = primitive.outputs.as_slice() else {
+                return None;
+            };
+            let mut lines = vec![
+                format!(
+                    "uint64_t {out}_row = (uint64_t){block}.y * {tile_rows} + {thread}.y;"
+                ),
+                format!(
+                    "uint64_t {out}_col = (uint64_t){block}.x * {tile_cols} + {thread}.x;"
+                ),
+            ];
+            if abi.static_view_rank(out).is_some() {
+                lines.extend(view_coordinate_lines(out, thread));
+            }
+            lines.extend(view_guard_lines(abi, out));
+            return Some(lines);
+        }
+
         if local.matches(&["view", "element"]) {
             let [thread] = primitive.inputs.as_slice() else {
                 return None;
@@ -242,7 +264,7 @@ impl NamespaceLowering for GpuPrimitives {
                 return None;
             };
             let output = primitive.outputs.first();
-            let mut lines = vec![format!("{global}[{view}] = {value};")];
+            let mut lines = vec![format!("{} = {value};", abi.global_access(global, view))];
             if let Some(output) = output
                 && output != global
             {
@@ -258,7 +280,10 @@ impl NamespaceLowering for GpuPrimitives {
             let [out] = primitive.outputs.as_slice() else {
                 return None;
             };
-            return Some(vec![format!("float {out} = {global}[{view}];")]);
+            return Some(vec![format!(
+                "float {out} = {};",
+                abi.global_access(global, view)
+            )]);
         }
 
         if local.matches(&["shared", "load"]) {

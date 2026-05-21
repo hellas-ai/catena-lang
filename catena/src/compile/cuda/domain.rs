@@ -230,12 +230,8 @@ impl NamespaceLowering for GpuPrimitives {
                 return None;
             };
             let mut lines = vec![
-                format!(
-                    "uint64_t {out}_row = (uint64_t){block}.y * {tile_rows} + {thread}.y;"
-                ),
-                format!(
-                    "uint64_t {out}_col = (uint64_t){block}.x * {tile_cols} + {thread}.x;"
-                ),
+                format!("uint64_t {out}_row = (uint64_t){block}.y * {tile_rows} + {thread}.y;"),
+                format!("uint64_t {out}_col = (uint64_t){block}.x * {tile_cols} + {thread}.x;"),
             ];
             if abi.static_view_rank(out).is_some() {
                 lines.extend(view_coordinate_lines(out, thread));

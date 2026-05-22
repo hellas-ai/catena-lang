@@ -302,6 +302,30 @@
   #
   #   Gamma |- pair2(0,col ij) : view2(one, tile_cols)
   #   Gamma |- pair2(row ij,0) : view2(tile_rows, one)
+  #
+  # Derivation tree:
+  #
+  #                                      group-tile-one-block
+  #   -------------------------------------------------------------------------
+  #   gamma-one-block(tile_rows,tile_cols) |- ij : view2(tile_rows,tile_cols)
+  #                                |                                      |
+  #                                | broadcast-a-view-from-ij             | broadcast-b-view-from-ij
+  #                                v                                      v
+  #   gamma-one-block(tile_rows,tile_cols) |- pair2(zero,col(ij)) : view2(one,tile_cols)
+  #   gamma-one-block(tile_rows,tile_cols) |- pair2(row(ij),zero) : view2(tile_rows,one)
+  #
+  # Expanded intended derivation for the first branch:
+  #
+  #   Gamma |- ij : view2(tile_rows,tile_cols)
+  #   ----------------------------------------- col-elim
+  #   Gamma |- col(ij) : idx(tile_cols)
+  #
+  #   Gamma |- zero : idx(one)
+  #   Gamma |- col(ij) : idx(tile_cols)
+  #   ---------------------------------- pair2-intro
+  #   Gamma |- pair2(zero,col(ij)) : view2(one,tile_cols)
+  #
+  # The second branch is symmetric, using row-elim and pair2(row(ij),zero).
   (def broadcast-view-subgraph-typed :
     ([tile_rows tile_cols.]) ->
     {[tile_rows tile_cols.]
@@ -333,6 +357,20 @@
   # Apply load2-safe to the two broadcast input views, given memory-shape
   # certificates and view certificates.  The view certificates are exactly the
   # second and third outputs of broadcast-view-subgraph-typed above.
+  #
+  # Derivation tree:
+  #
+  #   Gamma |- a : mat2(float32,one,tile_cols)
+  #   Gamma |- pair2(zero,col(ij)) : view2(one,tile_cols)
+  #   ----------------------------------------------------- load2-safe
+  #   Gamma |- load(a,pair2(zero,col(ij)))
+  #            : safe-load(mat2(float32,one,tile_cols),float32)
+  #
+  #   Gamma |- b : mat2(float32,tile_rows,one)
+  #   Gamma |- pair2(row(ij),zero) : view2(tile_rows,one)
+  #   ----------------------------------------------------- load2-safe
+  #   Gamma |- load(b,pair2(row(ij),zero))
+  #            : safe-load(mat2(float32,tile_rows,one),float32)
   (def broadcast-input-loads-safe-from-view-certificates :
     {[tile_rows tile_cols a b.]
       ([.tile_rows tile_cols] gamma-one-block [gamma.])

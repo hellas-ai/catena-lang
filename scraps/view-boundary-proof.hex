@@ -1,0 +1,398 @@
+# Scratch Metacat/Catena formal system for view typing.
+#
+# The object-language judgement is:
+#
+#   Gamma |- e : ty
+#
+# encoded as:
+#
+#   (|- Gamma e ty)
+#
+# Index and view boundaries are types:
+#
+#   idx(n)          means 0 <= e < n
+#   view2(rows,cols) means 0 <= row(e) < rows and 0 <= col(e) < cols
+#
+# A load is safe exactly when it can be typed with a safe-load type:
+#
+#   Gamma |- load(mem, view) : safe-load(memory-type, value-type)
+
+(theory syntax nat {
+  # Judgement and type constructors.
+  (arr |-        : 3 -> 1)
+  (arr idx       : 1 -> 1)
+  (arr view2     : 2 -> 1)
+  (arr float32   : 0 -> 1)
+  (arr vec1      : 2 -> 1)
+  (arr mat2      : 3 -> 1)
+  (arr safe-load : 2 -> 1)
+
+  # Context constructors.
+  (arr gamma-grid2     : 4 -> 1)
+  (arr gamma-one-block : 2 -> 1)
+
+  # Extent/type-level constructors.
+  (arr one : 0 -> 1)
+  (arr mul : 2 -> 1)
+
+  # View/index expression constructors.
+  (arr zero       : 0 -> 1)
+  (arr block      : 0 -> 1)
+  (arr thread     : 0 -> 1)
+  (arr block-row  : 0 -> 1)
+  (arr block-col  : 0 -> 1)
+  (arr thread-row : 0 -> 1)
+  (arr thread-col : 0 -> 1)
+  (arr group-tile : 4 -> 1)
+  (arr row        : 1 -> 1)
+  (arr col        : 1 -> 1)
+  (arr pair2      : 2 -> 1)
+  (arr load       : 2 -> 1)
+})
+
+(theory view_typing syntax {
+  ##############################################################################
+  # Grid-context rules
+  ##############################################################################
+
+  # Gamma = gamma-grid2(grid_rows, grid_cols, tile_rows, tile_cols)
+  # ---------------------------------------------------------------
+  # Gamma |- block-row : idx(grid_rows)
+  (arr grid-block-row :
+    ([grid_rows grid_cols tile_rows tile_cols.]) ->
+    {[grid_rows grid_cols tile_rows tile_cols.]
+      ([.grid_rows grid_cols tile_rows tile_cols] gamma-grid2 [gamma.])
+      ([.grid_rows] idx [ty.])
+      ([.gamma block-row ty] |-)
+    })
+
+  (arr grid-block-col :
+    ([grid_rows grid_cols tile_rows tile_cols.]) ->
+    {[grid_rows grid_cols tile_rows tile_cols.]
+      ([.grid_rows grid_cols tile_rows tile_cols] gamma-grid2 [gamma.])
+      ([.grid_cols] idx [ty.])
+      ([.gamma block-col ty] |-)
+    })
+
+  (arr grid-thread-row :
+    ([grid_rows grid_cols tile_rows tile_cols.]) ->
+    {[grid_rows grid_cols tile_rows tile_cols.]
+      ([.grid_rows grid_cols tile_rows tile_cols] gamma-grid2 [gamma.])
+      ([.tile_rows] idx [ty.])
+      ([.gamma thread-row ty] |-)
+    })
+
+  (arr grid-thread-col :
+    ([grid_rows grid_cols tile_rows tile_cols.]) ->
+    {[grid_rows grid_cols tile_rows tile_cols.]
+      ([.grid_rows grid_cols tile_rows tile_cols] gamma-grid2 [gamma.])
+      ([.tile_cols] idx [ty.])
+      ([.gamma thread-col ty] |-)
+    })
+
+  # Broadcast/single-block context.  Here the grid has one block in each
+  # dimension, so group-tile is bounded by the tile shape itself.
+  (arr one-block-thread-row :
+    ([tile_rows tile_cols.]) ->
+    {[tile_rows tile_cols.]
+      ([.tile_rows tile_cols] gamma-one-block [gamma.])
+      ([.tile_rows] idx [ty.])
+      ([.gamma thread-row ty] |-)
+    })
+
+  (arr one-block-thread-col :
+    ([tile_rows tile_cols.]) ->
+    {[tile_rows tile_cols.]
+      ([.tile_rows tile_cols] gamma-one-block [gamma.])
+      ([.tile_cols] idx [ty.])
+      ([.gamma thread-col ty] |-)
+    })
+
+  (arr one-block-block-row :
+    ([tile_rows tile_cols.]) ->
+    {[tile_rows tile_cols.]
+      ([.tile_rows tile_cols] gamma-one-block [gamma.])
+      (one [one_dim.])
+      ([.one_dim] idx [ty.])
+      ([.gamma block-row ty] |-)
+    })
+
+  (arr one-block-block-col :
+    ([tile_rows tile_cols.]) ->
+    {[tile_rows tile_cols.]
+      ([.tile_rows tile_cols] gamma-one-block [gamma.])
+      (one [one_dim.])
+      ([.one_dim] idx [ty.])
+      ([.gamma block-col ty] |-)
+    })
+
+  ##############################################################################
+  # View and index typing rules
+  ##############################################################################
+
+  # --------------------------
+  # Gamma |- zero : idx(one)
+  (arr zero-one :
+    ([gamma.]) ->
+    {[gamma.]
+      (one [one_dim.])
+      ([.one_dim] idx [ty.])
+      ([.gamma zero ty] |-)
+    })
+
+  # Gamma |- v : view2(rows, cols)
+  # --------------------------------
+  # Gamma |- row(v) : idx(rows)
+  (arr row-elim :
+    {[gamma v rows cols.]
+      ([.rows cols] view2 [view_ty.])
+      ([.gamma v view_ty] |-)
+    } ->
+    {[gamma v rows cols.]
+      ([.v] row [row_v.])
+      ([.rows] idx [row_ty.])
+      ([.gamma row_v row_ty] |-)
+    })
+
+  # Gamma |- v : view2(rows, cols)
+  # --------------------------------
+  # Gamma |- col(v) : idx(cols)
+  (arr col-elim :
+    {[gamma v rows cols.]
+      ([.rows cols] view2 [view_ty.])
+      ([.gamma v view_ty] |-)
+    } ->
+    {[gamma v rows cols.]
+      ([.v] col [col_v.])
+      ([.cols] idx [col_ty.])
+      ([.gamma col_v col_ty] |-)
+    })
+
+  # Gamma |- x : idx(rows)    Gamma |- y : idx(cols)
+  # -------------------------------------------------
+  # Gamma |- pair2(x, y) : view2(rows, cols)
+  (arr pair2-intro :
+    {[gamma x rows y cols.]
+      ([.rows] idx [x_ty.])
+      ([.cols] idx [y_ty.])
+      ([.gamma x x_ty] |-)
+      ([.gamma y y_ty] |-)
+    } ->
+    {[gamma x rows y cols.]
+      ([.x y] pair2 [xy.])
+      ([.rows cols] view2 [view_ty.])
+      ([.gamma xy view_ty] |-)
+    })
+
+  # General grid rule:
+  #
+  # Gamma = gamma-grid2(grid_rows, grid_cols, tile_rows, tile_cols)
+  # ---------------------------------------------------------------------
+  # Gamma |- group-tile(block, thread, tile_rows, tile_cols)
+  #          : view2(grid_rows * tile_rows, grid_cols * tile_cols)
+  (arr group-tile-grid2 :
+    ([grid_rows grid_cols tile_rows tile_cols.]) ->
+    {[grid_rows grid_cols tile_rows tile_cols.]
+      ([.grid_rows grid_cols tile_rows tile_cols] gamma-grid2 [gamma.])
+      (block [b.])
+      (thread [t.])
+      ([.b t tile_rows tile_cols] group-tile [ij.])
+      ([.grid_rows tile_rows] mul [rows.])
+      ([.grid_cols tile_cols] mul [cols.])
+      ([.rows cols] view2 [view_ty.])
+      ([.gamma ij view_ty] |-)
+    })
+
+  # Single-block broadcast rule:
+  #
+  # Gamma = gamma-one-block(tile_rows, tile_cols)
+  # ------------------------------------------------------------
+  # Gamma |- group-tile(block, thread, tile_rows, tile_cols)
+  #          : view2(tile_rows, tile_cols)
+  (arr group-tile-one-block :
+    ([tile_rows tile_cols.]) ->
+    {[tile_rows tile_cols.]
+      ([.tile_rows tile_cols] gamma-one-block [gamma.])
+      (block [b.])
+      (thread [t.])
+      ([.b t tile_rows tile_cols] group-tile [ij.])
+      ([.tile_rows tile_cols] view2 [view_ty.])
+      ([.gamma ij view_ty] |-)
+    })
+
+  ##############################################################################
+  # Load safety rules
+  ##############################################################################
+
+  # Gamma |- vec  : vec1(t,n)
+  # Gamma |- view : idx(n)
+  # ------------------------------------------------
+  # Gamma |- load(vec, view) : safe-load(vec1(t,n), t)
+  (arr load1-safe :
+    {[gamma vec view t n.]
+      ([.t n] vec1 [mem_ty.])
+      ([.gamma vec mem_ty] |-)
+      ([.n] idx [idx_ty.])
+      ([.gamma view idx_ty] |-)
+    } ->
+    {[gamma vec view t n.]
+      ([.vec view] load [expr.])
+      ([.t n] vec1 [mem_ty.])
+      ([.mem_ty t] safe-load [load_ty.])
+      ([.gamma expr load_ty] |-)
+    })
+
+  # Gamma |- mat  : mat2(t,rows,cols)
+  # Gamma |- view : view2(rows, cols)
+  # ------------------------------------------------------
+  # Gamma |- load(mat, view) : safe-load(mat2(t,rows,cols), t)
+  (arr load2-safe :
+    {[gamma mat view t rows cols.]
+      ([.t rows cols] mat2 [mem_ty.])
+      ([.gamma mat mem_ty] |-)
+      ([.rows cols] view2 [view_ty.])
+      ([.gamma view view_ty] |-)
+    } ->
+    {[gamma mat view t rows cols.]
+      ([.mat view] load [expr.])
+      ([.t rows cols] mat2 [mem_ty.])
+      ([.mem_ty t] safe-load [load_ty.])
+      ([.gamma expr load_ty] |-)
+    })
+
+  ##############################################################################
+  # Broadcast derivations
+  ##############################################################################
+
+  # From Gamma |- ij : view2(tile_rows, tile_cols), derive:
+  #
+  #   Gamma |- pair2(zero, col(ij)) : view2(one, tile_cols)
+  (arr broadcast-a-view-from-ij :
+    {[gamma ij tile_rows tile_cols.]
+      ([.tile_rows tile_cols] view2 [ij_ty.])
+      ([.gamma ij ij_ty] |-)
+    } ->
+    {[gamma ij tile_rows tile_cols.]
+      (zero [z.])
+      ([.ij] col [j.])
+      ([.z j] pair2 [a_view.])
+      (one [one_dim.])
+      ([.one_dim tile_cols] view2 [a_view_ty.])
+      ([.gamma a_view a_view_ty] |-)
+    })
+
+  # From Gamma |- ij : view2(tile_rows, tile_cols), derive:
+  #
+  #   Gamma |- pair2(row(ij), zero) : view2(tile_rows, one)
+  (arr broadcast-b-view-from-ij :
+    {[gamma ij tile_rows tile_cols.]
+      ([.tile_rows tile_cols] view2 [ij_ty.])
+      ([.gamma ij ij_ty] |-)
+    } ->
+    {[gamma ij tile_rows tile_cols.]
+      ([.ij] row [i.])
+      (zero [z.])
+      ([.i z] pair2 [b_view.])
+      (one [one_dim.])
+      ([.tile_rows one_dim] view2 [b_view_ty.])
+      ([.gamma b_view b_view_ty] |-)
+    })
+
+  # Derive the view-subgraph types:
+  #
+  #   Gamma |- pair2(0,col ij) : view2(one, tile_cols)
+  #   Gamma |- pair2(row ij,0) : view2(tile_rows, one)
+  (def broadcast-view-subgraph-typed :
+    ([tile_rows tile_cols.]) ->
+    {[tile_rows tile_cols.]
+      ([.tile_rows tile_cols] gamma-one-block [gamma.])
+      (block [b.])
+      (thread [t.])
+      ([.b t tile_rows tile_cols] group-tile [ij.])
+      (zero [z0.])
+      ([.ij] col [j.])
+      ([.z0 j] pair2 [a_view.])
+      (one [one_dim_a.])
+      ([.one_dim_a tile_cols] view2 [a_view_ty.])
+      ([.gamma a_view a_view_ty] |-)
+
+      ([.ij] row [i.])
+      (zero [z1.])
+      ([.i z1] pair2 [b_view.])
+      (one [one_dim_b.])
+      ([.tile_rows one_dim_b] view2 [b_view_ty.])
+      ([.gamma b_view b_view_ty] |-)
+    } =
+    (
+      []
+      ([.] group-tile-one-block [ij_typed])
+      ([ij_typed . ij_typed ij_typed]
+        {broadcast-a-view-from-ij broadcast-b-view-from-ij})
+    ))
+
+  # Apply load2-safe to the two broadcast input views, given memory-shape
+  # certificates and view certificates.  The view certificates are exactly the
+  # second and third outputs of broadcast-view-subgraph-typed above.
+  (def broadcast-input-loads-safe-from-view-certificates :
+    {[tile_rows tile_cols a b.]
+      ([.tile_rows tile_cols] gamma-one-block [gamma.])
+      (one [one_dim_a.])
+      (float32 [f32_ty_a.])
+      ([.f32_ty_a one_dim_a tile_cols] mat2 [a_mem_ty.])
+      ([.gamma a a_mem_ty] |-)
+
+      (one [one_dim_b.])
+      (float32 [f32_ty_b.])
+      ([.f32_ty_b tile_rows one_dim_b] mat2 [b_mem_ty.])
+      ([.gamma b b_mem_ty] |-)
+
+      (block [block_expr.])
+      (thread [thread_expr.])
+      ([.block_expr thread_expr tile_rows tile_cols] group-tile [ij.])
+
+      (zero [z0.])
+      ([.ij] col [j.])
+      ([.z0 j] pair2 [a_view.])
+      (one [one_dim_a_view.])
+      ([.one_dim_a_view tile_cols] view2 [a_view_ty.])
+      ([.gamma a_view a_view_ty] |-)
+
+      ([.ij] row [i.])
+      (zero [z1.])
+      ([.i z1] pair2 [b_view.])
+      (one [one_dim_b_view.])
+      ([.tile_rows one_dim_b_view] view2 [b_view_ty.])
+      ([.gamma b_view b_view_ty] |-)
+    } ->
+    {[tile_rows tile_cols a b.]
+      ([.tile_rows tile_cols] gamma-one-block [gamma.])
+      (block [block_expr.])
+      (thread [thread_expr.])
+      ([.block_expr thread_expr tile_rows tile_cols] group-tile [ij.])
+
+      (zero [z0.])
+      ([.ij] col [j.])
+      ([.z0 j] pair2 [a_view.])
+      ([.a a_view] load [a_load.])
+      (one [one_dim_a.])
+      (float32 [f32_ty_a.])
+      ([.f32_ty_a one_dim_a tile_cols] mat2 [a_mem_ty.])
+      ([.a_mem_ty f32_ty_a] safe-load [a_load_ty.])
+      ([.gamma a_load a_load_ty] |-)
+
+      ([.ij] row [i.])
+      (zero [z1.])
+      ([.i z1] pair2 [b_view.])
+      ([.b b_view] load [b_load.])
+      (one [one_dim_b.])
+      (float32 [f32_ty_b.])
+      ([.f32_ty_b tile_rows one_dim_b] mat2 [b_mem_ty.])
+      ([.b_mem_ty f32_ty_b] safe-load [b_load_ty.])
+      ([.gamma b_load b_load_ty] |-)
+    } =
+    (
+      [a_mem_known b_mem_known a_view_typed b_view_typed
+        . a_mem_known a_view_typed b_mem_known b_view_typed]
+      {load2-safe load2-safe}
+    ))
+})

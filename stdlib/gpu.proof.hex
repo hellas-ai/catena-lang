@@ -154,17 +154,21 @@
 
   # group
   #
-  #        Gamma |- e : view(cells 1d)
-  #   ------------------------------------
-  #    Gamma |- group(e, cols) : view({cells cols} 2d)
+  #        Gamma |- e : view(n 1d)
+  #   ------------------------------------------------
+  #    Gamma |- group(e, count) : view({ceil(n/count) count} 2d)
+  #
+  # The result shape has enough rows to cover all n linear positions when
+  # grouped into rows of length count. If count divides n exactly, this is the
+  # usual n/count by count shape.
 
   (arr group :
-    ([gamma expr cells cols . gamma expr cells]
-      ({[gamma] [expr] (([cells] 1d) view)} |-)) ->
-    ([gamma expr cells cols . gamma expr cols cells cols]
+    ([gamma expr n count . gamma expr n]
+      ({[gamma] [expr] (([n] 1d) view)} |-)) ->
+    ([gamma expr n count . gamma expr count n count count]
       ({[gamma]
-        ({[expr] [cols]} gpu.expr.group)
-        (({[cells] [cols]} 2d) view)}
+        ({[expr] [count]} gpu.expr.group)
+        (({({[n] [count]} nat.ceil-div) [count]} 2d) view)}
        |-)))
 
   # group-by-tile

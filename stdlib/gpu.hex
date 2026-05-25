@@ -29,13 +29,13 @@
     (gpu.view val) ->
     (gpu.view val))
 
-  # Group a linear 1D view into a 2D view with `cols` columns.
+  # Group a linear 1D view into a 2D view with rows of `count` elements.
   # For example, with a row-major layout:
-  #   row = view / cols
-  #   col = view % cols
+  #   row = view / count
+  #   col = view % count
   (arr gpu.view.group :
-    {(gpu.view val) (([cols] extent) val)} ->
-    ([cols .] (gpu.view val)))
+    {(gpu.view val) (([count] extent) val)} ->
+    ([count .] (gpu.view val)))
 
   # Map a 2D tiled worker view to a normal 2D data view.
   # For example, with row-major tile placement:

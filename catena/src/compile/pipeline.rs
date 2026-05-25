@@ -42,6 +42,8 @@ pub struct CompileRequest {
     pub format: Option<OutputFormat>,
     pub graph_options: GraphCompileOptions,
     pub cuda_options: CudaOptions,
+    pub proof_check: bool,
+    pub proof_paths: Vec<PathBuf>,
 }
 
 #[derive(Debug, Error)]
@@ -70,6 +72,10 @@ pub enum CompilePipelineError {
     UnsupportedFormat { emit: Emit, format: OutputFormat },
     #[error("--no-inline is only supported for emits that build a compile graph, not {0:?}")]
     UnsupportedNoInline(Emit),
+    #[error(
+        "missing proof certificate: pass one or more --proof <path> files, or pass --no-proof to compile without checking proof certificates"
+    )]
+    MissingProof,
 }
 
 pub fn compile(request: CompileRequest) -> Result<Vec<u8>, CompilePipelineError> {
@@ -106,6 +112,7 @@ impl CompilePipeline {
             }
             Emit::CompileGraph => {
                 self.require_format(OutputFormat::Svg)?;
+                self.check_proof_certificate()?;
                 let compile_graph_request = self.compile_graph_request()?;
                 let checked_elaborated_theory = self.checked_elaborated_theory()?;
                 let graph = Self::compile_graph(checked_elaborated_theory, compile_graph_request)?;
@@ -113,6 +120,7 @@ impl CompilePipeline {
             }
             Emit::Cuda | Emit::StructuredIr => {
                 self.require_format(OutputFormat::Text)?;
+                self.check_proof_certificate()?;
                 let emit = self.request.emit;
                 let cuda_options = self.request.cuda_options.clone();
                 let compile_graph_request = self.compile_graph_request()?;
@@ -198,6 +206,24 @@ impl CompilePipeline {
         if !self.request.graph_options.no_inline.is_empty() {
             return Err(CompilePipelineError::UnsupportedNoInline(self.request.emit));
         }
+        Ok(())
+    }
+
+    fn check_proof_certificate(&self) -> Result<(), CompilePipelineError> {
+        if !self.request.proof_check {
+            return Ok(());
+        }
+
+        if self.request.proof_paths.is_empty() {
+            return Err(CompilePipelineError::MissingProof);
+        }
+
+        let mut paths = self.request.paths.clone();
+        paths.extend(self.request.proof_paths.clone());
+
+        let raw = RawTheorySet::from_files(paths)?;
+        let elaborated = elaborate(raw)?;
+        check_elaborated_theory(&elaborated)?;
         Ok(())
     }
 }

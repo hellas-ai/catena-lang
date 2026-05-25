@@ -58,6 +58,14 @@ enum Command {
         /// Provide a compile-time CUDA size value, e.g. --cuda-static tile_rows=16.
         #[arg(long = "cuda-static", value_parser = parse_cuda_static)]
         cuda_static: Vec<(String, u64)>,
+
+        /// Compile without requiring a matching .proof.hex certificate.
+        #[arg(long = "no-proof")]
+        no_proof: bool,
+
+        /// Proof certificate file(s) to check before compiling.
+        #[arg(long = "proof", num_args = 1..)]
+        proof: Vec<PathBuf>,
     },
 }
 
@@ -91,6 +99,8 @@ fn main() -> anyhow::Result<()> {
             output,
             no_inline,
             cuda_static,
+            no_proof,
+            proof,
         } => compile_command(
             paths,
             emit,
@@ -100,6 +110,8 @@ fn main() -> anyhow::Result<()> {
             output,
             no_inline,
             cuda_static,
+            no_proof,
+            proof,
         ),
     }
 }
@@ -113,6 +125,8 @@ fn check_command(paths: Vec<PathBuf>, verbose: bool) -> anyhow::Result<()> {
         format: None,
         graph_options: GraphCompileOptions::default(),
         cuda_options: CudaOptions::default(),
+        proof_check: false,
+        proof_paths: Vec::new(),
     });
     let theory_set = pipeline.checked_elaborated_theory()?;
 
@@ -145,6 +159,8 @@ fn elaborate_command(paths: Vec<PathBuf>) -> anyhow::Result<()> {
         format: None,
         graph_options: GraphCompileOptions::default(),
         cuda_options: CudaOptions::default(),
+        proof_check: false,
+        proof_paths: Vec::new(),
     })?;
     write_output(None, &generated)
 }
@@ -158,6 +174,8 @@ fn compile_command(
     output: Option<PathBuf>,
     no_inline: Vec<String>,
     cuda_static: Vec<(String, u64)>,
+    no_proof: bool,
+    proof: Vec<PathBuf>,
 ) -> anyhow::Result<()> {
     let mut static_values = std::collections::HashMap::new();
     for (name, value) in cuda_static {
@@ -174,6 +192,8 @@ fn compile_command(
         format: format.map(Into::into),
         graph_options: GraphCompileOptions { no_inline },
         cuda_options: CudaOptions { static_values },
+        proof_check: !no_proof,
+        proof_paths: proof,
     })?;
 
     write_output(output, &generated)

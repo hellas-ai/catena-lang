@@ -32,29 +32,35 @@ echo "Compiling core/control examples"
 run_catena_quiet compile "${COMMON[@]}" examples/user-program.hex \
   --emit structured-ir \
   --theory control \
-  --entry user.u32.identity
+  --entry user.u32.identity \
+  --no-proof
 run_catena_quiet compile "${COMMON[@]}" examples/user-program.hex \
   --emit structured-ir \
   --theory data \
-  --entry user.u32.inc-unless-max
+  --entry user.u32.inc-unless-max \
+  --no-proof
 
 echo "Compiling CUDA examples"
 run_catena_quiet compile "${COMMON[@]}" examples/fill-one-array.hex \
   --emit cuda \
   --theory data \
-  --entry user.f32.fill-one
+  --entry user.f32.fill-one \
+  --proof examples/fill-one-array.proof.hex
 run_catena_quiet compile "${COMMON[@]}" examples/shared-memory.hex \
   --emit cuda \
   --theory data \
-  --entry user.f32.shared-one
+  --entry user.f32.shared-one \
+  --no-proof
 run_catena_quiet compile "${COMMON[@]}" examples/static-shared-memory.hex \
   --emit cuda \
   --theory data \
-  --entry user.f32.static-shared-one
+  --entry user.f32.static-shared-one \
+  --no-proof
 run_catena_quiet compile "${COMMON[@]}" examples/two-shared-two-global.hex \
   --emit cuda \
   --theory data \
-  --entry user.f32.two-shared-two-global
+  --entry user.f32.two-shared-two-global \
+  --no-proof
 
 echo "Compiling static CUDA shared-memory variants"
 run_catena_quiet compile "${COMMON[@]}" examples/static-shared-memory.hex \
@@ -62,12 +68,14 @@ run_catena_quiet compile "${COMMON[@]}" examples/static-shared-memory.hex \
   --theory data \
   --entry user.f32.static-shared-one \
   --cuda-static tile_rows=16 \
-  --cuda-static tile_cols=16
+  --cuda-static tile_cols=16 \
+  --no-proof
 run_catena_quiet compile "${COMMON[@]}" examples/two-shared-two-global.hex \
   --emit cuda \
   --theory data \
   --entry user.f32.two-shared-two-global \
   --cuda-static tile_rows=8 \
-  --cuda-static tile_cols=16
+  --cuda-static tile_cols=16 \
+  --no-proof
 
 echo "Examples passed"

@@ -3,8 +3,10 @@
 #
 # Naming convention:
 # - proof files mirror program files: fill-one-array.hex -> fill-one-array.proof.hex
-# - facts use the program's full name plus SSA variable as a prefix:
+# - SSA-local facts use the program's full name plus SSA variable:
 #   user.f32.fill-one.<ssa-name>.<property>
+# - memory safety facts name the memory and the view:
+#   user.f32.fill-one.<memory>.<view>.safe-access
 # - fact order follows the program's SSA order.
 #
 
@@ -41,7 +43,7 @@
   # Program:
   #   ([.worker] gpu.view.linearize [out_view.])
   #
-  # Fact: `out_view` is in bounds for the output array.
+  # Fact: `out_view` checks against the shape of output memory `out`.
   #
   #   Gamma |- out_view : view(([block_count * thread_count] 1d))
   #
@@ -56,7 +58,7 @@
   #      |- gpu.expr.linearize(gpu.expr.grid-view(grid))
   #       : view(([block_count * thread_count] 1d))
   #
-  (def user.f32.fill-one.out-view.view :
+  (def user.f32.fill-one.out_view.checks :
     ([grid block_count thread_count out . grid block_count thread_count]
       {gpu.ctx.empty [grid] ([block_count] 1d) ([thread_count] 1d)}) ->
     ([grid block_count thread_count out
@@ -79,10 +81,9 @@
   # Program:
   #   ([.out out_view one] gpu.global.store [out_filled.])
   #
-  # Fact: `out_filled` is produced by a global store whose view is in bounds
-  # for `out`.
+  # Theorem: `out_view` is safe for accessing memory `out`.
   #
-  # This fact uses user.f32.fill-one.out-view.view as a lemma.
+  # This theorem uses user.f32.fill-one.out_view.checks as a lemma.
   #
   # Derivation tree:
   #
@@ -92,7 +93,7 @@
   #  Gamma |- global.store(out, linearize(grid.view(grid)), one)
   #        : view(([block_count * thread_count] 1d))
   #
-  (def user.f32.fill-one.out-filled.store-view :
+  (def user.f32.fill-one.out.out_view.safe-access :
     ([grid block_count thread_count out one . grid block_count thread_count]
       {gpu.ctx.empty [grid] ([block_count] 1d) ([thread_count] 1d)}) ->
     ([grid block_count thread_count out one
@@ -106,7 +107,7 @@
        |-)
     )
     = (
-      user.f32.fill-one.out-view.view
+      user.f32.fill-one.out_view.checks
       global-store
     )
   )

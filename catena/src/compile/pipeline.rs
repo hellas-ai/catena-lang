@@ -1,12 +1,6 @@
 use std::path::PathBuf;
 
-use metacat::{
-    check::check as metacat_check,
-    theory::{
-        RawTheorySet, Theory, TheorySet,
-        ast::{MergeRawError, ParseRawError},
-    },
-};
+use metacat::theory::{RawTheorySet, TheorySet};
 use thiserror::Error;
 
 use crate::{
@@ -19,6 +13,7 @@ use crate::{
         graph_render,
         normalize::{NormalizeGraphError, normalize_graph},
         program::{ProgramCompileError, compile_program_from_graph},
+        proof::{ProofCertificateError, ProofCertificates},
         structured::{StructuredCompileError, compile_structured_program},
     },
     elaborate::{ElaborateError, elaborate},
@@ -78,22 +73,8 @@ pub enum CompilePipelineError {
     UnsupportedFormat { emit: Emit, format: OutputFormat },
     #[error("--no-inline is only supported for emits that build a compile graph, not {0:?}")]
     UnsupportedNoInline(Emit),
-    #[error(
-        "missing proof certificate: pass one or more --proof <path> files, or pass --no-proof to compile without checking proof certificates"
-    )]
-    MissingProof,
-    #[error("failed to parse proof input: {0}")]
-    ProofParse(ParseRawError),
-    #[error("failed to merge proof inputs: {0}")]
-    ProofMerge(#[from] MergeRawError),
-    #[error("failed to load proof certificate: {0}")]
-    ProofLoad(#[from] metacat::theory::LoadError),
-    #[error("proof check failed in theory `{theory}`, definition `{definition}`: {error:?}")]
-    ProofDefinition {
-        theory: String,
-        definition: String,
-        error: metacat::check::Error<hexpr::Operation>,
-    },
+    #[error(transparent)]
+    Proof(#[from] ProofCertificateError),
 }
 
 pub fn compile(request: CompileRequest) -> Result<Vec<u8>, CompilePipelineError> {
@@ -130,7 +111,7 @@ impl CompilePipeline {
             }
             Emit::CompileGraph => {
                 self.require_format(OutputFormat::Svg)?;
-                self.check_proof_certificate()?;
+                self.proof_certificates()?;
                 let compile_graph_request = self.compile_graph_request()?;
                 let checked_elaborated_theory = self.checked_elaborated_theory()?;
                 let graph = Self::compile_graph(checked_elaborated_theory, compile_graph_request)?;
@@ -138,7 +119,7 @@ impl CompilePipeline {
             }
             Emit::Cuda | Emit::StructuredIr => {
                 self.require_format(OutputFormat::Text)?;
-                self.check_proof_certificate()?;
+                let proof_certificates = self.proof_certificates()?;
                 let emit = self.request.emit;
                 let cuda_options = self.request.cuda_options.clone();
                 let compile_graph_request = self.compile_graph_request()?;
@@ -146,8 +127,15 @@ impl CompilePipeline {
                 let compile_graph =
                     Self::compile_graph(checked_elaborated_theory, compile_graph_request)?;
                 let graph = normalize_graph(&compile_graph)?;
+                let proof_evidence = proof_certificates
+                    .as_ref()
+                    .map(|certificates| certificates.verify_graph_properties(&graph))
+                    .transpose()?;
                 let program = compile_program_from_graph(&graph)?;
                 let structured = compile_structured_program(&program)?;
+                // Keep checked property evidence at the lowering boundary so
+                // future lowerings can consume it without rechecking proofs.
+                let _proof_evidence = proof_evidence;
                 Ok(match emit {
                     Emit::Cuda => render_cuda_source(
                         checked_elaborated_theory,
@@ -227,84 +215,16 @@ impl CompilePipeline {
         Ok(())
     }
 
-    fn check_proof_certificate(&self) -> Result<(), CompilePipelineError> {
+    fn proof_certificates(&self) -> Result<Option<ProofCertificates>, CompilePipelineError> {
         if !self.request.proof_check {
-            return Ok(());
+            return Ok(None);
         }
 
-        if self.request.proof_paths.is_empty() {
-            return Err(CompilePipelineError::MissingProof);
-        }
-
-        let theories = load_metacat_proof_theories(&self.request.paths, &self.request.proof_paths)?;
-        check_metacat_definitions(&theories)?;
-        Ok(())
+        Ok(Some(ProofCertificates::from_files(
+            &self.request.paths,
+            &self.request.proof_paths,
+        )?))
     }
-}
-
-fn load_metacat_proof_theories(
-    program_paths: &[PathBuf],
-    proof_paths: &[PathBuf],
-) -> Result<TheorySet, CompilePipelineError> {
-    let mut raw = RawTheorySet {
-        theories: Default::default(),
-        extensions: Vec::new(),
-    };
-
-    for path in program_paths {
-        raw = raw.merge(signature_only(
-            RawTheorySet::from_file(path.clone()).map_err(CompilePipelineError::ProofParse)?,
-        ))?;
-    }
-
-    for path in proof_paths {
-        raw = raw.merge(
-            RawTheorySet::from_file(path.clone()).map_err(CompilePipelineError::ProofParse)?,
-        )?;
-    }
-
-    Ok(TheorySet::from_raw(raw)?)
-}
-
-fn signature_only(mut raw: RawTheorySet) -> RawTheorySet {
-    for theory in raw.theories.values_mut() {
-        for arrow in theory.arrows.values_mut() {
-            arrow.definition = None;
-        }
-    }
-    raw.extensions.clear();
-    raw
-}
-
-fn check_metacat_definitions(theories: &TheorySet) -> Result<(), CompilePipelineError> {
-    for (id, theory) in &theories.theories {
-        if id.0.as_str() == "syntax" || id.0.as_str() == "nat" {
-            continue;
-        }
-
-        let Theory::Theory { arrows, .. } = theory else {
-            continue;
-        };
-
-        for (name, arrow) in arrows {
-            let Some(mut body) = arrow.definition.clone() else {
-                continue;
-            };
-            metacat_check(
-                theory,
-                arrow.type_maps.0.clone(),
-                arrow.type_maps.1.clone(),
-                &mut body,
-            )
-            .map_err(|error| CompilePipelineError::ProofDefinition {
-                theory: id.to_string(),
-                definition: name.to_string(),
-                error,
-            })?;
-        }
-    }
-
-    Ok(())
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

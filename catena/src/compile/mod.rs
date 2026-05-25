@@ -6,6 +6,7 @@ pub mod graph_render;
 pub mod normalize;
 pub mod pipeline;
 pub mod program;
+pub mod proof;
 pub mod structured;
 
 pub use config::{CompileConfig, TheoryExtension};

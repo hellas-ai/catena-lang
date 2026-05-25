@@ -19,10 +19,10 @@
   #
   # Derivation tree:
   #
-  #   ----------------------------------------------------------- grid-view
+  #   ----------------------------------------------------------- grid-view-1d-1d
   #    gpu.ctx.grid(empty, grid, ([block_count] 1d), ([thread_count] 1d))
   #      |- gpu.grid.view(grid)
-  #       : view(({([block_count] 1d) ([thread_count] 1d)} *))
+  #       : view(({block_count thread_count} 2d))
   #
   (def user.f32.map-add-ten.worker.view :
     ([grid block_count thread_count . grid block_count thread_count]
@@ -31,10 +31,10 @@
       . grid block_count thread_count grid block_count thread_count]
       ({({gpu.ctx.empty [grid] ([block_count] 1d) ([thread_count] 1d)} gpu.ctx.grid)
         ([grid] gpu.grid.view)
-        (({([block_count] 1d) ([thread_count] 1d)} *) view)}
+        (({[block_count] [thread_count]} 2d) view)}
        |-)
     )
-    = grid-view
+    = grid-view-1d-1d
   )
 
   #
@@ -43,12 +43,8 @@
   #
   # Fact: `view` checks against the shape of input memory `a`.
   #
-  #   ----------------------------------------------------------- global-linearize-1d-grid
-  #    gpu.ctx.global(
-  #      gpu.ctx.grid(empty, grid, ([block_count] 1d), ([thread_count] 1d)),
-  #      a,
-  #      block_count * thread_count,
-  #      ([block_count * thread_count] 1d))
+  #   ----------------------------------------------------------- linearize
+  #    gpu.ctx.grid(empty, grid, ([block_count] 1d), ([thread_count] 1d))
   #      |- gpu.view.linearize(gpu.grid.view(grid))
   #       : view(([block_count * thread_count] 1d))
   #
@@ -56,18 +52,15 @@
     ([grid block_count thread_count a . grid block_count thread_count]
       ({gpu.ctx.empty [grid] ([block_count] 1d) ([thread_count] 1d)} gpu.ctx.grid)) ->
     ([grid block_count thread_count a
-      . grid block_count thread_count a block_count thread_count grid block_count thread_count]
-      ({({({gpu.ctx.empty [grid] ([block_count] 1d) ([thread_count] 1d)} gpu.ctx.grid)
-          [a]
-          (({[block_count] [thread_count]} nat.mul) 1d)}
-         gpu.ctx.global)
+      . grid block_count thread_count grid block_count thread_count]
+      ({({gpu.ctx.empty [grid] ([block_count] 1d) ([thread_count] 1d)} gpu.ctx.grid)
         (([grid] gpu.grid.view) gpu.view.linearize)
         ((({[block_count] [thread_count]} nat.mul) 1d) view)}
        |-)
     )
     = (
       user.f32.map-add-ten.worker.view
-      global-linearize-1d-grid
+      linearize
     )
   )
 
@@ -84,18 +77,15 @@
     ([grid block_count thread_count output . grid block_count thread_count]
       ({gpu.ctx.empty [grid] ([block_count] 1d) ([thread_count] 1d)} gpu.ctx.grid)) ->
     ([grid block_count thread_count output
-      . grid block_count thread_count output block_count thread_count grid block_count thread_count]
-      ({({({gpu.ctx.empty [grid] ([block_count] 1d) ([thread_count] 1d)} gpu.ctx.grid)
-          [output]
-          (({[block_count] [thread_count]} nat.mul) 1d)}
-         gpu.ctx.global)
+      . grid block_count thread_count grid block_count thread_count]
+      ({({gpu.ctx.empty [grid] ([block_count] 1d) ([thread_count] 1d)} gpu.ctx.grid)
         (([grid] gpu.grid.view) gpu.view.linearize)
         ((({[block_count] [thread_count]} nat.mul) 1d) view)}
        |-)
     )
     = (
       user.f32.map-add-ten.worker.view
-      global-linearize-1d-grid
+      linearize
     )
   )
 

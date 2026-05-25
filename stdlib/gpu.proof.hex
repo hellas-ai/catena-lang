@@ -45,26 +45,62 @@
   ########################################
   # View introduction and structural view operations
   #
-  # grid-view
-  #
-  #    context = Gamma, grid : block_shape x thread_shape
-  #   ------------------------------------------------------- grid-view
-  #    context |- grid.view(grid) : view(block_shape * thread_shape)
-  #
-  # The result is hierarchical. For example:
-  # - 1D blocks x 1D threads: view(({([blocks] 1d) ([threads] 1d)} *))
-  # - 1D blocks x 2D threads: view(({([blocks] 1d) ({[rows] [cols]} 2d)} *))
-  # - 2D blocks x 1D threads: view(({({[grid_rows] [grid_cols]} 2d) ([threads] 1d)} *))
-  # - 2D blocks x 2D threads: view(({block_2d thread_2d} *))
 
-  (arr grid-view :
-    ([gamma grid block-shape thread-shape . gamma grid block-shape thread-shape]
-      ({[gamma] [grid] [block-shape] [thread-shape]} gpu.ctx.grid)) ->
-    ([gamma grid block-shape thread-shape
-      . gamma grid block-shape thread-shape grid block-shape thread-shape]
-      ({({[gamma] [grid] [block-shape] [thread-shape]} gpu.ctx.grid)
+  #   Gamma, grid : 1d(blocks) x 1d(threads)
+  #   ------------------------------------------------------- grid-view-1d-1d
+  #   Gamma |- grid.view(grid) : view(2d(blocks, threads))
+
+  (arr grid-view-1d-1d :
+    ([gamma grid blocks threads . gamma grid blocks threads]
+      ({[gamma] [grid] ([blocks] 1d) ([threads] 1d)} gpu.ctx.grid)) ->
+    ([gamma grid blocks threads
+      . gamma grid blocks threads grid blocks threads]
+      ({({[gamma] [grid] ([blocks] 1d) ([threads] 1d)} gpu.ctx.grid)
         ([grid] gpu.grid.view)
-        (({[block-shape] [thread-shape]} *) view)}
+        (({[blocks] [threads]} 2d) view)}
+       |-)))
+
+  #   Gamma, grid : 1d(blocks) x 2d(thread_rows, thread_cols)
+  #   ------------------------------------------------------------------ grid-view-1d-2d
+  #   Gamma |- grid.view(grid) : view(3d(blocks, thread_rows, thread_cols))
+
+  (arr grid-view-1d-2d :
+    ([gamma grid blocks thread-rows thread-cols . gamma grid blocks thread-rows thread-cols]
+      ({[gamma] [grid] ([blocks] 1d) ({[thread-rows] [thread-cols]} 2d)} gpu.ctx.grid)) ->
+    ([gamma grid blocks thread-rows thread-cols
+      . gamma grid blocks thread-rows thread-cols grid blocks thread-rows thread-cols]
+      ({({[gamma] [grid] ([blocks] 1d) ({[thread-rows] [thread-cols]} 2d)} gpu.ctx.grid)
+        ([grid] gpu.grid.view)
+        (({[blocks] [thread-rows] [thread-cols]} 3d) view)}
+       |-)))
+
+  #   Gamma, grid : 2d(block_rows, block_cols) x 1d(threads)
+  #   ---------------------------------------------------------------- grid-view-2d-1d
+  #   Gamma |- grid.view(grid) : view(3d(block_rows, block_cols, threads))
+
+  (arr grid-view-2d-1d :
+    ([gamma grid block-rows block-cols threads . gamma grid block-rows block-cols threads]
+      ({[gamma] [grid] ({[block-rows] [block-cols]} 2d) ([threads] 1d)} gpu.ctx.grid)) ->
+    ([gamma grid block-rows block-cols threads
+      . gamma grid block-rows block-cols threads grid block-rows block-cols threads]
+      ({({[gamma] [grid] ({[block-rows] [block-cols]} 2d) ([threads] 1d)} gpu.ctx.grid)
+        ([grid] gpu.grid.view)
+        (({[block-rows] [block-cols] [threads]} 3d) view)}
+       |-)))
+
+  #   Gamma, grid : 2d(block_rows, block_cols) x 2d(thread_rows, thread_cols)
+  #   -------------------------------------------------------------------------------- grid-view-2d-2d
+  #   Gamma |- grid.view(grid) : view(4d(block_rows, block_cols, thread_rows, thread_cols))
+
+  (arr grid-view-2d-2d :
+    ([gamma grid block-rows block-cols thread-rows thread-cols
+      . gamma grid block-rows block-cols thread-rows thread-cols]
+      ({[gamma] [grid] ({[block-rows] [block-cols]} 2d) ({[thread-rows] [thread-cols]} 2d)} gpu.ctx.grid)) ->
+    ([gamma grid block-rows block-cols thread-rows thread-cols
+      . gamma grid block-rows block-cols thread-rows thread-cols grid block-rows block-cols thread-rows thread-cols]
+      ({({[gamma] [grid] ({[block-rows] [block-cols]} 2d) ({[thread-rows] [thread-cols]} 2d)} gpu.ctx.grid)
+        ([grid] gpu.grid.view)
+        (({[block-rows] [block-cols] [thread-rows] [thread-cols]} 4d) view)}
        |-)))
 
   # linearize
@@ -80,48 +116,6 @@
       ({[gamma]
         ([expr] gpu.view.linearize)
         ((({[rows] [cols]} nat.mul) 1d) view)}
-       |-)))
-
-  # Common CUDA 1D-array case: after a 2D worker view is known,
-  # linearizing it is a valid index for a global array whose logical shape is
-  # rows*cols.
-  #
-  # global-linearize
-  #
-  #        Gamma |- e : view({rows cols} 2d)
-  #   ------------------------------------------------------------
-  #    Gamma, mem : view((rows * cols) 1d)
-  #      |- linearize(e) : view((rows * cols) 1d)
-
-  (arr global-linearize :
-    ([gamma expr rows cols mem . gamma expr rows cols]
-      ({[gamma] [expr] (({[rows] [cols]} 2d) view)} |-)) ->
-    ([gamma expr rows cols mem
-      . gamma mem rows cols expr rows cols]
-      ({({[gamma] [mem] (({[rows] [cols]} nat.mul) 1d)} gpu.ctx.global)
-        ([expr] gpu.view.linearize)
-        ((({[rows] [cols]} nat.mul) 1d) view)}
-       |-)))
-
-  # Common CUDA 1D grid case: a grid allocated as 1D blocks x 1D threads has
-  # hierarchical worker coordinates. Linearizing that hierarchy is a valid
-  # index for a flat global array of length blocks * threads.
-  #
-  # global-linearize-1d-grid
-  #
-  #        Gamma |- e : view(({([blocks] 1d) ([threads] 1d)} *))
-  #   ----------------------------------------------------------------
-  #    Gamma, mem : view(([blocks * threads] 1d))
-  #      |- linearize(e) : view(([blocks * threads] 1d))
-
-  (arr global-linearize-1d-grid :
-    ([gamma expr blocks threads mem . gamma expr blocks threads]
-      ({[gamma] [expr] (({([blocks] 1d) ([threads] 1d)} *) view)} |-)) ->
-    ([gamma expr blocks threads mem
-      . gamma mem blocks threads expr blocks threads]
-      ({({[gamma] [mem] (({[blocks] [threads]} nat.mul) 1d)} gpu.ctx.global)
-        ([expr] gpu.view.linearize)
-        ((({[blocks] [threads]} nat.mul) 1d) view)}
        |-)))
 
   # group
@@ -191,13 +185,13 @@
   #
   # global-load
   #
-  #    Gamma, mem : global(shape) |- e : view(shape)
+  #    Gamma |- e : view(shape)
   #   -------------------------------------------------------
   #    Gamma, mem : global(shape) |- global.load(mem, e) : view(shape)
   #
   # global-store
   #
-  #    Gamma, mem : global(shape) |- e : view(shape)
+  #    Gamma |- e : view(shape)
   #   --------------------------------------------------------------
   #    Gamma, mem : global(shape) |- global.store(mem, e, value) : view(shape)
   #
@@ -205,11 +199,8 @@
   # shared-memory context entry.
 
   (arr global-load :
-    ([gamma mem shape expr . gamma mem shape expr shape]
-      ({({[gamma] [mem] [shape]} gpu.ctx.global)
-        [expr]
-        ([shape] view)}
-       |-)) ->
+    ([gamma mem shape expr . gamma expr shape]
+      ({[gamma] [expr] ([shape] view)} |-)) ->
     ([gamma mem shape expr . gamma mem shape mem expr shape]
       ({({[gamma] [mem] [shape]} gpu.ctx.global)
         ({[mem] [expr]} gpu.global.load)
@@ -217,11 +208,8 @@
        |-)))
 
   (arr global-store :
-    ([gamma mem shape expr value . gamma mem shape expr shape]
-      ({({[gamma] [mem] [shape]} gpu.ctx.global)
-        [expr]
-        ([shape] view)}
-       |-)) ->
+    ([gamma mem shape expr value . gamma expr shape]
+      ({[gamma] [expr] ([shape] view)} |-)) ->
     ([gamma mem shape expr value . gamma mem shape mem expr value shape]
       ({({[gamma] [mem] [shape]} gpu.ctx.global)
         ({[mem] [expr] [value]} gpu.global.store)
@@ -229,11 +217,8 @@
        |-)))
 
   (arr shared-load :
-    ([gamma mem shape expr . gamma mem shape expr shape]
-      ({({[gamma] [mem] [shape]} gpu.ctx.shared)
-        [expr]
-        ([shape] view)}
-       |-)) ->
+    ([gamma mem shape expr . gamma expr shape]
+      ({[gamma] [expr] ([shape] view)} |-)) ->
     ([gamma mem shape expr . gamma mem shape mem expr shape]
       ({({[gamma] [mem] [shape]} gpu.ctx.shared)
         ({[mem] [expr]} gpu.shared.load)
@@ -241,11 +226,8 @@
        |-)))
 
   (arr shared-store :
-    ([gamma mem shape expr value . gamma mem shape expr shape]
-      ({({[gamma] [mem] [shape]} gpu.ctx.shared)
-        [expr]
-        ([shape] view)}
-       |-)) ->
+    ([gamma mem shape expr value . gamma expr shape]
+      ({[gamma] [expr] ([shape] view)} |-)) ->
     ([gamma mem shape expr value . gamma mem shape mem expr value shape]
       ({({[gamma] [mem] [shape]} gpu.ctx.shared)
         ({[mem] [expr] [value]} gpu.shared.store)

@@ -3,17 +3,20 @@
 #
 # Naming convention:
 # - proof files mirror program files: fill-one-array.hex -> fill-one-array.proof.hex
-# - facts use the program's full name as a prefix: user.f32.fill-one.<fact>
-# - fact suffixes name the program subterm/property being proved.
+# - facts use the program's full name plus SSA variable as a prefix:
+#   user.f32.fill-one.<ssa-name>.<property>
+# - fact order follows the program's SSA order.
 #
 
 (theory gpu.proof syntax {
   #
-  # Fact: the output index expression is in bounds for the output array.
+  # Program:
+  #   ([.grid] gpu.grid.view [worker.])
   #
-  #   Gamma |- linearize(grid.view(grid)) : view(([block_count * thread_count] 1d))
+  # Fact: `worker` is the hierarchical worker-coordinate view for the grid.
   #
-  # Gamma records both the grid and the output global array.
+  #   gpu.ctx.grid(empty, grid, ([block_count] 1d), ([thread_count] 1d))
+  #     |- worker : view(({([block_count] 1d) ([thread_count] 1d)} *))
   #
   # Derivation tree:
   #
@@ -21,6 +24,28 @@
   #    gpu.ctx.grid(empty, grid, ([block_count] 1d), ([thread_count] 1d))
   #      |- gpu.expr.grid-view(grid)
   #       : view(({([block_count] 1d) ([thread_count] 1d)} *))
+  #
+  (def user.f32.fill-one.worker.view :
+    {gpu.ctx.empty [grid] ([block_count] 1d) ([thread_count] 1d)} ->
+    ([grid block_count thread_count
+      . grid block_count thread_count grid block_count thread_count]
+      ({({gpu.ctx.empty [grid] ([block_count] 1d) ([thread_count] 1d)} gpu.ctx.grid)
+        ([grid] gpu.expr.grid-view)
+        (({([block_count] 1d) ([thread_count] 1d)} *) view)}
+       |-)
+    )
+    = grid-view
+  )
+
+  #
+  # Program:
+  #   ([.worker] gpu.view.linearize [out_view.])
+  #
+  # Fact: `out_view` is in bounds for the output array.
+  #
+  #   Gamma |- out_view : view(([block_count * thread_count] 1d))
+  #
+  # Gamma records both the grid and the output global array.
   #
   #   ----------------------------------------------------------- global-linearize-1d-grid
   #    gpu.ctx.global(
@@ -31,8 +56,9 @@
   #      |- gpu.expr.linearize(gpu.expr.grid-view(grid))
   #       : view(([block_count * thread_count] 1d))
   #
-  (arr user.f32.fill-one.out-view :
-    [grid block_count thread_count out] ->
+  (def user.f32.fill-one.out-view.view :
+    ([grid block_count thread_count out . grid block_count thread_count]
+      {gpu.ctx.empty [grid] ([block_count] 1d) ([thread_count] 1d)}) ->
     ([grid block_count thread_count out
       . grid block_count thread_count out block_count thread_count grid block_count thread_count]
       ({({({gpu.ctx.empty [grid] ([block_count] 1d) ([thread_count] 1d)} gpu.ctx.grid)
@@ -43,12 +69,20 @@
         ((({[block_count] [thread_count]} nat.mul) 1d) view)}
        |-)
     )
+    = (
+      user.f32.fill-one.worker.view
+      global-linearize-1d-grid
+    )
   )
 
   #
-  # Fact: the global store expression uses a view that is in bounds for `out`.
+  # Program:
+  #   ([.out out_view one] gpu.global.store [out_filled.])
   #
-  # This fact uses user.f32.fill-one.out-view as a lemma.
+  # Fact: `out_filled` is produced by a global store whose view is in bounds
+  # for `out`.
+  #
+  # This fact uses user.f32.fill-one.out-view.view as a lemma.
   #
   # Derivation tree:
   #
@@ -58,8 +92,9 @@
   #  Gamma |- global.store(out, linearize(grid.view(grid)), one)
   #        : view(([block_count * thread_count] 1d))
   #
-  (def user.f32.fill-one.store-view :
-    ([grid block_count thread_count out one . grid block_count thread_count out]) ->
+  (def user.f32.fill-one.out-filled.store-view :
+    ([grid block_count thread_count out one . grid block_count thread_count]
+      {gpu.ctx.empty [grid] ([block_count] 1d) ([thread_count] 1d)}) ->
     ([grid block_count thread_count out one
       . grid block_count thread_count out block_count thread_count out grid one block_count thread_count]
       ({({({gpu.ctx.empty [grid] ([block_count] 1d) ([thread_count] 1d)} gpu.ctx.grid)
@@ -71,7 +106,7 @@
        |-)
     )
     = (
-      user.f32.fill-one.out-view
+      user.f32.fill-one.out-view.view
       global-store
     )
   )

@@ -25,12 +25,11 @@
       (({f32 ({[global_rows] [global_cols]} 2d)} gpu.global) val)
     }
     = {[global_rows global_cols tile_rows tile_cols grid tile out.]
-      ([.grid] gpu.grid.schedule [block thread.])
-      ([.block thread tile_cols] gpu.view.group [out_view.])
-      ([.thread] gpu.view.element [tile_view.])
+      ([.grid] gpu.grid.view [worker.])
+      ([.worker tile_rows tile_cols] gpu.view.group-by-tile [out_view.])
       ([.] f32.one [one.])
-      ([.tile tile_view one] gpu.shared.store [tile_filled.])
-      ([.tile_filled tile_view] gpu.shared.load [from_tile.])
+      ([.tile worker one] gpu.shared.store [tile_filled.])
+      ([.tile_filled worker] gpu.shared.load [from_tile.])
       ([.out out_view from_tile] gpu.global.store [out_filled.])
       [.tile_filled out_filled]}
 )

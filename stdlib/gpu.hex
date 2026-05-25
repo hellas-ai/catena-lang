@@ -1,7 +1,5 @@
 (theory syntax nat {
 
-  (arr gpu.block : 0 -> 1)
-  (arr gpu.thread : 0 -> 1)
   (arr gpu.global : 2 -> 1)
   (arr gpu.view : 0 -> 1)
   (arr gpu.shared : 2 -> 1)
@@ -14,41 +12,58 @@
 
 (theory data syntax {
 
-  (arr gpu.grid.schedule :
+  # Views describe logical coordinates, not physical address arithmetic.
+  # Strides/layout are properties of the object being viewed.Those layouts can be chosen when grid/memory objects are created, but remain transparent to kernel code. 
+
+  # Current worker position in the grid execution domain.
+  # A 1D grid gives a product view [block_count] x [thread_count].
+  # A 2D grid gives a hierarchical product view:
+  #   ([grid_rows] x [grid_cols]) x ([tile_rows] x [tile_cols]).
+  (arr gpu.grid.view :
     (({[block_dim] [thread_dim]} gpu.grid) val) ->
-    ([block_dim thread_dim .] {(gpu.block val) (gpu.thread val)}))
+    ([block_dim thread_dim .] (gpu.view val)))
 
+  # Convert a product/hierarchical worker view to a contiguous 1D view.
+  # For a 1D worker view this is block.x * blockDim.x + thread.x.
+  (arr gpu.view.linearize :
+    (gpu.view val) ->
+    (gpu.view val))
+
+  # Group a linear 1D view into a 2D view with `cols` columns.
+  # For example, with a row-major layout:
+  #   row = view / cols
+  #   col = view % cols
   (arr gpu.view.group :
-    {(gpu.block val) (gpu.thread val) (([block_size] extent) val)} ->
-    ([block_size .] (gpu.view val)))
+    {(gpu.view val) (([cols] extent) val)} ->
+    ([cols .] (gpu.view val)))
 
+  # Map a 2D tiled worker view to a normal 2D data view.
+  # For example, with row-major tile placement:
+  # block position selects the tile, thread position selects the cell:
+  #   row = block.y * tile_rows + thread.y
+  #   col = block.x * tile_cols + thread.x
   (arr gpu.view.group-by-tile :
-    {(gpu.block val) (gpu.thread val) (([tile_rows] extent) val) (([tile_cols] extent) val)} ->
+    {(gpu.view val) (([tile_rows] extent) val) (([tile_cols] extent) val)} ->
     ([tile_rows tile_cols .] (gpu.view val)))
 
-  # TODO: consolidate group-by-tile and group-by-shape into one generic
-  # grouping/index-composition primitive once view ranks/shapes are explicit.
-
+  # Project the row coordinate from a 2D view.
   (arr gpu.view.row :
     (gpu.view val) ->
     (gpu.view val))
 
+  # Project the column coordinate from a 2D view.
   (arr gpu.view.col :
     (gpu.view val) ->
     (gpu.view val))
 
+  # Constant zero coordinate view.
   (arr gpu.view.zero :
     [] ->
     (gpu.view val))
 
-  (arr gpu.view.group-by-shape :
-    {(gpu.view val) (gpu.view val) (([rows] extent) val) (([cols] extent) val)} ->
-    ([rows cols .] (gpu.view val)))
-
-  (arr gpu.view.element :
-    (gpu.thread val) ->
-    (gpu.view val))
-
+  # Global memory access through a logical view. The view must match the
+  # accessed memory shape, or be explicitly converted by a view operation.
+  # For example, a row-major global layout maps (row, col) to row * cols + col.
   (arr gpu.global.store :
     {([matrix] val) (gpu.view val) (f32 val)} ->
     ([matrix . matrix] val))
@@ -57,6 +72,8 @@
     {([matrix] val) (gpu.view val)} ->
     ([matrix.] (f32 val)))
 
+  # Shared memory is block-local. When given a grid worker view, access uses
+  # the worker's thread position and ignores the block position.
   (arr gpu.shared.load :
     {([tile] val) (gpu.view val)} ->
     ([tile.] (f32 val)))

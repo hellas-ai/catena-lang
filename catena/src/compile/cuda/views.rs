@@ -207,19 +207,14 @@ fn collect_primitive_extents_required_by_device_code(
     primitive: &Primitive,
     names: &mut HashSet<String>,
 ) {
-    if primitive.name == "gpu.view.group"
-        && let Some(thread_count) = primitive.inputs.get(2)
-    {
-        names.insert(thread_count.clone());
-    }
     if primitive.name == "gpu.view.group-by-tile" {
-        for extent in primitive.inputs.iter().skip(2).take(2) {
+        for extent in primitive.inputs.iter().skip(1).take(2) {
             names.insert(extent.clone());
         }
     }
-    if primitive.name == "gpu.view.group-by-shape" {
-        for extent in primitive.inputs.iter().skip(2).take(2) {
-            names.insert(extent.clone());
-        }
+    if primitive.name == "gpu.view.group"
+        && let Some(cols) = primitive.inputs.get(1)
+    {
+        names.insert(cols.clone());
     }
 }

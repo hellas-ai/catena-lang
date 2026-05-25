@@ -63,6 +63,7 @@ pub(super) struct CudaKernelAbi {
     cuda_names: HashMap<String, String>,
     view_guards: HashMap<String, String>,
     view_ranks: HashMap<String, usize>,
+    grid_views: HashSet<String>,
     global_shapes: HashMap<String, Vec<String>>,
 }
 
@@ -138,11 +139,10 @@ impl CudaKernelAbi {
 
         // Find extent parameters that must still be available inside the
         // generated kernel body. Most extents are host-only: they size memory
-        // or compute launch dimensions. Some primitives, such as
-        // `gpu.view.group`, use an extent to compute per-thread indices in
-        // device code, so those extents must also become kernel parameters.
+        // or compute launch dimensions. View layout primitives can also need
+        // extents to compute device-side coordinates.
         let mut extents_required_by_device_code = extents_required_by_device_code(program);
-        if program_uses_tiled_view(program) {
+        if program_uses_tiled_view(program) || program_uses_grid_view_global_access(program) {
             for source_param in &source_params {
                 if crate::compile::cuda::shape::extent_leaf(&source_param.ty).is_some() {
                     extents_required_by_device_code.insert(source_param.name.clone());
@@ -202,6 +202,7 @@ impl CudaKernelAbi {
             cuda_names: source_parameter_abi.names,
             view_guards: view_analysis.guards,
             view_ranks: view_analysis.ranks,
+            grid_views: view_analysis.grid_views,
             global_shapes: source_parameter_abi.global_shapes,
         })
     }
@@ -214,6 +215,9 @@ impl CudaKernelAbi {
     }
 
     pub(super) fn shared_access(&self, shared: &str, view: &str) -> String {
+        if self.is_grid_view(view) && self.static_view_rank(view).is_none() {
+            return format!("{shared}[{view}_thread.x]");
+        }
         self.views.shared_access(shared, view)
     }
 
@@ -225,8 +229,15 @@ impl CudaKernelAbi {
         self.view_guards.get(view).map(String::as_str)
     }
 
+    pub(super) fn is_grid_view(&self, view: &str) -> bool {
+        self.grid_views.contains(view)
+    }
+
     pub(super) fn global_access(&self, global: &str, view: &str) -> String {
         match (self.view_ranks.get(view), self.global_shapes.get(global)) {
+            (_, Some(shape)) if self.is_grid_view(view) && shape.len() == 2 => {
+                format!("{global}[{view}_block.x * {} + {view}_thread.x]", shape[1])
+            }
             (Some(2), Some(shape)) if shape.len() == 2 => {
                 format!("{global}[{view}_row * {} + {view}_col]", shape[1])
             }
@@ -273,6 +284,81 @@ fn stmts_use_tiled_view(stmts: &[Stmt]) -> bool {
     })
 }
 
+fn program_uses_grid_view_global_access(program: &StructuredProgram) -> bool {
+    let mut grid_views = HashSet::new();
+    stmts_collect_grid_views(&program.body, &mut grid_views);
+    stmts_use_grid_view_global_access(&program.body, &grid_views)
+}
+
+fn stmts_collect_grid_views(stmts: &[Stmt], grid_views: &mut HashSet<String>) {
+    for stmt in stmts {
+        match stmt {
+            Stmt::Block { body, .. } | Stmt::Loop { body, .. } | Stmt::For { body, .. } => {
+                stmts_collect_grid_views(body, grid_views);
+            }
+            Stmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                stmts_collect_grid_views(then_body, grid_views);
+                stmts_collect_grid_views(else_body, grid_views);
+            }
+            Stmt::Switch { cases, .. } => {
+                for case in cases {
+                    stmts_collect_grid_views(case, grid_views);
+                }
+            }
+            Stmt::Primitive(primitive) if primitive.name == "gpu.grid.view" => {
+                if let Some(view) = primitive.outputs.first() {
+                    grid_views.insert(view.clone());
+                }
+            }
+            Stmt::Primitive(_)
+            | Stmt::Break(_)
+            | Stmt::Continue(_)
+            | Stmt::Return
+            | Stmt::Barrier
+            | Stmt::Assign { .. }
+            | Stmt::Comment(_) => {}
+        }
+    }
+}
+
+fn stmts_use_grid_view_global_access(stmts: &[Stmt], grid_views: &HashSet<String>) -> bool {
+    stmts.iter().any(|stmt| match stmt {
+        Stmt::Block { body, .. } | Stmt::Loop { body, .. } | Stmt::For { body, .. } => {
+            stmts_use_grid_view_global_access(body, grid_views)
+        }
+        Stmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            stmts_use_grid_view_global_access(then_body, grid_views)
+                || stmts_use_grid_view_global_access(else_body, grid_views)
+        }
+        Stmt::Switch { cases, .. } => cases
+            .iter()
+            .any(|case| stmts_use_grid_view_global_access(case, grid_views)),
+        Stmt::Primitive(primitive)
+            if primitive.name == "gpu.global.load" || primitive.name == "gpu.global.store" =>
+        {
+            primitive
+                .inputs
+                .get(1)
+                .is_some_and(|view| grid_views.contains(view))
+        }
+        Stmt::Primitive(_)
+        | Stmt::Break(_)
+        | Stmt::Continue(_)
+        | Stmt::Return
+        | Stmt::Barrier
+        | Stmt::Assign { .. }
+        | Stmt::Comment(_) => false,
+    })
+}
+
 fn collect_view_guards(
     program: &StructuredProgram,
     names: &HashMap<String, String>,
@@ -280,6 +366,7 @@ fn collect_view_guards(
     global_shapes: &mut HashMap<String, Vec<String>>,
 ) -> Result<CudaViewGuardAnalysis, CudaAbiError> {
     let mut defined_views = HashSet::new();
+    let mut grid_views = HashSet::new();
     let mut guard_conditions = HashMap::new();
     let mut view_ranks = HashMap::new();
     collect_view_guard_inputs(
@@ -288,6 +375,7 @@ fn collect_view_guards(
         global_sizes,
         global_shapes,
         &mut defined_views,
+        &mut grid_views,
         &mut guard_conditions,
         &mut view_ranks,
     )?;
@@ -306,12 +394,14 @@ fn collect_view_guards(
     Ok(CudaViewGuardAnalysis {
         guards,
         ranks: view_ranks,
+        grid_views,
     })
 }
 
 struct CudaViewGuardAnalysis {
     guards: HashMap<String, String>,
     ranks: HashMap<String, usize>,
+    grid_views: HashSet<String>,
 }
 
 fn collect_view_guard_inputs(
@@ -320,6 +410,7 @@ fn collect_view_guard_inputs(
     global_sizes: &mut HashMap<String, String>,
     global_shapes: &mut HashMap<String, Vec<String>>,
     defined_views: &mut HashSet<String>,
+    grid_views: &mut HashSet<String>,
     guard_conditions: &mut HashMap<String, Vec<String>>,
     view_ranks: &mut HashMap<String, usize>,
 ) -> Result<(), CudaAbiError> {
@@ -332,6 +423,7 @@ fn collect_view_guard_inputs(
                     global_sizes,
                     global_shapes,
                     defined_views,
+                    grid_views,
                     guard_conditions,
                     view_ranks,
                 )?;
@@ -347,6 +439,7 @@ fn collect_view_guard_inputs(
                     global_sizes,
                     global_shapes,
                     defined_views,
+                    grid_views,
                     guard_conditions,
                     view_ranks,
                 )?;
@@ -356,6 +449,7 @@ fn collect_view_guard_inputs(
                     global_sizes,
                     global_shapes,
                     defined_views,
+                    grid_views,
                     guard_conditions,
                     view_ranks,
                 )?;
@@ -368,6 +462,7 @@ fn collect_view_guard_inputs(
                         global_sizes,
                         global_shapes,
                         defined_views,
+                        grid_views,
                         guard_conditions,
                         view_ranks,
                     )?;
@@ -380,6 +475,7 @@ fn collect_view_guard_inputs(
                     global_sizes,
                     global_shapes,
                     defined_views,
+                    grid_views,
                     guard_conditions,
                     view_ranks,
                 )?;
@@ -401,10 +497,20 @@ fn collect_primitive_view_guard_inputs(
     global_sizes: &mut HashMap<String, String>,
     global_shapes: &mut HashMap<String, Vec<String>>,
     defined_views: &mut HashSet<String>,
+    grid_views: &mut HashSet<String>,
     guard_conditions: &mut HashMap<String, Vec<String>>,
     view_ranks: &mut HashMap<String, usize>,
 ) -> Result<(), CudaAbiError> {
-    if primitive.name == "gpu.view.group-by-tile" {
+    if primitive.name == "gpu.grid.view" {
+        if let Some(view) = primitive.outputs.first() {
+            let view = rename_with(names, view);
+            defined_views.insert(view.clone());
+            grid_views.insert(view);
+        }
+        return Ok(());
+    }
+
+    if primitive.name == "gpu.view.group-by-tile" || primitive.name == "gpu.view.group" {
         if let Some(view) = primitive.outputs.first() {
             let view = rename_with(names, view);
             defined_views.insert(view.clone());
@@ -422,19 +528,7 @@ fn collect_primitive_view_guard_inputs(
         return Ok(());
     }
 
-    if primitive.name == "gpu.view.group-by-shape" {
-        if let Some(view) = primitive.outputs.first() {
-            let view = rename_with(names, view);
-            defined_views.insert(view.clone());
-            view_ranks.insert(view, 2);
-        }
-        return Ok(());
-    }
-
-    if primitive.name == "gpu.view.group"
-        || primitive.name == "gpu.view.element"
-        || primitive.name == "gpu.view.zero"
-    {
+    if primitive.name == "gpu.view.linearize" || primitive.name == "gpu.view.zero" {
         if let Some(view) = primitive.outputs.first() {
             defined_views.insert(rename_with(names, view));
         }
@@ -457,8 +551,18 @@ fn collect_primitive_view_guard_inputs(
         return Err(CudaAbiError::MissingGlobalSize(global));
     };
 
-    let condition = match (view_ranks.get(&view), global_shapes.get(&global)) {
-        (Some(2), Some(shape)) if shape.len() == 2 => {
+    let condition = match (
+        grid_views.contains(&view),
+        view_ranks.get(&view),
+        global_shapes.get(&global),
+    ) {
+        (true, _, Some(shape)) if shape.len() == 2 => {
+            format!(
+                "{view}_block.x < {} && {view}_thread.x < {}",
+                shape[0], shape[1]
+            )
+        }
+        (_, Some(2), Some(shape)) if shape.len() == 2 => {
             format!("{view}_row < {} && {view}_col < {}", shape[0], shape[1])
         }
         _ => format!("{view} < {size}"),
@@ -597,8 +701,8 @@ impl SourceParameterAbiState {
         }
 
         // Most extents exist only to compute launch parameters and memory sizes
-        // on the host. gpu.view.group also needs its thread-count extent inside
-        // the kernel, so pass that one through as a device parameter.
+        // on the host. View layout primitives can also need extents inside the
+        // kernel, so pass those through as device parameters.
         if self
             .extents_required_by_device_code
             .contains(&source_param.name)

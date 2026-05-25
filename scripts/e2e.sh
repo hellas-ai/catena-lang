@@ -9,7 +9,7 @@ if [[ -n "${CATENA_CMD:-}" ]]; then
 else
   CATENA=(cargo run -q -p catena-cli --)
 fi
-COMMON=(stdlib/core.hex stdlib/gpu.hex)
+COMMON=(stdlib/core.hex stdlib/gpu.hex stdlib/gpu.proof.hex)
 
 run_catena() {
   echo "+ ${CATENA[*]} $*"

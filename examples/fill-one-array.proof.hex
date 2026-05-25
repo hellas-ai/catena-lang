@@ -1,0 +1,78 @@
+#
+# Facts about the program user.f32.fill-one.
+#
+# Naming convention:
+# - proof files mirror program files: fill-one-array.hex -> fill-one-array.proof.hex
+# - facts use the program's full name as a prefix: user.f32.fill-one.<fact>
+# - fact suffixes name the program subterm/property being proved.
+#
+
+(theory gpu.proof syntax {
+  #
+  # Fact: the output index expression is in bounds for the output array.
+  #
+  #   Gamma |- linearize(grid.view(grid)) : view(([block_count * thread_count] 1d))
+  #
+  # Gamma records both the grid and the output global array.
+  #
+  # Derivation tree:
+  #
+  #   ----------------------------------------------------------- grid-view
+  #    gpu.ctx.grid(empty, grid, ([block_count] 1d), ([thread_count] 1d))
+  #      |- gpu.expr.grid-view(grid)
+  #       : view(({([block_count] 1d) ([thread_count] 1d)} *))
+  #
+  #   ----------------------------------------------------------- global-linearize-1d-grid
+  #    gpu.ctx.global(
+  #      gpu.ctx.grid(empty, grid, ([block_count] 1d), ([thread_count] 1d)),
+  #      out,
+  #      block_count * thread_count,
+  #      ([block_count * thread_count] 1d))
+  #      |- gpu.expr.linearize(gpu.expr.grid-view(grid))
+  #       : view(([block_count * thread_count] 1d))
+  #
+  (arr user.f32.fill-one.out-view :
+    [grid block_count thread_count out] ->
+    ([grid block_count thread_count out
+      . grid block_count thread_count out block_count thread_count grid block_count thread_count]
+      ({({({gpu.ctx.empty [grid] ([block_count] 1d) ([thread_count] 1d)} gpu.ctx.grid)
+          [out]
+          (({[block_count] [thread_count]} nat.mul) 1d)}
+         gpu.ctx.global)
+        (([grid] gpu.expr.grid-view) gpu.expr.linearize)
+        ((({[block_count] [thread_count]} nat.mul) 1d) view)}
+       |-)
+    )
+  )
+
+  #
+  # Fact: the global store expression uses a view that is in bounds for `out`.
+  #
+  # This fact uses user.f32.fill-one.out-view as a lemma.
+  #
+  # Derivation tree:
+  #
+  #    Gamma |- gpu.expr.linearize(gpu.expr.grid-view(grid))
+  #          : view(([block_count * thread_count] 1d))
+  #   -------------------------------------------------------------- global-store
+  #  Gamma |- global.store(out, linearize(grid.view(grid)), one)
+  #        : view(([block_count * thread_count] 1d))
+  #
+  (def user.f32.fill-one.store-view :
+    ([grid block_count thread_count out one . grid block_count thread_count out]) ->
+    ([grid block_count thread_count out one
+      . grid block_count thread_count out block_count thread_count out grid one block_count thread_count]
+      ({({({gpu.ctx.empty [grid] ([block_count] 1d) ([thread_count] 1d)} gpu.ctx.grid)
+          [out]
+          (({[block_count] [thread_count]} nat.mul) 1d)}
+         gpu.ctx.global)
+        ({[out] (([grid] gpu.expr.grid-view) gpu.expr.linearize) [one]} gpu.expr.global.store)
+        ((({[block_count] [thread_count]} nat.mul) 1d) view)}
+       |-)
+    )
+    = (
+      user.f32.fill-one.out-view
+      global-store
+    )
+  )
+})

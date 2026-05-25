@@ -103,6 +103,23 @@
         (({[block-rows] [block-cols] [thread-rows] [thread-cols]} 4d) view)}
        |-)))
 
+  # linearize-1d
+  #
+  #        Gamma |- e : view(n 1d)
+  #   ---------------------------------
+  #    Gamma |- linearize(e) : view(n 1d)
+  #
+  # Linearizing a 1D view preserves its shape.
+
+  (arr linearize-1d :
+    ([gamma expr n]
+      ({[gamma] [expr] (([n] 1d) view)} |-)) ->
+    ([gamma expr n]
+      ({[gamma]
+        ([expr] gpu.view.linearize)
+        (([n] 1d) view)}
+       |-)))
+
   # linearize
   #
   #        Gamma |- e : view({rows cols} 2d)
@@ -116,6 +133,36 @@
       ({[gamma]
         ([expr] gpu.view.linearize)
         ((({[rows] [cols]} nat.mul) 1d) view)}
+       |-)))
+
+  # linearize-3d
+  #
+  #        Gamma |- e : view({x y z} 3d)
+  #   --------------------------------------------
+  #    Gamma |- linearize(e) : view(((x * y) * z) 1d)
+
+  (arr linearize-3d :
+    ([gamma expr x y z]
+      ({[gamma] [expr] (({[x] [y] [z]} 3d) view)} |-)) ->
+    ([gamma expr x y z]
+      ({[gamma]
+        ([expr] gpu.view.linearize)
+        ((({({[x] [y]} nat.mul) [z]} nat.mul) 1d) view)}
+       |-)))
+
+  # linearize-4d
+  #
+  #        Gamma |- e : view({x y z w} 4d)
+  #   ------------------------------------------------------
+  #    Gamma |- linearize(e) : view((((x * y) * z) * w) 1d)
+
+  (arr linearize-4d :
+    ([gamma expr x y z w]
+      ({[gamma] [expr] (({[x] [y] [z] [w]} 4d) view)} |-)) ->
+    ([gamma expr x y z w]
+      ({[gamma]
+        ([expr] gpu.view.linearize)
+        ((({({({[x] [y]} nat.mul) [z]} nat.mul) [w]} nat.mul) 1d) view)}
        |-)))
 
   # group

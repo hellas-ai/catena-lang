@@ -19,11 +19,24 @@
   (arr bool.or  : {bool bool} -> bool)
   (arr bool.and : {bool bool} -> bool)
 
-
-  # execute one of two functions depending on a boolean flag
+  # execute one of two *closures* depending on a boolean flag
   #
   #   if : 2 ● (A => B) ● (A => B) -> (A => B)
   (arr bool.if : {bool =>} -> =>)
+
+  # Execute one of two *converted closures* depending on a flag
+  # (A "converted closure" is an explicit environment plus a fn pointer)
+  #
+  #   ifc : X ● (X * A -> B) ● Y ● (Y * A -> B) ● Bool ● A -> B
+  (arr bool.ifc : {[x y a b.]
+    [.x]
+    ([.x a] {* [.b]} ->)
+    [.y]
+    ([.y a] {* [.b]} ->)
+    bool
+    [.a]
+  } -> [x y a b . b])
+
 
   # temp helpers until we add polymorphic versions
   # unitors and associators for bools only

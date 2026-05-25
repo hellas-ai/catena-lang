@@ -100,25 +100,15 @@ fn target_type_map(syntax: &Theory, raw: &RawTheoryArrow) -> Hexpr {
 fn pack_object(object_size: usize) -> Hexpr {
     match object_size {
         0 => op(UNIT_TYPE),
-        1 => Hexpr::Frobenius {
-            sources: vec![var("x0")],
-            targets: vec![var("x0")],
-        },
+        1 => identity_var("x0"),
         2 => op(PRODUCT_TYPE),
-        n => {
-            let mut steps = Vec::new();
-            for next_var in 2..n {
-                steps.push(Hexpr::Tensor(vec![
-                    op(PRODUCT_TYPE),
-                    Hexpr::Frobenius {
-                        sources: vec![var(&format!("x{next_var}"))],
-                        targets: vec![var(&format!("x{next_var}"))],
-                    },
-                ]));
-            }
-            steps.push(op(PRODUCT_TYPE));
-            Hexpr::Composition(steps)
-        }
+        n => Hexpr::Composition(vec![
+            Hexpr::Tensor(vec![
+                pack_object(n - 1),
+                identity_var(&format!("x{}", n - 1)),
+            ]),
+            op(PRODUCT_TYPE),
+        ]),
     }
 }
 
@@ -129,6 +119,13 @@ fn vars(prefix: &str, arity: usize) -> Vec<Variable> {
 fn var(name: &str) -> Variable {
     name.parse()
         .expect("generated variable should satisfy hexpr variable syntax")
+}
+
+fn identity_var(name: &str) -> Hexpr {
+    Hexpr::Frobenius {
+        sources: vec![var(name)],
+        targets: vec![var(name)],
+    }
 }
 
 fn op(name: &str) -> Hexpr {

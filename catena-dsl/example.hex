@@ -5,6 +5,10 @@
 # Boolean examples
 (def program not : bool -> bool = bool.not)
 (def program run-not : bool -> bool = ({defer (name.bool.not lift)} compose run))
+(def program test-ifc : {bool bool} -> bool = (
+  {bool.t name.bool.and bool.t name.bool.or [flag arg . flag arg]}
+  bool.ifc
+))
 
 ########################################
 # Minimal packed-product example.
@@ -27,15 +31,16 @@
 
 
 # Partial application of 'and' to its first arg.
-(def program partial-and-closure : bool -> ({bool bool} =>) = (
-  {
-    (
-      {defer (name.bool.id lift)}
-      tensor
-    )
-    (name.bool.and lift)
-  }
-  compose
-  {(name.bool.li lift) [f]}
-  compose
-))
+# NOTE: this is currently rejected because of => types on interfaces.
+#(def program partial-and-closure : bool -> ({bool bool} =>) = (
+  #{
+    #(
+      #{defer (name.bool.id lift)}
+      #tensor
+    #)
+    #(name.bool.and lift)
+  #}
+  #compose
+  #{(name.bool.li lift) [f]}
+  #compose
+#))

@@ -76,12 +76,29 @@ fn runtime_prelude() -> &'static str {
 
 typedef uint8_t catena_unit_t;
 
-static inline uint8_t bool_not(uint8_t arg0) {
-    return !arg0;
+static inline void bool_not(uint8_t arg0, uint8_t *out1) {
+    *out1 = !arg0;
 }
 
-static inline uint8_t bool_or(uint8_t arg0, uint8_t arg1) {
-    return arg0 || arg1;
+static inline void bool_or(uint8_t arg0, uint8_t arg1, uint8_t *out2) {
+    *out2 = arg0 || arg1;
+}
+
+static inline void bool_and(uint8_t arg0, uint8_t arg1, uint8_t *out2) {
+    *out2 = arg0 && arg1;
+}
+
+static inline void bool_id(uint8_t arg0, uint8_t *out1) {
+    *out1 = arg0;
+}
+
+static inline void bool_copy(uint8_t arg0, uint8_t *out1, uint8_t *out2) {
+    *out1 = arg0;
+    *out2 = arg0;
+}
+
+static inline void bool_li(uint8_t arg0, uint8_t *out1) {
+    *out1 = arg0;
 }
 "#
 }
@@ -124,15 +141,40 @@ fn render_primitive(
     }
 
     match primitive.name.as_str() {
+        "bool.t" => {
+            let [output] = primitive.outputs.as_slice() else { return Err(CRenderError::UnsupportedStmt) };
+            out.push_str(&format!("    {output} = 1;\n"));
+        }
+        "bool.f" => {
+            let [output] = primitive.outputs.as_slice() else { return Err(CRenderError::UnsupportedStmt) };
+            out.push_str(&format!("    {output} = 0;\n"));
+        }
         "bool.not" => {
             let [input] = primitive.inputs.as_slice() else { return Err(CRenderError::UnsupportedStmt) };
             let [output] = primitive.outputs.as_slice() else { return Err(CRenderError::UnsupportedStmt) };
             out.push_str(&format!("    {output} = !{input};\n"));
         }
+        "bool.and" => {
+            let [lhs, rhs] = primitive.inputs.as_slice() else { return Err(CRenderError::UnsupportedStmt) };
+            let [output] = primitive.outputs.as_slice() else { return Err(CRenderError::UnsupportedStmt) };
+            out.push_str(&format!("    {output} = {lhs} && {rhs};\n"));
+        }
         "bool.or" => {
             let [lhs, rhs] = primitive.inputs.as_slice() else { return Err(CRenderError::UnsupportedStmt) };
             let [output] = primitive.outputs.as_slice() else { return Err(CRenderError::UnsupportedStmt) };
             out.push_str(&format!("    {output} = {lhs} || {rhs};\n"));
+        }
+        "bool.ifc" => {
+            let [env_true, fn_true, env_false, fn_false, flag, arg] = primitive.inputs.as_slice() else {
+                return Err(CRenderError::UnsupportedStmt);
+            };
+            let [output] = primitive.outputs.as_slice() else { return Err(CRenderError::UnsupportedStmt) };
+            out.push_str(&format!(
+                "    if ({flag}) {{ {fn_true}({env_true}, {arg}, &{output}); }} else {{ {fn_false}({env_false}, {arg}, &{output}); }}\n"
+            ));
+        }
+        "unit.intro" => {
+            // The singleton object is erased from the wire-level representation.
         }
         "eval" => {
             let Some((func, args)) = primitive.inputs.split_last() else {

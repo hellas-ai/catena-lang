@@ -24,7 +24,7 @@
   #
   #   ----------------------------------------------------------- grid-view
   #    gpu.ctx.grid(empty, grid, ([block_count] 1d), ([thread_count] 1d))
-  #      |- gpu.expr.grid-view(grid)
+  #      |- gpu.grid.view(grid)
   #       : view(({([block_count] 1d) ([thread_count] 1d)} *))
   #
   (def user.f32.fill-one.worker.view :
@@ -33,7 +33,7 @@
     ([grid block_count thread_count
       . grid block_count thread_count grid block_count thread_count]
       ({({gpu.ctx.empty [grid] ([block_count] 1d) ([thread_count] 1d)} gpu.ctx.grid)
-        ([grid] gpu.expr.grid-view)
+        ([grid] gpu.grid.view)
         (({([block_count] 1d) ([thread_count] 1d)} *) view)}
        |-)
     )
@@ -56,7 +56,7 @@
   #      out,
   #      block_count * thread_count,
   #      ([block_count * thread_count] 1d))
-  #      |- gpu.expr.linearize(gpu.expr.grid-view(grid))
+  #      |- gpu.view.linearize(gpu.grid.view(grid))
   #       : view(([block_count * thread_count] 1d))
   #
   (def user.f32.fill-one.out_view.checks :
@@ -68,7 +68,7 @@
           [out]
           (({[block_count] [thread_count]} nat.mul) 1d)}
          gpu.ctx.global)
-        (([grid] gpu.expr.grid-view) gpu.expr.linearize)
+        (([grid] gpu.grid.view) gpu.view.linearize)
         ((({[block_count] [thread_count]} nat.mul) 1d) view)}
        |-)
     )
@@ -88,7 +88,7 @@
   #
   # Derivation tree:
   #
-  #    Gamma |- gpu.expr.linearize(gpu.expr.grid-view(grid))
+  #    Gamma |- gpu.view.linearize(gpu.grid.view(grid))
   #          : view(([block_count * thread_count] 1d))
   #   -------------------------------------------------------------- global-store
   #  Gamma |- global.store(out, linearize(grid.view(grid)), one)
@@ -103,7 +103,7 @@
           [out]
           (({[block_count] [thread_count]} nat.mul) 1d)}
          gpu.ctx.global)
-        ({[out] (([grid] gpu.expr.grid-view) gpu.expr.linearize) [one]} gpu.expr.global.store)
+        ({[out] (([grid] gpu.grid.view) gpu.view.linearize) [one]} gpu.global.store)
         ((({[block_count] [thread_count]} nat.mul) 1d) view)}
        |-)
     )

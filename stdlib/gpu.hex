@@ -8,6 +8,19 @@
   (arr 3d : 3 -> 1)
   (arr gpu.grid : 2 -> 1)
 
+  # GPU operation names are also syntax constructors so proof systems can
+  # talk about object-language expressions using the same names as programs.
+  (arr gpu.grid.view : 1 -> 1)
+  (arr gpu.view.linearize : 1 -> 1)
+  (arr gpu.view.group : 2 -> 1)
+  (arr gpu.view.group-by-tile : 3 -> 1)
+  (arr gpu.view.row : 1 -> 1)
+  (arr gpu.view.col : 1 -> 1)
+  (arr gpu.global.store : 3 -> 1)
+  (arr gpu.global.load : 2 -> 1)
+  (arr gpu.shared.store : 3 -> 1)
+  (arr gpu.shared.load : 2 -> 1)
+
 })
 
 (theory data syntax {

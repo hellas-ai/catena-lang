@@ -25,19 +25,6 @@
   (arr gpu.ctx.global : 3 -> 1)
   (arr gpu.ctx.shared : 3 -> 1)
 
-  ########################################
-  # Object-language expressions for GPU view operations
-
-  (arr gpu.expr.grid-view : 1 -> 1)
-  (arr gpu.expr.linearize : 1 -> 1)
-  (arr gpu.expr.group : 2 -> 1)
-  (arr gpu.expr.group-by-tile : 3 -> 1)
-  (arr gpu.expr.row : 1 -> 1)
-  (arr gpu.expr.col : 1 -> 1)
-  (arr gpu.expr.global.load : 2 -> 1)
-  (arr gpu.expr.global.store : 3 -> 1)
-  (arr gpu.expr.shared.load : 2 -> 1)
-  (arr gpu.expr.shared.store : 3 -> 1)
 })
 
 (theory gpu.proof syntax {
@@ -63,7 +50,7 @@
     ([gamma grid block-shape thread-shape
       . gamma grid block-shape thread-shape grid block-shape thread-shape]
       ({({[gamma] [grid] [block-shape] [thread-shape]} gpu.ctx.grid)
-        ([grid] gpu.expr.grid-view)
+        ([grid] gpu.grid.view)
         (({[block-shape] [thread-shape]} *) view)}
        |-)))
 
@@ -78,7 +65,7 @@
       ({[gamma] [expr] (({[rows] [cols]} 2d) view)} |-)) ->
     ([gamma expr rows cols]
       ({[gamma]
-        ([expr] gpu.expr.linearize)
+        ([expr] gpu.view.linearize)
         ((({[rows] [cols]} nat.mul) 1d) view)}
        |-)))
 
@@ -99,7 +86,7 @@
     ([gamma expr rows cols mem
       . gamma mem rows cols expr rows cols]
       ({({[gamma] [mem] (({[rows] [cols]} nat.mul) 1d)} gpu.ctx.global)
-        ([expr] gpu.expr.linearize)
+        ([expr] gpu.view.linearize)
         ((({[rows] [cols]} nat.mul) 1d) view)}
        |-)))
 
@@ -120,7 +107,7 @@
     ([gamma expr blocks threads mem
       . gamma mem blocks threads expr blocks threads]
       ({({[gamma] [mem] (({[blocks] [threads]} nat.mul) 1d)} gpu.ctx.global)
-        ([expr] gpu.expr.linearize)
+        ([expr] gpu.view.linearize)
         ((({[blocks] [threads]} nat.mul) 1d) view)}
        |-)))
 
@@ -139,7 +126,7 @@
       ({[gamma] [expr] (([n] 1d) view)} |-)) ->
     ([gamma expr n count . gamma expr count n count count]
       ({[gamma]
-        ({[expr] [count]} gpu.expr.group)
+        ({[expr] [count]} gpu.view.group)
         (({({[n] [count]} nat.ceil-div) [count]} 2d) view)}
        |-)))
 
@@ -157,7 +144,7 @@
     ([gamma expr grid-rows grid-cols tile-rows tile-cols
       . gamma expr tile-rows tile-cols grid-rows tile-rows grid-cols tile-cols]
       ({[gamma]
-        ({[expr] [tile-rows] [tile-cols]} gpu.expr.group-by-tile)
+        ({[expr] [tile-rows] [tile-cols]} gpu.view.group-by-tile)
         (({({[grid-rows] [tile-rows]} nat.mul) ({[grid-cols] [tile-cols]} nat.mul)} 2d) view)}
        |-)))
 
@@ -171,7 +158,7 @@
     ([gamma expr rows cols]
       ({[gamma] [expr] (({[rows] [cols]} 2d) view)} |-)) ->
     ([gamma expr rows cols . gamma expr rows]
-      ({[gamma] ([expr] gpu.expr.row) (([rows] 1d) view)} |-)))
+      ({[gamma] ([expr] gpu.view.row) (([rows] 1d) view)} |-)))
 
   # col
   #
@@ -183,7 +170,7 @@
     ([gamma expr rows cols]
       ({[gamma] [expr] (({[rows] [cols]} 2d) view)} |-)) ->
     ([gamma expr rows cols . gamma expr cols]
-      ({[gamma] ([expr] gpu.expr.col) (([cols] 1d) view)} |-)))
+      ({[gamma] ([expr] gpu.view.col) (([cols] 1d) view)} |-)))
 
   ########################################
   # Memory operations are well-viewed when their index view is in bounds for
@@ -212,7 +199,7 @@
        |-)) ->
     ([gamma mem shape expr . gamma mem shape mem expr shape]
       ({({[gamma] [mem] [shape]} gpu.ctx.global)
-        ({[mem] [expr]} gpu.expr.global.load)
+        ({[mem] [expr]} gpu.global.load)
         ([shape] view)}
        |-)))
 
@@ -224,7 +211,7 @@
        |-)) ->
     ([gamma mem shape expr value . gamma mem shape mem expr value shape]
       ({({[gamma] [mem] [shape]} gpu.ctx.global)
-        ({[mem] [expr] [value]} gpu.expr.global.store)
+        ({[mem] [expr] [value]} gpu.global.store)
         ([shape] view)}
        |-)))
 
@@ -236,7 +223,7 @@
        |-)) ->
     ([gamma mem shape expr . gamma mem shape mem expr shape]
       ({({[gamma] [mem] [shape]} gpu.ctx.shared)
-        ({[mem] [expr]} gpu.expr.shared.load)
+        ({[mem] [expr]} gpu.shared.load)
         ([shape] view)}
        |-)))
 
@@ -248,7 +235,7 @@
        |-)) ->
     ([gamma mem shape expr value . gamma mem shape mem expr value shape]
       ({({[gamma] [mem] [shape]} gpu.ctx.shared)
-        ({[mem] [expr] [value]} gpu.expr.shared.store)
+        ({[mem] [expr] [value]} gpu.shared.store)
         ([shape] view)}
        |-)))
 })

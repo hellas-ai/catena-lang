@@ -82,6 +82,12 @@ impl ProofEvidence {
     pub fn requirements(&self) -> &[ProofRequirement] {
         &self.requirements
     }
+
+    pub fn has_definition(&self, definition: &str) -> bool {
+        self.requirements
+            .iter()
+            .any(|requirement| requirement.definition == definition)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -6,6 +6,7 @@ use crate::{
             render::{CudaPrimitiveLowering, render_cuda},
         },
         program::Definition,
+        proof::ProofEvidence,
     },
     structured::ir::{Primitive, StructuredProgram},
 };
@@ -24,9 +25,10 @@ impl<'a> CudaTarget<'a> {
         entry: &Definition,
         program: &StructuredProgram,
         options: &CudaOptions,
+        proof_evidence: Option<&ProofEvidence>,
     ) -> Result<Self, CudaAbiError> {
         Ok(Self {
-            abi: CudaKernelAbi::from_definition(entry, program, options)?,
+            abi: CudaKernelAbi::from_definition(entry, program, options, proof_evidence)?,
             primitives: GenericCudaPrimitives::new(theory_set),
         })
     }
@@ -206,7 +208,6 @@ impl NamespaceLowering for GpuPrimitives {
             if abi.static_view_rank(out).is_some() {
                 lines.extend(view_coordinate_lines_from_grid_view(out, out));
             }
-            lines.extend(view_guard_lines(abi, out));
             return Some(lines);
         }
 
@@ -217,7 +218,7 @@ impl NamespaceLowering for GpuPrimitives {
             let [out] = primitive.outputs.as_slice() else {
                 return None;
             };
-            let mut lines = if abi.is_grid_view(view) {
+            let lines = if abi.is_grid_view(view) {
                 vec![format!(
                     "uint64_t {out} = (uint64_t){} * blockDim.x + {};",
                     view_block_component(view, "x"),
@@ -226,7 +227,6 @@ impl NamespaceLowering for GpuPrimitives {
             } else {
                 vec![format!("uint64_t {out} = {view};")]
             };
-            lines.extend(view_guard_lines(abi, out));
             return Some(lines);
         }
 
@@ -259,7 +259,6 @@ impl NamespaceLowering for GpuPrimitives {
             if abi.static_view_rank(out).is_some() && abi.is_grid_view(view) {
                 lines.extend(view_coordinate_lines_from_grid_view(out, view));
             }
-            lines.extend(view_guard_lines(abi, out));
             return Some(lines);
         }
 
@@ -270,11 +269,10 @@ impl NamespaceLowering for GpuPrimitives {
             let [out] = primitive.outputs.as_slice() else {
                 return None;
             };
-            let mut lines = vec![
+            let lines = vec![
                 format!("uint64_t {out}_row = {view} / {cols};"),
                 format!("uint64_t {out}_col = {view} % {cols};"),
             ];
-            lines.extend(view_guard_lines(abi, out));
             return Some(lines);
         }
 
@@ -285,9 +283,7 @@ impl NamespaceLowering for GpuPrimitives {
             let [out] = primitive.outputs.as_slice() else {
                 return None;
             };
-            let mut lines = vec![format!("uint64_t {out} = {view}_row;")];
-            lines.extend(view_guard_lines(abi, out));
-            return Some(lines);
+            return Some(vec![format!("uint64_t {out} = {view}_row;")]);
         }
 
         if local.matches(&["view", "col"]) {
@@ -297,9 +293,7 @@ impl NamespaceLowering for GpuPrimitives {
             let [out] = primitive.outputs.as_slice() else {
                 return None;
             };
-            let mut lines = vec![format!("uint64_t {out} = {view}_col;")];
-            lines.extend(view_guard_lines(abi, out));
-            return Some(lines);
+            return Some(vec![format!("uint64_t {out} = {view}_col;")]);
         }
 
         if local.matches(&["global", "store"]) {
@@ -307,7 +301,8 @@ impl NamespaceLowering for GpuPrimitives {
                 return None;
             };
             let output = primitive.outputs.first();
-            let mut lines = vec![format!("{} = {value};", abi.global_access(global, view))];
+            let mut lines = certified_access_lines(abi, global, view);
+            lines.push(format!("{} = {value};", abi.global_access(global, view)));
             if let Some(output) = output
                 && output != global
             {
@@ -323,10 +318,12 @@ impl NamespaceLowering for GpuPrimitives {
             let [out] = primitive.outputs.as_slice() else {
                 return None;
             };
-            return Some(vec![format!(
+            let mut lines = certified_access_lines(abi, global, view);
+            lines.push(format!(
                 "float {out} = {};",
                 abi.global_access(global, view)
-            )]);
+            ));
+            return Some(lines);
         }
 
         if local.matches(&["shared", "load"]) {
@@ -336,10 +333,12 @@ impl NamespaceLowering for GpuPrimitives {
             let [out] = primitive.outputs.as_slice() else {
                 return None;
             };
-            return Some(vec![format!(
+            let mut lines = certified_access_lines(abi, shared, view);
+            lines.push(format!(
                 "float {out} = {};",
                 abi.shared_access(shared, view)
-            )]);
+            ));
+            return Some(lines);
         }
 
         if local.matches(&["shared", "store"]) {
@@ -347,7 +346,8 @@ impl NamespaceLowering for GpuPrimitives {
                 return None;
             };
             let output = primitive.outputs.first();
-            let mut lines = vec![format!("{} = {value};", abi.shared_access(shared, view))];
+            let mut lines = certified_access_lines(abi, shared, view);
+            lines.push(format!("{} = {value};", abi.shared_access(shared, view)));
             if let Some(output) = output
                 && output != shared
             {
@@ -385,15 +385,11 @@ fn view_thread_component(view: &str, component: &str) -> String {
     format!("{view}_thread.{component}")
 }
 
-fn view_guard_lines(abi: &CudaKernelAbi, view: &str) -> Vec<String> {
-    let Some(guard) = abi.view_guard(view) else {
+fn certified_access_lines(abi: &CudaKernelAbi, memory: &str, view: &str) -> Vec<String> {
+    let Some(certificate) = abi.access_certificate(memory, view) else {
         return Vec::new();
     };
-    vec![
-        format!("if (!({guard})) {{"),
-        "    return;".to_string(),
-        "}".to_string(),
-    ]
+    vec![format!("// safety: certified by {certificate}")]
 }
 
 fn fallback_primitive_lines(primitive: &Primitive) -> Vec<String> {

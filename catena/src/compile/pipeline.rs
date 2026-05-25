@@ -133,15 +133,13 @@ impl CompilePipeline {
                     .transpose()?;
                 let program = compile_program_from_graph(&graph)?;
                 let structured = compile_structured_program(&program)?;
-                // Keep checked property evidence at the lowering boundary so
-                // future lowerings can consume it without rechecking proofs.
-                let _proof_evidence = proof_evidence;
                 Ok(match emit {
                     Emit::Cuda => render_cuda_source(
                         checked_elaborated_theory,
                         &program,
                         &structured,
                         &cuda_options,
+                        proof_evidence.as_ref(),
                     )?,
                     Emit::StructuredIr => structured.render_ir(),
                     _ => unreachable!("only structured-backed emits are handled here"),

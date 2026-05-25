@@ -23,6 +23,7 @@ use crate::{
         CompileConfig, CompileGraphError, GraphCompileOptions, Program, compile_graph,
         normalize::{NormalizeGraphError, normalize_graph},
         program::{ProgramCompileError, compile_program_from_graph},
+        proof::ProofEvidence,
         structured::{StructuredCompileError, compile_structured_program},
     },
     elaborate::elaborate,
@@ -94,6 +95,7 @@ pub fn compile_cuda_theory_set_with_options(
         &program,
         &structured,
         &CudaOptions::default(),
+        None,
     )?)
 }
 
@@ -102,7 +104,14 @@ pub fn render_cuda_source(
     program: &Program,
     structured: &StructuredProgram,
     options: &CudaOptions,
+    proof_evidence: Option<&ProofEvidence>,
 ) -> Result<String, CudaAbiError> {
-    let target = CudaTarget::new(theory_set, program.entry_definition(), structured, options)?;
+    let target = CudaTarget::new(
+        theory_set,
+        program.entry_definition(),
+        structured,
+        options,
+        proof_evidence,
+    )?;
     Ok(target.render_cuda_with_launch(structured))
 }

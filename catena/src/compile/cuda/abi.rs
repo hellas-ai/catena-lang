@@ -528,7 +528,7 @@ fn collect_primitive_view_guard_inputs(
         return Ok(());
     }
 
-    if primitive.name == "gpu.view.linearize" || primitive.name == "gpu.view.zero" {
+    if primitive.name == "gpu.view.linearize" {
         if let Some(view) = primitive.outputs.first() {
             defined_views.insert(rename_with(names, view));
         }

@@ -56,11 +56,6 @@
     (gpu.view val) ->
     (gpu.view val))
 
-  # Constant zero coordinate view.
-  (arr gpu.view.zero :
-    [] ->
-    (gpu.view val))
-
   # Global memory access through a logical view. The view must match the
   # accessed memory shape, or be explicitly converted by a view operation.
   # For example, a row-major global layout maps (row, col) to row * cols + col.

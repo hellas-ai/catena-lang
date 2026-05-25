@@ -25,7 +25,8 @@
   #       : view(({([block_count] 1d) ([thread_count] 1d)} *))
   #
   (def user.f32.map-add-ten.worker.view :
-    {gpu.ctx.empty [grid] ([block_count] 1d) ([thread_count] 1d)} ->
+    ([grid block_count thread_count . grid block_count thread_count]
+      ({gpu.ctx.empty [grid] ([block_count] 1d) ([thread_count] 1d)} gpu.ctx.grid)) ->
     ([grid block_count thread_count
       . grid block_count thread_count grid block_count thread_count]
       ({({gpu.ctx.empty [grid] ([block_count] 1d) ([thread_count] 1d)} gpu.ctx.grid)
@@ -53,7 +54,7 @@
   #
   (def user.f32.map-add-ten.a.view.checks :
     ([grid block_count thread_count a . grid block_count thread_count]
-      {gpu.ctx.empty [grid] ([block_count] 1d) ([thread_count] 1d)}) ->
+      ({gpu.ctx.empty [grid] ([block_count] 1d) ([thread_count] 1d)} gpu.ctx.grid)) ->
     ([grid block_count thread_count a
       . grid block_count thread_count a block_count thread_count grid block_count thread_count]
       ({({({gpu.ctx.empty [grid] ([block_count] 1d) ([thread_count] 1d)} gpu.ctx.grid)
@@ -81,7 +82,7 @@
   #
   (def user.f32.map-add-ten.output.view.checks :
     ([grid block_count thread_count output . grid block_count thread_count]
-      {gpu.ctx.empty [grid] ([block_count] 1d) ([thread_count] 1d)}) ->
+      ({gpu.ctx.empty [grid] ([block_count] 1d) ([thread_count] 1d)} gpu.ctx.grid)) ->
     ([grid block_count thread_count output
       . grid block_count thread_count output block_count thread_count grid block_count thread_count]
       ({({({gpu.ctx.empty [grid] ([block_count] 1d) ([thread_count] 1d)} gpu.ctx.grid)
@@ -116,7 +117,7 @@
   #
   (def user.f32.map-add-ten.a.view.safe-access :
     ([grid block_count thread_count a . grid block_count thread_count]
-      {gpu.ctx.empty [grid] ([block_count] 1d) ([thread_count] 1d)}) ->
+      ({gpu.ctx.empty [grid] ([block_count] 1d) ([thread_count] 1d)} gpu.ctx.grid)) ->
     ([grid block_count thread_count a
       . grid block_count thread_count a block_count thread_count a grid block_count thread_count]
       ({({({gpu.ctx.empty [grid] ([block_count] 1d) ([thread_count] 1d)} gpu.ctx.grid)
@@ -151,7 +152,7 @@
   #
   (def user.f32.map-add-ten.output.view.safe-access :
     ([grid block_count thread_count output mapped . grid block_count thread_count]
-      {gpu.ctx.empty [grid] ([block_count] 1d) ([thread_count] 1d)}) ->
+      ({gpu.ctx.empty [grid] ([block_count] 1d) ([thread_count] 1d)} gpu.ctx.grid)) ->
     ([grid block_count thread_count output mapped
       . grid block_count thread_count output block_count thread_count output grid mapped block_count thread_count]
       ({({({gpu.ctx.empty [grid] ([block_count] 1d) ([thread_count] 1d)} gpu.ctx.grid)

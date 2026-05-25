@@ -28,7 +28,8 @@
   #       : view(({([block_count] 1d) ([thread_count] 1d)} *))
   #
   (def user.f32.fill-one.worker.view :
-    {gpu.ctx.empty [grid] ([block_count] 1d) ([thread_count] 1d)} ->
+    ([grid block_count thread_count . grid block_count thread_count]
+      ({gpu.ctx.empty [grid] ([block_count] 1d) ([thread_count] 1d)} gpu.ctx.grid)) ->
     ([grid block_count thread_count
       . grid block_count thread_count grid block_count thread_count]
       ({({gpu.ctx.empty [grid] ([block_count] 1d) ([thread_count] 1d)} gpu.ctx.grid)
@@ -60,7 +61,7 @@
   #
   (def user.f32.fill-one.out_view.checks :
     ([grid block_count thread_count out . grid block_count thread_count]
-      {gpu.ctx.empty [grid] ([block_count] 1d) ([thread_count] 1d)}) ->
+      ({gpu.ctx.empty [grid] ([block_count] 1d) ([thread_count] 1d)} gpu.ctx.grid)) ->
     ([grid block_count thread_count out
       . grid block_count thread_count out block_count thread_count grid block_count thread_count]
       ({({({gpu.ctx.empty [grid] ([block_count] 1d) ([thread_count] 1d)} gpu.ctx.grid)
@@ -95,7 +96,7 @@
   #
   (def user.f32.fill-one.out.out_view.safe-access :
     ([grid block_count thread_count out one . grid block_count thread_count]
-      {gpu.ctx.empty [grid] ([block_count] 1d) ([thread_count] 1d)}) ->
+      ({gpu.ctx.empty [grid] ([block_count] 1d) ([thread_count] 1d)} gpu.ctx.grid)) ->
     ([grid block_count thread_count out one
       . grid block_count thread_count out block_count thread_count out grid one block_count thread_count]
       ({({({gpu.ctx.empty [grid] ([block_count] 1d) ([thread_count] 1d)} gpu.ctx.grid)

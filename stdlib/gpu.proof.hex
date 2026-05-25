@@ -41,44 +41,15 @@
 })
 
 (theory gpu.proof syntax {
-  ########################################
-  # Context membership
-  #
-  # has-grid
-  #
-  #        Gamma |- e : ty
-  #   -------------------------------- grid in Gamma
-  #    Gamma, grid : block_shape x thread_shape |- e : ty
-  #
-  # has-global / has-shared have the same shape, extending Gamma with a memory
-  # object and its logical shape.
-
-  (arr has-grid :
-    ([gamma grid block-shape thread-shape expr ty . gamma expr ty]
-      ({[gamma] [expr] [ty]} |-)) ->
-    ([gamma grid block-shape thread-shape expr ty]
-      ({({[gamma] [grid] [block-shape] [thread-shape]} gpu.ctx.grid) [expr] [ty]} |-)))
-
-  (arr has-global :
-    ([gamma mem shape expr ty . gamma expr ty]
-      ({[gamma] [expr] [ty]} |-)) ->
-    ([gamma mem shape expr ty]
-      ({({[gamma] [mem] [shape]} gpu.ctx.global) [expr] [ty]} |-)))
-
-  (arr has-shared :
-    ([gamma mem shape expr ty . gamma expr ty]
-      ({[gamma] [expr] [ty]} |-)) ->
-    ([gamma mem shape expr ty]
-      ({({[gamma] [mem] [shape]} gpu.ctx.shared) [expr] [ty]} |-)))
 
   ########################################
   # View introduction and structural view operations
   #
   # grid-view
   #
-  #   ------------------------------------------------------- grid in Gamma
-  #    Gamma, grid : block_shape x thread_shape
-  #      |- grid.view(grid) : view(block_shape * thread_shape)
+  #    context = Gamma, grid : block_shape x thread_shape
+  #   ------------------------------------------------------- grid-view
+  #    context |- grid.view(grid) : view(block_shape * thread_shape)
   #
   # The result is hierarchical. For example:
   # - 1D blocks x 1D threads: view(({([blocks] 1d) ([threads] 1d)} *))
@@ -87,7 +58,8 @@
   # - 2D blocks x 2D threads: view(({block_2d thread_2d} *))
 
   (arr grid-view :
-    [gamma grid block-shape thread-shape] ->
+    ([gamma grid block-shape thread-shape . gamma grid block-shape thread-shape]
+      ({[gamma] [grid] [block-shape] [thread-shape]} gpu.ctx.grid)) ->
     ([gamma grid block-shape thread-shape
       . gamma grid block-shape thread-shape grid block-shape thread-shape]
       ({({[gamma] [grid] [block-shape] [thread-shape]} gpu.ctx.grid)
@@ -219,15 +191,15 @@
   #
   # global-load
   #
-  #    Gamma, mem : view(shape) |- e : view(shape)
+  #    Gamma, mem : global(shape) |- e : view(shape)
   #   -------------------------------------------------------
-  #    Gamma, mem : view(shape) |- global.load(mem, e) : view(shape)
+  #    Gamma, mem : global(shape) |- global.load(mem, e) : view(shape)
   #
   # global-store
   #
-  #    Gamma, mem : view(shape) |- e : view(shape)
+  #    Gamma, mem : global(shape) |- e : view(shape)
   #   --------------------------------------------------------------
-  #    Gamma, mem : view(shape) |- global.store(mem, e, value) : view(shape)
+  #    Gamma, mem : global(shape) |- global.store(mem, e, value) : view(shape)
   #
   # shared-load / shared-store have the same derivation shape with a block-local
   # shared-memory context entry.

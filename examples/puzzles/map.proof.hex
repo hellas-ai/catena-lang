@@ -1,0 +1,170 @@
+#
+# Facts about the program user.f32.map-add-ten.
+#
+# Naming convention:
+# - proof files mirror program files: map.hex -> map.proof.hex
+# - SSA-local facts use the program's full name plus SSA variable:
+#   user.f32.map-add-ten.<ssa-name>.<property>
+# - memory safety facts name the memory and the view:
+#   user.f32.map-add-ten.<memory>.<view>.safe-access
+# - fact order follows the program's SSA order.
+#
+
+(theory gpu.proof syntax {
+  #
+  # Program:
+  #   ([.grid] gpu.grid.view [worker.])
+  #
+  # Fact: `worker` is the hierarchical worker-coordinate view for the grid.
+  #
+  # Derivation tree:
+  #
+  #   ----------------------------------------------------------- grid-view
+  #    gpu.ctx.grid(empty, grid, ([block_count] 1d), ([thread_count] 1d))
+  #      |- gpu.expr.grid-view(grid)
+  #       : view(({([block_count] 1d) ([thread_count] 1d)} *))
+  #
+  (def user.f32.map-add-ten.worker.view :
+    {gpu.ctx.empty [grid] ([block_count] 1d) ([thread_count] 1d)} ->
+    ([grid block_count thread_count
+      . grid block_count thread_count grid block_count thread_count]
+      ({({gpu.ctx.empty [grid] ([block_count] 1d) ([thread_count] 1d)} gpu.ctx.grid)
+        ([grid] gpu.expr.grid-view)
+        (({([block_count] 1d) ([thread_count] 1d)} *) view)}
+       |-)
+    )
+    = grid-view
+  )
+
+  #
+  # Program:
+  #   ([.worker] gpu.view.linearize [view.])
+  #
+  # Fact: `view` checks against the shape of input memory `a`.
+  #
+  #   ----------------------------------------------------------- global-linearize-1d-grid
+  #    gpu.ctx.global(
+  #      gpu.ctx.grid(empty, grid, ([block_count] 1d), ([thread_count] 1d)),
+  #      a,
+  #      block_count * thread_count,
+  #      ([block_count * thread_count] 1d))
+  #      |- gpu.expr.linearize(gpu.expr.grid-view(grid))
+  #       : view(([block_count * thread_count] 1d))
+  #
+  (def user.f32.map-add-ten.a.view.checks :
+    ([grid block_count thread_count a . grid block_count thread_count]
+      {gpu.ctx.empty [grid] ([block_count] 1d) ([thread_count] 1d)}) ->
+    ([grid block_count thread_count a
+      . grid block_count thread_count a block_count thread_count grid block_count thread_count]
+      ({({({gpu.ctx.empty [grid] ([block_count] 1d) ([thread_count] 1d)} gpu.ctx.grid)
+          [a]
+          (({[block_count] [thread_count]} nat.mul) 1d)}
+         gpu.ctx.global)
+        (([grid] gpu.expr.grid-view) gpu.expr.linearize)
+        ((({[block_count] [thread_count]} nat.mul) 1d) view)}
+       |-)
+    )
+    = (
+      user.f32.map-add-ten.worker.view
+      global-linearize-1d-grid
+    )
+  )
+
+  #
+  # Program:
+  #   ([.worker] gpu.view.linearize [view.])
+  #
+  # Fact: `view` checks against the shape of output memory `output`.
+  #
+  # This has the same derivation as the input view check, with `output` as the
+  # memory recorded in Gamma.
+  #
+  (def user.f32.map-add-ten.output.view.checks :
+    ([grid block_count thread_count output . grid block_count thread_count]
+      {gpu.ctx.empty [grid] ([block_count] 1d) ([thread_count] 1d)}) ->
+    ([grid block_count thread_count output
+      . grid block_count thread_count output block_count thread_count grid block_count thread_count]
+      ({({({gpu.ctx.empty [grid] ([block_count] 1d) ([thread_count] 1d)} gpu.ctx.grid)
+          [output]
+          (({[block_count] [thread_count]} nat.mul) 1d)}
+         gpu.ctx.global)
+        (([grid] gpu.expr.grid-view) gpu.expr.linearize)
+        ((({[block_count] [thread_count]} nat.mul) 1d) view)}
+       |-)
+    )
+    = (
+      user.f32.map-add-ten.worker.view
+      global-linearize-1d-grid
+    )
+  )
+
+  #
+  # Program:
+  #   ([.a view] gpu.global.load [a_value.])
+  #
+  # Theorem: `view` is safe for reading memory `a`.
+  #
+  # This theorem uses user.f32.map-add-ten.a.view.checks as a lemma.
+  #
+  # Derivation tree:
+  #
+  #    Gamma |- gpu.expr.linearize(gpu.expr.grid-view(grid))
+  #          : view(([block_count * thread_count] 1d))
+  #   -------------------------------------------------------------- global-load
+  #  Gamma |- global.load(a, linearize(grid.view(grid)))
+  #        : view(([block_count * thread_count] 1d))
+  #
+  (def user.f32.map-add-ten.a.view.safe-access :
+    ([grid block_count thread_count a . grid block_count thread_count]
+      {gpu.ctx.empty [grid] ([block_count] 1d) ([thread_count] 1d)}) ->
+    ([grid block_count thread_count a
+      . grid block_count thread_count a block_count thread_count a grid block_count thread_count]
+      ({({({gpu.ctx.empty [grid] ([block_count] 1d) ([thread_count] 1d)} gpu.ctx.grid)
+          [a]
+          (({[block_count] [thread_count]} nat.mul) 1d)}
+         gpu.ctx.global)
+        ({[a] (([grid] gpu.expr.grid-view) gpu.expr.linearize)} gpu.expr.global.load)
+        ((({[block_count] [thread_count]} nat.mul) 1d) view)}
+       |-)
+    )
+    = (
+      user.f32.map-add-ten.a.view.checks
+      global-load
+    )
+  )
+
+  #
+  # Program:
+  #   ([.output view mapped] gpu.global.store [output_mapped.])
+  #
+  # Theorem: `view` is safe for writing memory `output`.
+  #
+  # This theorem uses user.f32.map-add-ten.output.view.checks as a lemma.
+  #
+  # Derivation tree:
+  #
+  #    Gamma |- gpu.expr.linearize(gpu.expr.grid-view(grid))
+  #          : view(([block_count * thread_count] 1d))
+  #   -------------------------------------------------------------- global-store
+  #  Gamma |- global.store(output, linearize(grid.view(grid)), mapped)
+  #        : view(([block_count * thread_count] 1d))
+  #
+  (def user.f32.map-add-ten.output.view.safe-access :
+    ([grid block_count thread_count output mapped . grid block_count thread_count]
+      {gpu.ctx.empty [grid] ([block_count] 1d) ([thread_count] 1d)}) ->
+    ([grid block_count thread_count output mapped
+      . grid block_count thread_count output block_count thread_count output grid mapped block_count thread_count]
+      ({({({gpu.ctx.empty [grid] ([block_count] 1d) ([thread_count] 1d)} gpu.ctx.grid)
+          [output]
+          (({[block_count] [thread_count]} nat.mul) 1d)}
+         gpu.ctx.global)
+        ({[output] (([grid] gpu.expr.grid-view) gpu.expr.linearize) [mapped]} gpu.expr.global.store)
+        ((({[block_count] [thread_count]} nat.mul) 1d) view)}
+       |-)
+    )
+    = (
+      user.f32.map-add-ten.output.view.checks
+      global-store
+    )
+  )
+})

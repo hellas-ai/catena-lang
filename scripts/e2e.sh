@@ -28,6 +28,11 @@ for example in examples/*.hex; do
   run_catena check "${COMMON[@]}" "$example"
 done
 
+echo "Checking puzzle examples"
+for puzzle in examples/puzzles/*.hex; do
+  run_catena check "${COMMON[@]}" "$puzzle"
+done
+
 echo "Compiling core/control examples"
 run_catena_quiet compile "${COMMON[@]}" examples/user-program.hex \
   --emit structured-ir \
@@ -60,6 +65,38 @@ run_catena_quiet compile "${COMMON[@]}" examples/two-shared-two-global.hex \
   --emit cuda \
   --theory data \
   --entry user.f32.two-shared-two-global \
+  --no-proof
+
+echo "Compiling CUDA puzzle examples"
+run_catena_quiet compile "${COMMON[@]}" examples/puzzles/map.hex \
+  --emit cuda \
+  --theory data \
+  --entry user.f32.map-add-ten \
+  --proof examples/puzzles/map.proof.hex
+run_catena_quiet compile "${COMMON[@]}" examples/puzzles/zip.hex \
+  --emit cuda \
+  --theory data \
+  --entry user.f32.zip-add \
+  --no-proof
+run_catena_quiet compile "${COMMON[@]}" examples/puzzles/map-square-2d.hex \
+  --emit cuda \
+  --theory data \
+  --entry user.f32.map-square-2d-add-ten \
+  --no-proof
+run_catena_quiet compile "${COMMON[@]}" examples/puzzles/map-square-2d.hex \
+  --emit cuda \
+  --theory data \
+  --entry user.f32.map-square-2d-block-add-ten \
+  --no-proof
+run_catena_quiet compile "${COMMON[@]}" examples/puzzles/broadcast.hex \
+  --emit cuda \
+  --theory data \
+  --entry user.f32.broadcast-add \
+  --no-proof
+run_catena_quiet compile "${COMMON[@]}" examples/puzzles/broadcast.hex \
+  --emit cuda \
+  --theory data \
+  --entry user.f32.broadcast-add-singleton-matrix-inputs \
   --no-proof
 
 echo "Compiling static CUDA shared-memory variants"

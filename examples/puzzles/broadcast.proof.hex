@@ -1,0 +1,182 @@
+#
+# Facts about the program user.f32.broadcast-add-singleton-matrix-inputs.
+#
+# The output worker view is
+#
+#   ij : view({grid_rows * tile_rows, grid_cols * tile_cols} 2d)
+#
+# so row(ij) is safe for the column-vector input, col(ij) is safe for the
+# row-vector input, and the reshaped views
+#
+#   reshape(col(ij), {1, grid_cols * tile_cols}) = (0, j)
+#   reshape(row(ij), {grid_rows * tile_rows, 1}) = (i, 0)
+#
+# are safe whenever ij is safe for the output.
+#
+
+(theory gpu.proof syntax {
+  (def user.f32.broadcast-add-singleton-matrix-inputs.worker.view :
+    ([grid grid_cols grid_rows tile_cols tile_rows . grid grid_cols grid_rows tile_cols tile_rows]
+      ({gpu.ctx.empty [grid] ({[grid_cols] [grid_rows]} 2d) ({[tile_cols] [tile_rows]} 2d)} gpu.ctx.grid)) ->
+    ([grid grid_cols grid_rows tile_cols tile_rows
+      . grid grid_cols grid_rows tile_cols tile_rows grid grid_cols grid_rows tile_cols tile_rows]
+      ({({gpu.ctx.empty [grid] ({[grid_cols] [grid_rows]} 2d) ({[tile_cols] [tile_rows]} 2d)} gpu.ctx.grid)
+        ([grid] gpu.grid.view)
+        (({[grid_cols] [grid_rows] [tile_cols] [tile_rows]} 4d) view)}
+       |-)
+    )
+    = grid-view-2d-2d
+  )
+
+  (def user.f32.broadcast-add-singleton-matrix-inputs.ij.checks :
+    ([grid grid_cols grid_rows tile_cols tile_rows . grid grid_cols grid_rows tile_cols tile_rows]
+      ({gpu.ctx.empty [grid] ({[grid_cols] [grid_rows]} 2d) ({[tile_cols] [tile_rows]} 2d)} gpu.ctx.grid)) ->
+    ([grid grid_cols grid_rows tile_cols tile_rows
+      . grid grid_cols grid_rows tile_cols tile_rows grid tile_rows tile_cols grid_rows tile_rows grid_cols tile_cols]
+      ({({gpu.ctx.empty [grid] ({[grid_cols] [grid_rows]} 2d) ({[tile_cols] [tile_rows]} 2d)} gpu.ctx.grid)
+        ({([grid] gpu.grid.view) [tile_rows] [tile_cols]} gpu.view.group-by-tile)
+        (({({[grid_rows] [tile_rows]} nat.mul) ({[grid_cols] [tile_cols]} nat.mul)} 2d) view)}
+       |-)
+    )
+    = (
+      user.f32.broadcast-add-singleton-matrix-inputs.worker.view
+      group-by-tile-2d-2d
+    )
+  )
+
+  (def user.f32.broadcast-add-singleton-matrix-inputs.i.checks :
+    ([grid grid_cols grid_rows tile_cols tile_rows . grid grid_cols grid_rows tile_cols tile_rows]
+      ({gpu.ctx.empty [grid] ({[grid_cols] [grid_rows]} 2d) ({[tile_cols] [tile_rows]} 2d)} gpu.ctx.grid)) ->
+    ([grid grid_cols grid_rows tile_cols tile_rows
+      . grid grid_cols grid_rows tile_cols tile_rows grid tile_rows tile_cols grid_rows tile_rows]
+      ({({gpu.ctx.empty [grid] ({[grid_cols] [grid_rows]} 2d) ({[tile_cols] [tile_rows]} 2d)} gpu.ctx.grid)
+        (({([grid] gpu.grid.view) [tile_rows] [tile_cols]} gpu.view.group-by-tile) gpu.view.row)
+        ((({[grid_rows] [tile_rows]} nat.mul) 1d) view)}
+       |-)
+    )
+    = (
+      user.f32.broadcast-add-singleton-matrix-inputs.ij.checks
+      row
+    )
+  )
+
+  (def user.f32.broadcast-add-singleton-matrix-inputs.j.checks :
+    ([grid grid_cols grid_rows tile_cols tile_rows . grid grid_cols grid_rows tile_cols tile_rows]
+      ({gpu.ctx.empty [grid] ({[grid_cols] [grid_rows]} 2d) ({[tile_cols] [tile_rows]} 2d)} gpu.ctx.grid)) ->
+    ([grid grid_cols grid_rows tile_cols tile_rows
+      . grid grid_cols grid_rows tile_cols tile_rows grid tile_rows tile_cols grid_cols tile_cols]
+      ({({gpu.ctx.empty [grid] ({[grid_cols] [grid_rows]} 2d) ({[tile_cols] [tile_rows]} 2d)} gpu.ctx.grid)
+        (({([grid] gpu.grid.view) [tile_rows] [tile_cols]} gpu.view.group-by-tile) gpu.view.col)
+        ((({[grid_cols] [tile_cols]} nat.mul) 1d) view)}
+       |-)
+    )
+    = (
+      user.f32.broadcast-add-singleton-matrix-inputs.ij.checks
+      col
+    )
+  )
+
+  (def user.f32.broadcast-add-singleton-matrix-inputs.a_view.checks :
+    ([grid grid_cols grid_rows tile_cols tile_rows . grid grid_cols grid_rows tile_cols tile_rows]
+      ({gpu.ctx.empty [grid] ({[grid_cols] [grid_rows]} 2d) ({[tile_cols] [tile_rows]} 2d)} gpu.ctx.grid)) ->
+    ([grid grid_cols grid_rows tile_cols tile_rows
+      . grid grid_cols grid_rows tile_cols tile_rows grid tile_rows tile_cols grid_cols tile_cols grid_cols tile_cols]
+      ({({gpu.ctx.empty [grid] ({[grid_cols] [grid_rows]} 2d) ({[tile_cols] [tile_rows]} 2d)} gpu.ctx.grid)
+        ({(({([grid] gpu.grid.view) [tile_rows] [tile_cols]} gpu.view.group-by-tile) gpu.view.col)
+          ({[grid_cols] [tile_cols]} gpu.shape.row-mul)}
+         gpu.view.reshape)
+        (({1 ({[grid_cols] [tile_cols]} nat.mul)} 2d) view)}
+       |-)
+    )
+    = (
+      user.f32.broadcast-add-singleton-matrix-inputs.j.checks
+      reshape-row-mul
+    )
+  )
+
+  (def user.f32.broadcast-add-singleton-matrix-inputs.b_view.checks :
+    ([grid grid_cols grid_rows tile_cols tile_rows . grid grid_cols grid_rows tile_cols tile_rows]
+      ({gpu.ctx.empty [grid] ({[grid_cols] [grid_rows]} 2d) ({[tile_cols] [tile_rows]} 2d)} gpu.ctx.grid)) ->
+    ([grid grid_cols grid_rows tile_cols tile_rows
+      . grid grid_cols grid_rows tile_cols tile_rows grid tile_rows tile_cols grid_rows tile_rows grid_rows tile_rows]
+      ({({gpu.ctx.empty [grid] ({[grid_cols] [grid_rows]} 2d) ({[tile_cols] [tile_rows]} 2d)} gpu.ctx.grid)
+        ({(({([grid] gpu.grid.view) [tile_rows] [tile_cols]} gpu.view.group-by-tile) gpu.view.row)
+          ({[grid_rows] [tile_rows]} gpu.shape.col-mul)}
+         gpu.view.reshape)
+        (({({[grid_rows] [tile_rows]} nat.mul) 1} 2d) view)}
+       |-)
+    )
+    = (
+      user.f32.broadcast-add-singleton-matrix-inputs.i.checks
+      reshape-col-mul
+    )
+  )
+
+  (def user.f32.broadcast-add-singleton-matrix-inputs.a.a_view.safe-access :
+    ([grid grid_cols grid_rows tile_cols tile_rows a . grid grid_cols grid_rows tile_cols tile_rows]
+      ({gpu.ctx.empty [grid] ({[grid_cols] [grid_rows]} 2d) ({[tile_cols] [tile_rows]} 2d)} gpu.ctx.grid)) ->
+    ([grid grid_cols grid_rows tile_cols tile_rows a
+      . grid grid_cols grid_rows tile_cols tile_rows a grid_cols tile_cols a grid tile_rows tile_cols grid_cols tile_cols grid_cols tile_cols]
+      ({({({gpu.ctx.empty [grid] ({[grid_cols] [grid_rows]} 2d) ({[tile_cols] [tile_rows]} 2d)} gpu.ctx.grid)
+          [a]
+          ({1 ({[grid_cols] [tile_cols]} nat.mul)} 2d)}
+         gpu.ctx.global)
+        ({[a]
+          ({(({([grid] gpu.grid.view) [tile_rows] [tile_cols]} gpu.view.group-by-tile) gpu.view.col)
+            ({[grid_cols] [tile_cols]} gpu.shape.row-mul)}
+           gpu.view.reshape)}
+         gpu.global.load)
+        (({1 ({[grid_cols] [tile_cols]} nat.mul)} 2d) view)}
+       |-)
+    )
+    = (
+      user.f32.broadcast-add-singleton-matrix-inputs.a_view.checks
+      global-load
+    )
+  )
+
+  (def user.f32.broadcast-add-singleton-matrix-inputs.b.b_view.safe-access :
+    ([grid grid_cols grid_rows tile_cols tile_rows b . grid grid_cols grid_rows tile_cols tile_rows]
+      ({gpu.ctx.empty [grid] ({[grid_cols] [grid_rows]} 2d) ({[tile_cols] [tile_rows]} 2d)} gpu.ctx.grid)) ->
+    ([grid grid_cols grid_rows tile_cols tile_rows b
+      . grid grid_cols grid_rows tile_cols tile_rows b grid_rows tile_rows b grid tile_rows tile_cols grid_rows tile_rows grid_rows tile_rows]
+      ({({({gpu.ctx.empty [grid] ({[grid_cols] [grid_rows]} 2d) ({[tile_cols] [tile_rows]} 2d)} gpu.ctx.grid)
+          [b]
+          ({({[grid_rows] [tile_rows]} nat.mul) 1} 2d)}
+         gpu.ctx.global)
+        ({[b]
+          ({(({([grid] gpu.grid.view) [tile_rows] [tile_cols]} gpu.view.group-by-tile) gpu.view.row)
+            ({[grid_rows] [tile_rows]} gpu.shape.col-mul)}
+           gpu.view.reshape)}
+         gpu.global.load)
+        (({({[grid_rows] [tile_rows]} nat.mul) 1} 2d) view)}
+       |-)
+    )
+    = (
+      user.f32.broadcast-add-singleton-matrix-inputs.b_view.checks
+      global-load
+    )
+  )
+
+  (def user.f32.broadcast-add-singleton-matrix-inputs.output.ij.safe-access :
+    ([grid grid_cols grid_rows tile_cols tile_rows output sum . grid grid_cols grid_rows tile_cols tile_rows]
+      ({gpu.ctx.empty [grid] ({[grid_cols] [grid_rows]} 2d) ({[tile_cols] [tile_rows]} 2d)} gpu.ctx.grid)) ->
+    ([grid grid_cols grid_rows tile_cols tile_rows output sum
+      . grid grid_cols grid_rows tile_cols tile_rows output grid_rows tile_rows grid_cols tile_cols output grid tile_rows tile_cols sum grid_rows tile_rows grid_cols tile_cols]
+      ({({({gpu.ctx.empty [grid] ({[grid_cols] [grid_rows]} 2d) ({[tile_cols] [tile_rows]} 2d)} gpu.ctx.grid)
+          [output]
+          ({({[grid_rows] [tile_rows]} nat.mul) ({[grid_cols] [tile_cols]} nat.mul)} 2d)}
+         gpu.ctx.global)
+        ({[output]
+          ({([grid] gpu.grid.view) [tile_rows] [tile_cols]} gpu.view.group-by-tile)
+          [sum]}
+         gpu.global.store)
+        (({({[grid_rows] [tile_rows]} nat.mul) ({[grid_cols] [tile_cols]} nat.mul)} 2d) view)}
+       |-)
+    )
+    = (
+      user.f32.broadcast-add-singleton-matrix-inputs.ij.checks
+      global-store
+    )
+  )
+})

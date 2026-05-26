@@ -97,7 +97,7 @@ run_catena_quiet compile "${COMMON[@]}" examples/puzzles/broadcast.hex \
   --emit cuda \
   --theory data \
   --entry user.f32.broadcast-add-singleton-matrix-inputs \
-  --no-proof
+  --proof examples/puzzles/broadcast.proof.hex
 
 echo "Compiling static CUDA shared-memory variants"
 run_catena_quiet compile "${COMMON[@]}" examples/static-shared-memory.hex \

@@ -50,9 +50,17 @@
     (([cols] extent) val) ->
     (({1 [cols]} 2d) gpu.shape))
 
+  (arr gpu.shape.row-mul :
+    {(([lhs] extent) val) (([rhs] extent) val)} ->
+    (({1 ({[lhs] [rhs]} nat.mul)} 2d) gpu.shape))
+
   (arr gpu.shape.col :
     (([rows] extent) val) ->
     (({[rows] 1} 2d) gpu.shape))
+
+  (arr gpu.shape.col-mul :
+    {(([lhs] extent) val) (([rhs] extent) val)} ->
+    (({({[lhs] [rhs]} nat.mul) 1} 2d) gpu.shape))
 
   (arr gpu.shape.2d :
     {(([rows] extent) val) (([cols] extent) val)} ->

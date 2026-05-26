@@ -496,11 +496,47 @@ fn collect_primitive_view_metadata(
         return;
     }
 
+    if primitive.name == "gpu.shape.row-mul" {
+        if let ([lhs, rhs], Some(shape)) = (primitive.inputs.as_slice(), primitive.outputs.first())
+        {
+            shape_values.insert(
+                rename_with(names, shape),
+                vec![
+                    "1".to_string(),
+                    format!(
+                        "({} * {})",
+                        rename_with(names, lhs),
+                        rename_with(names, rhs)
+                    ),
+                ],
+            );
+        }
+        return;
+    }
+
     if primitive.name == "gpu.shape.col" {
         if let (Some(rows), Some(shape)) = (primitive.inputs.first(), primitive.outputs.first()) {
             shape_values.insert(
                 rename_with(names, shape),
                 vec![rename_with(names, rows), "1".to_string()],
+            );
+        }
+        return;
+    }
+
+    if primitive.name == "gpu.shape.col-mul" {
+        if let ([lhs, rhs], Some(shape)) = (primitive.inputs.as_slice(), primitive.outputs.first())
+        {
+            shape_values.insert(
+                rename_with(names, shape),
+                vec![
+                    format!(
+                        "({} * {})",
+                        rename_with(names, lhs),
+                        rename_with(names, rhs)
+                    ),
+                    "1".to_string(),
+                ],
             );
         }
         return;

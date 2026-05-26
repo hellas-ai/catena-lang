@@ -222,6 +222,11 @@ fn collect_primitive_extents_required_by_device_code(
             names.insert(extent.clone());
         }
     }
+    if primitive.name == "gpu.shape.row-mul" || primitive.name == "gpu.shape.col-mul" {
+        for extent in primitive.inputs.iter().take(2) {
+            names.insert(extent.clone());
+        }
+    }
     if primitive.name == "gpu.shape.2d" {
         for extent in primitive.inputs.iter().take(2) {
             names.insert(extent.clone());

@@ -314,7 +314,9 @@ impl NamespaceLowering for GpuPrimitives {
         }
 
         if local.matches(&["shape", "row"])
+            || local.matches(&["shape", "row-mul"])
             || local.matches(&["shape", "col"])
+            || local.matches(&["shape", "col-mul"])
             || local.matches(&["shape", "2d"])
         {
             return Some(Vec::new());

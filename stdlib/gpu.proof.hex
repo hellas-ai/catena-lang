@@ -31,6 +31,7 @@
   (arr gpu.grid.view : 1 -> 1)
   (arr gpu.view.linearize : 1 -> 1)
   (arr gpu.view.group : 2 -> 1)
+  (arr gpu.view.reshape : 2 -> 1)
   (arr gpu.view.group-by-tile : 3 -> 1)
   (arr gpu.view.row : 1 -> 1)
   (arr gpu.view.col : 1 -> 1)
@@ -38,6 +39,9 @@
   (arr gpu.global.store : 3 -> 1)
   (arr gpu.shared.load : 2 -> 1)
   (arr gpu.shared.store : 3 -> 1)
+  (arr gpu.shape.row : 1 -> 1)
+  (arr gpu.shape.col : 1 -> 1)
+  (arr gpu.shape.2d : 2 -> 1)
 })
 
 (theory gpu.proof syntax {
@@ -182,6 +186,36 @@
       ({[gamma]
         ({[expr] [count]} gpu.view.group)
         (({({[n] [count]} nat.ceil-div) [count]} 2d) view)}
+       |-)))
+
+  # reshape-row
+  #
+  #        Gamma |- e : view(cols 1d)
+  #   ---------------------------------------------
+  #    Gamma |- reshape(e, 1, cols) : view({1 cols} 2d)
+
+  (arr reshape-row :
+    ([gamma expr cols]
+      ({[gamma] [expr] (([cols] 1d) view)} |-)) ->
+    ([gamma expr cols . gamma expr cols cols]
+      ({[gamma]
+        ({[expr] ([cols] gpu.shape.row)} gpu.view.reshape)
+        (({1 [cols]} 2d) view)}
+       |-)))
+
+  # reshape-col
+  #
+  #        Gamma |- e : view(rows 1d)
+  #   ---------------------------------------------
+  #    Gamma |- reshape(e, rows, 1) : view({rows 1} 2d)
+
+  (arr reshape-col :
+    ([gamma expr rows]
+      ({[gamma] [expr] (([rows] 1d) view)} |-)) ->
+    ([gamma expr rows . gamma expr rows rows]
+      ({[gamma]
+        ({[expr] ([rows] gpu.shape.col)} gpu.view.reshape)
+        (({[rows] 1} 2d) view)}
        |-)))
 
   # group-by-tile

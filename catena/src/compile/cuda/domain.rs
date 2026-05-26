@@ -276,6 +276,50 @@ impl NamespaceLowering for GpuPrimitives {
             return Some(lines);
         }
 
+        if local.matches(&["view", "reshape"]) {
+            let [view, _shape] = primitive.inputs.as_slice() else {
+                return None;
+            };
+            let [out] = primitive.outputs.as_slice() else {
+                return None;
+            };
+            let shape = abi.view_shape(out);
+            let rows = shape
+                .and_then(|shape| shape.first())
+                .cloned()
+                .unwrap_or_else(|| "1".to_string());
+            let cols = shape
+                .and_then(|shape| shape.get(1))
+                .cloned()
+                .unwrap_or_else(|| "1".to_string());
+            let row = if rows == "1" {
+                "0".to_string()
+            } else if cols == "1" {
+                view.to_string()
+            } else {
+                format!("{view} / {cols}")
+            };
+            let col = if cols == "1" {
+                "0".to_string()
+            } else if rows == "1" {
+                view.to_string()
+            } else {
+                format!("{view} % {cols}")
+            };
+            let lines = vec![
+                format!("uint64_t {out}_row = {row};"),
+                format!("uint64_t {out}_col = {col};"),
+            ];
+            return Some(lines);
+        }
+
+        if local.matches(&["shape", "row"])
+            || local.matches(&["shape", "col"])
+            || local.matches(&["shape", "2d"])
+        {
+            return Some(Vec::new());
+        }
+
         if local.matches(&["view", "row"]) {
             let [view] = primitive.inputs.as_slice() else {
                 return None;

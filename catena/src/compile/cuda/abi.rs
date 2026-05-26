@@ -64,6 +64,7 @@ pub(super) struct CudaKernelAbi {
     cuda_names: HashMap<String, String>,
     access_certificates: HashMap<(String, String), String>,
     view_ranks: HashMap<String, usize>,
+    view_shapes: HashMap<String, Vec<String>>,
     grid_views: HashSet<String>,
     global_shapes: HashMap<String, Vec<String>>,
 }
@@ -201,6 +202,7 @@ impl CudaKernelAbi {
             cuda_names: source_parameter_abi.names,
             access_certificates,
             view_ranks: view_metadata.ranks,
+            view_shapes: view_metadata.shapes,
             grid_views: view_metadata.grid_views,
             global_shapes,
         })
@@ -232,6 +234,10 @@ impl CudaKernelAbi {
 
     pub(super) fn is_grid_view(&self, view: &str) -> bool {
         self.grid_views.contains(view)
+    }
+
+    pub(super) fn view_shape(&self, view: &str) -> Option<&[String]> {
+        self.view_shapes.get(view).map(Vec::as_slice)
     }
 
     pub(super) fn global_access(&self, global: &str, view: &str) -> String {
@@ -367,22 +373,26 @@ fn collect_view_metadata(
 ) -> CudaViewMetadata {
     let mut grid_views = HashSet::new();
     let mut view_ranks = HashMap::new();
+    let mut view_shapes = HashMap::new();
     collect_view_metadata_inputs(
         &program.body,
         names,
         global_shapes,
         &mut grid_views,
         &mut view_ranks,
+        &mut view_shapes,
     );
 
     CudaViewMetadata {
         ranks: view_ranks,
+        shapes: view_shapes,
         grid_views,
     }
 }
 
 struct CudaViewMetadata {
     ranks: HashMap<String, usize>,
+    shapes: HashMap<String, Vec<String>>,
     grid_views: HashSet<String>,
 }
 
@@ -392,11 +402,19 @@ fn collect_view_metadata_inputs(
     global_shapes: &mut HashMap<String, Vec<String>>,
     grid_views: &mut HashSet<String>,
     view_ranks: &mut HashMap<String, usize>,
+    view_shapes: &mut HashMap<String, Vec<String>>,
 ) {
     for stmt in stmts {
         match stmt {
             Stmt::Block { body, .. } | Stmt::Loop { body, .. } | Stmt::For { body, .. } => {
-                collect_view_metadata_inputs(body, names, global_shapes, grid_views, view_ranks);
+                collect_view_metadata_inputs(
+                    body,
+                    names,
+                    global_shapes,
+                    grid_views,
+                    view_ranks,
+                    view_shapes,
+                );
             }
             Stmt::If {
                 then_body,
@@ -409,6 +427,7 @@ fn collect_view_metadata_inputs(
                     global_shapes,
                     grid_views,
                     view_ranks,
+                    view_shapes,
                 );
                 collect_view_metadata_inputs(
                     else_body,
@@ -416,6 +435,7 @@ fn collect_view_metadata_inputs(
                     global_shapes,
                     grid_views,
                     view_ranks,
+                    view_shapes,
                 );
             }
             Stmt::Switch { cases, .. } => {
@@ -426,6 +446,7 @@ fn collect_view_metadata_inputs(
                         global_shapes,
                         grid_views,
                         view_ranks,
+                        view_shapes,
                     );
                 }
             }
@@ -436,6 +457,7 @@ fn collect_view_metadata_inputs(
                     global_shapes,
                     grid_views,
                     view_ranks,
+                    view_shapes,
                 );
             }
             Stmt::Break(_)
@@ -454,11 +476,44 @@ fn collect_primitive_view_metadata(
     global_shapes: &mut HashMap<String, Vec<String>>,
     grid_views: &mut HashSet<String>,
     view_ranks: &mut HashMap<String, usize>,
+    view_shapes: &mut HashMap<String, Vec<String>>,
 ) {
     if primitive.name == "gpu.grid.view" {
         if let Some(view) = primitive.outputs.first() {
             let view = rename_with(names, view);
             grid_views.insert(view);
+        }
+        return;
+    }
+
+    if primitive.name == "gpu.shape.row" {
+        if let (Some(cols), Some(shape)) = (primitive.inputs.first(), primitive.outputs.first()) {
+            view_shapes.insert(
+                rename_with(names, shape),
+                vec!["1".to_string(), rename_with(names, cols)],
+            );
+        }
+        return;
+    }
+
+    if primitive.name == "gpu.shape.col" {
+        if let (Some(rows), Some(shape)) = (primitive.inputs.first(), primitive.outputs.first()) {
+            view_shapes.insert(
+                rename_with(names, shape),
+                vec![rename_with(names, rows), "1".to_string()],
+            );
+        }
+        return;
+    }
+
+    if primitive.name == "gpu.shape.2d" {
+        if let ([rows, cols], Some(shape)) =
+            (primitive.inputs.as_slice(), primitive.outputs.first())
+        {
+            view_shapes.insert(
+                rename_with(names, shape),
+                vec![rename_with(names, rows), rename_with(names, cols)],
+            );
         }
         return;
     }
@@ -471,6 +526,19 @@ fn collect_primitive_view_metadata(
         return;
     }
 
+    if primitive.name == "gpu.view.reshape" {
+        if let Some(view) = primitive.outputs.first() {
+            let view = rename_with(names, view);
+            view_ranks.insert(view.clone(), 2);
+            if let Some(shape) = primitive.inputs.get(1)
+                && let Some(shape) = view_shapes.get(&rename_with(names, shape)).cloned()
+            {
+                view_shapes.insert(view, shape);
+            }
+        }
+        return;
+    }
+
     if primitive.name == "gpu.view.row" || primitive.name == "gpu.view.col" {
         if let Some(view) = primitive.outputs.first() {
             let view = rename_with(names, view);
@@ -479,20 +547,18 @@ fn collect_primitive_view_metadata(
         return;
     }
 
-    if primitive.name != "gpu.global.store" {
-        return;
-    }
+    if primitive.name == "gpu.global.store" {
+        let Some(global) = primitive.inputs.first() else {
+            return;
+        };
+        let global = rename_with(names, global);
 
-    let Some(global) = primitive.inputs.first() else {
-        return;
-    };
-    let global = rename_with(names, global);
-
-    if let Some(output) = primitive.outputs.first()
-        && let Some(shape) = global_shapes.get(&global).cloned()
-    {
-        let output = rename_with(names, output);
-        global_shapes.insert(output, shape);
+        if let Some(shape) = global_shapes.get(&global).cloned() {
+            if let Some(output) = primitive.outputs.first() {
+                let output = rename_with(names, output);
+                global_shapes.insert(output, shape);
+            }
+        }
     }
 }
 

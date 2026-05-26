@@ -2,6 +2,7 @@
 
   (arr gpu.global : 2 -> 1)
   (arr gpu.view : 0 -> 1)
+  (arr gpu.shape : 1 -> 1)
   (arr gpu.shared : 2 -> 1)
   (arr 1d : 1 -> 1)
   (arr 2d : 2 -> 1)
@@ -37,6 +38,25 @@
   (arr gpu.view.group :
     {(gpu.view val) (([count] extent) val)} ->
     ([count .] (gpu.view val)))
+
+  # Reshape a linear 1D view into a 2D view with the requested shape.
+  (arr gpu.view.reshape :
+    {(gpu.view val) ([shape] gpu.shape)} ->
+    ([shape .] (gpu.view val)))
+
+  # Shape witnesses used by view operations. They carry no runtime data; they
+  # make target shapes explicit in programs.
+  (arr gpu.shape.row :
+    (([cols] extent) val) ->
+    (({1 [cols]} 2d) gpu.shape))
+
+  (arr gpu.shape.col :
+    (([rows] extent) val) ->
+    (({[rows] 1} 2d) gpu.shape))
+
+  (arr gpu.shape.2d :
+    {(([rows] extent) val) (([cols] extent) val)} ->
+    (({[rows] [cols]} 2d) gpu.shape))
 
   # Map a 2D tiled worker view to a normal 2D data view.
   # For example, with row-major tile placement:

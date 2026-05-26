@@ -277,19 +277,19 @@ impl NamespaceLowering for GpuPrimitives {
         }
 
         if local.matches(&["view", "reshape"]) {
-            let [view, _shape] = primitive.inputs.as_slice() else {
+            let [view, shape] = primitive.inputs.as_slice() else {
                 return None;
             };
             let [out] = primitive.outputs.as_slice() else {
                 return None;
             };
-            let shape = abi.view_shape(out);
-            let rows = shape
-                .and_then(|shape| shape.first())
+            let shape_value = abi.shape_value(shape);
+            let rows = shape_value
+                .and_then(|value| value.first())
                 .cloned()
                 .unwrap_or_else(|| "1".to_string());
-            let cols = shape
-                .and_then(|shape| shape.get(1))
+            let cols = shape_value
+                .and_then(|value| value.get(1))
                 .cloned()
                 .unwrap_or_else(|| "1".to_string());
             let row = if rows == "1" {

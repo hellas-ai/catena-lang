@@ -64,7 +64,7 @@ pub(super) struct CudaKernelAbi {
     cuda_names: HashMap<String, String>,
     access_certificates: HashMap<(String, String), String>,
     view_ranks: HashMap<String, usize>,
-    view_shapes: HashMap<String, Vec<String>>,
+    shape_values: HashMap<String, Vec<String>>,
     grid_views: HashSet<String>,
     global_shapes: HashMap<String, Vec<String>>,
 }
@@ -202,7 +202,7 @@ impl CudaKernelAbi {
             cuda_names: source_parameter_abi.names,
             access_certificates,
             view_ranks: view_metadata.ranks,
-            view_shapes: view_metadata.shapes,
+            shape_values: view_metadata.shapes,
             grid_views: view_metadata.grid_views,
             global_shapes,
         })
@@ -236,8 +236,8 @@ impl CudaKernelAbi {
         self.grid_views.contains(view)
     }
 
-    pub(super) fn view_shape(&self, view: &str) -> Option<&[String]> {
-        self.view_shapes.get(view).map(Vec::as_slice)
+    pub(super) fn shape_value(&self, shape: &str) -> Option<&[String]> {
+        self.shape_values.get(shape).map(Vec::as_slice)
     }
 
     pub(super) fn global_access(&self, global: &str, view: &str) -> String {
@@ -373,19 +373,19 @@ fn collect_view_metadata(
 ) -> CudaViewMetadata {
     let mut grid_views = HashSet::new();
     let mut view_ranks = HashMap::new();
-    let mut view_shapes = HashMap::new();
+    let mut shape_values = HashMap::new();
     collect_view_metadata_inputs(
         &program.body,
         names,
         global_shapes,
         &mut grid_views,
         &mut view_ranks,
-        &mut view_shapes,
+        &mut shape_values,
     );
 
     CudaViewMetadata {
         ranks: view_ranks,
-        shapes: view_shapes,
+        shapes: shape_values,
         grid_views,
     }
 }
@@ -402,7 +402,7 @@ fn collect_view_metadata_inputs(
     global_shapes: &mut HashMap<String, Vec<String>>,
     grid_views: &mut HashSet<String>,
     view_ranks: &mut HashMap<String, usize>,
-    view_shapes: &mut HashMap<String, Vec<String>>,
+    shape_values: &mut HashMap<String, Vec<String>>,
 ) {
     for stmt in stmts {
         match stmt {
@@ -413,7 +413,7 @@ fn collect_view_metadata_inputs(
                     global_shapes,
                     grid_views,
                     view_ranks,
-                    view_shapes,
+                    shape_values,
                 );
             }
             Stmt::If {
@@ -427,7 +427,7 @@ fn collect_view_metadata_inputs(
                     global_shapes,
                     grid_views,
                     view_ranks,
-                    view_shapes,
+                    shape_values,
                 );
                 collect_view_metadata_inputs(
                     else_body,
@@ -435,7 +435,7 @@ fn collect_view_metadata_inputs(
                     global_shapes,
                     grid_views,
                     view_ranks,
-                    view_shapes,
+                    shape_values,
                 );
             }
             Stmt::Switch { cases, .. } => {
@@ -446,7 +446,7 @@ fn collect_view_metadata_inputs(
                         global_shapes,
                         grid_views,
                         view_ranks,
-                        view_shapes,
+                        shape_values,
                     );
                 }
             }
@@ -457,7 +457,7 @@ fn collect_view_metadata_inputs(
                     global_shapes,
                     grid_views,
                     view_ranks,
-                    view_shapes,
+                    shape_values,
                 );
             }
             Stmt::Break(_)
@@ -476,7 +476,7 @@ fn collect_primitive_view_metadata(
     global_shapes: &mut HashMap<String, Vec<String>>,
     grid_views: &mut HashSet<String>,
     view_ranks: &mut HashMap<String, usize>,
-    view_shapes: &mut HashMap<String, Vec<String>>,
+    shape_values: &mut HashMap<String, Vec<String>>,
 ) {
     if primitive.name == "gpu.grid.view" {
         if let Some(view) = primitive.outputs.first() {
@@ -488,7 +488,7 @@ fn collect_primitive_view_metadata(
 
     if primitive.name == "gpu.shape.row" {
         if let (Some(cols), Some(shape)) = (primitive.inputs.first(), primitive.outputs.first()) {
-            view_shapes.insert(
+            shape_values.insert(
                 rename_with(names, shape),
                 vec!["1".to_string(), rename_with(names, cols)],
             );
@@ -498,7 +498,7 @@ fn collect_primitive_view_metadata(
 
     if primitive.name == "gpu.shape.col" {
         if let (Some(rows), Some(shape)) = (primitive.inputs.first(), primitive.outputs.first()) {
-            view_shapes.insert(
+            shape_values.insert(
                 rename_with(names, shape),
                 vec![rename_with(names, rows), "1".to_string()],
             );
@@ -510,7 +510,7 @@ fn collect_primitive_view_metadata(
         if let ([rows, cols], Some(shape)) =
             (primitive.inputs.as_slice(), primitive.outputs.first())
         {
-            view_shapes.insert(
+            shape_values.insert(
                 rename_with(names, shape),
                 vec![rename_with(names, rows), rename_with(names, cols)],
             );
@@ -529,12 +529,7 @@ fn collect_primitive_view_metadata(
     if primitive.name == "gpu.view.reshape" {
         if let Some(view) = primitive.outputs.first() {
             let view = rename_with(names, view);
-            view_ranks.insert(view.clone(), 2);
-            if let Some(shape) = primitive.inputs.get(1)
-                && let Some(shape) = view_shapes.get(&rename_with(names, shape)).cloned()
-            {
-                view_shapes.insert(view, shape);
-            }
+            view_ranks.insert(view, 2);
         }
         return;
     }

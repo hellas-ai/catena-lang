@@ -6,6 +6,7 @@ use crate::{
             render::{CudaPrimitiveLowering, render_cuda},
         },
         program::Definition,
+        proof::ProofEvidence,
     },
     structured::ir::{Primitive, StructuredProgram},
 };
@@ -24,9 +25,10 @@ impl<'a> CudaTarget<'a> {
         entry: &Definition,
         program: &StructuredProgram,
         options: &CudaOptions,
+        proof_evidence: Option<&ProofEvidence>,
     ) -> Result<Self, CudaAbiError> {
         Ok(Self {
-            abi: CudaKernelAbi::from_definition(entry, program, options)?,
+            abi: CudaKernelAbi::from_definition(entry, program, options, proof_evidence)?,
             primitives: GenericCudaPrimitives::new(theory_set),
         })
     }
@@ -192,66 +194,85 @@ impl NamespaceLowering for GpuPrimitives {
         primitive: &Primitive,
         abi: &CudaKernelAbi,
     ) -> Option<Vec<String>> {
-        if local.matches(&["grid", "schedule"]) {
+        if local.matches(&["grid", "view"]) {
             let [_grid] = primitive.inputs.as_slice() else {
-                return None;
-            };
-            let [block, thread] = primitive.outputs.as_slice() else {
-                return None;
-            };
-            return Some(vec![
-                format!("uint3 {block} = blockIdx;"),
-                format!("uint3 {thread} = threadIdx;"),
-            ]);
-        }
-
-        if local.matches(&["view", "group"]) {
-            let [block, thread, thread_count] = primitive.inputs.as_slice() else {
-                return None;
-            };
-            let [out] = primitive.outputs.as_slice() else {
-                return None;
-            };
-            let mut lines = vec![format!(
-                "uint64_t {out} = (uint64_t){block}.x * {thread_count} + {thread}.x;"
-            )];
-            if abi.static_view_rank(out).is_some() {
-                lines.extend(view_coordinate_lines(out, thread));
-            }
-            lines.extend(view_guard_lines(abi, out));
-            return Some(lines);
-        }
-
-        if local.matches(&["view", "group-by-tile"]) {
-            let [block, thread, tile_rows, tile_cols] = primitive.inputs.as_slice() else {
                 return None;
             };
             let [out] = primitive.outputs.as_slice() else {
                 return None;
             };
             let mut lines = vec![
-                format!("uint64_t {out}_row = (uint64_t){block}.y * {tile_rows} + {thread}.y;"),
-                format!("uint64_t {out}_col = (uint64_t){block}.x * {tile_cols} + {thread}.x;"),
+                format!("uint3 {out}_block = blockIdx;"),
+                format!("uint3 {out}_thread = threadIdx;"),
             ];
             if abi.static_view_rank(out).is_some() {
-                lines.extend(view_coordinate_lines(out, thread));
+                lines.extend(view_coordinate_lines_from_grid_view(out, out));
             }
-            lines.extend(view_guard_lines(abi, out));
             return Some(lines);
         }
 
-        if local.matches(&["view", "element"]) {
-            let [thread] = primitive.inputs.as_slice() else {
+        if local.matches(&["view", "linearize"]) {
+            let [view] = primitive.inputs.as_slice() else {
                 return None;
             };
             let [out] = primitive.outputs.as_slice() else {
                 return None;
             };
-            let mut lines = vec![format!("uint64_t {out} = {thread}.x;")];
-            if abi.static_view_rank(out).is_some() {
-                lines.extend(view_coordinate_lines(out, thread));
+            let lines = if abi.is_grid_view(view) {
+                vec![format!(
+                    "uint64_t {out} = (uint64_t){} * blockDim.x + {};",
+                    view_block_component(view, "x"),
+                    view_thread_component(view, "x")
+                )]
+            } else {
+                vec![format!("uint64_t {out} = {view};")]
+            };
+            return Some(lines);
+        }
+
+        if local.matches(&["view", "group-by-tile"]) {
+            let [view, tile_rows, tile_cols] = primitive.inputs.as_slice() else {
+                return None;
+            };
+            let [out] = primitive.outputs.as_slice() else {
+                return None;
+            };
+            let mut lines = if abi.is_grid_view(view) {
+                vec![
+                    format!(
+                        "uint64_t {out}_row = (uint64_t){} * {tile_rows} + {};",
+                        view_block_component(view, "y"),
+                        view_thread_component(view, "y")
+                    ),
+                    format!(
+                        "uint64_t {out}_col = (uint64_t){} * {tile_cols} + {};",
+                        view_block_component(view, "x"),
+                        view_thread_component(view, "x")
+                    ),
+                ]
+            } else {
+                vec![
+                    format!("uint64_t {out}_row = {view} / {tile_cols};"),
+                    format!("uint64_t {out}_col = {view} % {tile_cols};"),
+                ]
+            };
+            if abi.static_view_rank(out).is_some() && abi.is_grid_view(view) {
+                lines.extend(view_coordinate_lines_from_grid_view(out, view));
             }
-            lines.extend(view_guard_lines(abi, out));
+            return Some(lines);
+        }
+
+        if local.matches(&["view", "group"]) {
+            let [view, cols] = primitive.inputs.as_slice() else {
+                return None;
+            };
+            let [out] = primitive.outputs.as_slice() else {
+                return None;
+            };
+            let lines = vec![
+                format!("uint64_t {out}_row = {view} / {cols};"),
+                format!("uint64_t {out}_col = {view} % {cols};"),
+            ];
             return Some(lines);
         }
 
@@ -262,9 +283,7 @@ impl NamespaceLowering for GpuPrimitives {
             let [out] = primitive.outputs.as_slice() else {
                 return None;
             };
-            let mut lines = vec![format!("uint64_t {out} = {view}_row;")];
-            lines.extend(view_guard_lines(abi, out));
-            return Some(lines);
+            return Some(vec![format!("uint64_t {out} = {view}_row;")]);
         }
 
         if local.matches(&["view", "col"]) {
@@ -274,36 +293,7 @@ impl NamespaceLowering for GpuPrimitives {
             let [out] = primitive.outputs.as_slice() else {
                 return None;
             };
-            let mut lines = vec![format!("uint64_t {out} = {view}_col;")];
-            lines.extend(view_guard_lines(abi, out));
-            return Some(lines);
-        }
-
-        if local.matches(&["view", "zero"]) {
-            let [] = primitive.inputs.as_slice() else {
-                return None;
-            };
-            let [out] = primitive.outputs.as_slice() else {
-                return None;
-            };
-            let mut lines = vec![format!("uint64_t {out} = 0;")];
-            lines.extend(view_guard_lines(abi, out));
-            return Some(lines);
-        }
-
-        if local.matches(&["view", "group-by-shape"]) {
-            let [row, col, _rows, _cols] = primitive.inputs.as_slice() else {
-                return None;
-            };
-            let [out] = primitive.outputs.as_slice() else {
-                return None;
-            };
-            let mut lines = vec![
-                format!("uint64_t {out}_row = {row};"),
-                format!("uint64_t {out}_col = {col};"),
-            ];
-            lines.extend(view_guard_lines(abi, out));
-            return Some(lines);
+            return Some(vec![format!("uint64_t {out} = {view}_col;")]);
         }
 
         if local.matches(&["global", "store"]) {
@@ -311,7 +301,8 @@ impl NamespaceLowering for GpuPrimitives {
                 return None;
             };
             let output = primitive.outputs.first();
-            let mut lines = vec![format!("{} = {value};", abi.global_access(global, view))];
+            let mut lines = certified_access_lines(abi, global, view);
+            lines.push(format!("{} = {value};", abi.global_access(global, view)));
             if let Some(output) = output
                 && output != global
             {
@@ -327,10 +318,12 @@ impl NamespaceLowering for GpuPrimitives {
             let [out] = primitive.outputs.as_slice() else {
                 return None;
             };
-            return Some(vec![format!(
+            let mut lines = certified_access_lines(abi, global, view);
+            lines.push(format!(
                 "float {out} = {};",
                 abi.global_access(global, view)
-            )]);
+            ));
+            return Some(lines);
         }
 
         if local.matches(&["shared", "load"]) {
@@ -340,10 +333,12 @@ impl NamespaceLowering for GpuPrimitives {
             let [out] = primitive.outputs.as_slice() else {
                 return None;
             };
-            return Some(vec![format!(
+            let mut lines = certified_access_lines(abi, shared, view);
+            lines.push(format!(
                 "float {out} = {};",
                 abi.shared_access(shared, view)
-            )]);
+            ));
+            return Some(lines);
         }
 
         if local.matches(&["shared", "store"]) {
@@ -351,7 +346,8 @@ impl NamespaceLowering for GpuPrimitives {
                 return None;
             };
             let output = primitive.outputs.first();
-            let mut lines = vec![format!("{} = {value};", abi.shared_access(shared, view))];
+            let mut lines = certified_access_lines(abi, shared, view);
+            lines.push(format!("{} = {value};", abi.shared_access(shared, view)));
             if let Some(output) = output
                 && output != shared
             {
@@ -364,23 +360,36 @@ impl NamespaceLowering for GpuPrimitives {
     }
 }
 
-fn view_coordinate_lines(view: &str, thread: &str) -> Vec<String> {
+fn view_coordinate_lines_from_grid_view(view: &str, grid_view: &str) -> Vec<String> {
     vec![
-        format!("uint64_t {view}_x = {thread}.x;"),
-        format!("uint64_t {view}_y = {thread}.y;"),
-        format!("uint64_t {view}_z = {thread}.z;"),
+        format!(
+            "uint64_t {view}_x = {};",
+            view_thread_component(grid_view, "x")
+        ),
+        format!(
+            "uint64_t {view}_y = {};",
+            view_thread_component(grid_view, "y")
+        ),
+        format!(
+            "uint64_t {view}_z = {};",
+            view_thread_component(grid_view, "z")
+        ),
     ]
 }
 
-fn view_guard_lines(abi: &CudaKernelAbi, view: &str) -> Vec<String> {
-    let Some(guard) = abi.view_guard(view) else {
+fn view_block_component(view: &str, component: &str) -> String {
+    format!("{view}_block.{component}")
+}
+
+fn view_thread_component(view: &str, component: &str) -> String {
+    format!("{view}_thread.{component}")
+}
+
+fn certified_access_lines(abi: &CudaKernelAbi, memory: &str, view: &str) -> Vec<String> {
+    let Some(certificate) = abi.access_certificate(memory, view) else {
         return Vec::new();
     };
-    vec![
-        format!("if (!({guard})) {{"),
-        "    return;".to_string(),
-        "}".to_string(),
-    ]
+    vec![format!("// safety: certified by {certificate}")]
 }
 
 fn fallback_primitive_lines(primitive: &Primitive) -> Vec<String> {

@@ -1,0 +1,283 @@
+#
+# View typing as a Metacat/Catena formal system.
+#
+# The object-language judgement
+#
+#   Gamma |- e : view(shape)
+#
+# is encoded as the syntax object
+#
+#   {Gamma e ([shape] view)} |-
+#
+
+(theory syntax nat {
+  ########################################
+  # Object-language judgement and view types
+
+  (arr |- : 3 -> 1)
+  (arr view : 1 -> 1)
+
+  ########################################
+  # Contexts derived from kernel arguments
+
+  (arr gpu.ctx.empty : 0 -> 1)
+  (arr gpu.ctx.grid : 4 -> 1)
+  (arr gpu.ctx.global : 3 -> 1)
+  (arr gpu.ctx.shared : 3 -> 1)
+
+  ########################################
+  # Object-language expressions for GPU view operations
+
+  (arr gpu.grid.view : 1 -> 1)
+  (arr gpu.view.linearize : 1 -> 1)
+  (arr gpu.view.group : 2 -> 1)
+  (arr gpu.view.group-by-tile : 3 -> 1)
+  (arr gpu.view.row : 1 -> 1)
+  (arr gpu.view.col : 1 -> 1)
+  (arr gpu.global.load : 2 -> 1)
+  (arr gpu.global.store : 3 -> 1)
+  (arr gpu.shared.load : 2 -> 1)
+  (arr gpu.shared.store : 3 -> 1)
+})
+
+(theory gpu.proof syntax {
+
+  ########################################
+  # View introduction and structural view operations
+  #
+
+  #   Gamma, grid : 1d(blocks) x 1d(threads)
+  #   ------------------------------------------------------- grid-view-1d-1d
+  #   Gamma |- grid.view(grid) : view(2d(blocks, threads))
+
+  (arr grid-view-1d-1d :
+    ([gamma grid blocks threads . gamma grid blocks threads]
+      ({[gamma] [grid] ([blocks] 1d) ([threads] 1d)} gpu.ctx.grid)) ->
+    ([gamma grid blocks threads
+      . gamma grid blocks threads grid blocks threads]
+      ({({[gamma] [grid] ([blocks] 1d) ([threads] 1d)} gpu.ctx.grid)
+        ([grid] gpu.grid.view)
+        (({[blocks] [threads]} 2d) view)}
+       |-)))
+
+  #   Gamma, grid : 1d(blocks) x 2d(thread_rows, thread_cols)
+  #   ------------------------------------------------------------------ grid-view-1d-2d
+  #   Gamma |- grid.view(grid) : view(3d(blocks, thread_rows, thread_cols))
+
+  (arr grid-view-1d-2d :
+    ([gamma grid blocks thread-rows thread-cols . gamma grid blocks thread-rows thread-cols]
+      ({[gamma] [grid] ([blocks] 1d) ({[thread-rows] [thread-cols]} 2d)} gpu.ctx.grid)) ->
+    ([gamma grid blocks thread-rows thread-cols
+      . gamma grid blocks thread-rows thread-cols grid blocks thread-rows thread-cols]
+      ({({[gamma] [grid] ([blocks] 1d) ({[thread-rows] [thread-cols]} 2d)} gpu.ctx.grid)
+        ([grid] gpu.grid.view)
+        (({[blocks] [thread-rows] [thread-cols]} 3d) view)}
+       |-)))
+
+  #   Gamma, grid : 2d(block_rows, block_cols) x 1d(threads)
+  #   ---------------------------------------------------------------- grid-view-2d-1d
+  #   Gamma |- grid.view(grid) : view(3d(block_rows, block_cols, threads))
+
+  (arr grid-view-2d-1d :
+    ([gamma grid block-rows block-cols threads . gamma grid block-rows block-cols threads]
+      ({[gamma] [grid] ({[block-rows] [block-cols]} 2d) ([threads] 1d)} gpu.ctx.grid)) ->
+    ([gamma grid block-rows block-cols threads
+      . gamma grid block-rows block-cols threads grid block-rows block-cols threads]
+      ({({[gamma] [grid] ({[block-rows] [block-cols]} 2d) ([threads] 1d)} gpu.ctx.grid)
+        ([grid] gpu.grid.view)
+        (({[block-rows] [block-cols] [threads]} 3d) view)}
+       |-)))
+
+  #   Gamma, grid : 2d(block_rows, block_cols) x 2d(thread_rows, thread_cols)
+  #   -------------------------------------------------------------------------------- grid-view-2d-2d
+  #   Gamma |- grid.view(grid) : view(4d(block_rows, block_cols, thread_rows, thread_cols))
+
+  (arr grid-view-2d-2d :
+    ([gamma grid block-rows block-cols thread-rows thread-cols
+      . gamma grid block-rows block-cols thread-rows thread-cols]
+      ({[gamma] [grid] ({[block-rows] [block-cols]} 2d) ({[thread-rows] [thread-cols]} 2d)} gpu.ctx.grid)) ->
+    ([gamma grid block-rows block-cols thread-rows thread-cols
+      . gamma grid block-rows block-cols thread-rows thread-cols grid block-rows block-cols thread-rows thread-cols]
+      ({({[gamma] [grid] ({[block-rows] [block-cols]} 2d) ({[thread-rows] [thread-cols]} 2d)} gpu.ctx.grid)
+        ([grid] gpu.grid.view)
+        (({[block-rows] [block-cols] [thread-rows] [thread-cols]} 4d) view)}
+       |-)))
+
+  # linearize-1d
+  #
+  #        Gamma |- e : view(n 1d)
+  #   ---------------------------------
+  #    Gamma |- linearize(e) : view(n 1d)
+  #
+  # Linearizing a 1D view preserves its shape.
+
+  (arr linearize-1d :
+    ([gamma expr n]
+      ({[gamma] [expr] (([n] 1d) view)} |-)) ->
+    ([gamma expr n]
+      ({[gamma]
+        ([expr] gpu.view.linearize)
+        (([n] 1d) view)}
+       |-)))
+
+  # linearize
+  #
+  #        Gamma |- e : view({rows cols} 2d)
+  #   -----------------------------------------
+  #    Gamma |- linearize(e) : view((rows * cols) 1d)
+
+  (arr linearize :
+    ([gamma expr rows cols]
+      ({[gamma] [expr] (({[rows] [cols]} 2d) view)} |-)) ->
+    ([gamma expr rows cols]
+      ({[gamma]
+        ([expr] gpu.view.linearize)
+        ((({[rows] [cols]} nat.mul) 1d) view)}
+       |-)))
+
+  # linearize-3d
+  #
+  #        Gamma |- e : view({x y z} 3d)
+  #   --------------------------------------------
+  #    Gamma |- linearize(e) : view(((x * y) * z) 1d)
+
+  (arr linearize-3d :
+    ([gamma expr x y z]
+      ({[gamma] [expr] (({[x] [y] [z]} 3d) view)} |-)) ->
+    ([gamma expr x y z]
+      ({[gamma]
+        ([expr] gpu.view.linearize)
+        ((({({[x] [y]} nat.mul) [z]} nat.mul) 1d) view)}
+       |-)))
+
+  # linearize-4d
+  #
+  #        Gamma |- e : view({x y z w} 4d)
+  #   ------------------------------------------------------
+  #    Gamma |- linearize(e) : view((((x * y) * z) * w) 1d)
+
+  (arr linearize-4d :
+    ([gamma expr x y z w]
+      ({[gamma] [expr] (({[x] [y] [z] [w]} 4d) view)} |-)) ->
+    ([gamma expr x y z w]
+      ({[gamma]
+        ([expr] gpu.view.linearize)
+        ((({({({[x] [y]} nat.mul) [z]} nat.mul) [w]} nat.mul) 1d) view)}
+       |-)))
+
+  # group
+  #
+  #        Gamma |- e : view(n 1d)
+  #   ------------------------------------------------
+  #    Gamma |- group(e, count) : view({ceil(n/count) count} 2d)
+  #
+  # The result shape has enough rows to cover all n linear positions when
+  # grouped into rows of length count. If count divides n exactly, this is the
+  # usual n/count by count shape.
+
+  (arr group :
+    ([gamma expr n count . gamma expr n]
+      ({[gamma] [expr] (([n] 1d) view)} |-)) ->
+    ([gamma expr n count . gamma expr count n count count]
+      ({[gamma]
+        ({[expr] [count]} gpu.view.group)
+        (({({[n] [count]} nat.ceil-div) [count]} 2d) view)}
+       |-)))
+
+  # group-by-tile
+  #
+  #    Gamma |- e : view(({grid_2d tile_2d} *))
+  #   ------------------------------------------------------------------
+  #    Gamma |- group-by-tile(e, tile_rows, tile_cols)
+  #           : view(grid_rows * tile_rows, grid_cols * tile_cols)
+
+  (arr group-by-tile :
+    ([gamma expr grid-rows grid-cols tile-rows tile-cols]
+      ({[gamma] [expr] (({({[grid-rows] [grid-cols]} 2d) ({[tile-rows] [tile-cols]} 2d)} *) view)}
+       |-)) ->
+    ([gamma expr grid-rows grid-cols tile-rows tile-cols
+      . gamma expr tile-rows tile-cols grid-rows tile-rows grid-cols tile-cols]
+      ({[gamma]
+        ({[expr] [tile-rows] [tile-cols]} gpu.view.group-by-tile)
+        (({({[grid-rows] [tile-rows]} nat.mul) ({[grid-cols] [tile-cols]} nat.mul)} 2d) view)}
+       |-)))
+
+  # row
+  #
+  #        Gamma |- e : view({rows cols} 2d)
+  #   --------------------------------------
+  #    Gamma |- row(e) : view(rows 1d)
+
+  (arr row :
+    ([gamma expr rows cols]
+      ({[gamma] [expr] (({[rows] [cols]} 2d) view)} |-)) ->
+    ([gamma expr rows cols . gamma expr rows]
+      ({[gamma] ([expr] gpu.view.row) (([rows] 1d) view)} |-)))
+
+  # col
+  #
+  #        Gamma |- e : view({rows cols} 2d)
+  #   --------------------------------------
+  #    Gamma |- col(e) : view(cols 1d)
+
+  (arr col :
+    ([gamma expr rows cols]
+      ({[gamma] [expr] (({[rows] [cols]} 2d) view)} |-)) ->
+    ([gamma expr rows cols . gamma expr cols]
+      ({[gamma] ([expr] gpu.view.col) (([cols] 1d) view)} |-)))
+
+  ########################################
+  # Memory operations are well-viewed when their index view is in bounds for
+  # the memory shape recorded in Gamma.
+  #
+  # global-load
+  #
+  #    Gamma |- e : view(shape)
+  #   -------------------------------------------------------
+  #    Gamma, mem : global(shape) |- global.load(mem, e) : view(shape)
+  #
+  # global-store
+  #
+  #    Gamma |- e : view(shape)
+  #   --------------------------------------------------------------
+  #    Gamma, mem : global(shape) |- global.store(mem, e, value) : view(shape)
+  #
+  # shared-load / shared-store have the same derivation shape with a block-local
+  # shared-memory context entry.
+
+  (arr global-load :
+    ([gamma mem shape expr . gamma expr shape]
+      ({[gamma] [expr] ([shape] view)} |-)) ->
+    ([gamma mem shape expr . gamma mem shape mem expr shape]
+      ({({[gamma] [mem] [shape]} gpu.ctx.global)
+        ({[mem] [expr]} gpu.global.load)
+        ([shape] view)}
+       |-)))
+
+  (arr global-store :
+    ([gamma mem shape expr value . gamma expr shape]
+      ({[gamma] [expr] ([shape] view)} |-)) ->
+    ([gamma mem shape expr value . gamma mem shape mem expr value shape]
+      ({({[gamma] [mem] [shape]} gpu.ctx.global)
+        ({[mem] [expr] [value]} gpu.global.store)
+        ([shape] view)}
+       |-)))
+
+  (arr shared-load :
+    ([gamma mem shape expr . gamma expr shape]
+      ({[gamma] [expr] ([shape] view)} |-)) ->
+    ([gamma mem shape expr . gamma mem shape mem expr shape]
+      ({({[gamma] [mem] [shape]} gpu.ctx.shared)
+        ({[mem] [expr]} gpu.shared.load)
+        ([shape] view)}
+       |-)))
+
+  (arr shared-store :
+    ([gamma mem shape expr value . gamma expr shape]
+      ({[gamma] [expr] ([shape] view)} |-)) ->
+    ([gamma mem shape expr value . gamma mem shape mem expr value shape]
+      ({({[gamma] [mem] [shape]} gpu.ctx.shared)
+        ({[mem] [expr] [value]} gpu.shared.store)
+        ([shape] view)}
+       |-)))
+})

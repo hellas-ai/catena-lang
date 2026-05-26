@@ -13,6 +13,7 @@ use crate::{
         graph_render,
         normalize::{NormalizeGraphError, normalize_graph},
         program::{ProgramCompileError, compile_program_from_graph},
+        proof::{ProofCertificateError, ProofCertificates},
         structured::{StructuredCompileError, compile_structured_program},
     },
     elaborate::{ElaborateError, elaborate},
@@ -42,6 +43,8 @@ pub struct CompileRequest {
     pub format: Option<OutputFormat>,
     pub graph_options: GraphCompileOptions,
     pub cuda_options: CudaOptions,
+    pub proof_check: bool,
+    pub proof_paths: Vec<PathBuf>,
 }
 
 #[derive(Debug, Error)]
@@ -70,6 +73,8 @@ pub enum CompilePipelineError {
     UnsupportedFormat { emit: Emit, format: OutputFormat },
     #[error("--no-inline is only supported for emits that build a compile graph, not {0:?}")]
     UnsupportedNoInline(Emit),
+    #[error(transparent)]
+    Proof(#[from] ProofCertificateError),
 }
 
 pub fn compile(request: CompileRequest) -> Result<Vec<u8>, CompilePipelineError> {
@@ -106,6 +111,7 @@ impl CompilePipeline {
             }
             Emit::CompileGraph => {
                 self.require_format(OutputFormat::Svg)?;
+                self.proof_certificates()?;
                 let compile_graph_request = self.compile_graph_request()?;
                 let checked_elaborated_theory = self.checked_elaborated_theory()?;
                 let graph = Self::compile_graph(checked_elaborated_theory, compile_graph_request)?;
@@ -113,6 +119,7 @@ impl CompilePipeline {
             }
             Emit::Cuda | Emit::StructuredIr => {
                 self.require_format(OutputFormat::Text)?;
+                let proof_certificates = self.proof_certificates()?;
                 let emit = self.request.emit;
                 let cuda_options = self.request.cuda_options.clone();
                 let compile_graph_request = self.compile_graph_request()?;
@@ -120,6 +127,10 @@ impl CompilePipeline {
                 let compile_graph =
                     Self::compile_graph(checked_elaborated_theory, compile_graph_request)?;
                 let graph = normalize_graph(&compile_graph)?;
+                let proof_evidence = proof_certificates
+                    .as_ref()
+                    .map(|certificates| certificates.verify_graph_properties(&graph))
+                    .transpose()?;
                 let program = compile_program_from_graph(&graph)?;
                 let structured = compile_structured_program(&program)?;
                 Ok(match emit {
@@ -128,6 +139,7 @@ impl CompilePipeline {
                         &program,
                         &structured,
                         &cuda_options,
+                        proof_evidence.as_ref(),
                     )?,
                     Emit::StructuredIr => structured.render_ir(),
                     _ => unreachable!("only structured-backed emits are handled here"),
@@ -199,6 +211,17 @@ impl CompilePipeline {
             return Err(CompilePipelineError::UnsupportedNoInline(self.request.emit));
         }
         Ok(())
+    }
+
+    fn proof_certificates(&self) -> Result<Option<ProofCertificates>, CompilePipelineError> {
+        if !self.request.proof_check {
+            return Ok(None);
+        }
+
+        Ok(Some(ProofCertificates::from_files(
+            &self.request.paths,
+            &self.request.proof_paths,
+        )?))
     }
 }
 

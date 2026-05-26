@@ -26,8 +26,8 @@
       (({f32 ({[rows] [cols]} 2d)} gpu.global) val)
     }
     = {[rows cols tile_rows tile_cols grid a b output.]
-      ([.grid] gpu.grid.schedule [block thread.])
-      ([.block thread tile_rows tile_cols] gpu.view.group-by-tile [ij.])
+      ([.grid] gpu.grid.view [worker.])
+      ([.worker tile_rows tile_cols] gpu.view.group-by-tile [ij.])
       ([.ij] gpu.view.row [i.])
       ([.ij] gpu.view.col [j.])
       ([.a i] gpu.global.load [a_value.])
@@ -42,7 +42,7 @@
 # Use one_row = 1 and one_col = 1.
 #
 
-(def data user.f32.broadcast-add-matrix-inputs :
+(def data user.f32.broadcast-add-singleton-matrix-inputs :
     {
       (([.one_row] extent) val)
       (([.one_col] extent) val)
@@ -60,13 +60,12 @@
       (({f32 ({[tile_rows] [tile_cols]} 2d)} gpu.global) val)
     }
     = {[one_row one_col tile_rows tile_cols grid a b output.]
-      ([.grid] gpu.grid.schedule [block thread.])
-      ([.block thread tile_rows tile_cols] gpu.view.group-by-tile [ij.])
+      ([.grid] gpu.grid.view [worker.])
+      ([.worker tile_rows tile_cols] gpu.view.group-by-tile [ij.])
       ([.ij] gpu.view.row [i.])
       ([.ij] gpu.view.col [j.])
-      ([.] gpu.view.zero [zero.])
-      ([.zero j one_row tile_cols] gpu.view.group-by-shape [a_view.])
-      ([.i zero tile_rows one_col] gpu.view.group-by-shape [b_view.])
+      ([.j tile_cols] gpu.view.group [a_view.])
+      ([.i one_col] gpu.view.group [b_view.])
       ([.a a_view] gpu.global.load [a_value.])
       ([.b b_view] gpu.global.load [b_value.])
       ([.a_value b_value] f32.add [sum.])

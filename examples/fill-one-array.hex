@@ -14,9 +14,9 @@
        (({f32 (({[block_count] [thread_count]} nat.mul) 1d)} gpu.global) val)
     }
     = {[block_count thread_count grid out.]
-      ([.grid] gpu.grid.schedule [block thread.])
+      ([.grid] gpu.grid.view [worker.])
       ([.] f32.one [one.])
-      ([.block thread thread_count] gpu.view.group [out_view.])
+      ([.worker] gpu.view.linearize [out_view.])
       ([.out out_view one] gpu.global.store [out_filled.])
       [.out_filled]}
 )

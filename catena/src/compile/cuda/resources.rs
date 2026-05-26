@@ -21,7 +21,6 @@ pub(super) enum SharedIndexing {
 
 pub(super) struct GlobalBinding {
     pub(super) device_name: String,
-    pub(super) size_name: String,
     pub(super) dimensions: Vec<String>,
     pub(super) device_params: Vec<Param>,
     pub(super) host_params: Vec<Param>,
@@ -49,13 +48,6 @@ pub(super) fn bind_global(
     let base_name = sanitize_ident(&variable.name);
     let device_name = unique_name(&base_name, used_device_names);
     let host_name = unique_name(&base_name, used_host_names);
-    let size_name = unique_name(&format!("{device_name}_size"), used_device_names);
-    let size_expr = memory_size_expr(
-        &global.dimensions,
-        extent_names,
-        CudaAbiError::MissingGlobalExtent,
-        || CudaAbiError::InvalidGlobalShape,
-    )?;
     let dimensions = memory_dimension_exprs(
         &global.dimensions,
         extent_names,
@@ -65,24 +57,17 @@ pub(super) fn bind_global(
 
     Ok(GlobalBinding {
         device_name: device_name.clone(),
-        size_name: size_name.clone(),
         dimensions,
-        device_params: vec![
-            Param {
-                ty: "uint64_t".to_string(),
-                name: size_name.clone(),
-            },
-            Param {
-                ty: param_ty.to_string(),
-                name: device_name,
-            },
-        ],
+        device_params: vec![Param {
+            ty: param_ty.to_string(),
+            name: device_name,
+        }],
         host_params: vec![Param {
             ty: param_ty.to_string(),
             name: host_name.clone(),
         }],
-        host_prelude: vec![format!("uint64_t {size_name} = {size_expr};")],
-        device_call_args: vec![size_name, host_name],
+        host_prelude: Vec::new(),
+        device_call_args: vec![host_name],
     })
 }
 
@@ -217,26 +202,6 @@ pub(super) fn bind_static_shared(device_name: String, memory: StaticSharedMemory
             memory.shape.cuda_array_suffix()
         )],
     }
-}
-
-fn memory_size_expr(
-    dimensions: &[&crate::lang::Obj],
-    extent_names: &HashMap<usize, String>,
-    missing_extent: impl Fn(usize) -> CudaAbiError + Copy,
-    invalid_shape: impl Fn() -> CudaAbiError + Copy,
-) -> Result<String, CudaAbiError> {
-    let dimensions = dimensions
-        .iter()
-        .map(|dimension| {
-            crate::compile::cuda::shape::dimension_expr(
-                dimension,
-                extent_names,
-                missing_extent,
-                invalid_shape,
-            )
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(dimensions.join(" * "))
 }
 
 fn memory_dimension_exprs(

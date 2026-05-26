@@ -45,6 +45,7 @@ use crate::{
             views::{ViewAnalysis, extents_required_by_device_code},
         },
         program::{Definition, Variable},
+        proof::ProofEvidence,
     },
     structured::ir::{Param, Primitive, Stmt, StructuredProgram},
 };
@@ -61,8 +62,9 @@ pub(super) struct CudaKernelAbi {
     pub(super) dynamic_shared_memory_bytes: Option<String>,
     views: ViewAnalysis,
     cuda_names: HashMap<String, String>,
-    view_guards: HashMap<String, String>,
+    access_certificates: HashMap<(String, String), String>,
     view_ranks: HashMap<String, usize>,
+    grid_views: HashSet<String>,
     global_shapes: HashMap<String, Vec<String>>,
 }
 
@@ -114,10 +116,6 @@ pub enum CudaAbiError {
     StaticValueNotExtent(String),
     #[error("unsupported CUDA kernel source parameter `{name}` of type `{ty}`")]
     UnsupportedSourceParameter { name: String, ty: String },
-    #[error("gpu.global `{0}` has no associated size, so CUDA cannot guard accesses safely")]
-    MissingGlobalSize(String),
-    #[error("gpu.global access uses view `{0}`, but no CUDA view primitive defines it")]
-    MissingGlobalAccessView(String),
 }
 
 impl CudaKernelAbi {
@@ -125,6 +123,7 @@ impl CudaKernelAbi {
         definition: &Definition,
         program: &StructuredProgram,
         options: &CudaOptions,
+        proof_evidence: Option<&ProofEvidence>,
     ) -> Result<Self, CudaAbiError> {
         let source_params = source_parameters(definition)?;
 
@@ -138,11 +137,10 @@ impl CudaKernelAbi {
 
         // Find extent parameters that must still be available inside the
         // generated kernel body. Most extents are host-only: they size memory
-        // or compute launch dimensions. Some primitives, such as
-        // `gpu.view.group`, use an extent to compute per-thread indices in
-        // device code, so those extents must also become kernel parameters.
+        // or compute launch dimensions. View layout primitives can also need
+        // extents to compute device-side coordinates.
         let mut extents_required_by_device_code = extents_required_by_device_code(program);
-        if program_uses_tiled_view(program) {
+        if program_uses_tiled_view(program) || program_uses_grid_view_global_access(program) {
             for source_param in &source_params {
                 if crate::compile::cuda::shape::extent_leaf(&source_param.ty).is_some() {
                     extents_required_by_device_code.insert(source_param.name.clone());
@@ -180,14 +178,15 @@ impl CudaKernelAbi {
             &source_parameter_abi.names,
             source_parameter_abi.shared_indexing.clone(),
         );
-        let mut global_sizes = source_parameter_abi.global_sizes.clone();
         let mut global_shapes = source_parameter_abi.global_shapes.clone();
-        let view_analysis = collect_view_guards(
+        let view_metadata =
+            collect_view_metadata(program, &source_parameter_abi.names, &mut global_shapes);
+        let access_certificates = collect_access_certificates(
+            &definition.name,
             program,
             &source_parameter_abi.names,
-            &mut global_sizes,
-            &mut global_shapes,
-        )?;
+            proof_evidence,
+        );
 
         Ok(CudaKernelAbi {
             kernel_params: source_parameter_abi.device_params,
@@ -200,9 +199,10 @@ impl CudaKernelAbi {
             dynamic_shared_memory_bytes,
             views,
             cuda_names: source_parameter_abi.names,
-            view_guards: view_analysis.guards,
-            view_ranks: view_analysis.ranks,
-            global_shapes: source_parameter_abi.global_shapes,
+            access_certificates,
+            view_ranks: view_metadata.ranks,
+            grid_views: view_metadata.grid_views,
+            global_shapes,
         })
     }
 
@@ -214,6 +214,9 @@ impl CudaKernelAbi {
     }
 
     pub(super) fn shared_access(&self, shared: &str, view: &str) -> String {
+        if self.is_grid_view(view) && self.static_view_rank(view).is_none() {
+            return format!("{shared}[{view}_thread.x]");
+        }
         self.views.shared_access(shared, view)
     }
 
@@ -221,12 +224,21 @@ impl CudaKernelAbi {
         self.views.static_view_rank(view)
     }
 
-    pub(super) fn view_guard(&self, view: &str) -> Option<&str> {
-        self.view_guards.get(view).map(String::as_str)
+    pub(super) fn access_certificate(&self, memory: &str, view: &str) -> Option<&str> {
+        self.access_certificates
+            .get(&(memory.to_string(), view.to_string()))
+            .map(String::as_str)
+    }
+
+    pub(super) fn is_grid_view(&self, view: &str) -> bool {
+        self.grid_views.contains(view)
     }
 
     pub(super) fn global_access(&self, global: &str, view: &str) -> String {
         match (self.view_ranks.get(view), self.global_shapes.get(global)) {
+            (_, Some(shape)) if self.is_grid_view(view) && shape.len() == 2 => {
+                format!("{global}[{view}_block.x * {} + {view}_thread.x]", shape[1])
+            }
             (Some(2), Some(shape)) if shape.len() == 2 => {
                 format!("{global}[{view}_row * {} + {view}_col]", shape[1])
             }
@@ -273,116 +285,158 @@ fn stmts_use_tiled_view(stmts: &[Stmt]) -> bool {
     })
 }
 
-fn collect_view_guards(
-    program: &StructuredProgram,
-    names: &HashMap<String, String>,
-    global_sizes: &mut HashMap<String, String>,
-    global_shapes: &mut HashMap<String, Vec<String>>,
-) -> Result<CudaViewGuardAnalysis, CudaAbiError> {
-    let mut defined_views = HashSet::new();
-    let mut guard_conditions = HashMap::new();
-    let mut view_ranks = HashMap::new();
-    collect_view_guard_inputs(
-        &program.body,
-        names,
-        global_sizes,
-        global_shapes,
-        &mut defined_views,
-        &mut guard_conditions,
-        &mut view_ranks,
-    )?;
-
-    let mut guards = HashMap::new();
-    for (view, conditions) in guard_conditions {
-        if !defined_views.contains(&view) {
-            return Err(CudaAbiError::MissingGlobalAccessView(view));
-        }
-        if guards.contains_key(&view) {
-            continue;
-        }
-        let predicate = conditions.join(" && ");
-        guards.insert(view, predicate);
-    }
-    Ok(CudaViewGuardAnalysis {
-        guards,
-        ranks: view_ranks,
-    })
+fn program_uses_grid_view_global_access(program: &StructuredProgram) -> bool {
+    let mut grid_views = HashSet::new();
+    stmts_collect_grid_views(&program.body, &mut grid_views);
+    stmts_use_grid_view_global_access(&program.body, &grid_views)
 }
 
-struct CudaViewGuardAnalysis {
-    guards: HashMap<String, String>,
-    ranks: HashMap<String, usize>,
-}
-
-fn collect_view_guard_inputs(
-    stmts: &[Stmt],
-    names: &HashMap<String, String>,
-    global_sizes: &mut HashMap<String, String>,
-    global_shapes: &mut HashMap<String, Vec<String>>,
-    defined_views: &mut HashSet<String>,
-    guard_conditions: &mut HashMap<String, Vec<String>>,
-    view_ranks: &mut HashMap<String, usize>,
-) -> Result<(), CudaAbiError> {
+fn stmts_collect_grid_views(stmts: &[Stmt], grid_views: &mut HashSet<String>) {
     for stmt in stmts {
         match stmt {
             Stmt::Block { body, .. } | Stmt::Loop { body, .. } | Stmt::For { body, .. } => {
-                collect_view_guard_inputs(
-                    body,
-                    names,
-                    global_sizes,
-                    global_shapes,
-                    defined_views,
-                    guard_conditions,
-                    view_ranks,
-                )?;
+                stmts_collect_grid_views(body, grid_views);
             }
             Stmt::If {
                 then_body,
                 else_body,
                 ..
             } => {
-                collect_view_guard_inputs(
-                    then_body,
-                    names,
-                    global_sizes,
-                    global_shapes,
-                    defined_views,
-                    guard_conditions,
-                    view_ranks,
-                )?;
-                collect_view_guard_inputs(
-                    else_body,
-                    names,
-                    global_sizes,
-                    global_shapes,
-                    defined_views,
-                    guard_conditions,
-                    view_ranks,
-                )?;
+                stmts_collect_grid_views(then_body, grid_views);
+                stmts_collect_grid_views(else_body, grid_views);
             }
             Stmt::Switch { cases, .. } => {
                 for case in cases {
-                    collect_view_guard_inputs(
+                    stmts_collect_grid_views(case, grid_views);
+                }
+            }
+            Stmt::Primitive(primitive) if primitive.name == "gpu.grid.view" => {
+                if let Some(view) = primitive.outputs.first() {
+                    grid_views.insert(view.clone());
+                }
+            }
+            Stmt::Primitive(_)
+            | Stmt::Break(_)
+            | Stmt::Continue(_)
+            | Stmt::Return
+            | Stmt::Barrier
+            | Stmt::Assign { .. }
+            | Stmt::Comment(_) => {}
+        }
+    }
+}
+
+fn stmts_use_grid_view_global_access(stmts: &[Stmt], grid_views: &HashSet<String>) -> bool {
+    stmts.iter().any(|stmt| match stmt {
+        Stmt::Block { body, .. } | Stmt::Loop { body, .. } | Stmt::For { body, .. } => {
+            stmts_use_grid_view_global_access(body, grid_views)
+        }
+        Stmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            stmts_use_grid_view_global_access(then_body, grid_views)
+                || stmts_use_grid_view_global_access(else_body, grid_views)
+        }
+        Stmt::Switch { cases, .. } => cases
+            .iter()
+            .any(|case| stmts_use_grid_view_global_access(case, grid_views)),
+        Stmt::Primitive(primitive)
+            if primitive.name == "gpu.global.load" || primitive.name == "gpu.global.store" =>
+        {
+            primitive
+                .inputs
+                .get(1)
+                .is_some_and(|view| grid_views.contains(view))
+        }
+        Stmt::Primitive(_)
+        | Stmt::Break(_)
+        | Stmt::Continue(_)
+        | Stmt::Return
+        | Stmt::Barrier
+        | Stmt::Assign { .. }
+        | Stmt::Comment(_) => false,
+    })
+}
+
+fn collect_view_metadata(
+    program: &StructuredProgram,
+    names: &HashMap<String, String>,
+    global_shapes: &mut HashMap<String, Vec<String>>,
+) -> CudaViewMetadata {
+    let mut grid_views = HashSet::new();
+    let mut view_ranks = HashMap::new();
+    collect_view_metadata_inputs(
+        &program.body,
+        names,
+        global_shapes,
+        &mut grid_views,
+        &mut view_ranks,
+    );
+
+    CudaViewMetadata {
+        ranks: view_ranks,
+        grid_views,
+    }
+}
+
+struct CudaViewMetadata {
+    ranks: HashMap<String, usize>,
+    grid_views: HashSet<String>,
+}
+
+fn collect_view_metadata_inputs(
+    stmts: &[Stmt],
+    names: &HashMap<String, String>,
+    global_shapes: &mut HashMap<String, Vec<String>>,
+    grid_views: &mut HashSet<String>,
+    view_ranks: &mut HashMap<String, usize>,
+) {
+    for stmt in stmts {
+        match stmt {
+            Stmt::Block { body, .. } | Stmt::Loop { body, .. } | Stmt::For { body, .. } => {
+                collect_view_metadata_inputs(body, names, global_shapes, grid_views, view_ranks);
+            }
+            Stmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                collect_view_metadata_inputs(
+                    then_body,
+                    names,
+                    global_shapes,
+                    grid_views,
+                    view_ranks,
+                );
+                collect_view_metadata_inputs(
+                    else_body,
+                    names,
+                    global_shapes,
+                    grid_views,
+                    view_ranks,
+                );
+            }
+            Stmt::Switch { cases, .. } => {
+                for case in cases {
+                    collect_view_metadata_inputs(
                         case,
                         names,
-                        global_sizes,
                         global_shapes,
-                        defined_views,
-                        guard_conditions,
+                        grid_views,
                         view_ranks,
-                    )?;
+                    );
                 }
             }
             Stmt::Primitive(primitive) => {
-                collect_primitive_view_guard_inputs(
+                collect_primitive_view_metadata(
                     primitive,
                     names,
-                    global_sizes,
                     global_shapes,
-                    defined_views,
-                    guard_conditions,
+                    grid_views,
                     view_ranks,
-                )?;
+                );
             }
             Stmt::Break(_)
             | Stmt::Continue(_)
@@ -392,93 +446,176 @@ fn collect_view_guard_inputs(
             | Stmt::Comment(_) => {}
         }
     }
-    Ok(())
 }
 
-fn collect_primitive_view_guard_inputs(
+fn collect_primitive_view_metadata(
     primitive: &Primitive,
     names: &HashMap<String, String>,
-    global_sizes: &mut HashMap<String, String>,
     global_shapes: &mut HashMap<String, Vec<String>>,
-    defined_views: &mut HashSet<String>,
-    guard_conditions: &mut HashMap<String, Vec<String>>,
+    grid_views: &mut HashSet<String>,
     view_ranks: &mut HashMap<String, usize>,
-) -> Result<(), CudaAbiError> {
-    if primitive.name == "gpu.view.group-by-tile" {
+) {
+    if primitive.name == "gpu.grid.view" {
         if let Some(view) = primitive.outputs.first() {
             let view = rename_with(names, view);
-            defined_views.insert(view.clone());
+            grid_views.insert(view);
+        }
+        return;
+    }
+
+    if primitive.name == "gpu.view.group-by-tile" || primitive.name == "gpu.view.group" {
+        if let Some(view) = primitive.outputs.first() {
+            let view = rename_with(names, view);
             view_ranks.insert(view, 2);
         }
-        return Ok(());
+        return;
     }
 
     if primitive.name == "gpu.view.row" || primitive.name == "gpu.view.col" {
         if let Some(view) = primitive.outputs.first() {
             let view = rename_with(names, view);
-            defined_views.insert(view.clone());
             view_ranks.insert(view, 1);
         }
-        return Ok(());
+        return;
     }
 
-    if primitive.name == "gpu.view.group-by-shape" {
-        if let Some(view) = primitive.outputs.first() {
-            let view = rename_with(names, view);
-            defined_views.insert(view.clone());
-            view_ranks.insert(view, 2);
-        }
-        return Ok(());
-    }
-
-    if primitive.name == "gpu.view.group"
-        || primitive.name == "gpu.view.element"
-        || primitive.name == "gpu.view.zero"
-    {
-        if let Some(view) = primitive.outputs.first() {
-            defined_views.insert(rename_with(names, view));
-        }
-        return Ok(());
-    }
-
-    if primitive.name != "gpu.global.load" && primitive.name != "gpu.global.store" {
-        return Ok(());
+    if primitive.name != "gpu.global.store" {
+        return;
     }
 
     let Some(global) = primitive.inputs.first() else {
-        return Ok(());
-    };
-    let Some(view) = primitive.inputs.get(1) else {
-        return Ok(());
+        return;
     };
     let global = rename_with(names, global);
-    let view = rename_with(names, view);
-    let Some(size) = global_sizes.get(&global).cloned() else {
-        return Err(CudaAbiError::MissingGlobalSize(global));
-    };
 
-    let condition = match (view_ranks.get(&view), global_shapes.get(&global)) {
-        (Some(2), Some(shape)) if shape.len() == 2 => {
-            format!("{view}_row < {} && {view}_col < {}", shape[0], shape[1])
-        }
-        _ => format!("{view} < {size}"),
-    };
-    let conditions = guard_conditions.entry(view).or_default();
-    if !conditions.contains(&condition) {
-        conditions.push(condition);
-    }
-
-    if primitive.name == "gpu.global.store"
-        && let Some(output) = primitive.outputs.first()
+    if let Some(output) = primitive.outputs.first()
+        && let Some(shape) = global_shapes.get(&global).cloned()
     {
         let output = rename_with(names, output);
-        global_sizes.insert(output.clone(), size);
-        if let Some(shape) = global_shapes.get(&global).cloned() {
-            global_shapes.insert(output, shape);
+        global_shapes.insert(output, shape);
+    }
+}
+
+fn collect_access_certificates(
+    entry: &str,
+    program: &StructuredProgram,
+    names: &HashMap<String, String>,
+    proof_evidence: Option<&ProofEvidence>,
+) -> HashMap<(String, String), String> {
+    let mut certificates = HashMap::new();
+    let Some(proof_evidence) = proof_evidence else {
+        return certificates;
+    };
+
+    collect_access_certificates_from_stmts(
+        entry,
+        &program.body,
+        names,
+        proof_evidence,
+        &mut certificates,
+    );
+    certificates
+}
+
+fn collect_access_certificates_from_stmts(
+    entry: &str,
+    stmts: &[Stmt],
+    names: &HashMap<String, String>,
+    proof_evidence: &ProofEvidence,
+    certificates: &mut HashMap<(String, String), String>,
+) {
+    for stmt in stmts {
+        match stmt {
+            Stmt::Block { body, .. } | Stmt::Loop { body, .. } | Stmt::For { body, .. } => {
+                collect_access_certificates_from_stmts(
+                    entry,
+                    body,
+                    names,
+                    proof_evidence,
+                    certificates,
+                );
+            }
+            Stmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                collect_access_certificates_from_stmts(
+                    entry,
+                    then_body,
+                    names,
+                    proof_evidence,
+                    certificates,
+                );
+                collect_access_certificates_from_stmts(
+                    entry,
+                    else_body,
+                    names,
+                    proof_evidence,
+                    certificates,
+                );
+            }
+            Stmt::Switch { cases, .. } => {
+                for case in cases {
+                    collect_access_certificates_from_stmts(
+                        entry,
+                        case,
+                        names,
+                        proof_evidence,
+                        certificates,
+                    );
+                }
+            }
+            Stmt::Primitive(primitive) => {
+                collect_primitive_access_certificate(
+                    entry,
+                    primitive,
+                    names,
+                    proof_evidence,
+                    certificates,
+                );
+            }
+            Stmt::Break(_)
+            | Stmt::Continue(_)
+            | Stmt::Return
+            | Stmt::Barrier
+            | Stmt::Assign { .. }
+            | Stmt::Comment(_) => {}
         }
     }
+}
 
-    Ok(())
+fn collect_primitive_access_certificate(
+    entry: &str,
+    primitive: &Primitive,
+    names: &HashMap<String, String>,
+    proof_evidence: &ProofEvidence,
+    certificates: &mut HashMap<(String, String), String>,
+) {
+    if !is_gpu_memory_access(&primitive.name) {
+        return;
+    }
+    let Some(memory) = primitive.inputs.first() else {
+        return;
+    };
+    let Some(view) = primitive.inputs.get(1) else {
+        return;
+    };
+
+    let proof_name = format!("{entry}.{memory}.{view}.safe-access");
+    if proof_evidence.has_definition(&proof_name) {
+        certificates.insert(
+            (rename_with(names, memory), rename_with(names, view)),
+            proof_name,
+        );
+    }
+}
+
+fn is_gpu_memory_access(name: &str) -> bool {
+    matches!(
+        name,
+        "gpu.global.load" | "gpu.global.store" | "gpu.shared.load" | "gpu.shared.store"
+    )
 }
 
 fn rename_with(names: &HashMap<String, String>, name: &str) -> String {
@@ -493,7 +630,6 @@ struct SourceParameterAbi {
     prelude: Vec<String>,
     host_prelude: Vec<String>,
     names: HashMap<String, String>,
-    global_sizes: HashMap<String, String>,
     global_shapes: HashMap<String, Vec<String>>,
     shared_layout: SharedMemoryLayout,
     shared_indexing: HashMap<String, SharedIndexing>,
@@ -520,7 +656,6 @@ fn collect_source_parameter_abi(
             prelude: Vec::new(),
             host_prelude: Vec::new(),
             names: HashMap::new(),
-            global_sizes: HashMap::new(),
             global_shapes: HashMap::new(),
             shared_layout: SharedMemoryLayout::new(),
             shared_indexing: HashMap::new(),
@@ -597,8 +732,8 @@ impl SourceParameterAbiState {
         }
 
         // Most extents exist only to compute launch parameters and memory sizes
-        // on the host. gpu.view.group also needs its thread-count extent inside
-        // the kernel, so pass that one through as a device parameter.
+        // on the host. View layout primitives can also need extents inside the
+        // kernel, so pass those through as device parameters.
         if self
             .extents_required_by_device_code
             .contains(&source_param.name)
@@ -641,12 +776,6 @@ impl SourceParameterAbiState {
         self.source_parameter_abi
             .names
             .insert(source_param.name.clone(), binding.device_name.clone());
-        if binding.size_name.is_empty() {
-            return Err(CudaAbiError::MissingGlobalSize(binding.device_name));
-        }
-        self.source_parameter_abi
-            .global_sizes
-            .insert(binding.device_name.clone(), binding.size_name.clone());
         self.source_parameter_abi
             .global_shapes
             .insert(binding.device_name.clone(), binding.dimensions.clone());

@@ -17,16 +17,15 @@
       (({f32 ({[rows] [cols]} 2d)} gpu.global) val)
     }
     = {[rows cols grid a output.]
-      ([.grid] gpu.grid.schedule [block thread.])
-      ([.block thread cols] gpu.view.group [view.])
-      ([.a view] gpu.global.load [a_value.])
+      ([.grid] gpu.grid.view [worker.])
+      ([.a worker] gpu.global.load [a_value.])
       ([.] f32.one [one.])
       ([.one one] f32.add [two.])
       ([.two two] f32.add [four.])
       ([.four four] f32.add [eight.])
       ([.eight two] f32.add [ten.])
       ([.a_value ten] f32.add [mapped.])
-      ([.output view mapped] gpu.global.store [output_mapped.])
+      ([.output worker mapped] gpu.global.store [output_mapped.])
       [.a output_mapped]}
 )
 
@@ -56,8 +55,8 @@
       (({f32 ({[rows] [cols]} 2d)} gpu.global) val)
     }
     = {[rows cols tile_rows tile_cols grid a output.]
-      ([.grid] gpu.grid.schedule [block thread.])
-      ([.block thread tile_rows tile_cols] gpu.view.group-by-tile [ij.])
+      ([.grid] gpu.grid.view [worker.])
+      ([.worker tile_rows tile_cols] gpu.view.group-by-tile [ij.])
       ([.a ij] gpu.global.load [a_value.])
       ([.] f32.one [one.])
       ([.one one] f32.add [two.])

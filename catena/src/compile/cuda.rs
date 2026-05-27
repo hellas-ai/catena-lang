@@ -20,7 +20,7 @@ use domain::CudaTarget;
 use crate::{
     check::check as typecheck_elaborated,
     compile::{
-        CompileConfig, CompileGraphError, GraphCompileOptions, Program, compile_graph,
+        CompileConfig, CompileGraphError, Program, compile_graph,
         normalize::{NormalizeGraphError, normalize_graph},
         program::{ProgramCompileError, compile_program_from_graph},
         proof::ProofEvidence,
@@ -71,22 +71,7 @@ pub fn compile_cuda_theory_set(
     theory: &str,
     entry: &str,
 ) -> Result<String, CudaCompileError> {
-    compile_cuda_theory_set_with_options(theory_set, theory, entry, GraphCompileOptions::default())
-}
-
-pub fn compile_cuda_theory_set_with_options(
-    theory_set: &TheorySet,
-    theory: &str,
-    entry: &str,
-    graph_options: GraphCompileOptions,
-) -> Result<String, CudaCompileError> {
-    let compile_graph = compile_graph(
-        theory_set,
-        &CompileConfig::data_control(),
-        theory,
-        entry,
-        graph_options,
-    )?;
+    let compile_graph = compile_graph(theory_set, &CompileConfig::data_control(), theory, entry)?;
     let graph = normalize_graph(&compile_graph)?;
     let program = compile_program_from_graph(&graph)?;
     let structured = compile_structured_program(&program)?;

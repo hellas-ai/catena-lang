@@ -1,14 +1,14 @@
 use std::collections::HashMap;
 
-use open_hypergraphs::lax::{NodeId, OpenHypergraph};
+use open_hypergraphs::lax::NodeId;
 use thiserror::Error;
 
 use crate::{
-    compile::{CompileGraph, CompileTheory},
+    compile::CompileGraph,
     lang::Obj,
     structured::{
         StructuredError, cfg,
-        cfg::Cfg,
+        cfg::{Cfg, Region},
         ir::{Primitive, Stmt},
     },
 };
@@ -92,31 +92,29 @@ fn build_definition(
     let id = DefinitionId(*next_id);
     *next_id += 1;
 
-    let cfg_context = cfg_context(compile_graph);
-    let context = context_for_cfg_context(compile_graph, &cfg_context);
+    let context = context_for_graph(compile_graph);
     let semantics = ProgramSemantics;
-    let cfg_context = cfg_context.with_variables(variables_for_context(&context));
-    let body = match cfg_context.kind() {
-        cfg::GraphKind::Data => cfg::Cfg::from_dataflow_context(&cfg_context, &semantics)?,
-        cfg::GraphKind::Control => cfg::Cfg::from_control_context(&cfg_context, &semantics)?,
-    };
+    let region = Region::new(compile_graph, node_names_for_context(&context));
+    let body = cfg::Cfg::from_region(&region, &semantics)?;
 
     definitions.insert(
         id,
         Definition {
             id,
-            name: compile_graph.definition.clone(),
-            params: cfg_context
-                .graph()
-                .sources
+            name: compile_graph.definition_name.clone(),
+            params: compile_graph
+                .graph
+                .s
+                .table
                 .iter()
-                .map(|node| VariableId(node.0))
+                .map(|node| VariableId(*node))
                 .collect(),
-            returns: cfg_context
-                .graph()
-                .targets
+            returns: compile_graph
+                .graph
+                .t
+                .table
                 .iter()
-                .map(|node| VariableId(node.0))
+                .map(|node| VariableId(*node))
                 .collect(),
             context,
             body,
@@ -130,13 +128,14 @@ fn build_definition(
     Ok(id)
 }
 
-fn context_for_cfg_context(compile_graph: &CompileGraph, context: &cfg::BuildContext) -> Context {
+fn context_for_graph(compile_graph: &CompileGraph) -> Context {
     let mut used_names = HashMap::new();
     Context::new(
-        context
-            .graph()
-            .hypergraph
-            .nodes
+        compile_graph
+            .graph
+            .h
+            .w
+            .0
             .iter()
             .cloned()
             .enumerate()
@@ -155,7 +154,7 @@ fn variable_name(
     used_names: &mut HashMap<String, usize>,
 ) -> String {
     let base = compile_graph
-        .variable_names
+        .source_variable_names
         .get(&index)
         .map(|name| sanitize_ident(name))
         .filter(|name| !name.is_empty())
@@ -185,7 +184,7 @@ fn sanitize_ident(name: &str) -> String {
     ident
 }
 
-fn variables_for_context(context: &Context) -> HashMap<NodeId, String> {
+fn node_names_for_context(context: &Context) -> HashMap<NodeId, String> {
     context
         .variables()
         .map(|variable| (NodeId(variable.id.0), variable.name.clone()))
@@ -226,23 +225,4 @@ fn branch_tag(arrow: &cfg::ArrowInstance) -> String {
 
 fn branch_payload(arrow: &cfg::ArrowInstance) -> String {
     format!("p{}", arrow.id)
-}
-
-fn cfg_context(graph: &CompileGraph) -> cfg::BuildContext {
-    cfg::BuildContext::new(
-        graph_kind(&graph.theory),
-        OpenHypergraph::from_strict(graph.typed_graph.clone()),
-        graph
-            .children
-            .iter()
-            .map(|child| (child.operation.clone(), cfg_context(&child.graph)))
-            .collect(),
-    )
-}
-
-fn graph_kind(theory: &CompileTheory) -> cfg::GraphKind {
-    match theory {
-        CompileTheory::Data => cfg::GraphKind::Data,
-        CompileTheory::Control => cfg::GraphKind::Control,
-    }
 }

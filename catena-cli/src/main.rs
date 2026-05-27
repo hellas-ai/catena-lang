@@ -1,8 +1,6 @@
 use std::path::PathBuf;
 
-use catena::compile::{
-    CompilePipeline, CompileRequest, CudaOptions, Emit, GraphCompileOptions, OutputFormat, compile,
-};
+use catena::compile::{CompilePipeline, CompileRequest, CudaOptions, Emit, OutputFormat, compile};
 use clap::{Parser, Subcommand, ValueEnum};
 
 #[derive(Parser)]
@@ -51,10 +49,6 @@ enum Command {
         #[arg(short, long)]
         output: Option<PathBuf>,
 
-        /// Do not inline definitions matching this pattern. Supports `*`.
-        #[arg(long = "no-inline")]
-        no_inline: Vec<String>,
-
         /// Provide a compile-time CUDA size value, e.g. --cuda-static tile_rows=16.
         #[arg(long = "cuda-static", value_parser = parse_cuda_static)]
         cuda_static: Vec<(String, u64)>,
@@ -97,7 +91,6 @@ fn main() -> anyhow::Result<()> {
             entry,
             format,
             output,
-            no_inline,
             cuda_static,
             no_proof,
             proof,
@@ -108,7 +101,6 @@ fn main() -> anyhow::Result<()> {
             entry,
             format,
             output,
-            no_inline,
             cuda_static,
             no_proof,
             proof,
@@ -123,7 +115,6 @@ fn check_command(paths: Vec<PathBuf>, verbose: bool) -> anyhow::Result<()> {
         theory: None,
         entry: None,
         format: None,
-        graph_options: GraphCompileOptions::default(),
         cuda_options: CudaOptions::default(),
         proof_check: false,
         proof_paths: Vec::new(),
@@ -157,7 +148,6 @@ fn elaborate_command(paths: Vec<PathBuf>) -> anyhow::Result<()> {
         theory: None,
         entry: None,
         format: None,
-        graph_options: GraphCompileOptions::default(),
         cuda_options: CudaOptions::default(),
         proof_check: false,
         proof_paths: Vec::new(),
@@ -172,7 +162,6 @@ fn compile_command(
     entry: Option<String>,
     format: Option<OutputFormatArg>,
     output: Option<PathBuf>,
-    no_inline: Vec<String>,
     cuda_static: Vec<(String, u64)>,
     no_proof: bool,
     proof: Vec<PathBuf>,
@@ -190,7 +179,6 @@ fn compile_command(
         theory,
         entry,
         format: format.map(Into::into),
-        graph_options: GraphCompileOptions { no_inline },
         cuda_options: CudaOptions { static_values },
         proof_check: !no_proof,
         proof_paths: proof,

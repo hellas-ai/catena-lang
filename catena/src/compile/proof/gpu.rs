@@ -10,7 +10,7 @@ pub(super) struct MemorySafety;
 impl ProofProperty for MemorySafety {
     fn requirements(&self, graph: &CompileGraph) -> Vec<ProofRequirement> {
         let mut requirements = Vec::new();
-        collect_memory_safety_requirements(graph, &graph.definition, &mut requirements);
+        collect_memory_safety_requirements(graph, &graph.definition_name, &mut requirements);
         requirements
     }
 }
@@ -60,12 +60,12 @@ fn build_memory_safety_requirements(
 
 fn find_memory_accesses(graph: &CompileGraph) -> Vec<MemoryAccess> {
     graph
-        .typed_graph
+        .graph
         .h
         .x
         .0
         .iter()
-        .zip(graph.typed_graph.h.s.clone())
+        .zip(graph.graph.h.s.clone())
         .filter_map(|(op, sources)| {
             let op = op.to_string();
             memory_access_from_edge(graph, op, &sources.table)
@@ -92,7 +92,7 @@ fn memory_access_from_edge(
 fn source_name(graph: &CompileGraph, sources: &[usize], index: usize) -> String {
     sources
         .get(index)
-        .and_then(|node| graph.variable_names.get(node))
+        .and_then(|node| graph.source_variable_names.get(node))
         .cloned()
         .unwrap_or_else(|| "<unknown>".to_string())
 }

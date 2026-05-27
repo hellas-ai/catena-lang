@@ -30,14 +30,13 @@
       ([.index] gpu.view.is-zero [is_zero.])
       ([.output index] val.*.intro [output_index.])
       ([.input output_index] val.*.intro [payload.])
-      ([.is_zero payload] if control.user.f32.pool-zero-or-rest [pooled.])
-      ([.pooled] control.merge [result.])
+      ([.is_zero payload] if control.user.f32.pool-zero-or-rest [result.])
       ([.result] val.*.elim [input_result output_pooled.])
       [.input_result output_pooled]}
 )
 
 (def control user.f32.pool-zero-or-rest :
-    {
+    (
       (({
         ({f32 ([n] 1d)} gpu.global)
         ({
@@ -45,25 +44,13 @@
           gpu.view
         } *)
       } *) val)
-      (({
-        ({f32 ([n] 1d)} gpu.global)
-        ({
-          ({f32 ([n] 1d)} gpu.global)
-          gpu.view
-        } *)
-      } *) val)
-    } ->
-    {
-      (({
-        ({f32 ([n] 1d)} gpu.global)
-        ({f32 ([n] 1d)} gpu.global)
-      } *) val)
-      (({
-        ({f32 ([n] 1d)} gpu.global)
-        ({f32 ([n] 1d)} gpu.global)
-      } *) val)
-    }
-    = {data.user.f32.pool-at-zero data.user.f32.pool-nonzero}
+      [payload . payload payload]
+    ) ->
+    (({
+      ({f32 ([n] 1d)} gpu.global)
+      ({f32 ([n] 1d)} gpu.global)
+    } *) val)
+    = ({data.user.f32.pool-at-zero data.user.f32.pool-nonzero} merge)
 )
 
 (def data user.f32.pool-nonzero :
@@ -83,12 +70,12 @@
       ([.output_index] val.*.elim [output index.])
       ([.index] gpu.view.is-one [is_one.])
       ([.is_one payload] if control.user.f32.pool-one-or-many [pooled.])
-      ([.pooled] control.merge)
+      [.pooled]
     }
 )
 
 (def control user.f32.pool-one-or-many :
-    {
+    (
       (({
         ({f32 ([n] 1d)} gpu.global)
         ({
@@ -96,25 +83,13 @@
           gpu.view
         } *)
       } *) val)
-      (({
-        ({f32 ([n] 1d)} gpu.global)
-        ({
-          ({f32 ([n] 1d)} gpu.global)
-          gpu.view
-        } *)
-      } *) val)
-    } ->
-    {
-      (({
-        ({f32 ([n] 1d)} gpu.global)
-        ({f32 ([n] 1d)} gpu.global)
-      } *) val)
-      (({
-        ({f32 ([n] 1d)} gpu.global)
-        ({f32 ([n] 1d)} gpu.global)
-      } *) val)
-    }
-    = {data.user.f32.pool-at-one data.user.f32.pool-at-many}
+      [payload . payload payload]
+    ) ->
+    (({
+      ({f32 ([n] 1d)} gpu.global)
+      ({f32 ([n] 1d)} gpu.global)
+    } *) val)
+    = ({data.user.f32.pool-at-one data.user.f32.pool-at-many} merge)
 )
 
 (def data user.f32.pool-at-zero :

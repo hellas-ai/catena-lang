@@ -14,13 +14,12 @@ pub enum NormalizeGraphError {
 }
 
 pub fn normalize_graph(graph: &CompileGraph) -> Result<CompileGraph, NormalizeGraphError> {
-    let typed_graph = OpenHypergraph::from_strict(graph.typed_graph.clone());
+    let graph_body = OpenHypergraph::from_strict(graph.graph.clone());
     Ok(CompileGraph {
         theory: graph.theory.clone(),
-        definition: graph.definition.clone(),
-        graph: graph.graph.clone(),
-        typed_graph: normalize_graph_hypergraph(&typed_graph)?.to_strict(),
-        variable_names: graph.variable_names.clone(),
+        definition_name: graph.definition_name.clone(),
+        graph: normalize_graph_hypergraph(&graph_body)?.to_strict(),
+        source_variable_names: graph.source_variable_names.clone(),
         children: graph
             .children
             .iter()

@@ -281,6 +281,7 @@ fn stmts_use_tiled_view(stmts: &[Stmt]) -> bool {
         | Stmt::Return
         | Stmt::Barrier
         | Stmt::Assign { .. }
+        | Stmt::Call { .. }
         | Stmt::Comment(_) => false,
     })
 }
@@ -321,6 +322,7 @@ fn stmts_collect_grid_views(stmts: &[Stmt], grid_views: &mut HashSet<String>) {
             | Stmt::Return
             | Stmt::Barrier
             | Stmt::Assign { .. }
+            | Stmt::Call { .. }
             | Stmt::Comment(_) => {}
         }
     }
@@ -356,6 +358,7 @@ fn stmts_use_grid_view_global_access(stmts: &[Stmt], grid_views: &HashSet<String
         | Stmt::Return
         | Stmt::Barrier
         | Stmt::Assign { .. }
+        | Stmt::Call { .. }
         | Stmt::Comment(_) => false,
     })
 }
@@ -443,6 +446,7 @@ fn collect_view_metadata_inputs(
             | Stmt::Return
             | Stmt::Barrier
             | Stmt::Assign { .. }
+            | Stmt::Call { .. }
             | Stmt::Comment(_) => {}
         }
     }
@@ -580,6 +584,7 @@ fn collect_access_certificates_from_stmts(
             | Stmt::Return
             | Stmt::Barrier
             | Stmt::Assign { .. }
+            | Stmt::Call { .. }
             | Stmt::Comment(_) => {}
         }
     }

@@ -1,6 +1,6 @@
 use super::ir::Stmt;
-use crate::lang::{Arr, Obj};
-use open_hypergraphs::lax::{NodeId, OpenHypergraph};
+use crate::compile::{CompileGraph, CompileTheory};
+use open_hypergraphs::lax::NodeId;
 use std::collections::{HashMap, HashSet};
 
 pub type CfgNodeId = usize;
@@ -29,86 +29,71 @@ pub struct ArrowInstance {
     pub branch_arity: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum BranchValue {
-    Opaque,
-    Coproduct(Variable),
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GraphKind {
-    Data,
-    Control,
+enum NodeKind {
+    Primitive,
+    ChildRegion,
 }
 
 #[derive(Debug, Clone)]
-struct ChildContext {
-    pub operation: String,
-    pub context: BuildContext,
+struct DataNode {
+    edge: usize,
+    op: OperationName,
+    kind: NodeKind,
+    inputs: Vec<NodeId>,
+    outputs: Vec<NodeId>,
 }
 
-#[derive(Debug, Clone)]
-pub struct BuildContext {
-    kind: GraphKind,
-    graph: OpenHypergraph<Obj, Arr>,
-    children: Vec<ChildContext>,
-    variables: HashMap<NodeId, Variable>,
-    prefix: String,
+pub struct Region<'a> {
+    compile_graph: &'a CompileGraph,
+    node_names: HashMap<NodeId, Variable>,
 }
 
-impl BuildContext {
-    pub fn new(
-        kind: GraphKind,
-        graph: OpenHypergraph<Obj, Arr>,
-        children: Vec<(String, BuildContext)>,
-    ) -> Self {
+impl<'a> Region<'a> {
+    pub fn new(compile_graph: &'a CompileGraph, node_names: HashMap<NodeId, Variable>) -> Self {
         Self {
-            kind,
-            graph,
-            children: children
-                .into_iter()
-                .map(|(operation, context)| ChildContext { operation, context })
-                .collect(),
-            variables: HashMap::new(),
-            prefix: "w".to_string(),
+            compile_graph,
+            node_names,
         }
     }
 
-    pub fn with_variables(mut self, variables: HashMap<NodeId, Variable>) -> Self {
-        self.variables = variables;
-        self
-    }
-
-    pub fn graph(&self) -> &OpenHypergraph<Obj, Arr> {
-        &self.graph
-    }
-
-    pub fn kind(&self) -> GraphKind {
-        self.kind
+    fn theory(&self) -> &CompileTheory {
+        &self.compile_graph.theory
     }
 
     fn variable(&self, node: NodeId) -> Variable {
-        self.variables
+        self.node_names
             .get(&node)
             .cloned()
-            .unwrap_or_else(|| format!("{}{}", self.prefix, node.0))
+            .unwrap_or_else(|| format!("w{}", node.0))
     }
 
-    fn child_for_operation(&self, operation: &str) -> Option<&BuildContext> {
-        self.children
+    fn child_for_operation(&self, operation: &str) -> Option<&CompileGraph> {
+        self.compile_graph
+            .children
             .iter()
             .find(|child| child.operation == operation)
-            .map(|child| &child.context)
+            .map(|child| &child.graph)
     }
 
-    fn with_child_variables(&self, variables: HashMap<NodeId, Variable>, prefix: String) -> Self {
-        Self {
-            kind: self.kind,
-            graph: self.graph.clone(),
-            children: self.children.clone(),
-            variables,
-            prefix,
-        }
+    fn source_nodes(&self) -> &[usize] {
+        &self.compile_graph.graph.s.table
+    }
+
+    fn target_nodes(&self) -> &[usize] {
+        &self.compile_graph.graph.t.table
+    }
+
+    fn operations(&self) -> &[crate::lang::Arr] {
+        &self.compile_graph.graph.h.x.0
+    }
+
+    fn edge_sources(&self, edge_index: usize) -> Vec<NodeId> {
+        edge_sources(self, edge_index)
+    }
+
+    fn edge_targets(&self, edge_index: usize) -> Vec<NodeId> {
+        edge_targets(self, edge_index)
     }
 }
 
@@ -118,14 +103,12 @@ pub enum StructuredError {
     MissingEntry,
     #[error("control-flow graph has an irreducible back edge from {from} to {to}")]
     IrreducibleBackEdge { from: String, to: String },
-    #[error("dataflow graph has a cycle or depends on unavailable wires")]
-    DataflowCycle,
+    #[error("dataflow graph has a cycle among remaining operations: {operations}")]
+    DataflowCycle { operations: String },
+    #[error("dataflow graph depends on unavailable wires: {wires}; remaining: {remaining}")]
+    UnavailableWires { wires: String, remaining: String },
     #[error("branch target {0} is not in the structured context")]
     MissingContext(String),
-    #[error(
-        "expected alternating structured graph layers, but {parent:?} graph contains {child:?} child"
-    )]
-    InvalidLayer { parent: GraphKind, child: GraphKind },
     #[error("control node {node} has {successors} entry successors; only one entry is supported")]
     UnsupportedEntry { node: String, successors: usize },
 }
@@ -159,27 +142,36 @@ pub(super) enum Transfer {
 }
 
 impl Cfg {
-    pub fn from_control_context(
-        context: &BuildContext,
+    pub fn from_region(
+        region: &Region<'_>,
         semantics: &impl ArrowSemantics,
     ) -> Result<Self, StructuredError> {
-        let f = context.graph();
+        match region.theory() {
+            CompileTheory::Data => Self::from_dataflow_region(region, semantics),
+            CompileTheory::Control => Self::from_control_region(region, semantics),
+        }
+    }
+
+    fn from_control_region(
+        region: &Region<'_>,
+        semantics: &impl ArrowSemantics,
+    ) -> Result<Self, StructuredError> {
         let mut consumers: HashMap<NodeId, Vec<CfgNodeId>> = HashMap::new();
-        for (edge_index, adjacency) in f.hypergraph.adjacency.iter().enumerate() {
-            for source in &adjacency.sources {
-                consumers.entry(*source).or_default().push(edge_index);
+        for edge_index in 0..region.operations().len() {
+            for source in region.edge_sources(edge_index) {
+                consumers.entry(source).or_default().push(edge_index);
             }
         }
 
         let mut entry_edges = Vec::new();
         // One structured program has one entry point. Additional open sources
         // are external state alternatives, not extra CFG entries.
-        if let Some(source) = f.sources.first() {
-            if let Some(edges) = consumers.get(source) {
+        if let Some(source) = region.source_nodes().first() {
+            if let Some(edges) = consumers.get(&NodeId(*source)) {
                 push_unique_all(&mut entry_edges, edges.iter().copied());
             }
         }
-        if entry_edges.is_empty() && !f.hypergraph.edges.is_empty() {
+        if entry_edges.is_empty() && !region.operations().is_empty() {
             entry_edges.push(0);
         }
 
@@ -194,30 +186,36 @@ impl Cfg {
             }
         };
 
-        let graph_targets: HashSet<NodeId> = f.targets.iter().copied().collect();
-        let exit_node = (!graph_targets.is_empty()).then_some(f.hypergraph.edges.len());
+        let graph_targets = region
+            .target_nodes()
+            .iter()
+            .copied()
+            .map(NodeId)
+            .collect::<HashSet<_>>();
+        let exit_node = (!graph_targets.is_empty()).then_some(region.operations().len());
         let mut nodes = Vec::new();
         let mut branches = Vec::new();
-        for (edge_index, op) in f.hypergraph.edges.iter().enumerate() {
+        for (edge_index, op) in region.operations().iter().enumerate() {
             let op = op.to_string();
-            let successors = edge_successors(f, edge_index, &consumers, &graph_targets, exit_node);
+            let successors =
+                edge_successors(region, edge_index, &consumers, &graph_targets, exit_node);
             let arrow = ArrowInstance {
                 id: edge_index,
                 op: op.clone(),
-                inputs: f.hypergraph.adjacency[edge_index]
-                    .sources
+                inputs: region
+                    .edge_sources(edge_index)
                     .iter()
-                    .map(|node| context.variable(*node))
+                    .map(|node| region.variable(*node))
                     .collect(),
-                outputs: f.hypergraph.adjacency[edge_index]
-                    .targets
+                outputs: region
+                    .edge_targets(edge_index)
                     .iter()
-                    .map(|node| context.variable(*node))
+                    .map(|node| region.variable(*node))
                     .collect(),
                 branch_arity: successors.len(),
             };
-            let (statements, branch) = statements_for_arrow(context, &op, &arrow, semantics)?;
-            branches.push((arrow, branch));
+            let statements = statements_for_arrow(region, &op, &arrow, semantics);
+            branches.push(arrow);
             nodes.push(CfgNode {
                 statements,
                 transfer: Transfer::Return,
@@ -231,17 +229,17 @@ impl Cfg {
             });
         }
 
-        for edge_index in 0..f.hypergraph.edges.len() {
-            let (arrow, branch) = branches[edge_index].clone();
+        for edge_index in 0..region.operations().len() {
+            let arrow = branches[edge_index].clone();
             let successors = edge_successors(
-                f,
+                region,
                 edge_index,
                 &consumers,
                 &graph_targets,
-                (!graph_targets.is_empty()).then_some(f.hypergraph.edges.len()),
+                (!graph_targets.is_empty()).then_some(region.operations().len()),
             );
             nodes[edge_index].transfer =
-                transfer_for_successors(&mut nodes, arrow, branch, successors, semantics);
+                transfer_for_successors(&mut nodes, arrow, successors, semantics);
         }
 
         let mut predecessors = vec![Vec::new(); nodes.len()];
@@ -261,11 +259,44 @@ impl Cfg {
     // Schedule dataflow edges with a topological sort over wire dependencies, then place the resulting SSA-like primitive statements in one CFG node.
     // for now we assume dataflow graphs are acyclic
     // but we may want to relax this condition
-    pub fn from_dataflow_context(
-        context: &BuildContext,
+    fn from_dataflow_region(
+        region: &Region<'_>,
         semantics: &impl ArrowSemantics,
     ) -> Result<Self, StructuredError> {
-        let statements = dataflow_statements(context, semantics)?;
+        let data_nodes = data_nodes(region);
+        let mut available = region
+            .source_nodes()
+            .iter()
+            .map(|node| NodeId(*node))
+            .collect::<HashSet<_>>();
+        let mut remaining = (0..data_nodes.len()).collect::<Vec<_>>();
+        let mut statements = Vec::new();
+
+        // Data regions are scheduled by wire dependencies. Each scheduled node
+        // is either a primitive operation or a child-region call; both expose
+        // explicit inputs and outputs to the scheduler.
+        while !remaining.is_empty() {
+            let Some(index) = remaining.iter().position(|edge| {
+                data_nodes[*edge]
+                    .inputs
+                    .iter()
+                    .all(|source| available.contains(source))
+            }) else {
+                return Err(classify_dataflow_block(
+                    region,
+                    &data_nodes,
+                    &available,
+                    &remaining,
+                ));
+            };
+
+            let node_index = remaining.remove(index);
+            let data_node = &data_nodes[node_index];
+            let arrow = arrow_for_data_node(data_node, region);
+            statements.extend(lower_data_node(region, data_node, &arrow, semantics));
+            available.extend(data_node.outputs.iter().copied());
+        }
+
         Ok(Self {
             entry: 0,
             nodes: vec![CfgNode {
@@ -297,178 +328,214 @@ impl CfgNode {
 }
 
 fn statements_for_arrow(
-    context: &BuildContext,
+    region: &Region<'_>,
     op: &str,
     arrow: &ArrowInstance,
     semantics: &impl ArrowSemantics,
-) -> Result<(Vec<Stmt>, BranchValue), StructuredError> {
-    if let Some(child) = context.child_for_operation(op) {
-        return Ok((
-            statements_for_child_graph(context.kind(), child, arrow, semantics)?,
-            branch_value_for_child_graph(child, arrow),
-        ));
+) -> Vec<Stmt> {
+    if let Some(child) = region.child_for_operation(op) {
+        return vec![call_statement(child, arrow)];
     }
-    Ok((semantics.statements(arrow), BranchValue::Opaque))
+    semantics.statements(arrow)
 }
 
-fn statements_for_child_graph(
-    parent: GraphKind,
-    child: &BuildContext,
-    arrow: &ArrowInstance,
-    semantics: &impl ArrowSemantics,
-) -> Result<Vec<Stmt>, StructuredError> {
-    if child.kind() == parent {
-        return Err(StructuredError::InvalidLayer {
-            parent,
-            child: child.kind(),
-        });
-    }
-
-    let child_context = child.with_child_variables(
-        child_graph_variables(child, arrow),
-        format!("v{}_", arrow.id),
-    );
-    match child.kind() {
-        GraphKind::Data => dataflow_statements(&child_context, semantics),
-        GraphKind::Control => {
-            super::ramsey::structure(Cfg::from_control_context(&child_context, semantics)?)
-        }
-    }
-}
-
-fn dataflow_statements(
-    context: &BuildContext,
-    semantics: &impl ArrowSemantics,
-) -> Result<Vec<Stmt>, StructuredError> {
-    let f = context.graph();
-    let mut available = f.sources.iter().copied().collect::<HashSet<_>>();
-    let mut remaining = (0..f.hypergraph.edges.len()).collect::<Vec<_>>();
-    let mut variables = context.variables.clone();
-    let mut statements = Vec::new();
-
-    // For now structured dataflow assumes an acyclic dependency graph.
-    while !remaining.is_empty() {
-        let Some(index) = remaining.iter().position(|edge| {
-            f.hypergraph.adjacency[*edge]
-                .sources
-                .iter()
-                .all(|source| available.contains(source))
-        }) else {
-            return Err(StructuredError::DataflowCycle);
-        };
-
-        let edge_index = remaining.remove(index);
-        let op = f.hypergraph.edges[edge_index].to_string();
-        let adjacency = &f.hypergraph.adjacency[edge_index];
-        let arrow = ArrowInstance {
-            id: edge_index,
-            op: op.clone(),
-            inputs: adjacency
-                .sources
-                .iter()
-                .map(|node| variable_for_child_node(&mut variables, &context.prefix, *node))
-                .collect(),
-            outputs: adjacency
-                .targets
-                .iter()
-                .map(|node| variable_for_child_node(&mut variables, &context.prefix, *node))
-                .collect(),
-            branch_arity: 0,
-        };
-
-        if let Some(child) = context.child_for_operation(&op) {
-            statements.extend(statements_for_child_graph(
-                context.kind(),
-                child,
-                &arrow,
-                semantics,
-            )?);
-        } else {
-            statements.push(Stmt::Primitive(super::ir::Primitive {
-                name: op,
-                inputs: arrow.inputs,
-                outputs: arrow.outputs,
-                code: String::new(),
-            }));
-        }
-        available.extend(adjacency.targets.iter().copied());
-    }
-
-    Ok(statements)
-}
-
-fn branch_value_for_child_graph(child: &BuildContext, arrow: &ArrowInstance) -> BranchValue {
-    if arrow.branch_arity <= 1 {
-        return BranchValue::Opaque;
-    }
-    let Some(target) = child.graph().targets.first() else {
-        return BranchValue::Opaque;
-    };
-    let mut variables = child_graph_variables(child, arrow);
-    BranchValue::Coproduct(variable_for_child_node(
-        &mut variables,
-        &format!("v{}_", arrow.id),
-        *target,
-    ))
-}
-
-fn child_graph_variables(child: &BuildContext, arrow: &ArrowInstance) -> HashMap<NodeId, Variable> {
-    let mut variables = HashMap::new();
-    for (index, node) in child.graph().sources.iter().enumerate() {
-        if let Some(input) = arrow.inputs.get(index) {
-            variables.insert(*node, input.clone());
-        }
-    }
-
-    if arrow.branch_arity > 1 && child.graph().targets.len() == 1 {
-        variables.insert(child.graph().targets[0], branch_result_variable(arrow));
+fn call_statement(child: &CompileGraph, arrow: &ArrowInstance) -> Stmt {
+    let outputs = if arrow.branch_arity > 1 {
+        vec![format!("b{}", arrow.id), format!("p{}", arrow.id)]
     } else {
-        for (index, node) in child.graph().targets.iter().enumerate() {
-            if let Some(output) = arrow.outputs.get(index) {
-                variables.insert(*node, output.clone());
-            }
-        }
+        arrow.outputs.clone()
+    };
+    Stmt::Call {
+        function: child.definition_name.clone(),
+        inputs: arrow.inputs.clone(),
+        outputs,
     }
-    variables
 }
 
-fn variable_for_child_node(
-    variables: &mut HashMap<NodeId, Variable>,
-    prefix: &str,
-    node: NodeId,
-) -> Variable {
-    variables
-        .entry(node)
-        .or_insert_with(|| format!("{prefix}{}", node.0))
-        .clone()
+fn data_nodes(region: &Region<'_>) -> Vec<DataNode> {
+    region
+        .operations()
+        .iter()
+        .enumerate()
+        .map(|(edge, op)| {
+            let op = op.to_string();
+            DataNode {
+                edge,
+                kind: if region.child_for_operation(&op).is_some() {
+                    NodeKind::ChildRegion
+                } else {
+                    NodeKind::Primitive
+                },
+                op,
+                inputs: region.edge_sources(edge),
+                outputs: region.edge_targets(edge),
+            }
+        })
+        .collect()
+}
+
+fn arrow_for_data_node(node: &DataNode, region: &Region<'_>) -> ArrowInstance {
+    ArrowInstance {
+        id: node.edge,
+        op: node.op.clone(),
+        inputs: node
+            .inputs
+            .iter()
+            .map(|node| region.variable(*node))
+            .collect(),
+        outputs: node
+            .outputs
+            .iter()
+            .map(|node| region.variable(*node))
+            .collect(),
+        branch_arity: 0,
+    }
+}
+
+fn lower_data_node(
+    region: &Region<'_>,
+    node: &DataNode,
+    arrow: &ArrowInstance,
+    _semantics: &impl ArrowSemantics,
+) -> Vec<Stmt> {
+    match node.kind {
+        NodeKind::Primitive => vec![Stmt::Primitive(super::ir::Primitive {
+            name: node.op.clone(),
+            inputs: arrow.inputs.clone(),
+            outputs: arrow.outputs.clone(),
+            code: String::new(),
+        })],
+        NodeKind::ChildRegion => {
+            let child = region
+                .child_for_operation(&node.op)
+                .expect("child region node must have child context");
+            vec![call_statement(child, arrow)]
+        }
+    }
+}
+
+fn classify_dataflow_block(
+    region: &Region<'_>,
+    nodes: &[DataNode],
+    available: &HashSet<NodeId>,
+    remaining: &[usize],
+) -> StructuredError {
+    let remaining_set = remaining.iter().copied().collect::<HashSet<_>>();
+    let remaining_targets = remaining
+        .iter()
+        .flat_map(|node| nodes[*node].outputs.iter().copied())
+        .collect::<HashSet<_>>();
+
+    let unavailable = remaining
+        .iter()
+        .flat_map(|node| {
+            nodes[*node]
+                .inputs
+                .iter()
+                .copied()
+                .filter(|source| !available.contains(source) && !remaining_targets.contains(source))
+                .map(|source| blocked_wire_description(region, &nodes[*node], source))
+        })
+        .collect::<Vec<_>>();
+
+    if !unavailable.is_empty() {
+        return StructuredError::UnavailableWires {
+            wires: unavailable.join(", "),
+            remaining: remaining_node_descriptions(region, nodes, remaining).join("; "),
+        };
+    }
+
+    let operations = remaining_set
+        .iter()
+        .copied()
+        .map(|node| format!("{}#{}", nodes[node].op, nodes[node].edge))
+        .collect::<Vec<_>>()
+        .join(", ");
+    StructuredError::DataflowCycle { operations }
+}
+
+fn blocked_wire_description(region: &Region<'_>, node: &DataNode, source: NodeId) -> String {
+    format!("{} input {}", node.op, region.variable(source))
+}
+
+fn remaining_node_descriptions(
+    region: &Region<'_>,
+    nodes: &[DataNode],
+    remaining: &[usize],
+) -> Vec<String> {
+    remaining
+        .iter()
+        .map(|node| node_description(region, &nodes[*node]))
+        .collect()
+}
+
+fn node_description(region: &Region<'_>, node: &DataNode) -> String {
+    let inputs = node
+        .inputs
+        .iter()
+        .map(|node| region.variable(*node))
+        .collect::<Vec<_>>()
+        .join(",");
+    let outputs = node
+        .outputs
+        .iter()
+        .map(|node| region.variable(*node))
+        .collect::<Vec<_>>()
+        .join(",");
+    format!("{}({inputs}) -> ({outputs})", node.op)
 }
 
 fn edge_successors(
-    f: &OpenHypergraph<Obj, Arr>,
+    region: &Region<'_>,
     edge_index: CfgNodeId,
     consumers: &HashMap<NodeId, Vec<CfgNodeId>>,
     graph_targets: &HashSet<NodeId>,
     exit_node: Option<CfgNodeId>,
 ) -> Vec<CfgNodeId> {
     let mut successors = Vec::new();
-    for target in &f.hypergraph.adjacency[edge_index].targets {
-        if graph_targets.contains(target) {
+    for target in region.edge_targets(edge_index) {
+        if graph_targets.contains(&target) {
             if let Some(exit_node) = exit_node {
                 push_unique_all(&mut successors, [exit_node]);
             }
             continue;
         }
-        if let Some(edges) = consumers.get(target) {
+        if let Some(edges) = consumers.get(&target) {
             push_unique_all(&mut successors, edges.iter().copied());
         }
     }
     successors
 }
 
+fn edge_sources(region: &Region<'_>, edge_index: usize) -> Vec<NodeId> {
+    region
+        .compile_graph
+        .graph
+        .h
+        .s
+        .clone()
+        .into_iter()
+        .nth(edge_index)
+        .map(|sources| sources.table.0.into_iter().map(NodeId).collect())
+        .unwrap_or_default()
+}
+
+fn edge_targets(region: &Region<'_>, edge_index: usize) -> Vec<NodeId> {
+    region
+        .compile_graph
+        .graph
+        .h
+        .t
+        .clone()
+        .into_iter()
+        .nth(edge_index)
+        .map(|targets| targets.table.0.into_iter().map(NodeId).collect())
+        .unwrap_or_default()
+}
+
 fn transfer_for_successors(
     nodes: &mut Vec<CfgNode>,
     arrow: ArrowInstance,
-    branch: BranchValue,
     successors: Vec<CfgNodeId>,
     semantics: &impl ArrowSemantics,
 ) -> Transfer {
@@ -477,7 +544,7 @@ fn transfer_for_successors(
         [target] => Transfer::Goto(*target),
         [then_target, else_target] => {
             let condition = branch_condition_value(&arrow, 0);
-            let payload = branch_payload(&arrow, &branch);
+            let payload = branch_payload(&arrow);
             let then_target =
                 append_binding_node(nodes, branch_binding(&arrow, 0, &payload), *then_target);
             let else_target =
@@ -486,7 +553,7 @@ fn transfer_for_successors(
             nodes.push(CfgNode {
                 statements: vec![Stmt::Assign {
                     lhs: condition.clone(),
-                    rhs: branch_condition_rhs(&arrow, &branch, 0, semantics),
+                    rhs: semantics.branch_condition_rhs(&arrow, 0),
                 }],
                 transfer: Transfer::If {
                     condition,
@@ -497,7 +564,7 @@ fn transfer_for_successors(
             Transfer::Goto(branch_node)
         }
         targets => {
-            let payload = branch_payload(&arrow, &branch);
+            let payload = branch_payload(&arrow);
             let targets = targets
                 .iter()
                 .enumerate()
@@ -509,35 +576,12 @@ fn transfer_for_successors(
             nodes.push(CfgNode {
                 statements: Vec::new(),
                 transfer: Transfer::Switch {
-                    selector: branch_selector(&arrow, &branch, semantics),
+                    selector: semantics.selector(&arrow),
                     targets,
                 },
             });
             Transfer::Goto(branch_node)
         }
-    }
-}
-
-fn branch_condition_rhs(
-    arrow: &ArrowInstance,
-    branch: &BranchValue,
-    output: usize,
-    semantics: &impl ArrowSemantics,
-) -> Expr {
-    match branch {
-        BranchValue::Opaque => semantics.branch_condition_rhs(arrow, output),
-        BranchValue::Coproduct(value) => format!("{value}.tag == {output}"),
-    }
-}
-
-fn branch_selector(
-    arrow: &ArrowInstance,
-    branch: &BranchValue,
-    semantics: &impl ArrowSemantics,
-) -> Variable {
-    match branch {
-        BranchValue::Opaque => semantics.selector(arrow),
-        BranchValue::Coproduct(value) => format!("{value}.tag"),
     }
 }
 
@@ -557,15 +601,8 @@ fn append_binding_node(
     node
 }
 
-fn branch_payload(arrow: &ArrowInstance, branch: &BranchValue) -> Variable {
-    match branch {
-        BranchValue::Opaque => format!("p{}", arrow.id),
-        BranchValue::Coproduct(value) => format!("{value}.payload"),
-    }
-}
-
-fn branch_result_variable(arrow: &ArrowInstance) -> Variable {
-    format!("r{}", arrow.id)
+fn branch_payload(arrow: &ArrowInstance) -> Variable {
+    format!("p{}", arrow.id)
 }
 
 fn branch_condition_value(arrow: &ArrowInstance, output: usize) -> Variable {

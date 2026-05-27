@@ -6,8 +6,7 @@ use thiserror::Error;
 use crate::{
     check::{CheckError, check as check_elaborated_theory},
     compile::{
-        CompileConfig, CompileGraph, CompileGraphError, GraphCompileOptions, check_render,
-        compile_graph,
+        CompileConfig, CompileGraph, CompileGraphError, check_render, compile_graph,
         cuda::CudaOptions,
         cuda::{CudaAbiError, render_cuda_source},
         graph_render,
@@ -18,6 +17,33 @@ use crate::{
     },
     elaborate::{ElaborateError, elaborate},
 };
+
+// High-level compiler pipeline:
+//
+// 1. Parse + elaborate source files into the data/control theory set used by
+//    later stages. Elaboration is responsible for exposing cross-theory arrows.
+// 2. Typecheck the elaborated theory. After this point the compiler works with
+//    checked theory objects rather than raw syntax.
+// 3. Build a CompileGraph for the requested entry.
+//    - Interpret the checked definition as a hypergraph of operations and
+//      wires.
+//    - Annotate graph wires with checked type information and keep source
+//      variable names for diagnostics/backend names.
+//    - Preserve definition and cross-theory operation boundaries as child
+//      regions so structured lowering can decide how to lower them.
+//    - inline local graph definitions if in the allowed list
+// 4. Normalize the graph for backend consumption. Normalization removes
+//    typechecking-only structure, erases non-runtime operations, forgets
+//    loopback markers, and quotients unified wires so later stages see the
+//    executable runtime graph.
+// 5. Verify any requested proof certificates against the normalized graph.
+//    Proofs are checked after normalization because backend requirements are
+//    stated over the graph shape the backend will actually consume.
+// 6. Compile the graph into a Program/CFG representation. This is where data
+//    dependency scheduling and control CFG construction happen.
+// 7. Structure the Program into structured IR with statements, blocks, and
+//    control flow. CUDA lowering consumes this structured IR plus ABI/proof
+//    metadata to render target source.
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Emit {
@@ -41,7 +67,6 @@ pub struct CompileRequest {
     pub theory: Option<String>,
     pub entry: Option<String>,
     pub format: Option<OutputFormat>,
-    pub graph_options: GraphCompileOptions,
     pub cuda_options: CudaOptions,
     pub proof_check: bool,
     pub proof_paths: Vec<PathBuf>,
@@ -71,8 +96,6 @@ pub enum CompilePipelineError {
     MissingArgument { argument: &'static str, emit: Emit },
     #[error("--format {format:?} is not supported when emitting {emit:?}")]
     UnsupportedFormat { emit: Emit, format: OutputFormat },
-    #[error("--no-inline is only supported for emits that build a compile graph, not {0:?}")]
-    UnsupportedNoInline(Emit),
     #[error(transparent)]
     Proof(#[from] ProofCertificateError),
 }
@@ -101,12 +124,10 @@ impl CompilePipeline {
         match self.request.emit {
             Emit::Elaborated => {
                 self.require_format(OutputFormat::Text)?;
-                self.reject_graph_options()?;
                 Ok(self.elaborated()?.to_hexpr_text().into_bytes())
             }
             Emit::Checked => {
                 self.require_format(OutputFormat::Text)?;
-                self.reject_graph_options()?;
                 Ok(check_render::summary(self.checked_elaborated_theory()?).into_bytes())
             }
             Emit::CompileGraph => {
@@ -172,7 +193,6 @@ impl CompilePipeline {
         Ok(CompileGraphRequest {
             theory: self.required_input(PipelineInput::Theory)?,
             entry: self.required_input(PipelineInput::Entry)?,
-            graph_options: self.request.graph_options.clone(),
         })
     }
 
@@ -206,13 +226,6 @@ impl CompilePipeline {
         Ok(())
     }
 
-    fn reject_graph_options(&self) -> Result<(), CompilePipelineError> {
-        if !self.request.graph_options.no_inline.is_empty() {
-            return Err(CompilePipelineError::UnsupportedNoInline(self.request.emit));
-        }
-        Ok(())
-    }
-
     fn proof_certificates(&self) -> Result<Option<ProofCertificates>, CompilePipelineError> {
         if !self.request.proof_check {
             return Ok(None);
@@ -229,7 +242,6 @@ impl CompilePipeline {
 pub struct CompileGraphRequest {
     pub theory: String,
     pub entry: String,
-    pub graph_options: GraphCompileOptions,
 }
 
 fn compile_graph_from_checked(
@@ -241,7 +253,6 @@ fn compile_graph_from_checked(
         &CompileConfig::data_control(),
         &request.theory,
         &request.entry,
-        request.graph_options,
     )?)
 }
 

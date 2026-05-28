@@ -6,6 +6,9 @@
 
   # booleans
   (arr bool : 0 -> 1)
+
+  # u64
+  (arr u64 : 0 -> 1)
 })
 
 (theory program type {

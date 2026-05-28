@@ -9,7 +9,6 @@ use crate::{
     structured::{
         StructuredError, cfg,
         cfg::{Cfg, Region},
-        ir::{Primitive, Stmt},
     },
 };
 
@@ -194,35 +193,4 @@ fn node_names_for_context(context: &Context) -> HashMap<NodeId, String> {
 #[derive(Debug, Clone, Copy)]
 struct ProgramSemantics;
 
-impl cfg::ArrowSemantics for ProgramSemantics {
-    fn statements(&self, arrow: &cfg::ArrowInstance) -> Vec<Stmt> {
-        if arrow.op == "gpu.sync" {
-            return vec![Stmt::Barrier];
-        }
-        let outputs = if arrow.branch_arity > 1 {
-            vec![branch_tag(arrow), branch_payload(arrow)]
-        } else if arrow.op.starts_with("data.") {
-            arrow.outputs.clone()
-        } else {
-            Vec::new()
-        };
-        vec![Stmt::Primitive(Primitive {
-            name: arrow.op.clone(),
-            inputs: arrow.inputs.clone(),
-            outputs,
-            code: String::new(),
-        })]
-    }
-
-    fn branch_condition_rhs(&self, arrow: &cfg::ArrowInstance, output: usize) -> String {
-        format!("{} == {output}", branch_tag(arrow))
-    }
-}
-
-fn branch_tag(arrow: &cfg::ArrowInstance) -> String {
-    format!("b{}", arrow.id)
-}
-
-fn branch_payload(arrow: &cfg::ArrowInstance) -> String {
-    format!("p{}", arrow.id)
-}
+impl cfg::ArrowSemantics for ProgramSemantics {}

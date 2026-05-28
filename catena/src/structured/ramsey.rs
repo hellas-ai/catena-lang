@@ -1,12 +1,19 @@
 use super::{
-    cfg::{Cfg, CfgNodeId, StructuredError, Transfer},
-    ir::Stmt,
+    cfg::{BlockInstruction, BlockInstructionRhs, Cfg, CfgNodeId, StructuredError, Transfer},
+    ir::{Primitive, Stmt},
 };
 use std::collections::{BTreeSet, HashSet};
 
-pub fn structure(cfg: Cfg) -> Result<Vec<Stmt>, StructuredError> {
+pub fn structure(
+    cfg: Cfg,
+    variable_name: impl Fn(crate::structured::cfg::VariableId) -> String + 'static,
+) -> Result<Vec<Stmt>, StructuredError> {
     let analyses = Analyses::new(&cfg)?;
-    let mut structurer = Structurer { cfg, analyses };
+    let mut structurer = Structurer {
+        cfg,
+        analyses,
+        variable_name: Box::new(variable_name),
+    };
     let mut body = structurer.do_tree(structurer.cfg.entry, &[])?;
     drop_redundant_terminal_continues(&mut body);
     Ok(body)
@@ -83,6 +90,7 @@ enum ContextFrame {
 struct Structurer {
     cfg: Cfg,
     analyses: Analyses,
+    variable_name: Box<dyn Fn(crate::structured::cfg::VariableId) -> String>,
 }
 
 impl Structurer {
@@ -123,7 +131,7 @@ impl Structurer {
         }
 
         let cfg_node = self.cfg.nodes[node].clone();
-        let mut code = cfg_node.statements;
+        let mut code = self.block_statements(&cfg_node.block);
         match cfg_node.transfer {
             Transfer::Return => code.push(Stmt::Return),
             Transfer::Goto(target) => code.extend(self.do_branch(node, target, context)?),
@@ -136,7 +144,7 @@ impl Structurer {
                 then_context.insert(0, ContextFrame::IfThenElse);
                 let else_context = then_context.clone();
                 code.push(Stmt::If {
-                    condition,
+                    condition: (self.variable_name)(condition),
                     then_body: self.do_branch(node, then_target, &then_context)?,
                     else_body: self.do_branch(node, else_target, &else_context)?,
                 });
@@ -149,7 +157,7 @@ impl Structurer {
                     case_bodies.push(self.do_branch(node, target, &case_context)?);
                 }
                 code.push(Stmt::Switch {
-                    selector,
+                    selector: (self.variable_name)(selector),
                     cases: case_bodies,
                 });
             }
@@ -200,6 +208,58 @@ impl Structurer {
             }
         }
         Err(StructuredError::MissingContext(self.cfg.label(target)))
+    }
+
+    fn block_statements(&self, block: &[BlockInstruction]) -> Vec<Stmt> {
+        block
+            .iter()
+            .map(|instruction| self.block_instruction_statement(instruction))
+            .collect()
+    }
+
+    fn block_instruction_statement(&self, instruction: &BlockInstruction) -> Stmt {
+        let lhs = instruction
+            .lhs
+            .iter()
+            .map(|id| (self.variable_name)(*id))
+            .collect::<Vec<_>>();
+        match &instruction.rhs {
+            BlockInstructionRhs::Primitive { operation, args }
+                if operation == "cfg.alias" && lhs.len() == 1 && args.len() == 1 =>
+            {
+                Stmt::Assign {
+                    lhs: lhs[0].clone(),
+                    rhs: (self.variable_name)(args[0]),
+                }
+            }
+            BlockInstructionRhs::Primitive { operation, args }
+                if operation.starts_with("cfg.branch-condition.")
+                    && lhs.len() == 1
+                    && args.len() == 1 =>
+            {
+                let output = operation
+                    .strip_prefix("cfg.branch-condition.")
+                    .unwrap_or("0");
+                Stmt::Assign {
+                    lhs: lhs[0].clone(),
+                    rhs: format!("{} == {output}", (self.variable_name)(args[0])),
+                }
+            }
+            BlockInstructionRhs::Primitive { operation, args } if operation == "gpu.sync" => {
+                Stmt::Barrier
+            }
+            BlockInstructionRhs::Primitive { operation, args } => Stmt::Primitive(Primitive {
+                name: operation.clone(),
+                inputs: args.iter().map(|id| (self.variable_name)(*id)).collect(),
+                outputs: lhs,
+                code: String::new(),
+            }),
+            BlockInstructionRhs::Call { function, args } => Stmt::Call {
+                function: function.clone(),
+                inputs: args.iter().map(|id| (self.variable_name)(*id)).collect(),
+                outputs: lhs,
+            },
+        }
     }
 }
 

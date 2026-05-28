@@ -1,9 +1,9 @@
 use thiserror::Error;
 
 use crate::{
-    compile::program::Program,
+    compile::program::{Program, VariableId},
     structured::{
-        StructuredError,
+        StructuredError, cfg,
         ir::{EntryPoint, Stmt, StructuredProgram},
         ramsey,
     },
@@ -19,7 +19,13 @@ pub fn compile_structured_program(
     program: &Program,
 ) -> Result<StructuredProgram, StructuredCompileError> {
     let entry = program.entry_definition();
-    let body = ramsey::structure(entry.body.clone())?;
+    let context = entry.context.clone();
+    let body = ramsey::structure(entry.body.clone(), move |id| {
+        context
+            .variable(VariableId(id))
+            .map(|variable| variable.name.clone())
+            .unwrap_or_else(|| cfg::variable_name(id))
+    })?;
     Ok(structured_program(&entry.name, body))
 }
 

@@ -1,22 +1,25 @@
-use super::ir::Stmt;
 use crate::compile::{CompileGraph, CompileTheory};
 use open_hypergraphs::lax::NodeId;
 use std::collections::{HashMap, HashSet};
 
 pub type CfgNodeId = usize;
-pub type Expr = String;
 pub type OperationName = String;
-pub type Variable = String;
+pub type VariableId = usize;
+pub type VariableName = String;
 
 pub trait ArrowSemantics {
-    fn statements(&self, arrow: &ArrowInstance) -> Vec<Stmt>;
-
-    fn branch_condition_rhs(&self, arrow: &ArrowInstance, output: usize) -> Expr {
-        format!("/* {} output {output} */ 1", sanitize_ident(&arrow.op))
+    fn block_instruction(&self, arrow: &ArrowInstance) -> Option<BlockInstruction> {
+        Some(BlockInstruction {
+            lhs: arrow.outputs.clone(),
+            rhs: BlockInstructionRhs::Primitive {
+                operation: arrow.op.clone(),
+                args: arrow.inputs.clone(),
+            },
+        })
     }
 
-    fn selector(&self, arrow: &ArrowInstance) -> Variable {
-        format!("/* {} */ 0", sanitize_ident(&arrow.op))
+    fn selector(&self, arrow: &ArrowInstance) -> VariableId {
+        branch_tag(arrow)
     }
 }
 
@@ -24,8 +27,8 @@ pub trait ArrowSemantics {
 pub struct ArrowInstance {
     pub id: CfgNodeId,
     pub op: OperationName,
-    pub inputs: Vec<Variable>,
-    pub outputs: Vec<Variable>,
+    pub inputs: Vec<VariableId>,
+    pub outputs: Vec<VariableId>,
     pub branch_arity: usize,
 }
 
@@ -46,11 +49,11 @@ struct DataNode {
 
 pub struct Region<'a> {
     compile_graph: &'a CompileGraph,
-    node_names: HashMap<NodeId, Variable>,
+    node_names: HashMap<NodeId, VariableName>,
 }
 
 impl<'a> Region<'a> {
-    pub fn new(compile_graph: &'a CompileGraph, node_names: HashMap<NodeId, Variable>) -> Self {
+    pub fn new(compile_graph: &'a CompileGraph, node_names: HashMap<NodeId, VariableName>) -> Self {
         Self {
             compile_graph,
             node_names,
@@ -61,11 +64,15 @@ impl<'a> Region<'a> {
         &self.compile_graph.theory
     }
 
-    fn variable(&self, node: NodeId) -> Variable {
+    fn variable(&self, node: NodeId) -> VariableId {
+        node.0
+    }
+
+    fn variable_name(&self, node: NodeId) -> VariableName {
         self.node_names
             .get(&node)
             .cloned()
-            .unwrap_or_else(|| format!("w{}", node.0))
+            .unwrap_or_else(|| variable_name(node.0))
     }
 
     fn child_for_operation(&self, operation: &str) -> Option<&CompileGraph> {
@@ -122,20 +129,38 @@ pub struct Cfg {
 
 #[derive(Debug, Clone)]
 pub(super) struct CfgNode {
-    pub(super) statements: Vec<Stmt>,
+    pub(super) block: Vec<BlockInstruction>,
     pub(super) transfer: Transfer,
+}
+
+#[derive(Debug, Clone)]
+pub struct BlockInstruction {
+    pub lhs: Vec<VariableId>,
+    pub rhs: BlockInstructionRhs,
+}
+
+#[derive(Debug, Clone)]
+pub enum BlockInstructionRhs {
+    Primitive {
+        operation: OperationName,
+        args: Vec<VariableId>,
+    },
+    Call {
+        function: OperationName,
+        args: Vec<VariableId>,
+    },
 }
 
 #[derive(Debug, Clone)]
 pub(super) enum Transfer {
     Goto(CfgNodeId),
     If {
-        condition: Variable,
+        condition: VariableId,
         then_target: CfgNodeId,
         else_target: CfgNodeId,
     },
     Switch {
-        selector: Variable,
+        selector: VariableId,
         targets: Vec<CfgNodeId>,
     },
     Return,
@@ -214,17 +239,16 @@ impl Cfg {
                     .collect(),
                 branch_arity: successors.len(),
             };
-            let statements = statements_for_arrow(region, &op, &arrow, semantics);
-            branches.push(arrow);
+            branches.push(arrow.clone());
             nodes.push(CfgNode {
-                statements,
+                block: block_for_arrow(region, &op, &arrow, semantics),
                 transfer: Transfer::Return,
             });
         }
 
         if !graph_targets.is_empty() {
             nodes.push(CfgNode {
-                statements: Vec::new(),
+                block: Vec::new(),
                 transfer: Transfer::Return,
             });
         }
@@ -270,7 +294,7 @@ impl Cfg {
             .map(|node| NodeId(*node))
             .collect::<HashSet<_>>();
         let mut remaining = (0..data_nodes.len()).collect::<Vec<_>>();
-        let mut statements = Vec::new();
+        let mut block = Vec::new();
 
         // Data regions are scheduled by wire dependencies. Each scheduled node
         // is either a primitive operation or a child-region call; both expose
@@ -293,14 +317,14 @@ impl Cfg {
             let node_index = remaining.remove(index);
             let data_node = &data_nodes[node_index];
             let arrow = arrow_for_data_node(data_node, region);
-            statements.extend(lower_data_node(region, data_node, &arrow, semantics));
+            block.extend(lower_data_node(region, data_node, &arrow, semantics));
             available.extend(data_node.outputs.iter().copied());
         }
 
         Ok(Self {
             entry: 0,
             nodes: vec![CfgNode {
-                statements,
+                block,
                 transfer: Transfer::Return,
             }],
             predecessors: vec![Vec::new()],
@@ -327,28 +351,30 @@ impl CfgNode {
     }
 }
 
-fn statements_for_arrow(
+fn block_for_arrow(
     region: &Region<'_>,
     op: &str,
     arrow: &ArrowInstance,
     semantics: &impl ArrowSemantics,
-) -> Vec<Stmt> {
+) -> Vec<BlockInstruction> {
     if let Some(child) = region.child_for_operation(op) {
         return vec![call_statement(child, arrow)];
     }
-    semantics.statements(arrow)
+    semantics.block_instruction(arrow).into_iter().collect()
 }
 
-fn call_statement(child: &CompileGraph, arrow: &ArrowInstance) -> Stmt {
-    let outputs = if arrow.branch_arity > 1 {
-        vec![format!("b{}", arrow.id), format!("p{}", arrow.id)]
+fn call_statement(child: &CompileGraph, arrow: &ArrowInstance) -> BlockInstruction {
+    let lhs = if arrow.branch_arity > 1 {
+        vec![branch_tag(arrow), branch_payload(arrow)]
     } else {
         arrow.outputs.clone()
     };
-    Stmt::Call {
-        function: child.definition_name.clone(),
-        inputs: arrow.inputs.clone(),
-        outputs,
+    BlockInstruction {
+        lhs,
+        rhs: BlockInstructionRhs::Call {
+            function: child.definition_name.clone(),
+            args: arrow.inputs.clone(),
+        },
     }
 }
 
@@ -396,15 +422,10 @@ fn lower_data_node(
     region: &Region<'_>,
     node: &DataNode,
     arrow: &ArrowInstance,
-    _semantics: &impl ArrowSemantics,
-) -> Vec<Stmt> {
+    semantics: &impl ArrowSemantics,
+) -> Vec<BlockInstruction> {
     match node.kind {
-        NodeKind::Primitive => vec![Stmt::Primitive(super::ir::Primitive {
-            name: node.op.clone(),
-            inputs: arrow.inputs.clone(),
-            outputs: arrow.outputs.clone(),
-            code: String::new(),
-        })],
+        NodeKind::Primitive => semantics.block_instruction(arrow).into_iter().collect(),
         NodeKind::ChildRegion => {
             let child = region
                 .child_for_operation(&node.op)
@@ -455,7 +476,7 @@ fn classify_dataflow_block(
 }
 
 fn blocked_wire_description(region: &Region<'_>, node: &DataNode, source: NodeId) -> String {
-    format!("{} input {}", node.op, region.variable(source))
+    format!("{} input {}", node.op, region.variable_name(source))
 }
 
 fn remaining_node_descriptions(
@@ -473,13 +494,13 @@ fn node_description(region: &Region<'_>, node: &DataNode) -> String {
     let inputs = node
         .inputs
         .iter()
-        .map(|node| region.variable(*node))
+        .map(|node| region.variable_name(*node))
         .collect::<Vec<_>>()
         .join(",");
     let outputs = node
         .outputs
         .iter()
-        .map(|node| region.variable(*node))
+        .map(|node| region.variable_name(*node))
         .collect::<Vec<_>>()
         .join(",");
     format!("{}({inputs}) -> ({outputs})", node.op)
@@ -546,15 +567,12 @@ fn transfer_for_successors(
             let condition = branch_condition_value(&arrow, 0);
             let payload = branch_payload(&arrow);
             let then_target =
-                append_binding_node(nodes, branch_binding(&arrow, 0, &payload), *then_target);
+                append_binding_node(nodes, branch_binding(&arrow, 0, payload), *then_target);
             let else_target =
-                append_binding_node(nodes, branch_binding(&arrow, 1, &payload), *else_target);
+                append_binding_node(nodes, branch_binding(&arrow, 1, payload), *else_target);
             let branch_node = nodes.len();
             nodes.push(CfgNode {
-                statements: vec![Stmt::Assign {
-                    lhs: condition.clone(),
-                    rhs: semantics.branch_condition_rhs(&arrow, 0),
-                }],
+                block: vec![branch_condition_instruction(&arrow, 0, condition)],
                 transfer: Transfer::If {
                     condition,
                     then_target,
@@ -569,12 +587,12 @@ fn transfer_for_successors(
                 .iter()
                 .enumerate()
                 .map(|(index, target)| {
-                    append_binding_node(nodes, branch_binding(&arrow, index, &payload), *target)
+                    append_binding_node(nodes, branch_binding(&arrow, index, payload), *target)
                 })
                 .collect();
             let branch_node = nodes.len();
             nodes.push(CfgNode {
-                statements: Vec::new(),
+                block: Vec::new(),
                 transfer: Transfer::Switch {
                     selector: semantics.selector(&arrow),
                     targets,
@@ -587,7 +605,7 @@ fn transfer_for_successors(
 
 fn append_binding_node(
     nodes: &mut Vec<CfgNode>,
-    bind: Option<(Variable, Variable)>,
+    bind: Option<(VariableId, VariableId)>,
     target: CfgNodeId,
 ) -> CfgNodeId {
     let Some((lhs, rhs)) = bind else {
@@ -595,29 +613,58 @@ fn append_binding_node(
     };
     let node = nodes.len();
     nodes.push(CfgNode {
-        statements: vec![Stmt::Assign { lhs, rhs }],
+        block: vec![alias_instruction(lhs, rhs)],
         transfer: Transfer::Goto(target),
     });
     node
 }
 
-fn branch_payload(arrow: &ArrowInstance) -> Variable {
-    format!("p{}", arrow.id)
+fn branch_payload(arrow: &ArrowInstance) -> VariableId {
+    synthetic_variable(arrow.id, 1)
 }
 
-fn branch_condition_value(arrow: &ArrowInstance, output: usize) -> Variable {
-    format!("c{}_{}", arrow.id, output)
+fn branch_tag(arrow: &ArrowInstance) -> VariableId {
+    synthetic_variable(arrow.id, 0)
+}
+
+fn branch_condition_value(arrow: &ArrowInstance, output: usize) -> VariableId {
+    synthetic_variable(arrow.id, 2 + output)
 }
 
 fn branch_binding(
     arrow: &ArrowInstance,
     output: usize,
-    payload: &str,
-) -> Option<(Variable, Variable)> {
-    arrow
-        .outputs
-        .get(output)
-        .map(|wire| (wire.clone(), payload.to_string()))
+    payload: VariableId,
+) -> Option<(VariableId, VariableId)> {
+    arrow.outputs.get(output).map(|wire| (*wire, payload))
+}
+
+fn branch_condition_instruction(
+    arrow: &ArrowInstance,
+    output: usize,
+    condition: VariableId,
+) -> BlockInstruction {
+    BlockInstruction {
+        lhs: vec![condition],
+        rhs: BlockInstructionRhs::Primitive {
+            operation: format!("cfg.branch-condition.{output}"),
+            args: vec![branch_tag(arrow)],
+        },
+    }
+}
+
+fn alias_instruction(lhs: VariableId, rhs: VariableId) -> BlockInstruction {
+    BlockInstruction {
+        lhs: vec![lhs],
+        rhs: BlockInstructionRhs::Primitive {
+            operation: "cfg.alias".to_string(),
+            args: vec![rhs],
+        },
+    }
+}
+
+fn synthetic_variable(edge_id: usize, slot: usize) -> VariableId {
+    usize::MAX - edge_id * 8 - slot
 }
 
 fn push_unique_all(target: &mut Vec<CfgNodeId>, values: impl IntoIterator<Item = CfgNodeId>) {
@@ -628,8 +675,10 @@ fn push_unique_all(target: &mut Vec<CfgNodeId>, values: impl IntoIterator<Item =
     }
 }
 
-fn sanitize_ident(name: &str) -> String {
-    name.chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
-        .collect()
+pub(crate) fn variable_name(id: VariableId) -> String {
+    if id > usize::MAX / 2 {
+        format!("s{}", usize::MAX - id)
+    } else {
+        format!("w{id}")
+    }
 }

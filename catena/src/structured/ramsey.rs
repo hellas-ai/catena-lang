@@ -1,5 +1,7 @@
 use super::{
-    cfg::{BlockInstruction, BlockInstructionRhs, Cfg, CfgNodeId, StructuredError, Transfer},
+    cfg::{
+        BlockInstruction, BlockInstructionRhs, Cfg, CfgEdge, CfgNodeId, StructuredError, Transfer,
+    },
     ir::{Primitive, Stmt},
 };
 use std::collections::{BTreeSet, HashSet};
@@ -133,28 +135,31 @@ impl Structurer {
         let cfg_node = self.cfg.nodes[node].clone();
         let mut code = self.block_statements(&cfg_node.block);
         match cfg_node.transfer {
-            Transfer::Return => code.push(Stmt::Return),
-            Transfer::Goto(target) => code.extend(self.do_branch(node, target, context)?),
+            Transfer::Return(values) => {
+                let _return_arity = values.len();
+                code.push(Stmt::Return);
+            }
+            Transfer::Goto(edge) => code.extend(self.do_edge(node, &edge, context)?),
             Transfer::If {
                 condition,
-                then_target,
-                else_target,
+                then_edge,
+                else_edge,
             } => {
                 let mut then_context = context.to_vec();
                 then_context.insert(0, ContextFrame::IfThenElse);
                 let else_context = then_context.clone();
                 code.push(Stmt::If {
                     condition: (self.variable_name)(condition),
-                    then_body: self.do_branch(node, then_target, &then_context)?,
-                    else_body: self.do_branch(node, else_target, &else_context)?,
+                    then_body: self.do_edge(node, &then_edge, &then_context)?,
+                    else_body: self.do_edge(node, &else_edge, &else_context)?,
                 });
             }
-            Transfer::Switch { selector, targets } => {
+            Transfer::Switch { selector, edges } => {
                 let mut case_bodies = Vec::new();
-                for target in targets {
+                for edge in edges {
                     let mut case_context = context.to_vec();
                     case_context.insert(0, ContextFrame::IfThenElse);
-                    case_bodies.push(self.do_branch(node, target, &case_context)?);
+                    case_bodies.push(self.do_edge(node, &edge, &case_context)?);
                 }
                 code.push(Stmt::Switch {
                     selector: (self.variable_name)(selector),
@@ -162,6 +167,17 @@ impl Structurer {
                 });
             }
         }
+        Ok(code)
+    }
+
+    fn do_edge(
+        &mut self,
+        source: CfgNodeId,
+        edge: &CfgEdge,
+        context: &[ContextFrame],
+    ) -> Result<Vec<Stmt>, StructuredError> {
+        let mut code = self.edge_bindings(edge);
+        code.extend(self.do_branch(source, edge.target, context)?);
         Ok(code)
     }
 
@@ -179,6 +195,20 @@ impl Structurer {
             return Ok(vec![Stmt::Break(self.cfg.label(target))]);
         }
         self.do_tree(target, context)
+    }
+
+    fn edge_bindings(&self, edge: &CfgEdge) -> Vec<Stmt> {
+        let target = &self.cfg.nodes[edge.target];
+        target
+            .params
+            .iter()
+            .zip(edge.args.iter())
+            .filter(|(param, arg)| param != arg)
+            .map(|(param, arg)| Stmt::Assign {
+                lhs: (self.variable_name)(*param),
+                rhs: (self.variable_name)(*arg),
+            })
+            .collect()
     }
 
     fn merge_children(&self, node: CfgNodeId) -> Vec<CfgNodeId> {
@@ -224,27 +254,6 @@ impl Structurer {
             .map(|id| (self.variable_name)(*id))
             .collect::<Vec<_>>();
         match &instruction.rhs {
-            BlockInstructionRhs::Primitive { operation, args }
-                if operation == "cfg.alias" && lhs.len() == 1 && args.len() == 1 =>
-            {
-                Stmt::Assign {
-                    lhs: lhs[0].clone(),
-                    rhs: (self.variable_name)(args[0]),
-                }
-            }
-            BlockInstructionRhs::Primitive { operation, args }
-                if operation.starts_with("cfg.branch-condition.")
-                    && lhs.len() == 1
-                    && args.len() == 1 =>
-            {
-                let output = operation
-                    .strip_prefix("cfg.branch-condition.")
-                    .unwrap_or("0");
-                Stmt::Assign {
-                    lhs: lhs[0].clone(),
-                    rhs: format!("{} == {output}", (self.variable_name)(args[0])),
-                }
-            }
             BlockInstructionRhs::Primitive { operation, args } if operation == "gpu.sync" => {
                 Stmt::Barrier
             }

@@ -1,6 +1,6 @@
 use crate::compile::{CompileGraph, CompileTheory};
 use open_hypergraphs::lax::NodeId;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 pub type CfgNodeId = usize;
 pub type OperationName = String;
@@ -17,10 +17,6 @@ pub trait ArrowSemantics {
             },
         })
     }
-
-    fn selector(&self, arrow: &ArrowInstance) -> VariableId {
-        branch_tag(arrow)
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -29,35 +25,24 @@ pub struct ArrowInstance {
     pub op: OperationName,
     pub inputs: Vec<VariableId>,
     pub outputs: Vec<VariableId>,
-    pub branch_arity: usize,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum NodeKind {
-    Primitive,
-    ChildRegion,
-}
-
-#[derive(Debug, Clone)]
-struct DataNode {
-    edge: usize,
-    op: OperationName,
-    kind: NodeKind,
-    inputs: Vec<NodeId>,
-    outputs: Vec<NodeId>,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CfgEdge {
+    pub target: CfgNodeId,
+    pub args: Vec<VariableId>,
 }
 
 pub struct Region<'a> {
     compile_graph: &'a CompileGraph,
-    node_names: HashMap<NodeId, VariableName>,
 }
 
 impl<'a> Region<'a> {
-    pub fn new(compile_graph: &'a CompileGraph, node_names: HashMap<NodeId, VariableName>) -> Self {
-        Self {
-            compile_graph,
-            node_names,
-        }
+    pub fn new(
+        compile_graph: &'a CompileGraph,
+        _node_names: HashMap<NodeId, VariableName>,
+    ) -> Self {
+        Self { compile_graph }
     }
 
     fn theory(&self) -> &CompileTheory {
@@ -66,13 +51,6 @@ impl<'a> Region<'a> {
 
     fn variable(&self, node: NodeId) -> VariableId {
         node.0
-    }
-
-    fn variable_name(&self, node: NodeId) -> VariableName {
-        self.node_names
-            .get(&node)
-            .cloned()
-            .unwrap_or_else(|| variable_name(node.0))
     }
 
     fn child_for_operation(&self, operation: &str) -> Option<&CompileGraph> {
@@ -129,6 +107,7 @@ pub struct Cfg {
 
 #[derive(Debug, Clone)]
 pub(super) struct CfgNode {
+    pub(super) params: Vec<VariableId>,
     pub(super) block: Vec<BlockInstruction>,
     pub(super) transfer: Transfer,
 }
@@ -153,17 +132,17 @@ pub enum BlockInstructionRhs {
 
 #[derive(Debug, Clone)]
 pub(super) enum Transfer {
-    Goto(CfgNodeId),
+    Goto(CfgEdge),
     If {
         condition: VariableId,
-        then_target: CfgNodeId,
-        else_target: CfgNodeId,
+        then_edge: CfgEdge,
+        else_edge: CfgEdge,
     },
     Switch {
         selector: VariableId,
-        targets: Vec<CfgNodeId>,
+        edges: Vec<CfgEdge>,
     },
-    Return,
+    Return(Vec<VariableId>),
 }
 
 impl Cfg {
@@ -172,163 +151,9 @@ impl Cfg {
         semantics: &impl ArrowSemantics,
     ) -> Result<Self, StructuredError> {
         match region.theory() {
-            CompileTheory::Data => Self::from_dataflow_region(region, semantics),
-            CompileTheory::Control => Self::from_control_region(region, semantics),
+            CompileTheory::Data => lower_data_region(region, semantics),
+            CompileTheory::Control => lower_control_region(region, semantics),
         }
-    }
-
-    fn from_control_region(
-        region: &Region<'_>,
-        semantics: &impl ArrowSemantics,
-    ) -> Result<Self, StructuredError> {
-        let mut consumers: HashMap<NodeId, Vec<CfgNodeId>> = HashMap::new();
-        for edge_index in 0..region.operations().len() {
-            for source in region.edge_sources(edge_index) {
-                consumers.entry(source).or_default().push(edge_index);
-            }
-        }
-
-        let mut entry_edges = Vec::new();
-        // One structured program has one entry point. Additional open sources
-        // are external state alternatives, not extra CFG entries.
-        if let Some(source) = region.source_nodes().first() {
-            if let Some(edges) = consumers.get(&NodeId(*source)) {
-                push_unique_all(&mut entry_edges, edges.iter().copied());
-            }
-        }
-        if entry_edges.is_empty() && !region.operations().is_empty() {
-            entry_edges.push(0);
-        }
-
-        let entry = match entry_edges.as_slice() {
-            [edge] => *edge,
-            [] => return Err(StructuredError::MissingEntry),
-            _ => {
-                return Err(StructuredError::UnsupportedEntry {
-                    node: "entry".to_string(),
-                    successors: entry_edges.len(),
-                });
-            }
-        };
-
-        let graph_targets = region
-            .target_nodes()
-            .iter()
-            .copied()
-            .map(NodeId)
-            .collect::<HashSet<_>>();
-        let exit_node = (!graph_targets.is_empty()).then_some(region.operations().len());
-        let mut nodes = Vec::new();
-        let mut branches = Vec::new();
-        for (edge_index, op) in region.operations().iter().enumerate() {
-            let op = op.to_string();
-            let successors =
-                edge_successors(region, edge_index, &consumers, &graph_targets, exit_node);
-            let arrow = ArrowInstance {
-                id: edge_index,
-                op: op.clone(),
-                inputs: region
-                    .edge_sources(edge_index)
-                    .iter()
-                    .map(|node| region.variable(*node))
-                    .collect(),
-                outputs: region
-                    .edge_targets(edge_index)
-                    .iter()
-                    .map(|node| region.variable(*node))
-                    .collect(),
-                branch_arity: successors.len(),
-            };
-            branches.push(arrow.clone());
-            nodes.push(CfgNode {
-                block: block_for_arrow(region, &op, &arrow, semantics),
-                transfer: Transfer::Return,
-            });
-        }
-
-        if !graph_targets.is_empty() {
-            nodes.push(CfgNode {
-                block: Vec::new(),
-                transfer: Transfer::Return,
-            });
-        }
-
-        for edge_index in 0..region.operations().len() {
-            let arrow = branches[edge_index].clone();
-            let successors = edge_successors(
-                region,
-                edge_index,
-                &consumers,
-                &graph_targets,
-                (!graph_targets.is_empty()).then_some(region.operations().len()),
-            );
-            nodes[edge_index].transfer =
-                transfer_for_successors(&mut nodes, arrow, successors, semantics);
-        }
-
-        let mut predecessors = vec![Vec::new(); nodes.len()];
-        for (node_index, node) in nodes.iter().enumerate() {
-            for successor in node.successors() {
-                predecessors[successor].push(node_index);
-            }
-        }
-
-        Ok(Self {
-            entry,
-            nodes,
-            predecessors,
-        })
-    }
-
-    // Schedule dataflow edges with a topological sort over wire dependencies, then place the resulting SSA-like primitive statements in one CFG node.
-    // for now we assume dataflow graphs are acyclic
-    // but we may want to relax this condition
-    fn from_dataflow_region(
-        region: &Region<'_>,
-        semantics: &impl ArrowSemantics,
-    ) -> Result<Self, StructuredError> {
-        let data_nodes = data_nodes(region);
-        let mut available = region
-            .source_nodes()
-            .iter()
-            .map(|node| NodeId(*node))
-            .collect::<HashSet<_>>();
-        let mut remaining = (0..data_nodes.len()).collect::<Vec<_>>();
-        let mut block = Vec::new();
-
-        // Data regions are scheduled by wire dependencies. Each scheduled node
-        // is either a primitive operation or a child-region call; both expose
-        // explicit inputs and outputs to the scheduler.
-        while !remaining.is_empty() {
-            let Some(index) = remaining.iter().position(|edge| {
-                data_nodes[*edge]
-                    .inputs
-                    .iter()
-                    .all(|source| available.contains(source))
-            }) else {
-                return Err(classify_dataflow_block(
-                    region,
-                    &data_nodes,
-                    &available,
-                    &remaining,
-                ));
-            };
-
-            let node_index = remaining.remove(index);
-            let data_node = &data_nodes[node_index];
-            let arrow = arrow_for_data_node(data_node, region);
-            block.extend(lower_data_node(region, data_node, &arrow, semantics));
-            available.extend(data_node.outputs.iter().copied());
-        }
-
-        Ok(Self {
-            entry: 0,
-            nodes: vec![CfgNode {
-                block,
-                transfer: Transfer::Return,
-            }],
-            predecessors: vec![Vec::new()],
-        })
     }
 
     pub(super) fn label(&self, node: CfgNodeId) -> String {
@@ -336,22 +161,183 @@ impl Cfg {
     }
 }
 
-impl CfgNode {
-    pub(super) fn successors(&self) -> Vec<CfgNodeId> {
-        match &self.transfer {
-            Transfer::Goto(target) => vec![*target],
-            Transfer::If {
-                then_target,
-                else_target,
-                ..
-            } => vec![*then_target, *else_target],
-            Transfer::Switch { targets, .. } => targets.clone(),
-            Transfer::Return => Vec::new(),
+// Data regions are lowered as maximal data blocks interrupted by control arrows.
+// The instructions in a data block describe dependencies, not execution order.
+fn lower_data_region(
+    region: &Region<'_>,
+    semantics: &impl ArrowSemantics,
+) -> Result<Cfg, StructuredError> {
+    let mut builder = CfgBuilder::new();
+    let entry = builder.new_data_block(variables(region, &source_nodes(region)));
+    let mut current_data_block = entry;
+
+    for edge_index in 0..region.operations().len() {
+        let arrow = arrow_for_edge(region, edge_index);
+        if is_control_operation(region, &arrow.op) {
+            current_data_block =
+                builder.split_to_control_arrow(region, semantics, current_data_block, &arrow);
+        } else {
+            builder.append_data_arrow(region, semantics, current_data_block, &arrow);
+        }
+    }
+
+    builder.return_from(current_data_block, variables(region, &target_nodes(region)));
+    Ok(builder.finish(entry))
+}
+
+// Control regions are already ordered by control wires. Each control arrow gets
+// a CFG node; its transfer is computed from the graph's outgoing control wires.
+fn lower_control_region(
+    region: &Region<'_>,
+    semantics: &impl ArrowSemantics,
+) -> Result<Cfg, StructuredError> {
+    if region.operations().is_empty() {
+        return Err(StructuredError::MissingEntry);
+    }
+
+    let mut builder = CfgBuilder::new();
+    let arrows = (0..region.operations().len())
+        .map(|edge_index| arrow_for_edge(region, edge_index))
+        .collect::<Vec<_>>();
+
+    builder.create_control_nodes(region, semantics, &arrows);
+
+    let exit = builder.new_return_node(variables(region, &target_nodes(region)));
+    builder.wire_control_transfers(region, &arrows, exit);
+
+    Ok(builder.finish(entry_edge(region)?))
+}
+
+struct CfgBuilder {
+    nodes: Vec<CfgNode>,
+}
+
+impl CfgBuilder {
+    fn new() -> Self {
+        Self { nodes: Vec::new() }
+    }
+
+    fn push_node(&mut self, node: CfgNode) -> CfgNodeId {
+        let id = self.nodes.len();
+        self.nodes.push(node);
+        id
+    }
+
+    fn new_data_block(&mut self, params: Vec<VariableId>) -> CfgNodeId {
+        self.push_node(CfgNode {
+            params,
+            block: Vec::new(),
+            transfer: Transfer::Return(Vec::new()),
+        })
+    }
+
+    fn new_return_node(&mut self, returns: Vec<VariableId>) -> CfgNodeId {
+        self.push_node(CfgNode {
+            params: returns.clone(),
+            block: Vec::new(),
+            transfer: Transfer::Return(returns),
+        })
+    }
+
+    fn append_data_arrow(
+        &mut self,
+        region: &Region<'_>,
+        semantics: &impl ArrowSemantics,
+        block: CfgNodeId,
+        arrow: &ArrowInstance,
+    ) {
+        self.nodes[block]
+            .block
+            .extend(instructions_for_arrow(region, &arrow.op, arrow, semantics));
+    }
+
+    // A control arrow in a data region closes the current data block, runs one
+    // ordered control step, then resumes data lowering in a fresh block.
+    fn split_to_control_arrow(
+        &mut self,
+        region: &Region<'_>,
+        semantics: &impl ArrowSemantics,
+        data_block: CfgNodeId,
+        arrow: &ArrowInstance,
+    ) -> CfgNodeId {
+        let control_node = self.push_node(CfgNode {
+            params: arrow.inputs.clone(),
+            block: instructions_for_arrow(region, &arrow.op, arrow, semantics),
+            transfer: Transfer::Return(Vec::new()),
+        });
+        self.nodes[data_block].transfer = Transfer::Goto(CfgEdge {
+            target: control_node,
+            args: arrow.inputs.clone(),
+        });
+
+        let continuation = self.new_data_block(arrow.outputs.clone());
+        self.nodes[control_node].transfer = transfer_for_arrow(
+            arrow,
+            vec![CfgEdge {
+                target: continuation,
+                args: arrow.outputs.clone(),
+            }],
+        );
+        continuation
+    }
+
+    fn create_control_nodes(
+        &mut self,
+        region: &Region<'_>,
+        semantics: &impl ArrowSemantics,
+        arrows: &[ArrowInstance],
+    ) {
+        for arrow in arrows {
+            self.push_node(CfgNode {
+                params: arrow.inputs.clone(),
+                block: instructions_for_arrow(region, &arrow.op, arrow, semantics),
+                transfer: Transfer::Return(Vec::new()),
+            });
+        }
+    }
+
+    fn wire_control_transfers(
+        &mut self,
+        region: &Region<'_>,
+        arrows: &[ArrowInstance],
+        exit: CfgNodeId,
+    ) {
+        for arrow in arrows {
+            let successors = successors_for_edge(region, arrow.id, Some(exit));
+            self.nodes[arrow.id].transfer = transfer_for_arrow(arrow, successors);
+        }
+    }
+
+    fn return_from(&mut self, block: CfgNodeId, returns: Vec<VariableId>) {
+        self.nodes[block].transfer = Transfer::Return(returns);
+    }
+
+    fn finish(self, entry: CfgNodeId) -> Cfg {
+        let predecessors = predecessors(&self.nodes);
+        Cfg {
+            entry,
+            nodes: self.nodes,
+            predecessors,
         }
     }
 }
 
-fn block_for_arrow(
+impl CfgNode {
+    pub(super) fn successors(&self) -> Vec<CfgNodeId> {
+        match &self.transfer {
+            Transfer::Goto(edge) => vec![edge.target],
+            Transfer::If {
+                then_edge,
+                else_edge,
+                ..
+            } => vec![then_edge.target, else_edge.target],
+            Transfer::Switch { edges, .. } => edges.iter().map(|edge| edge.target).collect(),
+            Transfer::Return(_) => Vec::new(),
+        }
+    }
+}
+
+fn instructions_for_arrow(
     region: &Region<'_>,
     op: &str,
     arrow: &ArrowInstance,
@@ -363,169 +349,92 @@ fn block_for_arrow(
     semantics.block_instruction(arrow).into_iter().collect()
 }
 
-fn call_statement(child: &CompileGraph, arrow: &ArrowInstance) -> BlockInstruction {
-    let lhs = if arrow.branch_arity > 1 {
-        vec![branch_tag(arrow), branch_payload(arrow)]
-    } else {
-        arrow.outputs.clone()
+fn arrow_for_edge(region: &Region<'_>, edge_index: usize) -> ArrowInstance {
+    ArrowInstance {
+        id: edge_index,
+        op: region.operations()[edge_index].to_string(),
+        inputs: variables(region, &region.edge_sources(edge_index)),
+        outputs: variables(region, &region.edge_targets(edge_index)),
+    }
+}
+
+fn is_control_operation(region: &Region<'_>, operation: &str) -> bool {
+    operation.starts_with("control.")
+        || matches!(
+            operation,
+            "distr" | "distl" | "val.+.elim" | "merge" | "never" | "elim2"
+        )
+        || region
+            .child_for_operation(operation)
+            .is_some_and(|child| matches!(child.theory, CompileTheory::Control))
+}
+
+fn source_nodes(region: &Region<'_>) -> Vec<NodeId> {
+    region.source_nodes().iter().copied().map(NodeId).collect()
+}
+
+fn target_nodes(region: &Region<'_>) -> Vec<NodeId> {
+    region.target_nodes().iter().copied().map(NodeId).collect()
+}
+
+fn entry_edge(region: &Region<'_>) -> Result<CfgNodeId, StructuredError> {
+    if region.operations().is_empty() {
+        return Err(StructuredError::MissingEntry);
+    }
+    let Some(source) = region.source_nodes().first().copied() else {
+        return Ok(0);
     };
+    Ok((0..region.operations().len())
+        .find(|edge| region.edge_sources(*edge).contains(&NodeId(source)))
+        .unwrap_or(0))
+}
+
+fn successors_for_edge(
+    region: &Region<'_>,
+    edge_index: usize,
+    exit: Option<CfgNodeId>,
+) -> Vec<CfgEdge> {
+    let mut successors = Vec::new();
+    for target in region.edge_targets(edge_index) {
+        if region.target_nodes().contains(&target.0) {
+            if let Some(exit) = exit {
+                push_unique_edge(
+                    &mut successors,
+                    CfgEdge {
+                        target: exit,
+                        args: variables(region, &[target]),
+                    },
+                );
+            }
+            continue;
+        }
+        for consumer in consumers_of_wire(region, target) {
+            push_unique_edge(
+                &mut successors,
+                CfgEdge {
+                    target: consumer,
+                    args: variables(region, &[target]),
+                },
+            );
+        }
+    }
+    successors
+}
+
+fn consumers_of_wire(region: &Region<'_>, wire: NodeId) -> Vec<CfgNodeId> {
+    (0..region.operations().len())
+        .filter(|edge| region.edge_sources(*edge).contains(&wire))
+        .collect()
+}
+
+fn call_statement(child: &CompileGraph, arrow: &ArrowInstance) -> BlockInstruction {
     BlockInstruction {
-        lhs,
+        lhs: arrow.outputs.clone(),
         rhs: BlockInstructionRhs::Call {
             function: child.definition_name.clone(),
             args: arrow.inputs.clone(),
         },
     }
-}
-
-fn data_nodes(region: &Region<'_>) -> Vec<DataNode> {
-    region
-        .operations()
-        .iter()
-        .enumerate()
-        .map(|(edge, op)| {
-            let op = op.to_string();
-            DataNode {
-                edge,
-                kind: if region.child_for_operation(&op).is_some() {
-                    NodeKind::ChildRegion
-                } else {
-                    NodeKind::Primitive
-                },
-                op,
-                inputs: region.edge_sources(edge),
-                outputs: region.edge_targets(edge),
-            }
-        })
-        .collect()
-}
-
-fn arrow_for_data_node(node: &DataNode, region: &Region<'_>) -> ArrowInstance {
-    ArrowInstance {
-        id: node.edge,
-        op: node.op.clone(),
-        inputs: node
-            .inputs
-            .iter()
-            .map(|node| region.variable(*node))
-            .collect(),
-        outputs: node
-            .outputs
-            .iter()
-            .map(|node| region.variable(*node))
-            .collect(),
-        branch_arity: 0,
-    }
-}
-
-fn lower_data_node(
-    region: &Region<'_>,
-    node: &DataNode,
-    arrow: &ArrowInstance,
-    semantics: &impl ArrowSemantics,
-) -> Vec<BlockInstruction> {
-    match node.kind {
-        NodeKind::Primitive => semantics.block_instruction(arrow).into_iter().collect(),
-        NodeKind::ChildRegion => {
-            let child = region
-                .child_for_operation(&node.op)
-                .expect("child region node must have child context");
-            vec![call_statement(child, arrow)]
-        }
-    }
-}
-
-fn classify_dataflow_block(
-    region: &Region<'_>,
-    nodes: &[DataNode],
-    available: &HashSet<NodeId>,
-    remaining: &[usize],
-) -> StructuredError {
-    let remaining_set = remaining.iter().copied().collect::<HashSet<_>>();
-    let remaining_targets = remaining
-        .iter()
-        .flat_map(|node| nodes[*node].outputs.iter().copied())
-        .collect::<HashSet<_>>();
-
-    let unavailable = remaining
-        .iter()
-        .flat_map(|node| {
-            nodes[*node]
-                .inputs
-                .iter()
-                .copied()
-                .filter(|source| !available.contains(source) && !remaining_targets.contains(source))
-                .map(|source| blocked_wire_description(region, &nodes[*node], source))
-        })
-        .collect::<Vec<_>>();
-
-    if !unavailable.is_empty() {
-        return StructuredError::UnavailableWires {
-            wires: unavailable.join(", "),
-            remaining: remaining_node_descriptions(region, nodes, remaining).join("; "),
-        };
-    }
-
-    let operations = remaining_set
-        .iter()
-        .copied()
-        .map(|node| format!("{}#{}", nodes[node].op, nodes[node].edge))
-        .collect::<Vec<_>>()
-        .join(", ");
-    StructuredError::DataflowCycle { operations }
-}
-
-fn blocked_wire_description(region: &Region<'_>, node: &DataNode, source: NodeId) -> String {
-    format!("{} input {}", node.op, region.variable_name(source))
-}
-
-fn remaining_node_descriptions(
-    region: &Region<'_>,
-    nodes: &[DataNode],
-    remaining: &[usize],
-) -> Vec<String> {
-    remaining
-        .iter()
-        .map(|node| node_description(region, &nodes[*node]))
-        .collect()
-}
-
-fn node_description(region: &Region<'_>, node: &DataNode) -> String {
-    let inputs = node
-        .inputs
-        .iter()
-        .map(|node| region.variable_name(*node))
-        .collect::<Vec<_>>()
-        .join(",");
-    let outputs = node
-        .outputs
-        .iter()
-        .map(|node| region.variable_name(*node))
-        .collect::<Vec<_>>()
-        .join(",");
-    format!("{}({inputs}) -> ({outputs})", node.op)
-}
-
-fn edge_successors(
-    region: &Region<'_>,
-    edge_index: CfgNodeId,
-    consumers: &HashMap<NodeId, Vec<CfgNodeId>>,
-    graph_targets: &HashSet<NodeId>,
-    exit_node: Option<CfgNodeId>,
-) -> Vec<CfgNodeId> {
-    let mut successors = Vec::new();
-    for target in region.edge_targets(edge_index) {
-        if graph_targets.contains(&target) {
-            if let Some(exit_node) = exit_node {
-                push_unique_all(&mut successors, [exit_node]);
-            }
-            continue;
-        }
-        if let Some(edges) = consumers.get(&target) {
-            push_unique_all(&mut successors, edges.iter().copied());
-        }
-    }
-    successors
 }
 
 fn edge_sources(region: &Region<'_>, edge_index: usize) -> Vec<NodeId> {
@@ -554,125 +463,58 @@ fn edge_targets(region: &Region<'_>, edge_index: usize) -> Vec<NodeId> {
         .unwrap_or_default()
 }
 
-fn transfer_for_successors(
-    nodes: &mut Vec<CfgNode>,
-    arrow: ArrowInstance,
-    successors: Vec<CfgNodeId>,
-    semantics: &impl ArrowSemantics,
-) -> Transfer {
+fn transfer_for_arrow(arrow: &ArrowInstance, successors: Vec<CfgEdge>) -> Transfer {
+    if is_sum_value_elim(&arrow.op) {
+        return branch_transfer_for_arrow(arrow, successors);
+    }
+
     match successors.as_slice() {
-        [] => Transfer::Return,
-        [target] => Transfer::Goto(*target),
-        [then_target, else_target] => {
-            let condition = branch_condition_value(&arrow, 0);
-            let payload = branch_payload(&arrow);
-            let then_target =
-                append_binding_node(nodes, branch_binding(&arrow, 0, payload), *then_target);
-            let else_target =
-                append_binding_node(nodes, branch_binding(&arrow, 1, payload), *else_target);
-            let branch_node = nodes.len();
-            nodes.push(CfgNode {
-                block: vec![branch_condition_instruction(&arrow, 0, condition)],
-                transfer: Transfer::If {
-                    condition,
-                    then_target,
-                    else_target,
-                },
-            });
-            Transfer::Goto(branch_node)
-        }
-        targets => {
-            let payload = branch_payload(&arrow);
-            let targets = targets
-                .iter()
-                .enumerate()
-                .map(|(index, target)| {
-                    append_binding_node(nodes, branch_binding(&arrow, index, payload), *target)
-                })
-                .collect();
-            let branch_node = nodes.len();
-            nodes.push(CfgNode {
-                block: Vec::new(),
-                transfer: Transfer::Switch {
-                    selector: semantics.selector(&arrow),
-                    targets,
-                },
-            });
-            Transfer::Goto(branch_node)
-        }
+        [] => Transfer::Return(arrow.outputs.clone()),
+        [edge, ..] => Transfer::Goto(edge.clone()),
     }
 }
 
-fn append_binding_node(
-    nodes: &mut Vec<CfgNode>,
-    bind: Option<(VariableId, VariableId)>,
-    target: CfgNodeId,
-) -> CfgNodeId {
-    let Some((lhs, rhs)) = bind else {
-        return target;
-    };
-    let node = nodes.len();
-    nodes.push(CfgNode {
-        block: vec![alias_instruction(lhs, rhs)],
-        transfer: Transfer::Goto(target),
-    });
-    node
-}
-
-fn branch_payload(arrow: &ArrowInstance) -> VariableId {
-    synthetic_variable(arrow.id, 1)
-}
-
-fn branch_tag(arrow: &ArrowInstance) -> VariableId {
-    synthetic_variable(arrow.id, 0)
-}
-
-fn branch_condition_value(arrow: &ArrowInstance, output: usize) -> VariableId {
-    synthetic_variable(arrow.id, 2 + output)
-}
-
-fn branch_binding(
-    arrow: &ArrowInstance,
-    output: usize,
-    payload: VariableId,
-) -> Option<(VariableId, VariableId)> {
-    arrow.outputs.get(output).map(|wire| (*wire, payload))
-}
-
-fn branch_condition_instruction(
-    arrow: &ArrowInstance,
-    output: usize,
-    condition: VariableId,
-) -> BlockInstruction {
-    BlockInstruction {
-        lhs: vec![condition],
-        rhs: BlockInstructionRhs::Primitive {
-            operation: format!("cfg.branch-condition.{output}"),
-            args: vec![branch_tag(arrow)],
+fn branch_transfer_for_arrow(arrow: &ArrowInstance, successors: Vec<CfgEdge>) -> Transfer {
+    let selector = arrow.inputs.first().copied().unwrap_or(0);
+    match successors.as_slice() {
+        [] => Transfer::Return(arrow.outputs.clone()),
+        [then_edge, else_edge] => Transfer::If {
+            condition: selector,
+            then_edge: then_edge.clone(),
+            else_edge: else_edge.clone(),
+        },
+        edges => Transfer::Switch {
+            selector,
+            edges: edges.to_vec(),
         },
     }
 }
 
-fn alias_instruction(lhs: VariableId, rhs: VariableId) -> BlockInstruction {
-    BlockInstruction {
-        lhs: vec![lhs],
-        rhs: BlockInstructionRhs::Primitive {
-            operation: "cfg.alias".to_string(),
-            args: vec![rhs],
-        },
-    }
-}
-
-fn synthetic_variable(edge_id: usize, slot: usize) -> VariableId {
-    usize::MAX - edge_id * 8 - slot
-}
-
-fn push_unique_all(target: &mut Vec<CfgNodeId>, values: impl IntoIterator<Item = CfgNodeId>) {
-    for value in values {
-        if !target.contains(&value) {
-            target.push(value);
+fn predecessors(nodes: &[CfgNode]) -> Vec<Vec<CfgNodeId>> {
+    let mut predecessors = vec![Vec::new(); nodes.len()];
+    for (node_index, node) in nodes.iter().enumerate() {
+        for successor in node.successors() {
+            predecessors[successor].push(node_index);
         }
     }
+    predecessors
+}
+
+fn variables(region: &Region<'_>, nodes: &[NodeId]) -> Vec<VariableId> {
+    nodes.iter().map(|node| region.variable(*node)).collect()
+}
+
+fn push_unique_edge(target: &mut Vec<CfgEdge>, edge: CfgEdge) {
+    if !target
+        .iter()
+        .any(|existing| existing.target == edge.target && existing.args == edge.args)
+    {
+        target.push(edge);
+    }
+}
+
+fn is_sum_value_elim(operation: &str) -> bool {
+    matches!(operation, "val.+.elim" | "control.val.+.elim")
 }
 
 pub(crate) fn variable_name(id: VariableId) -> String {

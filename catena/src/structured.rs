@@ -1,4 +1,5 @@
 pub mod cfg;
+pub mod cfg2;
 pub mod ir;
 pub mod ramsey;
 

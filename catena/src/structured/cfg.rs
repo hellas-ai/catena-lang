@@ -134,7 +134,7 @@ impl<'a> CfgBuilder<'a> {
     fn build(mut self) -> Result<Cfg, CfgError> {
         self.reject_non_data_region()?;
         self.collect_operations();
-        Ok(self.build_data_cfg())
+        self.build_data_cfg()
     }
 
     fn reject_non_data_region(&self) -> Result<(), CfgError> {
@@ -158,42 +158,79 @@ impl<'a> CfgBuilder<'a> {
         }
     }
 
-    fn build_data_cfg(&mut self) -> Cfg {
+    fn build_data_cfg(&mut self) -> Result<Cfg, CfgError> {
         let boundary = BoundaryWires::from_region_and_control_operations(
             self.compile_graph,
             &self.control_operation_ids,
         );
 
-        let control_fragment = self.control_cfg_fragment();
+        let control_fragment = self.control_cfg_fragment()?;
         let data_fragment = self.data_cfg_fragment(&boundary);
 
-        self.compose_fragments(data_fragment, control_fragment)
+        Ok(self.compose_fragments(data_fragment, control_fragment))
     }
 
-    fn control_cfg_fragment(&mut self) -> ControlCfgFragment {
+    fn control_cfg_fragment(&mut self) -> Result<ControlCfgFragment, CfgError> {
         let expanded_control = ControlExpander::new(self.compile_graph, &self.operation_instances)
-            .expand(&self.control_operation_ids);
+            .expand(&self.control_operation_ids)?;
 
         let mut node_by_control_operation = HashMap::new();
         let mut control_operation_by_node = HashMap::new();
         let mut node_by_entry_wire = HashMap::new();
-        let nodes = expanded_control
-            .operations
-            .iter()
-            .map(|operation| {
-                let id = self.node_ids.allocate();
-                node_by_control_operation.insert(operation.id, id);
-                control_operation_by_node.insert(id, operation.clone());
-                for input in &operation.inputs {
-                    node_by_entry_wire.insert(*input, id);
+        let mut nested_data_nodes = Vec::new();
+        let mut nested_data_node_by_entry_wire = HashMap::new();
+        let mut branch_data_successors = HashMap::<OperationId, Vec<CfgEdge>>::new();
+        let mut current_branch = None::<OperationInstance>;
+        let mut nodes = Vec::new();
+
+        for item in expanded_control.items {
+            match item {
+                ExpandedControlItem::Control(operation) => {
+                    let id = self.node_ids.allocate();
+                    node_by_control_operation.insert(operation.id, id);
+                    control_operation_by_node.insert(id, operation.clone());
+                    for input in &operation.inputs {
+                        node_by_entry_wire.insert(*input, id);
+                    }
+                    nodes.push(CfgNodeDraft {
+                        id,
+                        params: operation.inputs.clone(),
+                        block: vec![block_instruction(operation)],
+                    });
+                    current_branch = control_operation_by_node
+                        .get(&id)
+                        .filter(|operation| is_branch_operation(operation))
+                        .cloned();
                 }
-                CfgNodeDraft {
-                    id,
-                    params: operation.inputs.clone(),
-                    block: vec![block_instruction(operation.clone())],
+                ExpandedControlItem::DataCfg { call, cfg } => {
+                    let remapped_cfg = self.remap_cfg_nodes(cfg);
+                    if let Some(entry) = remapped_cfg
+                        .nodes
+                        .iter()
+                        .find(|node| node.id == remapped_cfg.entry)
+                    {
+                        for input in &call.inputs {
+                            nested_data_node_by_entry_wire.insert(*input, entry.id);
+                        }
+                        if let Some(branch) = &current_branch {
+                            let successors = branch_data_successors.entry(branch.id).or_default();
+                            let arg = branch
+                                .outputs
+                                .get(successors.len())
+                                .copied()
+                                .or_else(|| call.inputs.first().copied())
+                                .into_iter()
+                                .collect();
+                            successors.push(CfgEdge {
+                                target: entry.id,
+                                args: arg,
+                            });
+                        }
+                    }
+                    nested_data_nodes.extend(remapped_cfg.nodes);
                 }
-            })
-            .collect();
+            }
+        }
 
         for (visible_operation, entry_operation) in expanded_control.visible_operation_to_entry {
             if let Some(entry_node) = node_by_control_operation.get(&entry_operation).copied() {
@@ -201,12 +238,30 @@ impl<'a> CfgBuilder<'a> {
             }
         }
 
-        ControlCfgFragment {
+        Ok(ControlCfgFragment {
             nodes,
+            nested_data_nodes,
             node_by_control_operation,
             control_operation_by_node,
             node_by_entry_wire,
+            nested_data_node_by_entry_wire,
+            branch_data_successors,
+        })
+    }
+
+    fn remap_cfg_nodes(&mut self, mut cfg: Cfg) -> Cfg {
+        let node_id_by_old = cfg
+            .nodes
+            .iter()
+            .map(|node| (node.id, self.node_ids.allocate()))
+            .collect::<HashMap<_, _>>();
+
+        for node in &mut cfg.nodes {
+            node.id = node_id_by_old[&node.id];
+            node.transfer = remap_transfer_targets(node.transfer.clone(), &node_id_by_old);
         }
+        cfg.entry = node_id_by_old[&cfg.entry];
+        cfg
     }
 
     fn data_cfg_fragment(&mut self, boundary: &BoundaryWires) -> DataCfgFragment {
@@ -254,10 +309,15 @@ impl<'a> CfgBuilder<'a> {
         } = data_fragment;
         let ControlCfgFragment {
             nodes: control_nodes,
+            nested_data_nodes,
             node_by_control_operation,
             control_operation_by_node,
             node_by_entry_wire: control_node_by_entry_wire,
+            nested_data_node_by_entry_wire,
+            branch_data_successors,
         } = control_fragment;
+        let mut data_node_by_entry_wire = data_node_by_entry_wire;
+        data_node_by_entry_wire.extend(nested_data_node_by_entry_wire);
 
         let boundaries_by_node = wiring
             .node_boundaries
@@ -273,9 +333,18 @@ impl<'a> CfgBuilder<'a> {
                     &control_operation_by_node,
                     &control_node_by_entry_wire,
                     &data_node_by_entry_wire,
+                    &branch_data_successors,
                 )
             })
             .collect::<Vec<_>>();
+        nodes.extend(nested_data_nodes.into_iter().map(|mut node| {
+            node.transfer = resolve_nested_data_return(
+                node.transfer,
+                &control_node_by_entry_wire,
+                &data_node_by_entry_wire,
+            );
+            node
+        }));
         nodes.extend(data_nodes.into_iter().map(|node| {
             let boundaries = boundaries_by_node
                 .get(&node.id)
@@ -292,6 +361,7 @@ impl<'a> CfgBuilder<'a> {
             .next()
             .or_else(|| nodes.first().map(|node| node.id))
             .unwrap_or(0);
+        nodes.sort_by_key(|node| node.id);
         let predecessors = predecessors(&nodes);
 
         Cfg {
@@ -361,17 +431,26 @@ struct DataCfgFragment {
 #[derive(Debug, Clone)]
 struct ControlCfgFragment {
     nodes: Vec<CfgNodeDraft>,
+    nested_data_nodes: Vec<CfgNode>,
     node_by_control_operation: HashMap<OperationId, CfgNodeId>,
     control_operation_by_node: HashMap<CfgNodeId, OperationInstance>,
     node_by_entry_wire: HashMap<VariableId, CfgNodeId>,
+    nested_data_node_by_entry_wire: HashMap<VariableId, CfgNodeId>,
+    branch_data_successors: HashMap<OperationId, Vec<CfgEdge>>,
 }
 
 // Control expansion
 
 #[derive(Debug, Clone)]
 struct ExpandedControlGraph {
-    operations: Vec<OperationInstance>,
+    items: Vec<ExpandedControlItem>,
     visible_operation_to_entry: HashMap<OperationId, OperationId>,
+}
+
+#[derive(Debug, Clone)]
+enum ExpandedControlItem {
+    Control(OperationInstance),
+    DataCfg { call: OperationInstance, cfg: Cfg },
 }
 
 #[derive(Debug)]
@@ -392,23 +471,26 @@ impl<'a> ControlExpander<'a> {
         }
     }
 
-    fn expand(mut self, control_operation_ids: &[OperationId]) -> ExpandedControlGraph {
-        let mut operations = Vec::new();
+    fn expand(
+        mut self,
+        control_operation_ids: &[OperationId],
+    ) -> Result<ExpandedControlGraph, CfgError> {
+        let mut items = Vec::new();
         let mut visible_operation_to_entry = HashMap::new();
 
         for operation_id in control_operation_ids {
             let call = &self.operation_instances[*operation_id];
-            let first = operations.len();
-            self.inline_operation(self.compile_graph, call, true, &mut operations);
-            if let Some(entry) = operations.get(first) {
+            let first = items.len();
+            self.inline_operation(self.compile_graph, call, true, &mut items)?;
+            if let Some(ExpandedControlItem::Control(entry)) = items.get(first) {
                 visible_operation_to_entry.insert(call.id, entry.id);
             }
         }
 
-        ExpandedControlGraph {
-            operations,
+        Ok(ExpandedControlGraph {
+            items,
             visible_operation_to_entry,
-        }
+        })
     }
 
     fn inline_operation(
@@ -416,29 +498,38 @@ impl<'a> ControlExpander<'a> {
         compile_graph: &CompileGraph,
         call: &OperationInstance,
         keep_call_id: bool,
-        output: &mut Vec<OperationInstance>,
-    ) {
+        output: &mut Vec<ExpandedControlItem>,
+    ) -> Result<(), CfgError> {
         let Some(child) = self.child_control_graph(compile_graph, &call.name) else {
+            if let Some(child) = child_data_graph_for_operation(compile_graph, &call.name) {
+                let cfg = self.remapped_data_cfg(child, call)?;
+                output.push(ExpandedControlItem::DataCfg {
+                    call: call.clone(),
+                    cfg,
+                });
+                return Ok(());
+            }
             let mut operation = call.clone();
             if !keep_call_id {
                 operation.id = self.operation_ids.allocate();
             }
-            output.push(operation);
-            return;
+            output.push(ExpandedControlItem::Control(operation));
+            return Ok(());
         };
 
         let wire_map = self.child_wire_map(child, call);
         for child_operation_id in 0..operation_names(child).len() {
             let child_call = self.remapped_child_operation(child, child_operation_id, &wire_map);
-            self.inline_operation(child, &child_call, false, output);
+            self.inline_operation(child, &child_call, false, output)?;
         }
+        Ok(())
     }
 
-    fn child_control_graph<'b>(
+    fn child_control_graph(
         &self,
-        compile_graph: &'b CompileGraph,
+        compile_graph: &'a CompileGraph,
         operation: &str,
-    ) -> Option<&'b CompileGraph> {
+    ) -> Option<&'a CompileGraph> {
         compile_graph
             .children
             .iter()
@@ -495,6 +586,38 @@ impl<'a> ControlExpander<'a> {
                 .collect(),
         }
     }
+
+    fn remapped_data_cfg(
+        &mut self,
+        child: &CompileGraph,
+        call: &OperationInstance,
+    ) -> Result<Cfg, CfgError> {
+        let mut cfg = Cfg::from_compile_graph(child)?;
+        let mut variable_map = self.child_wire_map(child, call);
+        for variable in cfg_variables(&cfg) {
+            variable_map
+                .entry(NodeId(variable))
+                .or_insert_with(|| self.variable_ids.allocate());
+        }
+        remap_cfg_variables(&mut cfg, &variable_map);
+        Ok(cfg)
+    }
+}
+
+fn child_data_graph_for_operation<'a>(
+    compile_graph: &'a CompileGraph,
+    operation: &str,
+) -> Option<&'a CompileGraph> {
+    let local_name = operation.strip_prefix("data.");
+    compile_graph
+        .children
+        .iter()
+        .find(|child| {
+            child.operation == operation
+                || local_name.is_some_and(|local_name| child.graph.definition_name == local_name)
+        })
+        .map(|child| &child.graph)
+        .filter(|child| matches!(child.theory, CompileTheory::Data))
 }
 
 // CFG node drafts
@@ -504,6 +627,7 @@ fn cfg_node_from_control_draft(
     control_operation_by_node: &HashMap<CfgNodeId, OperationInstance>,
     control_node_by_entry_wire: &HashMap<VariableId, CfgNodeId>,
     data_node_by_entry_wire: &HashMap<VariableId, CfgNodeId>,
+    branch_data_successors: &HashMap<OperationId, Vec<CfgEdge>>,
 ) -> CfgNode {
     let operation = control_operation_by_node
         .get(&node.id)
@@ -513,6 +637,7 @@ fn cfg_node_from_control_draft(
         operation,
         control_node_by_entry_wire,
         data_node_by_entry_wire,
+        branch_data_successors,
     );
     CfgNode {
         id: node.id,
@@ -556,6 +681,57 @@ fn block_instruction(operation: OperationInstance) -> BlockInstruction {
 }
 
 // Transfers
+
+fn remap_transfer_targets(
+    transfer: Transfer,
+    node_id_by_old: &HashMap<CfgNodeId, CfgNodeId>,
+) -> Transfer {
+    match transfer {
+        Transfer::Goto(edge) => Transfer::Goto(remap_edge_target(edge, node_id_by_old)),
+        Transfer::If {
+            condition,
+            then_edge,
+            else_edge,
+        } => Transfer::If {
+            condition,
+            then_edge: remap_edge_target(then_edge, node_id_by_old),
+            else_edge: remap_edge_target(else_edge, node_id_by_old),
+        },
+        Transfer::Return(values) => Transfer::Return(values),
+    }
+}
+
+fn remap_edge_target(edge: CfgEdge, node_id_by_old: &HashMap<CfgNodeId, CfgNodeId>) -> CfgEdge {
+    CfgEdge {
+        target: node_id_by_old[&edge.target],
+        args: edge.args,
+    }
+}
+
+fn resolve_nested_data_return(
+    transfer: Transfer,
+    control_node_by_entry_wire: &HashMap<VariableId, CfgNodeId>,
+    data_node_by_entry_wire: &HashMap<VariableId, CfgNodeId>,
+) -> Transfer {
+    let Transfer::Return(values) = transfer else {
+        return transfer;
+    };
+    let Some(target) = values
+        .iter()
+        .find_map(|value| control_node_by_entry_wire.get(value).copied())
+        .or_else(|| {
+            values
+                .iter()
+                .find_map(|value| data_node_by_entry_wire.get(value).copied())
+        })
+    else {
+        return Transfer::Return(values);
+    };
+    Transfer::Goto(CfgEdge {
+        target,
+        args: values,
+    })
+}
 
 fn data_transfer(
     boundaries: &CfgNodeBoundaries,
@@ -605,6 +781,7 @@ fn control_transfer(
     operation: &OperationInstance,
     control_node_by_entry_wire: &HashMap<VariableId, CfgNodeId>,
     data_node_by_entry_wire: &HashMap<VariableId, CfgNodeId>,
+    branch_data_successors: &HashMap<OperationId, Vec<CfgEdge>>,
 ) -> Transfer {
     let successors = control_successors(
         operation,
@@ -612,6 +789,15 @@ fn control_transfer(
         data_node_by_entry_wire,
     );
     if is_branch_operation(operation) && successors.len() >= 2 {
+        return Transfer::If {
+            condition: operation.inputs.first().copied().unwrap_or(0),
+            then_edge: successors[0].clone(),
+            else_edge: successors[1].clone(),
+        };
+    }
+    if let Some(successors) = branch_data_successors.get(&operation.id)
+        && successors.len() >= 2
+    {
         return Transfer::If {
             condition: operation.inputs.first().copied().unwrap_or(0),
             then_edge: successors[0].clone(),
@@ -918,6 +1104,60 @@ fn operation_targets(compile_graph: &CompileGraph, operation_id: OperationId) ->
 
 fn variables(nodes: &[NodeId]) -> Vec<VariableId> {
     nodes.iter().map(|node| node.0).collect()
+}
+
+fn cfg_variables(cfg: &Cfg) -> Vec<VariableId> {
+    let mut variables = Vec::new();
+    for node in &cfg.nodes {
+        variables.extend(node.params.iter().copied());
+        for instruction in &node.block {
+            variables.extend(instruction.args.iter().copied());
+            variables.extend(instruction.results.iter().copied());
+        }
+        match &node.transfer {
+            Transfer::Goto(edge) => variables.extend(edge.args.iter().copied()),
+            Transfer::If {
+                condition,
+                then_edge,
+                else_edge,
+            } => {
+                variables.push(*condition);
+                variables.extend(then_edge.args.iter().copied());
+                variables.extend(else_edge.args.iter().copied());
+            }
+            Transfer::Return(values) => variables.extend(values.iter().copied()),
+        }
+    }
+    variables
+}
+
+fn remap_cfg_variables(cfg: &mut Cfg, variable_map: &HashMap<NodeId, VariableId>) {
+    for node in &mut cfg.nodes {
+        remap_variables(&mut node.params, variable_map);
+        for instruction in &mut node.block {
+            remap_variables(&mut instruction.args, variable_map);
+            remap_variables(&mut instruction.results, variable_map);
+        }
+        match &mut node.transfer {
+            Transfer::Goto(edge) => remap_variables(&mut edge.args, variable_map),
+            Transfer::If {
+                condition,
+                then_edge,
+                else_edge,
+            } => {
+                *condition = variable_map[&NodeId(*condition)];
+                remap_variables(&mut then_edge.args, variable_map);
+                remap_variables(&mut else_edge.args, variable_map);
+            }
+            Transfer::Return(values) => remap_variables(values, variable_map),
+        }
+    }
+}
+
+fn remap_variables(variables: &mut [VariableId], variable_map: &HashMap<NodeId, VariableId>) {
+    for variable in variables {
+        *variable = variable_map[&NodeId(*variable)];
+    }
 }
 
 fn all_operation_wires(compile_graph: &CompileGraph, operation_id: OperationId) -> Vec<NodeId> {

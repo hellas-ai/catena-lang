@@ -2,12 +2,30 @@
 
 Catena DSL's codegen has a few overlapping concerns:
 
+- Erasure: we need C runtime representations for all metacat types
 - Monomorphisation: a function with type parameters may requiring multiple versions of the 'same' templated C function
 - Host/device distinction: some functions may be needed on host, device, or both!
 - Kernels: some operations (gpu materialize) cannot be run as a normal C function, but MUST be launched as a kernel.
 
-The following two subsections describe each problem in more detail, and sketch
+The following subsections describe each problem in more detail, and sketch
 a solution.
+
+## Erasure
+
+We need to represent each catena type as a C type.
+For example:
+
+    # Indexes over space n map to u64
+    val(Ix n) ~> u64
+    val(f32 ) ~> float
+    val(bool) ~> bool
+    a -> b    ~> erase(a) -> erase(b) # here -> is short for a c function pointer
+    a => b    ~> ILLEGAL: error
+    f32       ~> empty (no representation)
+
+Thus, we can map each interface `Vec<Type>` to a `Vec<CType>` (of possibly shorter length).
+However, for simplicity, we'll use `1` as the empty type, and use a dummy
+value `catena_unit_t` at codegen time.
 
 ## Monomorphisation
 
@@ -27,7 +45,7 @@ Thus, if an annotated definition
 **Solution**
 
 Monomorphize by generating the same 'template' implementation for each set of
-type parameters used.
+type parameters used -- the "specialization key".
 For example, suppose we have
 
     (def program id : a -> a = [x])

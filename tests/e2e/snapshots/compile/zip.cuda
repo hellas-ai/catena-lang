@@ -1,0 +1,19 @@
+#include <stdint.h>
+
+__global__ void user_f32_zip_add(float* a, float* b, float* output) {
+    uint3 worker_block = blockIdx;
+    uint3 worker_thread = threadIdx;
+    uint64_t view = (uint64_t)worker_block.x * blockDim.x + worker_thread.x;
+    float a_value = a[view];
+    float b_value = b[view];
+    float sum = a_value + b_value;
+    output[view] = sum;
+    auto output_summed = output;
+    return;
+}
+
+void launch_user_f32_zip_add(uint64_t block_count, uint64_t thread_count, float* a, float* b, float* output) {
+    dim3 block(thread_count);
+    dim3 grid(block_count);
+    user_f32_zip_add<<<grid, block>>>(a, b, output);
+}

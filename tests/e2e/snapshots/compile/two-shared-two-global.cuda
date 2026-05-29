@@ -1,0 +1,32 @@
+#include <stdint.h>
+
+__global__ void user_f32_two_shared_two_global(uint64_t block_count, uint64_t thread_count, uint64_t tile_rows, uint64_t tile_cols, uint64_t tile_a_size, uint64_t tile_b_size, float* out_a, float* out_b) {
+    extern __shared__ float __shared_mem[];
+    float* tile_a = __shared_mem;
+    float* tile_b = __shared_mem + (tile_a_size);
+
+    uint3 worker_block = blockIdx;
+    uint3 worker_thread = threadIdx;
+    float one = 1.0f;
+    float zero = 0.0f;
+    tile_a[worker_thread.x] = one;
+    auto tile_a_filled = tile_a;
+    tile_b[worker_thread.x] = zero;
+    auto tile_b_filled = tile_b;
+    float from_tile_a = tile_a_filled[worker_thread.x];
+    float from_tile_b = tile_b_filled[worker_thread.x];
+    out_a[worker_block.x * thread_count + worker_thread.x] = from_tile_a;
+    auto out_a_filled = out_a;
+    out_b[worker_block.x * thread_count + worker_thread.x] = from_tile_b;
+    auto out_b_filled = out_b;
+    return;
+}
+
+void launch_user_f32_two_shared_two_global(uint64_t block_count, uint64_t thread_count, uint64_t tile_rows, uint64_t tile_cols, float* out_a, float* out_b) {
+    uint64_t tile_a_size = tile_rows * tile_cols;
+    uint64_t tile_b_size = tile_rows * tile_cols;
+
+    dim3 block(thread_count);
+    dim3 grid(block_count);
+    user_f32_two_shared_two_global<<<grid, block, (tile_a_size + tile_b_size) * sizeof(float)>>>(block_count, thread_count, tile_rows, tile_cols, tile_a_size, tile_b_size, out_a, out_b);
+}

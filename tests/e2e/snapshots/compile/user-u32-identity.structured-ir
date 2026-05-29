@@ -1,0 +1,3 @@
+program user_u32_identity()
+  never(w1)
+  return

@@ -1,0 +1,18 @@
+#include <stdint.h>
+
+__global__ void user_f32_fill_one(float* out) {
+    uint3 worker_block = blockIdx;
+    uint3 worker_thread = threadIdx;
+    float one = 1.0f;
+    uint64_t out_view = (uint64_t)worker_block.x * blockDim.x + worker_thread.x;
+    // safety: certified by user.f32.fill-one.out.out_view.safe-access
+    out[out_view] = one;
+    auto out_filled = out;
+    return;
+}
+
+void launch_user_f32_fill_one(uint64_t block_count, uint64_t thread_count, float* out) {
+    dim3 block(thread_count);
+    dim3 grid(block_count);
+    user_f32_fill_one<<<grid, block>>>(out);
+}

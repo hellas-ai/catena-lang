@@ -1,0 +1,26 @@
+#include <stdint.h>
+
+__global__ void user_f32_static_shared_one(uint64_t global_rows, uint64_t global_cols, uint64_t tile_rows, uint64_t tile_cols, uint64_t tile_size, float* out) {
+    extern __shared__ float __shared_mem[];
+    float* tile = __shared_mem;
+
+    uint3 worker_block = blockIdx;
+    uint3 worker_thread = threadIdx;
+    uint64_t out_view_row = (uint64_t)worker_block.y * tile_rows + worker_thread.y;
+    uint64_t out_view_col = (uint64_t)worker_block.x * tile_cols + worker_thread.x;
+    float one = 1.0f;
+    tile[worker_thread.x] = one;
+    auto tile_filled = tile;
+    float from_tile = tile_filled[worker_thread.x];
+    out[out_view_row * global_cols + out_view_col] = from_tile;
+    auto out_filled = out;
+    return;
+}
+
+void launch_user_f32_static_shared_one(uint64_t global_rows, uint64_t global_cols, uint64_t tile_rows, uint64_t tile_cols, float* out) {
+    uint64_t tile_size = tile_rows * tile_cols;
+
+    dim3 block(tile_rows, tile_cols);
+    dim3 grid(((global_rows + tile_rows - 1) / tile_rows), ((global_cols + tile_cols - 1) / tile_cols));
+    user_f32_static_shared_one<<<grid, block, (tile_size) * sizeof(float)>>>(global_rows, global_cols, tile_rows, tile_cols, tile_size, out);
+}

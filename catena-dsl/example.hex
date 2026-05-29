@@ -32,6 +32,17 @@
   run
 ))
 
+# using 'bool' as a substitute for `Ix n` (bool => n = 2!) we check if we can define pointwise addition!
+# TODO
+#(def program pointwise-add : {
+    #({(bool val) (u64 val)} =>) # bool => u64
+    #({(bool val) (u64 val)} =>) # bool => u64
+    #(bool val)                  # bool
+  #} -> {
+    #({(bool val) (u64 val)} =>) # bool => u64
+  #} = {
+  #})
+
 (def program materialize-bool : {
     ({gpu.state 1} * [args_tail.])
     ({gpu.env [.args_tail]} * [args.])

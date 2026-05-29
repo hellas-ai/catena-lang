@@ -4,6 +4,11 @@
   (arr => : 2 -> 1)
 })
 
+# NOTE: this assumes we also have:
+# - lifted identity
+# - lifted twist
+# In reality, we have *all* lifted functions (via 'name.')
+# But as a minimal axiomatisation, we need id, twist and generators!
 (theory program type {
   # defer A -> (1 => A)
   (arr defer : [a] -> ({1 [a]} =>))

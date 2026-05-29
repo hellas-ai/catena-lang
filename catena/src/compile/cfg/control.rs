@@ -7,6 +7,7 @@ use crate::compile::{CompileGraph, CompileTheory};
 use super::{
     build::{CfgBuilder, OperationIdAllocator, VariableIdAllocator},
     model::{Cfg, CfgError, OperationId, VariableId},
+    monoidal::MonoidalStructureSubgraph,
     operation::{
         OperationInstance, all_operation_wires, child_data_graph_for_operation, next_variable_id,
         operation_names, operation_sources, operation_targets, source_nodes, target_nodes,
@@ -31,6 +32,7 @@ pub(super) enum ExpandedControlItem {
 pub(super) struct ControlExpander<'a> {
     compile_graph: &'a CompileGraph,
     operation_instances: &'a [OperationInstance],
+    monoidal_structure_subgraph: MonoidalStructureSubgraph,
     operation_ids: OperationIdAllocator,
     variable_ids: VariableIdAllocator,
 }
@@ -39,10 +41,12 @@ impl<'a> ControlExpander<'a> {
     pub(super) fn new(
         compile_graph: &'a CompileGraph,
         operation_instances: &'a [OperationInstance],
+        monoidal_structure_subgraph: MonoidalStructureSubgraph,
     ) -> Self {
         Self {
             compile_graph,
             operation_instances,
+            monoidal_structure_subgraph,
             operation_ids: OperationIdAllocator::new(operation_instances.len()),
             variable_ids: VariableIdAllocator::new(next_variable_id(operation_instances)),
         }
@@ -58,7 +62,14 @@ impl<'a> ControlExpander<'a> {
         for operation_id in control_operation_ids {
             let call = &self.operation_instances[*operation_id];
             let first = items.len();
-            self.inline_operation(self.compile_graph, call, true, &mut items)?;
+            let monoidal_structure_subgraph = self.monoidal_structure_subgraph.clone();
+            self.inline_operation(
+                self.compile_graph,
+                call,
+                true,
+                &monoidal_structure_subgraph,
+                &mut items,
+            )?;
             if let Some(ExpandedControlItem::Control(entry)) = items.get(first) {
                 visible_operation_to_entry.insert(call.id, entry.id);
             }
@@ -75,11 +86,12 @@ impl<'a> ControlExpander<'a> {
         compile_graph: &CompileGraph,
         call: &OperationInstance,
         keep_call_id: bool,
+        monoidal_structure_subgraph: &MonoidalStructureSubgraph,
         output: &mut Vec<ExpandedControlItem>,
     ) -> Result<(), CfgError> {
         let Some(child) = self.child_control_graph(compile_graph, &call.name) else {
             if let Some(child) = child_data_graph_for_operation(compile_graph, &call.name) {
-                let cfg = self.remapped_data_cfg(child, call)?;
+                let cfg = self.remapped_data_cfg(child, call, monoidal_structure_subgraph)?;
                 output.push(ExpandedControlItem::DataCfg {
                     call: call.clone(),
                     cfg,
@@ -95,9 +107,21 @@ impl<'a> ControlExpander<'a> {
         };
 
         let wire_map = self.child_wire_map(child, call);
+        let child_monoidal_structure_subgraph =
+            MonoidalStructureSubgraph::from_compile_graph_with_context(
+                child,
+                Some(&wire_map),
+                Some(monoidal_structure_subgraph),
+            );
         for child_operation_id in 0..operation_names(child).len() {
             let child_call = self.remapped_child_operation(child, child_operation_id, &wire_map);
-            self.inline_operation(child, &child_call, false, output)?;
+            self.inline_operation(
+                child,
+                &child_call,
+                false,
+                &child_monoidal_structure_subgraph,
+                output,
+            )?;
         }
         Ok(())
     }
@@ -168,8 +192,14 @@ impl<'a> ControlExpander<'a> {
         &mut self,
         child: &CompileGraph,
         call: &OperationInstance,
+        monoidal_structure_subgraph: &MonoidalStructureSubgraph,
     ) -> Result<Cfg, CfgError> {
         let variable_map = self.child_wire_map(child, call);
-        CfgBuilder::new_with_context(child, variable_map).build()
+        CfgBuilder::new_with_context_and_monoidal(
+            child,
+            variable_map,
+            Some(monoidal_structure_subgraph.clone()),
+        )
+        .build()
     }
 }

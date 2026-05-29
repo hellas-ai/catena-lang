@@ -11,10 +11,10 @@ use super::{
         BoundaryKind, Cfg, CfgEdge, CfgError, CfgNode, CfgNodeDraft, CfgNodeId, CfgWiring,
         OperationId, VariableId,
     },
-    monoidal::MonoidalStructureResolver,
+    monoidal::{MonoidalStructureResolver, MonoidalStructureSubgraph},
     operation::{
-        OperationInstance, effective_operation_instance, is_branch_operation, is_control_operation,
-        operation_names,
+        CfgOperationRole, OperationInstance, cfg_operation_role, effective_operation_instance,
+        is_branch_operation, is_control_operation, operation_names,
     },
     wiring::{
         BoundaryWires, cfg_node_from_control_draft, data_transfer, nodes_with_boundary,
@@ -44,10 +44,23 @@ impl<'a> CfgBuilder<'a> {
         compile_graph: &'a CompileGraph,
         wire_map: HashMap<NodeId, VariableId>,
     ) -> Self {
+        Self::new_with_context_and_monoidal(compile_graph, wire_map, None)
+    }
+
+    pub(super) fn new_with_context_and_monoidal(
+        compile_graph: &'a CompileGraph,
+        wire_map: HashMap<NodeId, VariableId>,
+        inherited_monoidal_structure: Option<MonoidalStructureSubgraph>,
+    ) -> Self {
+        let monoidal_structure_resolver = MonoidalStructureResolver::new_with_context(
+            compile_graph,
+            Some(&wire_map),
+            inherited_monoidal_structure.as_ref(),
+        );
         Self {
             compile_graph,
             wire_map,
-            monoidal_structure_resolver: MonoidalStructureResolver::new(compile_graph),
+            monoidal_structure_resolver,
             node_ids: CfgNodeIdAllocator::default(),
             operation_instances: Vec::new(),
             control_operation_ids: Vec::new(),
@@ -57,7 +70,7 @@ impl<'a> CfgBuilder<'a> {
 
     pub(super) fn build(mut self) -> Result<Cfg, CfgError> {
         self.reject_non_data_region()?;
-        self.collect_operations();
+        self.collect_operations()?;
         self.build_data_cfg()
     }
 
@@ -68,21 +81,33 @@ impl<'a> CfgBuilder<'a> {
         }
     }
 
-    fn collect_operations(&mut self) {
-        let _resolver = &self.monoidal_structure_resolver;
+    fn collect_operations(&mut self) -> Result<(), CfgError> {
         self.operation_instances = (0..operation_names(self.compile_graph).len())
             .map(|operation_id| {
-                effective_operation_instance(self.compile_graph, operation_id, &self.wire_map)
+                effective_operation_instance(
+                    self.compile_graph,
+                    operation_id,
+                    &self.wire_map,
+                    &self.monoidal_structure_resolver,
+                )
             })
-            .collect();
+            .collect::<Result<Vec<_>, CfgError>>()?;
 
         for operation in &self.operation_instances {
+            if matches!(
+                cfg_operation_role(&operation.name),
+                CfgOperationRole::MonoidalStructure
+            ) && !is_control_operation(self.compile_graph, &operation.name)
+            {
+                continue;
+            }
             if is_control_operation(self.compile_graph, &operation.name) {
                 self.control_operation_ids.push(operation.id);
             } else {
                 self.data_operation_ids.push(operation.id);
             }
         }
+        Ok(())
     }
 
     fn build_data_cfg(&mut self) -> Result<Cfg, CfgError> {
@@ -99,8 +124,12 @@ impl<'a> CfgBuilder<'a> {
     }
 
     fn control_cfg_fragment(&mut self) -> Result<ControlCfgFragment, CfgError> {
-        let expanded_control = ControlExpander::new(self.compile_graph, &self.operation_instances)
-            .expand(&self.control_operation_ids)?;
+        let expanded_control = ControlExpander::new(
+            self.compile_graph,
+            &self.operation_instances,
+            self.monoidal_structure_resolver.subgraph().clone(),
+        )
+        .expand(&self.control_operation_ids)?;
 
         let mut node_by_control_operation = HashMap::new();
         let mut control_operation_by_node = HashMap::new();

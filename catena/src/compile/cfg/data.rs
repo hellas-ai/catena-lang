@@ -45,15 +45,13 @@ pub(super) fn block_instruction(
     operation: OperationInstance,
 ) -> Result<Option<BlockInstruction>, CfgError> {
     match cfg_operation_role(&operation.name) {
-        CfgOperationRole::Instruction | CfgOperationRole::MonoidalStructure => {
-            Ok(Some(BlockInstruction {
-                operation_id: operation.id,
-                operation: operation.name,
-                args: operation.inputs,
-                results: operation.outputs,
-            }))
-        }
-        CfgOperationRole::ControlFlow => Ok(None),
+        CfgOperationRole::Instruction => Ok(Some(BlockInstruction {
+            operation_id: operation.id,
+            operation: operation.name,
+            args: operation.inputs,
+            results: operation.outputs,
+        })),
+        CfgOperationRole::MonoidalStructure | CfgOperationRole::ControlFlow => Ok(None),
     }
 }
 // Data operation partitioning

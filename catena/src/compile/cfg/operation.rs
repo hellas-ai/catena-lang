@@ -3,7 +3,10 @@ use std::collections::HashMap;
 
 use crate::compile::{CompileGraph, CompileTheory};
 
-use super::model::{OperationId, OperationName, VariableId};
+use super::{
+    model::{CfgError, OperationId, OperationName, VariableId},
+    monoidal::MonoidalStructureResolver,
+};
 
 pub(super) const MONOIDAL_STRUCTURE_OPERATIONS: &[&str] = &[
     "val.*.intro",
@@ -97,19 +100,35 @@ pub(super) fn effective_operation_instance(
     compile_graph: &CompileGraph,
     operation_id: OperationId,
     wire_map: &HashMap<NodeId, VariableId>,
-) -> OperationInstance {
+    monoidal_structure_resolver: &MonoidalStructureResolver<'_>,
+) -> Result<OperationInstance, CfgError> {
     let mut operation = operation_instance(compile_graph, operation_id);
     operation.inputs = operation
         .inputs
         .into_iter()
         .map(|wire| mapped_wire(NodeId(wire), wire_map))
         .collect();
+    operation.inputs = resolve_operation_inputs(operation.clone(), monoidal_structure_resolver)?;
     operation.outputs = operation
         .outputs
         .into_iter()
         .map(|wire| mapped_wire(NodeId(wire), wire_map))
         .collect();
-    operation
+    Ok(operation)
+}
+
+fn resolve_operation_inputs(
+    operation: OperationInstance,
+    monoidal_structure_resolver: &MonoidalStructureResolver<'_>,
+) -> Result<Vec<VariableId>, CfgError> {
+    if matches!(
+        cfg_operation_role(&operation.name),
+        CfgOperationRole::Instruction
+    ) {
+        monoidal_structure_resolver.resolve_variables(operation.inputs)
+    } else {
+        Ok(operation.inputs)
+    }
 }
 
 pub(super) fn mapped_wire(wire: NodeId, wire_map: &HashMap<NodeId, VariableId>) -> VariableId {

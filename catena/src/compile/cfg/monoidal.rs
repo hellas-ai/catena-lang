@@ -14,8 +14,8 @@ use crate::compile::CompileGraph;
 use super::{
     model::{CfgError, OperationId, VariableId},
     operation::{
-        MONOIDAL_STRUCTURE_OPERATIONS, local_operation_name, operation_names, operation_sources,
-        operation_targets,
+        CONTROL_FLOW_ONLY_OPERATIONS, MONOIDAL_STRUCTURE_OPERATIONS, local_operation_name,
+        operation_names, operation_sources, operation_targets,
     },
 };
 
@@ -28,8 +28,19 @@ pub(super) struct MonoidalStructureSubgraph {
 
 impl MonoidalStructureSubgraph {
     pub(super) fn from_compile_graph(compile_graph: &CompileGraph) -> Self {
-        let mut builder = MonoidalStructureSubgraphBuilder::new(compile_graph.graph.h.w.0.to_vec());
-        builder.add_region(compile_graph);
+        Self::from_compile_graph_with_context(compile_graph, None, None)
+    }
+
+    pub(super) fn from_compile_graph_with_context(
+        compile_graph: &CompileGraph,
+        wire_map: Option<&std::collections::HashMap<NodeId, VariableId>>,
+        inherited: Option<&MonoidalStructureSubgraph>,
+    ) -> Self {
+        let mut builder = MonoidalStructureSubgraphBuilder::new();
+        if let Some(inherited) = inherited {
+            builder.add_subgraph(inherited);
+        }
+        builder.add_region(compile_graph, wire_map);
         Self {
             graph: builder.finish(),
         }
@@ -46,9 +57,9 @@ pub(super) struct MonoidalStructureSubgraphBuilder {
 }
 
 impl MonoidalStructureSubgraphBuilder {
-    fn new(wires: Vec<crate::lang::Obj>) -> Self {
+    fn new() -> Self {
         Self {
-            wires,
+            wires: Vec::new(),
             operations: Vec::new(),
             source_lengths: Vec::new(),
             target_lengths: Vec::new(),
@@ -57,23 +68,56 @@ impl MonoidalStructureSubgraphBuilder {
         }
     }
 
-    fn add_region(&mut self, compile_graph: &CompileGraph) {
+    fn add_subgraph(&mut self, subgraph: &MonoidalStructureSubgraph) {
+        for (wire, object) in subgraph.graph.h.w.0.0.iter().cloned().enumerate() {
+            self.add_wire(wire, object);
+        }
+        for operation_id in 0..subgraph_operation_count(&subgraph.graph) {
+            self.add_operation(
+                subgraph.graph.h.x.0.0[operation_id].clone(),
+                monoidal_structure_operation_sources(&subgraph.graph, operation_id)
+                    .into_iter()
+                    .map(|wire| wire.0)
+                    .collect(),
+                monoidal_structure_operation_targets(&subgraph.graph, operation_id)
+                    .into_iter()
+                    .map(|wire| wire.0)
+                    .collect(),
+            );
+        }
+    }
+
+    fn add_region(
+        &mut self,
+        compile_graph: &CompileGraph,
+        wire_map: Option<&std::collections::HashMap<NodeId, VariableId>>,
+    ) {
+        for (wire, object) in compile_graph.graph.h.w.0.0.iter().cloned().enumerate() {
+            self.add_wire(mapped_region_wire(NodeId(wire), wire_map), object);
+        }
         for operation_id in 0..operation_names(compile_graph).len() {
             let operation_name = operation_names(compile_graph)[operation_id].to_string();
-            if MONOIDAL_STRUCTURE_OPERATIONS.contains(&local_operation_name(&operation_name)) {
+            if is_structure_resolver_operation(local_operation_name(&operation_name)) {
                 self.add_operation(
                     operation_names(compile_graph)[operation_id].clone(),
                     operation_sources(compile_graph, operation_id)
                         .into_iter()
-                        .map(|wire| wire.0)
+                        .map(|wire| mapped_region_wire(wire, wire_map))
                         .collect(),
                     operation_targets(compile_graph, operation_id)
                         .into_iter()
-                        .map(|wire| wire.0)
+                        .map(|wire| mapped_region_wire(wire, wire_map))
                         .collect(),
                 );
             }
         }
+    }
+
+    fn add_wire(&mut self, wire: VariableId, object: crate::lang::Obj) {
+        if self.wires.len() <= wire {
+            self.wires.resize(wire + 1, object.clone());
+        }
+        self.wires[wire] = object;
     }
 
     fn add_operation(
@@ -114,10 +158,26 @@ pub(super) struct MonoidalStructureResolver<'a> {
 #[allow(dead_code)]
 impl<'a> MonoidalStructureResolver<'a> {
     pub(super) fn new(compile_graph: &'a CompileGraph) -> Self {
+        Self::new_with_context(compile_graph, None, None)
+    }
+
+    pub(super) fn new_with_context(
+        compile_graph: &'a CompileGraph,
+        wire_map: Option<&std::collections::HashMap<NodeId, VariableId>>,
+        inherited: Option<&MonoidalStructureSubgraph>,
+    ) -> Self {
         Self {
             compile_graph,
-            subgraph: MonoidalStructureSubgraph::from_compile_graph(compile_graph),
+            subgraph: MonoidalStructureSubgraph::from_compile_graph_with_context(
+                compile_graph,
+                wire_map,
+                inherited,
+            ),
         }
+    }
+
+    pub(super) fn subgraph(&self) -> &MonoidalStructureSubgraph {
+        &self.subgraph
     }
 
     pub(super) fn resolve_variables(
@@ -217,6 +277,17 @@ impl<'a> MonoidalStructureResolver<'a> {
                     seen,
                 )?;
                 self.resolve_atom_inner(payload, seen)
+            }
+            "merge" => {
+                let sources =
+                    monoidal_structure_operation_sources(&self.subgraph.graph, operation_id);
+                let [source] = sources.as_slice() else {
+                    return Err(CfgError::UnresolvedMonoidalStructureAtom {
+                        wire: variable,
+                        operation,
+                    });
+                };
+                self.resolve_atom_inner(source.0, seen)
             }
             _ => Err(CfgError::UnresolvedMonoidalStructureAtom {
                 wire: variable,
@@ -333,6 +404,17 @@ impl<'a> MonoidalStructureResolver<'a> {
                 )?;
                 self.resolve_product_component(payload, component, seen)
             }
+            "merge" => {
+                let sources =
+                    monoidal_structure_operation_sources(&self.subgraph.graph, operation_id);
+                let [source] = sources.as_slice() else {
+                    return Err(CfgError::UnresolvedMonoidalStructureAtom {
+                        wire: variable,
+                        operation,
+                    });
+                };
+                self.resolve_product_component(source.0, component, seen)
+            }
             _ => Err(CfgError::UnresolvedMonoidalStructureAtom {
                 wire: variable,
                 operation,
@@ -377,6 +459,17 @@ impl<'a> MonoidalStructureResolver<'a> {
                     });
                 };
                 Ok(source.0)
+            }
+            "merge" => {
+                let sources =
+                    monoidal_structure_operation_sources(&self.subgraph.graph, operation_id);
+                let [source] = sources.as_slice() else {
+                    return Err(CfgError::UnresolvedMonoidalStructureAtom {
+                        wire: variable,
+                        operation,
+                    });
+                };
+                self.resolve_coproduct_branch_atom(source.0, branch, _seen)
             }
             _ => Err(CfgError::UnresolvedMonoidalStructureAtom {
                 wire: variable,
@@ -455,12 +548,41 @@ impl<'a> MonoidalStructureResolver<'a> {
                     }),
                 }
             }
+            "merge" => {
+                let sources =
+                    monoidal_structure_operation_sources(&self.subgraph.graph, operation_id);
+                let [source] = sources.as_slice() else {
+                    return Err(CfgError::UnresolvedMonoidalStructureAtom {
+                        wire: variable,
+                        operation,
+                    });
+                };
+                self.resolve_coproduct_branch_product_component(source.0, branch, component, seen)
+            }
             _ => Err(CfgError::UnresolvedMonoidalStructureAtom {
                 wire: variable,
                 operation,
             }),
         }
     }
+}
+
+fn is_structure_resolver_operation(operation: &str) -> bool {
+    MONOIDAL_STRUCTURE_OPERATIONS.contains(&operation)
+        || CONTROL_FLOW_ONLY_OPERATIONS
+            .iter()
+            .any(|control_operation| {
+                *control_operation == "merge" && operation == *control_operation
+            })
+}
+
+fn mapped_region_wire(
+    wire: NodeId,
+    wire_map: Option<&std::collections::HashMap<NodeId, VariableId>>,
+) -> VariableId {
+    wire_map
+        .and_then(|wire_map| wire_map.get(&wire).copied())
+        .unwrap_or(wire.0)
 }
 
 fn indexed_coproduct(

@@ -1,9 +1,11 @@
 use thiserror::Error;
 
 use crate::{
-    compile::program::{Program, VariableId},
-    structured::{
+    compile::{
         cfg,
+        program::{Program, VariableId},
+    },
+    structured::{
         ir::{EntryPoint, Stmt, StructuredProgram},
         ramsey,
         ramsey::RamseyError,

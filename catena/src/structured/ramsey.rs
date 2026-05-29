@@ -1,7 +1,5 @@
-use super::{
-    cfg::{BlockInstruction, Cfg, CfgEdge, CfgNodeId, Transfer},
-    ir::{Primitive, Stmt},
-};
+use super::ir::{Primitive, Stmt};
+use crate::compile::cfg::{BlockInstruction, Cfg, CfgEdge, CfgNodeId, Transfer};
 use std::collections::{BTreeSet, HashSet};
 
 #[derive(Debug, thiserror::Error)]
@@ -14,7 +12,7 @@ pub enum RamseyError {
 
 pub fn structure(
     cfg: Cfg,
-    variable_name: impl Fn(crate::structured::cfg::VariableId) -> String + 'static,
+    variable_name: impl Fn(crate::compile::cfg::VariableId) -> String + 'static,
 ) -> Result<Vec<Stmt>, RamseyError> {
     let analyses = Analyses::new(&cfg)?;
     let mut structurer = Structurer {
@@ -99,7 +97,7 @@ enum ContextFrame {
 struct Structurer {
     cfg: Cfg,
     analyses: Analyses,
-    variable_name: Box<dyn Fn(crate::structured::cfg::VariableId) -> String>,
+    variable_name: Box<dyn Fn(crate::compile::cfg::VariableId) -> String>,
 }
 
 impl Structurer {

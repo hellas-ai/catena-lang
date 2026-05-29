@@ -3,9 +3,11 @@ use std::collections::HashMap;
 use thiserror::Error;
 
 use crate::{
-    compile::{CompileGraph, CompileTheory},
+    compile::{
+        CompileGraph, CompileTheory,
+        cfg::{Cfg, CfgError},
+    },
     lang::Obj,
-    structured::cfg::{Cfg, CfgError},
 };
 
 #[derive(Debug, Error)]

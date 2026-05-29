@@ -1,3 +1,4 @@
+pub mod cfg;
 pub mod check_render;
 pub mod config;
 pub mod cuda;

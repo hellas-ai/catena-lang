@@ -2,7 +2,7 @@
 
 Catena DSL's codegen has a few overlapping concerns:
 
-- Erasure: we need C runtime representations for all metacat types
+- Representation lowering: we need C runtime representations for all metacat types
 - Monomorphisation: a function with type parameters may requiring multiple versions of the 'same' templated C function
 - Host/device distinction: some functions may be needed on host, device, or both!
 - Kernels: some operations (gpu materialize) cannot be run as a normal C function, but MUST be launched as a kernel.
@@ -10,18 +10,20 @@ Catena DSL's codegen has a few overlapping concerns:
 The following subsections describe each problem in more detail, and sketch
 a solution.
 
-## Erasure
+## Representation Lowering
 
 We need to represent each catena type as a C type.
 For example:
 
-    # Indexes over space n map to u64
-    val(Ix n) ~> u64
-    val(f32 ) ~> float
-    val(bool) ~> bool
-    a -> b    ~> erase(a) -> erase(b) # here -> is short for a c function pointer
-    a => b    ~> ILLEGAL: error
-    f32       ~> empty (no representation)
+
+    val(Ix n)   ~> u64                  # Indexes over space n map to u64
+    val(f32 )   ~> float
+    val(bool)   ~> bool
+
+    val(buf t)  ~> *t                   # pointer to t, representing allocated array
+    a -> b      ~> lower(a) -> lower(b) # here -> is short for a c function pointer
+    a => b      ~> ERROR                # closures must not survive lowering
+    f32         ~> Erased               # empty (no representation)
 
 Thus, we can map each interface `Vec<Type>` to a `Vec<CType>` (of possibly shorter length).
 However, for simplicity, we'll use `1` as the empty type, and use a dummy

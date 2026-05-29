@@ -14,6 +14,7 @@
 //!   for bool, and synth a function type for (A -> B) fns.
 
 pub mod gpu;
+pub mod lower_types;
 mod prelude;
 mod types;
 

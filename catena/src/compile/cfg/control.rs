@@ -7,10 +7,11 @@ use crate::compile::{CompileGraph, CompileTheory};
 use super::{
     build::{CfgBuilder, OperationIdAllocator, VariableIdAllocator},
     model::{Cfg, CfgError, OperationId, VariableId},
-    monoidal::MonoidalStructureSubgraph,
+    monoidal::{MonoidalStructureResolver, MonoidalStructureSubgraph},
     operation::{
-        OperationInstance, all_operation_wires, child_data_graph_for_operation, next_variable_id,
-        operation_names, operation_sources, operation_targets, source_nodes, target_nodes,
+        OperationInstance, all_operation_wires, child_data_graph_for_operation,
+        is_branch_operation, next_variable_id, operation_names, operation_sources,
+        operation_targets, source_nodes, target_nodes,
     },
 };
 
@@ -113,13 +114,20 @@ impl<'a> ControlExpander<'a> {
                 Some(&wire_map),
                 Some(monoidal_structure_subgraph),
             );
+        let child_monoidal_structure_resolver =
+            MonoidalStructureResolver::from_subgraph(child, child_monoidal_structure_subgraph);
         for child_operation_id in 0..operation_names(child).len() {
-            let child_call = self.remapped_child_operation(child, child_operation_id, &wire_map);
+            let child_call = self.remapped_child_operation(
+                child,
+                child_operation_id,
+                &wire_map,
+                &child_monoidal_structure_resolver,
+            )?;
             self.inline_operation(
                 child,
                 &child_call,
                 false,
-                &child_monoidal_structure_subgraph,
+                child_monoidal_structure_resolver.subgraph(),
                 output,
             )?;
         }
@@ -173,8 +181,9 @@ impl<'a> ControlExpander<'a> {
         child: &CompileGraph,
         operation_id: OperationId,
         wire_map: &HashMap<NodeId, VariableId>,
-    ) -> OperationInstance {
-        OperationInstance {
+        monoidal_structure_resolver: &MonoidalStructureResolver<'_>,
+    ) -> Result<OperationInstance, CfgError> {
+        let mut operation = OperationInstance {
             id: self.operation_ids.allocate(),
             name: operation_names(child)[operation_id].to_string(),
             inputs: operation_sources(child, operation_id)
@@ -185,7 +194,15 @@ impl<'a> ControlExpander<'a> {
                 .into_iter()
                 .filter_map(|wire| wire_map.get(&wire).copied())
                 .collect(),
+            branch_condition: None,
+        };
+        if is_branch_operation(&operation)
+            && let Some(condition) = operation.inputs.first().copied()
+        {
+            operation.branch_condition =
+                Some(monoidal_structure_resolver.resolve_discriminator(condition)?);
         }
+        Ok(operation)
     }
 
     fn remapped_data_cfg(

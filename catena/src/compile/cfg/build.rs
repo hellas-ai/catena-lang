@@ -13,8 +13,8 @@ use super::{
     },
     monoidal::{MonoidalStructureResolver, MonoidalStructureSubgraph},
     operation::{
-        CfgOperationRole, OperationInstance, cfg_operation_role, effective_operation_instance,
-        is_branch_operation, is_control_operation, operation_names,
+        OperationInstance, effective_operation_instance, is_branch_operation, is_control_operation,
+        operation_names,
     },
     wiring::{
         BoundaryWires, cfg_node_from_control_draft, data_transfer, nodes_with_boundary,
@@ -94,13 +94,6 @@ impl<'a> CfgBuilder<'a> {
             .collect::<Result<Vec<_>, CfgError>>()?;
 
         for operation in &self.operation_instances {
-            if matches!(
-                cfg_operation_role(&operation.name),
-                CfgOperationRole::MonoidalStructure
-            ) && !is_control_operation(self.compile_graph, &operation.name)
-            {
-                continue;
-            }
             if is_control_operation(self.compile_graph, &operation.name) {
                 self.control_operation_ids.push(operation.id);
             } else {

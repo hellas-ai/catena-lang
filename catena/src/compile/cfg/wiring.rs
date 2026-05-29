@@ -148,7 +148,7 @@ pub(super) fn control_transfer(
     );
     if is_branch_operation(operation) && successors.len() >= 2 {
         return Transfer::If {
-            condition: operation.inputs.first().copied().unwrap_or(0),
+            condition: branch_condition(operation),
             then_edge: successors[0].clone(),
             else_edge: successors[1].clone(),
         };
@@ -157,14 +157,14 @@ pub(super) fn control_transfer(
         && successors.len() >= 2
     {
         return Transfer::If {
-            condition: operation.inputs.first().copied().unwrap_or(0),
+            condition: branch_condition(operation),
             then_edge: successors[0].clone(),
             else_edge: successors[1].clone(),
         };
     }
     if is_branch_operation(operation) && operation.outputs.len() >= 2 {
         return Transfer::If {
-            condition: operation.inputs.first().copied().unwrap_or(0),
+            condition: branch_condition(operation),
             then_edge: CfgEdge {
                 target: node + 1,
                 args: vec![operation.outputs[0]],
@@ -214,6 +214,13 @@ pub(super) fn control_successors(
 
 fn is_branch_operation(operation: &OperationInstance) -> bool {
     operation.outputs.len() > 1 || operation.name.contains("branch") || operation.name == "if"
+}
+
+fn branch_condition(operation: &OperationInstance) -> VariableId {
+    operation
+        .branch_condition
+        .or_else(|| operation.inputs.first().copied())
+        .unwrap_or(0)
 }
 // Boundary wiring
 

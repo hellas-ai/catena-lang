@@ -7,7 +7,7 @@ use open_hypergraphs::{
         SemifiniteFunction as StrictSemifiniteFunction, VecArray,
     },
 };
-use std::collections::HashSet;
+use std::collections::HashMap;
 
 use crate::compile::CompileGraph;
 
@@ -153,6 +153,18 @@ impl MonoidalStructureSubgraphBuilder {
 pub(super) struct MonoidalStructureResolver<'a> {
     compile_graph: &'a CompileGraph,
     subgraph: MonoidalStructureSubgraph,
+    values: HashMap<VariableId, MonoidalValue>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum MonoidalValue {
+    Atom(VariableId),
+    Product(Vec<MonoidalValue>),
+    Coproduct {
+        condition: Box<MonoidalValue>,
+        branches: Vec<MonoidalValue>,
+    },
+    Unit,
 }
 
 #[allow(dead_code)]
@@ -166,13 +178,28 @@ impl<'a> MonoidalStructureResolver<'a> {
         wire_map: Option<&std::collections::HashMap<NodeId, VariableId>>,
         inherited: Option<&MonoidalStructureSubgraph>,
     ) -> Self {
+        let subgraph = MonoidalStructureSubgraph::from_compile_graph_with_context(
+            compile_graph,
+            wire_map,
+            inherited,
+        );
+        let values = interpret_monoidal_structure(&subgraph);
         Self {
             compile_graph,
-            subgraph: MonoidalStructureSubgraph::from_compile_graph_with_context(
-                compile_graph,
-                wire_map,
-                inherited,
-            ),
+            subgraph,
+            values,
+        }
+    }
+
+    pub(super) fn from_subgraph(
+        compile_graph: &'a CompileGraph,
+        subgraph: MonoidalStructureSubgraph,
+    ) -> Self {
+        let values = interpret_monoidal_structure(&subgraph);
+        Self {
+            compile_graph,
+            subgraph,
+            values,
         }
     }
 
@@ -186,385 +213,302 @@ impl<'a> MonoidalStructureResolver<'a> {
     ) -> Result<Vec<VariableId>, CfgError> {
         variables
             .into_iter()
-            .map(|variable| self.resolve_atom(variable))
+            .map(|variable| self.resolve_variable(variable))
             .collect()
     }
 
-    pub(super) fn resolve_atom(&self, variable: VariableId) -> Result<VariableId, CfgError> {
-        self.resolve_atom_inner(variable, &mut HashSet::new())
-    }
-
-    fn resolve_atom_inner(
+    pub(super) fn resolve_discriminator(
         &self,
         variable: VariableId,
-        seen: &mut HashSet<VariableId>,
     ) -> Result<VariableId, CfgError> {
-        if !seen.insert(variable) {
-            return Err(CfgError::MonoidalStructureCycle(variable));
-        }
-
-        let Some((operation_id, output_index)) =
-            producer_of_monoidal_structure_wire(&self.subgraph.graph, variable)
-        else {
-            return Ok(variable);
-        };
-
-        let operation = monoidal_structure_operation_name(&self.subgraph.graph, operation_id);
-        match operation.as_str() {
-            "val.*.elim" => {
-                self.resolve_val_product_elim_component(operation_id, output_index, seen)
-            }
-            "2.elim" => {
-                let sources =
-                    monoidal_structure_operation_sources(&self.subgraph.graph, operation_id);
-                let [source] = sources.as_slice() else {
-                    return Err(CfgError::UnresolvedMonoidalStructureAtom {
-                        wire: variable,
-                        operation,
-                    });
-                };
-                self.resolve_atom_inner(source.0, seen)
-            }
-            "distr" => {
-                let sources =
-                    monoidal_structure_operation_sources(&self.subgraph.graph, operation_id);
-                let [source] = sources.as_slice() else {
-                    return Err(CfgError::UnresolvedMonoidalStructureAtom {
-                        wire: variable,
-                        operation,
-                    });
-                };
-                let condition = self.resolve_product_component(source.0, 0, seen)?;
-                self.resolve_atom_inner(condition, seen)
-            }
-            "unitl.elim" => {
-                let sources =
-                    monoidal_structure_operation_sources(&self.subgraph.graph, operation_id);
-                let [source] = sources.as_slice() else {
-                    return Err(CfgError::UnresolvedMonoidalStructureAtom {
-                        wire: variable,
-                        operation,
-                    });
-                };
-                let payload = self.resolve_product_component(source.0, 1, seen)?;
-                self.resolve_atom_inner(payload, seen)
-            }
-            "val.+.elim" => {
-                let sources =
-                    monoidal_structure_operation_sources(&self.subgraph.graph, operation_id);
-                let [source] = sources.as_slice() else {
-                    return Err(CfgError::UnresolvedMonoidalStructureAtom {
-                        wire: variable,
-                        operation,
-                    });
-                };
-                let branch = self.resolve_coproduct_branch_atom(source.0, output_index, seen)?;
-                self.resolve_atom_inner(branch, seen)
-            }
-            "elim2" => {
-                let sources =
-                    monoidal_structure_operation_sources(&self.subgraph.graph, operation_id);
-                let [source] = sources.as_slice() else {
-                    return Err(CfgError::UnresolvedMonoidalStructureAtom {
-                        wire: variable,
-                        operation,
-                    });
-                };
-                let payload = self.resolve_coproduct_branch_product_component(
-                    source.0,
-                    output_index,
-                    1,
-                    seen,
-                )?;
-                self.resolve_atom_inner(payload, seen)
-            }
-            "merge" => {
-                let sources =
-                    monoidal_structure_operation_sources(&self.subgraph.graph, operation_id);
-                let [source] = sources.as_slice() else {
-                    return Err(CfgError::UnresolvedMonoidalStructureAtom {
-                        wire: variable,
-                        operation,
-                    });
-                };
-                self.resolve_atom_inner(source.0, seen)
-            }
-            _ => Err(CfgError::UnresolvedMonoidalStructureAtom {
-                wire: variable,
-                operation,
-            }),
-        }
-    }
-
-    fn resolve_val_product_elim_component(
-        &self,
-        elim_operation: OperationId,
-        component: usize,
-        seen: &mut HashSet<VariableId>,
-    ) -> Result<VariableId, CfgError> {
-        let packed_sources =
-            monoidal_structure_operation_sources(&self.subgraph.graph, elim_operation);
-        let [packed] = packed_sources.as_slice() else {
-            return Err(CfgError::UnresolvedMonoidalStructureAtom {
-                wire: usize::MAX,
-                operation: monoidal_structure_operation_name(&self.subgraph.graph, elim_operation),
-            });
-        };
-        let source = self.resolve_product_component(packed.0, component, seen)?;
-        self.resolve_atom_inner(source, seen)
-    }
-
-    fn resolve_product_component(
-        &self,
-        variable: VariableId,
-        component: usize,
-        seen: &mut HashSet<VariableId>,
-    ) -> Result<VariableId, CfgError> {
-        let Some((operation_id, output_index)) =
-            producer_of_monoidal_structure_wire(&self.subgraph.graph, variable)
-        else {
-            return Err(CfgError::UnresolvedMonoidalStructureAtom {
-                wire: variable,
-                operation: "product component".to_string(),
-            });
-        };
-
-        let operation = monoidal_structure_operation_name(&self.subgraph.graph, operation_id);
-        match operation.as_str() {
-            "val.*.intro" => {
-                let sources =
-                    monoidal_structure_operation_sources(&self.subgraph.graph, operation_id);
-                sources
-                    .get(component)
-                    .map(|source| source.0)
-                    .ok_or_else(|| CfgError::UnresolvedMonoidalStructureAtom {
-                        wire: variable,
-                        operation,
-                    })
-            }
-            "val.+.elim" => {
-                let sources =
-                    monoidal_structure_operation_sources(&self.subgraph.graph, operation_id);
-                let [source] = sources.as_slice() else {
-                    return Err(CfgError::UnresolvedMonoidalStructureAtom {
-                        wire: variable,
-                        operation,
-                    });
-                };
-                self.resolve_coproduct_branch_product_component(
-                    source.0,
-                    output_index,
-                    component,
-                    seen,
-                )
-            }
-            "distr" => {
-                let sources =
-                    monoidal_structure_operation_sources(&self.subgraph.graph, operation_id);
-                let [source] = sources.as_slice() else {
-                    return Err(CfgError::UnresolvedMonoidalStructureAtom {
-                        wire: variable,
-                        operation,
-                    });
-                };
-                let payload = self.resolve_product_component(source.0, 1, seen)?;
-                self.resolve_product_component(payload, component, seen)
-            }
-            "unitl.intro" => {
-                if component != 1 {
-                    return Err(CfgError::UnresolvedMonoidalStructureAtom {
-                        wire: variable,
-                        operation,
-                    });
-                }
-                let sources =
-                    monoidal_structure_operation_sources(&self.subgraph.graph, operation_id);
-                let [source] = sources.as_slice() else {
-                    return Err(CfgError::UnresolvedMonoidalStructureAtom {
-                        wire: variable,
-                        operation,
-                    });
-                };
-                Ok(source.0)
-            }
-            "elim2" => {
-                let sources =
-                    monoidal_structure_operation_sources(&self.subgraph.graph, operation_id);
-                let [source] = sources.as_slice() else {
-                    return Err(CfgError::UnresolvedMonoidalStructureAtom {
-                        wire: variable,
-                        operation,
-                    });
-                };
-                let payload = self.resolve_coproduct_branch_product_component(
-                    source.0,
-                    output_index,
-                    1,
-                    seen,
-                )?;
-                self.resolve_product_component(payload, component, seen)
-            }
-            "merge" => {
-                let sources =
-                    monoidal_structure_operation_sources(&self.subgraph.graph, operation_id);
-                let [source] = sources.as_slice() else {
-                    return Err(CfgError::UnresolvedMonoidalStructureAtom {
-                        wire: variable,
-                        operation,
-                    });
-                };
-                self.resolve_product_component(source.0, component, seen)
-            }
-            _ => Err(CfgError::UnresolvedMonoidalStructureAtom {
-                wire: variable,
-                operation,
-            }),
-        }
-    }
-
-    fn resolve_coproduct_branch_atom(
-        &self,
-        variable: VariableId,
-        branch: usize,
-        _seen: &mut HashSet<VariableId>,
-    ) -> Result<VariableId, CfgError> {
-        let Some((operation_id, _)) =
-            producer_of_monoidal_structure_wire(&self.subgraph.graph, variable)
-        else {
-            return Err(CfgError::UnresolvedMonoidalStructureAtom {
-                wire: variable,
-                operation: "coproduct branch".to_string(),
-            });
-        };
-
-        let operation = monoidal_structure_operation_name(&self.subgraph.graph, operation_id);
-        match operation.as_str() {
-            "val.+.intro" => {
-                let sources =
-                    monoidal_structure_operation_sources(&self.subgraph.graph, operation_id);
-                sources.get(branch).map(|source| source.0).ok_or_else(|| {
-                    CfgError::UnresolvedMonoidalStructureAtom {
-                        wire: variable,
-                        operation,
-                    }
+        match self
+            .values
+            .get(&variable)
+            .cloned()
+            .unwrap_or(MonoidalValue::Atom(variable))
+        {
+            MonoidalValue::Atom(atom) => Ok(atom),
+            MonoidalValue::Coproduct { condition, .. } => {
+                atom_value(*condition).ok_or_else(|| CfgError::UnresolvedMonoidalStructureAtom {
+                    wire: variable,
+                    operation: "coproduct discriminator".to_string(),
                 })
             }
-            "2.elim" => {
-                let sources =
-                    monoidal_structure_operation_sources(&self.subgraph.graph, operation_id);
-                let [source] = sources.as_slice() else {
-                    return Err(CfgError::UnresolvedMonoidalStructureAtom {
-                        wire: variable,
-                        operation,
-                    });
-                };
-                Ok(source.0)
-            }
-            "merge" => {
-                let sources =
-                    monoidal_structure_operation_sources(&self.subgraph.graph, operation_id);
-                let [source] = sources.as_slice() else {
-                    return Err(CfgError::UnresolvedMonoidalStructureAtom {
-                        wire: variable,
-                        operation,
-                    });
-                };
-                self.resolve_coproduct_branch_atom(source.0, branch, _seen)
-            }
-            _ => Err(CfgError::UnresolvedMonoidalStructureAtom {
+            value => Err(CfgError::UnresolvedMonoidalStructureAtom {
                 wire: variable,
-                operation,
+                operation: format!("{value:?}"),
             }),
         }
     }
 
-    fn resolve_coproduct_branch_product_component(
-        &self,
-        variable: VariableId,
-        branch: usize,
-        component: usize,
-        seen: &mut HashSet<VariableId>,
-    ) -> Result<VariableId, CfgError> {
-        let Some((operation_id, _)) =
-            producer_of_monoidal_structure_wire(&self.subgraph.graph, variable)
-        else {
-            return Err(CfgError::UnresolvedMonoidalStructureAtom {
+    fn resolve_variable(&self, variable: VariableId) -> Result<VariableId, CfgError> {
+        match self
+            .values
+            .get(&variable)
+            .cloned()
+            .unwrap_or(MonoidalValue::Atom(variable))
+        {
+            MonoidalValue::Atom(atom) => Ok(atom),
+            value => Err(CfgError::UnresolvedMonoidalStructureAtom {
                 wire: variable,
-                operation: "coproduct branch".to_string(),
-            });
-        };
-        let operation = monoidal_structure_operation_name(&self.subgraph.graph, operation_id);
-        match operation.as_str() {
-            "val.+.intro" => {
-                let sources =
-                    monoidal_structure_operation_sources(&self.subgraph.graph, operation_id);
-                let source = sources.get(branch).ok_or_else(|| {
-                    CfgError::UnresolvedMonoidalStructureAtom {
-                        wire: variable,
-                        operation,
-                    }
-                })?;
-                self.resolve_product_component(source.0, component, seen)
-            }
-            "distr" => {
-                let sources =
-                    monoidal_structure_operation_sources(&self.subgraph.graph, operation_id);
-                let [source] = sources.as_slice() else {
-                    return Err(CfgError::UnresolvedMonoidalStructureAtom {
-                        wire: variable,
-                        operation,
-                    });
-                };
-                match component {
-                    0 => {
-                        let coproduct = self.resolve_product_component(source.0, 0, seen)?;
-                        self.resolve_coproduct_branch_atom(coproduct, branch, seen)
-                    }
-                    1 => self.resolve_product_component(source.0, 1, seen),
-                    _ => Err(CfgError::UnresolvedMonoidalStructureAtom {
-                        wire: variable,
-                        operation,
-                    }),
-                }
-            }
-            "distl" => {
-                let sources =
-                    monoidal_structure_operation_sources(&self.subgraph.graph, operation_id);
-                let [source] = sources.as_slice() else {
-                    return Err(CfgError::UnresolvedMonoidalStructureAtom {
-                        wire: variable,
-                        operation,
-                    });
-                };
-                match component {
-                    0 => self.resolve_product_component(source.0, 0, seen),
-                    1 => {
-                        let coproduct = self.resolve_product_component(source.0, 1, seen)?;
-                        self.resolve_coproduct_branch_atom(coproduct, branch, seen)
-                    }
-                    _ => Err(CfgError::UnresolvedMonoidalStructureAtom {
-                        wire: variable,
-                        operation,
-                    }),
-                }
-            }
-            "merge" => {
-                let sources =
-                    monoidal_structure_operation_sources(&self.subgraph.graph, operation_id);
-                let [source] = sources.as_slice() else {
-                    return Err(CfgError::UnresolvedMonoidalStructureAtom {
-                        wire: variable,
-                        operation,
-                    });
-                };
-                self.resolve_coproduct_branch_product_component(source.0, branch, component, seen)
-            }
-            _ => Err(CfgError::UnresolvedMonoidalStructureAtom {
-                wire: variable,
-                operation,
+                operation: format!("{value:?}"),
             }),
         }
     }
+}
+
+fn interpret_monoidal_structure(
+    subgraph: &MonoidalStructureSubgraph,
+) -> HashMap<VariableId, MonoidalValue> {
+    let mut values = (0..subgraph.graph.h.w.0.len())
+        .map(|wire| (wire, MonoidalValue::Atom(wire)))
+        .collect::<HashMap<_, _>>();
+
+    for operation_id in 0..subgraph_operation_count(&subgraph.graph) {
+        let operation = monoidal_structure_operation_name(&subgraph.graph, operation_id);
+        let sources = monoidal_structure_operation_sources(&subgraph.graph, operation_id);
+        let targets = monoidal_structure_operation_targets(&subgraph.graph, operation_id);
+        interpret_monoidal_operation(&operation, &sources, &targets, &mut values);
+    }
+
+    values
+}
+
+fn interpret_monoidal_operation(
+    operation: &str,
+    sources: &[NodeId],
+    targets: &[NodeId],
+    values: &mut HashMap<VariableId, MonoidalValue>,
+) {
+    match operation {
+        "val.*.intro" => {
+            if let Some(target) = single_target(targets) {
+                values.insert(
+                    target,
+                    MonoidalValue::Product(source_values(sources, values)),
+                );
+            }
+        }
+        "val.*.elim" => {
+            let Some(source) = single_source(sources) else {
+                return;
+            };
+            if let Some(components) = product_components(source, values) {
+                assign_targets(targets, components, values);
+            }
+        }
+        "unitl.intro" => {
+            if let (Some(source), Some(target)) = (single_source(sources), single_target(targets)) {
+                values.insert(
+                    target,
+                    MonoidalValue::Product(vec![MonoidalValue::Unit, value_of(source, values)]),
+                );
+            }
+        }
+        "unitl.elim" => {
+            let Some(source) = single_source(sources) else {
+                return;
+            };
+            if let Some(component) = product_components(source, values).and_then(|mut values| {
+                if values.len() > 1 {
+                    Some(values.remove(1))
+                } else {
+                    None
+                }
+            }) {
+                assign_targets(targets, vec![component], values);
+            }
+        }
+        "2.elim" => {
+            if let (Some(source), Some(target)) = (single_source(sources), single_target(targets)) {
+                values.insert(
+                    target,
+                    MonoidalValue::Coproduct {
+                        condition: Box::new(value_of(source, values)),
+                        branches: vec![MonoidalValue::Unit, MonoidalValue::Unit],
+                    },
+                );
+            }
+        }
+        "2.intro" => {
+            if let (Some(source), Some(target)) = (single_source(sources), single_target(targets)) {
+                values.insert(target, value_of(source, values));
+            }
+        }
+        "val.+.intro" => {
+            if let Some(target) = single_target(targets) {
+                values.insert(
+                    target,
+                    MonoidalValue::Coproduct {
+                        condition: Box::new(MonoidalValue::Unit),
+                        branches: source_values(sources, values),
+                    },
+                );
+            }
+        }
+        "val.+.elim" => {
+            let Some(source) = single_source(sources) else {
+                return;
+            };
+            if let Some(branches) = coproduct_branches(source, values) {
+                assign_targets(targets, branches, values);
+            }
+        }
+        "distr" => {
+            let Some(source) = single_source(sources) else {
+                return;
+            };
+            if let Some([left, right]) = product_pair(source, values)
+                && let MonoidalValue::Coproduct {
+                    condition,
+                    branches,
+                } = left
+            {
+                let distributed = branches
+                    .into_iter()
+                    .map(|branch| MonoidalValue::Product(vec![branch, right.clone()]))
+                    .collect();
+                assign_targets(
+                    targets,
+                    vec![MonoidalValue::Coproduct {
+                        condition,
+                        branches: distributed,
+                    }],
+                    values,
+                );
+            }
+        }
+        "distl" => {
+            let Some(source) = single_source(sources) else {
+                return;
+            };
+            if let Some([left, right]) = product_pair(source, values)
+                && let MonoidalValue::Coproduct {
+                    condition,
+                    branches,
+                } = right
+            {
+                let distributed = branches
+                    .into_iter()
+                    .map(|branch| MonoidalValue::Product(vec![left.clone(), branch]))
+                    .collect();
+                assign_targets(
+                    targets,
+                    vec![MonoidalValue::Coproduct {
+                        condition,
+                        branches: distributed,
+                    }],
+                    values,
+                );
+            }
+        }
+        "elim2" => {
+            let Some(source) = single_source(sources) else {
+                return;
+            };
+            if let Some(branches) = coproduct_branches(source, values) {
+                let eliminated = branches
+                    .into_iter()
+                    .filter_map(|branch| match branch {
+                        MonoidalValue::Product(mut components) if components.len() > 1 => {
+                            Some(components.remove(1))
+                        }
+                        _ => None,
+                    })
+                    .collect();
+                assign_targets(targets, eliminated, values);
+            }
+        }
+        "merge" => {
+            if let Some(target) = single_target(targets) {
+                values.insert(
+                    target,
+                    MonoidalValue::Coproduct {
+                        condition: Box::new(MonoidalValue::Unit),
+                        branches: source_values(sources, values),
+                    },
+                );
+            }
+        }
+        _ => {}
+    }
+}
+
+fn single_source(sources: &[NodeId]) -> Option<VariableId> {
+    let [source] = sources else {
+        return None;
+    };
+    Some(source.0)
+}
+
+fn single_target(targets: &[NodeId]) -> Option<VariableId> {
+    let [target] = targets else {
+        return None;
+    };
+    Some(target.0)
+}
+
+fn value_of(wire: VariableId, values: &HashMap<VariableId, MonoidalValue>) -> MonoidalValue {
+    values
+        .get(&wire)
+        .cloned()
+        .unwrap_or(MonoidalValue::Atom(wire))
+}
+
+fn atom_value(value: MonoidalValue) -> Option<VariableId> {
+    match value {
+        MonoidalValue::Atom(atom) => Some(atom),
+        _ => None,
+    }
+}
+
+fn source_values(
+    sources: &[NodeId],
+    values: &HashMap<VariableId, MonoidalValue>,
+) -> Vec<MonoidalValue> {
+    sources
+        .iter()
+        .map(|source| value_of(source.0, values))
+        .collect()
+}
+
+fn assign_targets(
+    targets: &[NodeId],
+    assigned: Vec<MonoidalValue>,
+    values: &mut HashMap<VariableId, MonoidalValue>,
+) {
+    for (target, value) in targets.iter().zip(assigned) {
+        values.insert(target.0, value);
+    }
+}
+
+fn product_components(
+    wire: VariableId,
+    values: &HashMap<VariableId, MonoidalValue>,
+) -> Option<Vec<MonoidalValue>> {
+    match value_of(wire, values) {
+        MonoidalValue::Product(components) => Some(components),
+        _ => None,
+    }
+}
+
+fn coproduct_branches(
+    wire: VariableId,
+    values: &HashMap<VariableId, MonoidalValue>,
+) -> Option<Vec<MonoidalValue>> {
+    match value_of(wire, values) {
+        MonoidalValue::Coproduct { branches, .. } => Some(branches),
+        _ => None,
+    }
+}
+
+fn product_pair(
+    wire: VariableId,
+    values: &HashMap<VariableId, MonoidalValue>,
+) -> Option<[MonoidalValue; 2]> {
+    let components = product_components(wire, values)?;
+    let [left, right]: [MonoidalValue; 2] = components.try_into().ok()?;
+    Some([left, right])
 }
 
 fn is_structure_resolver_operation(operation: &str) -> bool {

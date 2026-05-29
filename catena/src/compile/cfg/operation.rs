@@ -37,6 +37,7 @@ pub(super) struct OperationInstance {
     pub name: OperationName,
     pub inputs: Vec<VariableId>,
     pub outputs: Vec<VariableId>,
+    pub branch_condition: Option<VariableId>,
 }
 
 pub(super) fn cfg_operation_role(operation: &str) -> CfgOperationRole {
@@ -93,6 +94,7 @@ pub(super) fn operation_instance(
         name: operation_names(compile_graph)[operation_id].to_string(),
         inputs: variables(&operation_sources(compile_graph, operation_id)),
         outputs: variables(&operation_targets(compile_graph, operation_id)),
+        branch_condition: None,
     }
 }
 
@@ -108,7 +110,8 @@ pub(super) fn effective_operation_instance(
         .into_iter()
         .map(|wire| mapped_wire(NodeId(wire), wire_map))
         .collect();
-    operation.inputs = resolve_operation_inputs(operation.clone(), monoidal_structure_resolver)?;
+    operation.branch_condition = resolve_branch_condition(&operation, monoidal_structure_resolver)?;
+    operation.inputs = resolve_instruction_inputs(operation.clone(), monoidal_structure_resolver)?;
     operation.outputs = operation
         .outputs
         .into_iter()
@@ -117,7 +120,7 @@ pub(super) fn effective_operation_instance(
     Ok(operation)
 }
 
-fn resolve_operation_inputs(
+fn resolve_instruction_inputs(
     operation: OperationInstance,
     monoidal_structure_resolver: &MonoidalStructureResolver<'_>,
 ) -> Result<Vec<VariableId>, CfgError> {
@@ -129,6 +132,21 @@ fn resolve_operation_inputs(
     } else {
         Ok(operation.inputs)
     }
+}
+
+fn resolve_branch_condition(
+    operation: &OperationInstance,
+    monoidal_structure_resolver: &MonoidalStructureResolver<'_>,
+) -> Result<Option<VariableId>, CfgError> {
+    if !is_branch_operation(operation) {
+        return Ok(None);
+    }
+    operation
+        .inputs
+        .first()
+        .copied()
+        .map(|input| monoidal_structure_resolver.resolve_discriminator(input))
+        .transpose()
 }
 
 pub(super) fn mapped_wire(wire: NodeId, wire_map: &HashMap<NodeId, VariableId>) -> VariableId {

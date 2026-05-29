@@ -75,22 +75,6 @@ pub(super) fn child_data_graph_for_operation<'a>(
         .filter(|child| matches!(child.theory, CompileTheory::Data))
 }
 
-pub(super) fn child_graph_for_operation<'a>(
-    compile_graph: &'a CompileGraph,
-    operation: &str,
-) -> Option<&'a CompileGraph> {
-    let local_name = local_operation_name(operation);
-    compile_graph
-        .children
-        .iter()
-        .find(|child| {
-            child.operation == operation
-                || child.operation == local_name
-                || child.graph.definition_name == local_name
-        })
-        .map(|child| &child.graph)
-}
-
 pub(super) fn is_branch_operation(operation: &OperationInstance) -> bool {
     operation.outputs.len() > 1 || operation.name.contains("branch") || operation.name == "if"
 }

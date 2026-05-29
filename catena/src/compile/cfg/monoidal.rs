@@ -7,16 +7,15 @@ use open_hypergraphs::{
         SemifiniteFunction as StrictSemifiniteFunction, VecArray,
     },
 };
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use crate::compile::CompileGraph;
 
 use super::{
     model::{CfgError, OperationId, VariableId},
     operation::{
-        CfgOperationRole, MONOIDAL_STRUCTURE_OPERATIONS, cfg_operation_role,
-        child_graph_for_operation, is_control_operation, local_operation_name, operation_names,
-        operation_sources, operation_targets, source_nodes, target_nodes,
+        MONOIDAL_STRUCTURE_OPERATIONS, local_operation_name, operation_names, operation_sources,
+        operation_targets,
     },
 };
 
@@ -74,57 +73,6 @@ impl MonoidalStructureSubgraphBuilder {
                         .collect(),
                 );
             }
-
-            if should_compose_monoidal_structure_child(compile_graph, &operation_name)
-                && let Some(child) = child_graph_for_operation(compile_graph, &operation_name)
-            {
-                self.add_child_region(compile_graph, operation_id, child);
-            }
-        }
-    }
-
-    fn add_child_region(
-        &mut self,
-        parent: &CompileGraph,
-        operation_id: OperationId,
-        child: &CompileGraph,
-    ) {
-        let child_subgraph = MonoidalStructureSubgraph::from_compile_graph(child);
-        let mut wire_map = HashMap::<usize, usize>::new();
-        for (child_wire, parent_wire) in source_nodes(child)
-            .into_iter()
-            .zip(operation_sources(parent, operation_id))
-        {
-            wire_map.insert(child_wire.0, parent_wire.0);
-        }
-        for (child_wire, parent_wire) in target_nodes(child)
-            .into_iter()
-            .zip(operation_targets(parent, operation_id))
-        {
-            wire_map.insert(child_wire.0, parent_wire.0);
-        }
-
-        for child_wire in 0..child_subgraph.graph.h.w.0.len() {
-            wire_map.entry(child_wire).or_insert_with(|| {
-                let id = self.wires.len();
-                self.wires
-                    .push(child_subgraph.graph.h.w.0[child_wire].clone());
-                id
-            });
-        }
-
-        for child_operation_id in 0..subgraph_operation_count(&child_subgraph.graph) {
-            self.add_operation(
-                child_subgraph.graph.h.x.0[child_operation_id].clone(),
-                monoidal_structure_operation_sources(&child_subgraph.graph, child_operation_id)
-                    .into_iter()
-                    .map(|wire| wire_map[&wire.0])
-                    .collect(),
-                monoidal_structure_operation_targets(&child_subgraph.graph, child_operation_id)
-                    .into_iter()
-                    .map(|wire| wire_map[&wire.0])
-                    .collect(),
-            );
         }
     }
 
@@ -156,51 +104,19 @@ impl MonoidalStructureSubgraphBuilder {
     }
 }
 
-fn should_compose_monoidal_structure_child(compile_graph: &CompileGraph, operation: &str) -> bool {
-    matches!(
-        cfg_operation_role(operation),
-        CfgOperationRole::MonoidalStructure | CfgOperationRole::ControlFlow
-    ) || is_control_operation(compile_graph, operation)
-}
-
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
-pub(super) struct MonoidalStructureResolver {
+pub(super) struct MonoidalStructureResolver<'a> {
+    compile_graph: &'a CompileGraph,
     subgraph: MonoidalStructureSubgraph,
-    wire_map: HashMap<VariableId, VariableId>,
-    inverse_wire_map: HashMap<VariableId, VariableId>,
-    fallback_wires: HashSet<VariableId>,
-    fallback: Option<Box<MonoidalStructureResolver>>,
 }
 
 #[allow(dead_code)]
-impl MonoidalStructureResolver {
-    pub(super) fn new(subgraph: MonoidalStructureSubgraph) -> Self {
+impl<'a> MonoidalStructureResolver<'a> {
+    pub(super) fn new(compile_graph: &'a CompileGraph) -> Self {
         Self {
-            subgraph,
-            wire_map: HashMap::new(),
-            inverse_wire_map: HashMap::new(),
-            fallback_wires: HashSet::new(),
-            fallback: None,
-        }
-    }
-
-    pub(super) fn child_resolver(
-        &self,
-        subgraph: MonoidalStructureSubgraph,
-        wire_map: HashMap<VariableId, VariableId>,
-        fallback_wires: HashSet<VariableId>,
-    ) -> Self {
-        let inverse_wire_map = wire_map
-            .iter()
-            .map(|(local, mapped)| (*mapped, *local))
-            .collect();
-        Self {
-            subgraph,
-            wire_map,
-            inverse_wire_map,
-            fallback_wires,
-            fallback: Some(Box::new(self.clone())),
+            compile_graph,
+            subgraph: MonoidalStructureSubgraph::from_compile_graph(compile_graph),
         }
     }
 
@@ -223,7 +139,6 @@ impl MonoidalStructureResolver {
         variable: VariableId,
         seen: &mut HashSet<VariableId>,
     ) -> Result<VariableId, CfgError> {
-        let variable = self.local_wire(variable);
         if !seen.insert(variable) {
             return Err(CfgError::MonoidalStructureCycle(variable));
         }
@@ -231,7 +146,7 @@ impl MonoidalStructureResolver {
         let Some((operation_id, output_index)) =
             producer_of_monoidal_structure_wire(&self.subgraph.graph, variable)
         else {
-            return self.resolve_external_atom(variable);
+            return Ok(variable);
         };
 
         let operation = monoidal_structure_operation_name(&self.subgraph.graph, operation_id);
@@ -310,24 +225,6 @@ impl MonoidalStructureResolver {
         }
     }
 
-    fn local_wire(&self, variable: VariableId) -> VariableId {
-        self.inverse_wire_map
-            .get(&variable)
-            .copied()
-            .unwrap_or(variable)
-    }
-
-    fn resolve_external_atom(&self, variable: VariableId) -> Result<VariableId, CfgError> {
-        let mapped = self.wire_map.get(&variable).copied().unwrap_or(variable);
-        if self.fallback_wires.contains(&variable)
-            && let Some(fallback) = &self.fallback
-        {
-            fallback.resolve_atom(mapped)
-        } else {
-            Ok(mapped)
-        }
-    }
-
     fn resolve_val_product_elim_component(
         &self,
         elim_operation: OperationId,
@@ -352,11 +249,13 @@ impl MonoidalStructureResolver {
         component: usize,
         seen: &mut HashSet<VariableId>,
     ) -> Result<VariableId, CfgError> {
-        let variable = self.local_wire(variable);
         let Some((operation_id, output_index)) =
             producer_of_monoidal_structure_wire(&self.subgraph.graph, variable)
         else {
-            return self.resolve_external_product_component(variable, component);
+            return Err(CfgError::UnresolvedMonoidalStructureAtom {
+                wire: variable,
+                operation: "product component".to_string(),
+            });
         };
 
         let operation = monoidal_structure_operation_name(&self.subgraph.graph, operation_id);
@@ -441,35 +340,19 @@ impl MonoidalStructureResolver {
         }
     }
 
-    fn resolve_external_product_component(
-        &self,
-        variable: VariableId,
-        component: usize,
-    ) -> Result<VariableId, CfgError> {
-        if self.fallback_wires.contains(&variable)
-            && let Some(fallback) = &self.fallback
-        {
-            let mapped = self.wire_map.get(&variable).copied().unwrap_or(variable);
-            return fallback.resolve_product_component(mapped, component, &mut HashSet::new());
-        }
-
-        Err(CfgError::UnresolvedMonoidalStructureAtom {
-            wire: self.wire_map.get(&variable).copied().unwrap_or(variable),
-            operation: "product component".to_string(),
-        })
-    }
-
     fn resolve_coproduct_branch_atom(
         &self,
         variable: VariableId,
         branch: usize,
         _seen: &mut HashSet<VariableId>,
     ) -> Result<VariableId, CfgError> {
-        let variable = self.local_wire(variable);
         let Some((operation_id, _)) =
             producer_of_monoidal_structure_wire(&self.subgraph.graph, variable)
         else {
-            return self.resolve_external_coproduct_branch_atom(variable, branch);
+            return Err(CfgError::UnresolvedMonoidalStructureAtom {
+                wire: variable,
+                operation: "coproduct branch".to_string(),
+            });
         };
 
         let operation = monoidal_structure_operation_name(&self.subgraph.graph, operation_id);
@@ -502,24 +385,6 @@ impl MonoidalStructureResolver {
         }
     }
 
-    fn resolve_external_coproduct_branch_atom(
-        &self,
-        variable: VariableId,
-        branch: usize,
-    ) -> Result<VariableId, CfgError> {
-        if self.fallback_wires.contains(&variable)
-            && let Some(fallback) = &self.fallback
-        {
-            let mapped = self.wire_map.get(&variable).copied().unwrap_or(variable);
-            return fallback.resolve_coproduct_branch_atom(mapped, branch, &mut HashSet::new());
-        }
-
-        Err(CfgError::UnresolvedMonoidalStructureAtom {
-            wire: self.wire_map.get(&variable).copied().unwrap_or(variable),
-            operation: "coproduct branch".to_string(),
-        })
-    }
-
     fn resolve_coproduct_branch_product_component(
         &self,
         variable: VariableId,
@@ -527,12 +392,13 @@ impl MonoidalStructureResolver {
         component: usize,
         seen: &mut HashSet<VariableId>,
     ) -> Result<VariableId, CfgError> {
-        let variable = self.local_wire(variable);
         let Some((operation_id, _)) =
             producer_of_monoidal_structure_wire(&self.subgraph.graph, variable)
         else {
-            return self
-                .resolve_external_coproduct_branch_product_component(variable, branch, component);
+            return Err(CfgError::UnresolvedMonoidalStructureAtom {
+                wire: variable,
+                operation: "coproduct branch".to_string(),
+            });
         };
         let operation = monoidal_structure_operation_name(&self.subgraph.graph, operation_id);
         match operation.as_str() {
@@ -594,30 +460,6 @@ impl MonoidalStructureResolver {
                 operation,
             }),
         }
-    }
-
-    fn resolve_external_coproduct_branch_product_component(
-        &self,
-        variable: VariableId,
-        branch: usize,
-        component: usize,
-    ) -> Result<VariableId, CfgError> {
-        if self.fallback_wires.contains(&variable)
-            && let Some(fallback) = &self.fallback
-        {
-            let mapped = self.wire_map.get(&variable).copied().unwrap_or(variable);
-            return fallback.resolve_coproduct_branch_product_component(
-                mapped,
-                branch,
-                component,
-                &mut HashSet::new(),
-            );
-        }
-
-        Err(CfgError::UnresolvedMonoidalStructureAtom {
-            wire: self.wire_map.get(&variable).copied().unwrap_or(variable),
-            operation: "coproduct branch".to_string(),
-        })
     }
 }
 

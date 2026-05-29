@@ -11,6 +11,7 @@ use super::{
         BoundaryKind, Cfg, CfgEdge, CfgError, CfgNode, CfgNodeDraft, CfgNodeId, CfgWiring,
         OperationId, VariableId,
     },
+    monoidal::MonoidalStructureResolver,
     operation::{
         OperationInstance, effective_operation_instance, is_branch_operation, is_control_operation,
         operation_names,
@@ -27,6 +28,7 @@ use super::{
 pub(super) struct CfgBuilder<'a> {
     compile_graph: &'a CompileGraph,
     wire_map: HashMap<NodeId, VariableId>,
+    monoidal_structure_resolver: MonoidalStructureResolver<'a>,
     node_ids: CfgNodeIdAllocator,
     operation_instances: Vec<OperationInstance>,
     control_operation_ids: Vec<OperationId>,
@@ -45,6 +47,7 @@ impl<'a> CfgBuilder<'a> {
         Self {
             compile_graph,
             wire_map,
+            monoidal_structure_resolver: MonoidalStructureResolver::new(compile_graph),
             node_ids: CfgNodeIdAllocator::default(),
             operation_instances: Vec::new(),
             control_operation_ids: Vec::new(),
@@ -66,6 +69,7 @@ impl<'a> CfgBuilder<'a> {
     }
 
     fn collect_operations(&mut self) {
+        let _resolver = &self.monoidal_structure_resolver;
         self.operation_instances = (0..operation_names(self.compile_graph).len())
             .map(|operation_id| {
                 effective_operation_instance(self.compile_graph, operation_id, &self.wire_map)

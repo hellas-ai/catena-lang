@@ -110,8 +110,13 @@ pub(super) fn effective_operation_instance(
         .into_iter()
         .map(|wire| mapped_wire(NodeId(wire), wire_map))
         .collect();
-    operation.branch_condition = resolve_branch_condition(&operation, monoidal_structure_resolver)?;
-    operation.inputs = resolve_instruction_inputs(operation.clone(), monoidal_structure_resolver)?;
+    operation.branch_condition =
+        resolve_branch_condition(compile_graph, &operation, monoidal_structure_resolver)?;
+    operation.inputs = resolve_instruction_inputs(
+        compile_graph,
+        operation.clone(),
+        monoidal_structure_resolver,
+    )?;
     operation.outputs = operation
         .outputs
         .into_iter()
@@ -121,13 +126,16 @@ pub(super) fn effective_operation_instance(
 }
 
 fn resolve_instruction_inputs(
+    compile_graph: &CompileGraph,
     operation: OperationInstance,
     monoidal_structure_resolver: &MonoidalStructureResolver<'_>,
 ) -> Result<Vec<VariableId>, CfgError> {
-    if matches!(
-        cfg_operation_role(&operation.name),
-        CfgOperationRole::Instruction
-    ) {
+    if !is_control_operation(compile_graph, &operation.name)
+        && matches!(
+            cfg_operation_role(&operation.name),
+            CfgOperationRole::Instruction
+        )
+    {
         monoidal_structure_resolver.resolve_variables(operation.inputs)
     } else {
         Ok(operation.inputs)
@@ -135,10 +143,11 @@ fn resolve_instruction_inputs(
 }
 
 fn resolve_branch_condition(
+    compile_graph: &CompileGraph,
     operation: &OperationInstance,
     monoidal_structure_resolver: &MonoidalStructureResolver<'_>,
 ) -> Result<Option<VariableId>, CfgError> {
-    if !is_branch_operation(operation) {
+    if !is_control_operation(compile_graph, &operation.name) || !is_branch_operation(operation) {
         return Ok(None);
     }
     operation

@@ -159,7 +159,10 @@ pub(super) struct MonoidalStructureResolver<'a> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum MonoidalValue {
     Atom(VariableId),
-    Product(Vec<MonoidalValue>),
+    Product {
+        origin: Option<VariableId>,
+        components: Vec<MonoidalValue>,
+    },
     Coproduct {
         condition: Box<MonoidalValue>,
         branches: Vec<MonoidalValue>,
@@ -241,6 +244,44 @@ impl<'a> MonoidalStructureResolver<'a> {
         }
     }
 
+    pub(super) fn resolve_branch_payload_wire(&self, variable: VariableId) -> VariableId {
+        match self.values.get(&variable).cloned() {
+            Some(MonoidalValue::Product { mut components, .. }) if components.len() > 1 => {
+                origin_wire(components.remove(1))
+                    .or_else(|| self.branch_payload_from_producer(variable))
+                    .unwrap_or(variable)
+            }
+            Some(value) => origin_wire(value)
+                .or_else(|| self.branch_payload_from_producer(variable))
+                .unwrap_or(variable),
+            None => self
+                .branch_payload_from_producer(variable)
+                .unwrap_or(variable),
+        }
+    }
+
+    fn branch_payload_from_producer(&self, variable: VariableId) -> Option<VariableId> {
+        let (operation_id, branch) =
+            producer_of_monoidal_structure_wire(&self.subgraph.graph, variable)?;
+        let operation = monoidal_structure_operation_name(&self.subgraph.graph, operation_id);
+        match operation.as_str() {
+            "val.+.elim" => {
+                let source = single_source(&monoidal_structure_operation_sources(
+                    &self.subgraph.graph,
+                    operation_id,
+                ))?;
+                let branch = coproduct_branches(source, &self.values)?
+                    .get(branch)?
+                    .clone();
+                product_components_from_value(branch)
+                    .and_then(|mut components| (components.len() > 1).then(|| components.remove(1)))
+                    .and_then(origin_wire)
+            }
+            "elim2" => origin_wire(value_of(variable, &self.values)),
+            _ => None,
+        }
+    }
+
     fn resolve_variable(&self, variable: VariableId) -> Result<VariableId, CfgError> {
         match self
             .values
@@ -285,7 +326,10 @@ fn interpret_monoidal_operation(
             if let Some(target) = single_target(targets) {
                 values.insert(
                     target,
-                    MonoidalValue::Product(source_values(sources, values)),
+                    MonoidalValue::Product {
+                        origin: Some(target),
+                        components: source_values(sources, values),
+                    },
                 );
             }
         }
@@ -301,7 +345,10 @@ fn interpret_monoidal_operation(
             if let (Some(source), Some(target)) = (single_source(sources), single_target(targets)) {
                 values.insert(
                     target,
-                    MonoidalValue::Product(vec![MonoidalValue::Unit, value_of(source, values)]),
+                    MonoidalValue::Product {
+                        origin: Some(target),
+                        components: vec![MonoidalValue::Unit, value_of(source, values)],
+                    },
                 );
             }
         }
@@ -366,7 +413,10 @@ fn interpret_monoidal_operation(
             {
                 let distributed = branches
                     .into_iter()
-                    .map(|branch| MonoidalValue::Product(vec![branch, right.clone()]))
+                    .map(|branch| MonoidalValue::Product {
+                        origin: None,
+                        components: vec![branch, right.clone()],
+                    })
                     .collect();
                 assign_targets(
                     targets,
@@ -390,7 +440,10 @@ fn interpret_monoidal_operation(
             {
                 let distributed = branches
                     .into_iter()
-                    .map(|branch| MonoidalValue::Product(vec![left.clone(), branch]))
+                    .map(|branch| MonoidalValue::Product {
+                        origin: None,
+                        components: vec![left.clone(), branch],
+                    })
                     .collect();
                 assign_targets(
                     targets,
@@ -410,7 +463,7 @@ fn interpret_monoidal_operation(
                 let eliminated = branches
                     .into_iter()
                     .filter_map(|branch| match branch {
-                        MonoidalValue::Product(mut components) if components.len() > 1 => {
+                        MonoidalValue::Product { mut components, .. } if components.len() > 1 => {
                             Some(components.remove(1))
                         }
                         _ => None,
@@ -462,6 +515,14 @@ fn atom_value(value: MonoidalValue) -> Option<VariableId> {
     }
 }
 
+fn origin_wire(value: MonoidalValue) -> Option<VariableId> {
+    match value {
+        MonoidalValue::Atom(atom) => Some(atom),
+        MonoidalValue::Product { origin, .. } => origin,
+        MonoidalValue::Coproduct { .. } | MonoidalValue::Unit => None,
+    }
+}
+
 fn source_values(
     sources: &[NodeId],
     values: &HashMap<VariableId, MonoidalValue>,
@@ -486,8 +547,12 @@ fn product_components(
     wire: VariableId,
     values: &HashMap<VariableId, MonoidalValue>,
 ) -> Option<Vec<MonoidalValue>> {
-    match value_of(wire, values) {
-        MonoidalValue::Product(components) => Some(components),
+    product_components_from_value(value_of(wire, values))
+}
+
+fn product_components_from_value(value: MonoidalValue) -> Option<Vec<MonoidalValue>> {
+    match value {
+        MonoidalValue::Product { components, .. } => Some(components),
         _ => None,
     }
 }

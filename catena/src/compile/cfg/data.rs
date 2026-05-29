@@ -18,12 +18,19 @@ pub(super) fn data_cfg_node_draft(
 ) -> Result<(CfgNodeDraft, CfgNodeBoundaries), CfgError> {
     let entries = entries_for_node(compile_graph, &operations, boundary);
     let exits = exits_for_node(compile_graph, &operations, boundary);
-    let params = entries.iter().map(|entry| entry.wire).collect();
     let block = operations
         .into_iter()
         .map(block_instruction)
         .filter_map(Result::transpose)
         .collect::<Result<Vec<_>, CfgError>>()?;
+    let used_inputs = block
+        .iter()
+        .flat_map(|instruction| instruction.args.iter().copied())
+        .collect::<HashSet<_>>();
+    let params = entries
+        .iter()
+        .filter_map(|entry| used_inputs.contains(&entry.wire).then_some(entry.wire))
+        .collect();
 
     Ok((
         CfgNodeDraft { id, params, block },

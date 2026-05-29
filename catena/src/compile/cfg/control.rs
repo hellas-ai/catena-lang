@@ -34,6 +34,9 @@ pub(super) struct ControlExpander<'a> {
     compile_graph: &'a CompileGraph,
     operation_instances: &'a [OperationInstance],
     monoidal_structure_subgraph: MonoidalStructureSubgraph,
+    current_branch: Option<OperationInstance>,
+    branch_data_successor_counts: HashMap<OperationId, usize>,
+    branch_payload_by_operation: HashMap<OperationId, VariableId>,
     operation_ids: OperationIdAllocator,
     variable_ids: VariableIdAllocator,
 }
@@ -48,6 +51,9 @@ impl<'a> ControlExpander<'a> {
             compile_graph,
             operation_instances,
             monoidal_structure_subgraph,
+            current_branch: None,
+            branch_data_successor_counts: HashMap::new(),
+            branch_payload_by_operation: HashMap::new(),
             operation_ids: OperationIdAllocator::new(operation_instances.len()),
             variable_ids: VariableIdAllocator::new(next_variable_id(operation_instances)),
         }
@@ -92,17 +98,16 @@ impl<'a> ControlExpander<'a> {
     ) -> Result<(), CfgError> {
         let Some(child) = self.child_control_graph(compile_graph, &call.name) else {
             if let Some(child) = child_data_graph_for_operation(compile_graph, &call.name) {
-                let cfg = self.remapped_data_cfg(child, call, monoidal_structure_subgraph)?;
-                output.push(ExpandedControlItem::DataCfg {
-                    call: call.clone(),
-                    cfg,
-                });
+                let call = self.call_with_branch_payload(call, monoidal_structure_subgraph);
+                let cfg = self.remapped_data_cfg(child, &call, monoidal_structure_subgraph)?;
+                output.push(ExpandedControlItem::DataCfg { call, cfg });
                 return Ok(());
             }
             let mut operation = call.clone();
             if !keep_call_id {
                 operation.id = self.operation_ids.allocate();
             }
+            self.current_branch = is_branch_operation(&operation).then_some(operation.clone());
             output.push(ExpandedControlItem::Control(operation));
             return Ok(());
         };
@@ -132,6 +137,43 @@ impl<'a> ControlExpander<'a> {
             )?;
         }
         Ok(())
+    }
+
+    fn call_with_branch_payload(
+        &mut self,
+        call: &OperationInstance,
+        monoidal_structure_subgraph: &MonoidalStructureSubgraph,
+    ) -> OperationInstance {
+        let Some(branch) = self.current_branch.as_ref() else {
+            return call.clone();
+        };
+        let branch_index = self
+            .branch_data_successor_counts
+            .entry(branch.id)
+            .and_modify(|count| *count += 1)
+            .or_insert(1);
+        let Some(payload) = branch.outputs.get(*branch_index - 1).copied() else {
+            return call.clone();
+        };
+        let monoidal_structure_resolver = MonoidalStructureResolver::from_subgraph(
+            self.compile_graph,
+            monoidal_structure_subgraph.clone(),
+        );
+        let payload = monoidal_structure_resolver.resolve_branch_payload_wire(payload);
+        let payload = if payload == branch.outputs[*branch_index - 1] {
+            self.branch_payload_by_operation
+                .get(&branch.id)
+                .copied()
+                .unwrap_or(payload)
+        } else {
+            self.branch_payload_by_operation.insert(branch.id, payload);
+            payload
+        };
+        let mut call = call.clone();
+        if let Some(input) = call.inputs.first_mut() {
+            *input = payload;
+        }
+        call
     }
 
     fn child_control_graph(

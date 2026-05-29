@@ -224,21 +224,22 @@ impl<'a> CfgBuilder<'a> {
         let mut node_by_entry_wire = HashMap::new();
         let mut node_boundaries = Vec::new();
 
-        let nodes = operations_by_cfg_node
-            .into_iter()
-            .map(|operations| {
-                let id = self.node_ids.allocate();
-                let (node, boundaries) =
-                    data_cfg_node_draft(self.compile_graph, id, operations, boundary)?;
+        let mut nodes = Vec::new();
+        for operations in operations_by_cfg_node {
+            let id = self.node_ids.allocate();
+            let (node, boundaries) =
+                data_cfg_node_draft(self.compile_graph, id, operations, boundary)?;
+            if node.block.is_empty() && boundaries.exits.is_empty() {
+                continue;
+            }
 
-                for point in &boundaries.entries {
-                    node_by_entry_wire.insert(point.wire, id);
-                }
+            for point in &boundaries.entries {
+                node_by_entry_wire.insert(point.wire, id);
+            }
 
-                node_boundaries.push(boundaries);
-                Ok(node)
-            })
-            .collect::<Result<Vec<_>, CfgError>>()?;
+            node_boundaries.push(boundaries);
+            nodes.push(node);
+        }
 
         Ok(DataCfgFragment {
             nodes,
@@ -306,6 +307,9 @@ impl<'a> CfgBuilder<'a> {
                 transfer: data_transfer(boundaries, &node_by_control_operation),
             }
         }));
+        for node in &mut nodes {
+            prune_unused_params(node);
+        }
         let entry = nodes_with_boundary(&wiring, BoundaryKind::RegionEntry)
             .into_iter()
             .next()
@@ -320,6 +324,32 @@ impl<'a> CfgBuilder<'a> {
             predecessors,
         }
     }
+}
+
+fn prune_unused_params(node: &mut CfgNode) {
+    let mut used = node
+        .block
+        .iter()
+        .flat_map(|instruction| instruction.args.iter().copied())
+        .collect::<std::collections::HashSet<_>>();
+    match &node.transfer {
+        super::model::Transfer::Goto(edge) => {
+            used.extend(edge.args.iter().copied());
+        }
+        super::model::Transfer::If {
+            condition,
+            then_edge,
+            else_edge,
+        } => {
+            used.insert(*condition);
+            used.extend(then_edge.args.iter().copied());
+            used.extend(else_edge.args.iter().copied());
+        }
+        super::model::Transfer::Return(values) => {
+            used.extend(values.iter().copied());
+        }
+    }
+    node.params.retain(|param| used.contains(param));
 }
 
 // CFG construction state

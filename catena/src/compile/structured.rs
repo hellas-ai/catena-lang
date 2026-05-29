@@ -3,16 +3,17 @@ use thiserror::Error;
 use crate::{
     compile::program::{Program, VariableId},
     structured::{
-        StructuredError, cfg,
+        cfg,
         ir::{EntryPoint, Stmt, StructuredProgram},
         ramsey,
+        ramsey::RamseyError,
     },
 };
 
 #[derive(Debug, Error)]
 pub enum StructuredCompileError {
     #[error("failed to structure control graph: {0}")]
-    Structure(#[from] StructuredError),
+    Structure(#[from] RamseyError),
 }
 
 pub fn compile_structured_program(

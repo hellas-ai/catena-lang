@@ -1,21 +1,17 @@
 use std::collections::HashMap;
 
-use open_hypergraphs::lax::NodeId;
 use thiserror::Error;
 
 use crate::{
-    compile::CompileGraph,
+    compile::{CompileGraph, CompileTheory},
     lang::Obj,
-    structured::{
-        StructuredError, cfg,
-        cfg::{Cfg, Region},
-    },
+    structured::cfg::{Cfg, CfgError},
 };
 
 #[derive(Debug, Error)]
 pub enum ProgramCompileError {
     #[error("failed to build cfg: {0}")]
-    Structure(#[from] StructuredError),
+    Structure(#[from] CfgError),
 }
 
 #[derive(Debug, Clone)]
@@ -92,9 +88,7 @@ fn build_definition(
     *next_id += 1;
 
     let context = context_for_graph(compile_graph);
-    let semantics = ProgramSemantics;
-    let region = Region::new(compile_graph, node_names_for_context(&context));
-    let body = cfg::Cfg::from_region(&region, &semantics)?;
+    let body = Cfg::from_compile_graph(compile_graph)?;
 
     definitions.insert(
         id,
@@ -121,7 +115,9 @@ fn build_definition(
     );
 
     for child in &compile_graph.children {
-        build_definition(&child.graph, next_id, definitions)?;
+        if matches!(child.graph.theory, CompileTheory::Data) {
+            build_definition(&child.graph, next_id, definitions)?;
+        }
     }
 
     Ok(id)
@@ -182,15 +178,3 @@ fn sanitize_ident(name: &str) -> String {
     }
     ident
 }
-
-fn node_names_for_context(context: &Context) -> HashMap<NodeId, String> {
-    context
-        .variables()
-        .map(|variable| (NodeId(variable.id.0), variable.name.clone()))
-        .collect()
-}
-
-#[derive(Debug, Clone, Copy)]
-struct ProgramSemantics;
-
-impl cfg::ArrowSemantics for ProgramSemantics {}

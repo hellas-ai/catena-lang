@@ -1,15 +1,21 @@
 use super::{
-    cfg::{
-        BlockInstruction, BlockInstructionRhs, Cfg, CfgEdge, CfgNodeId, StructuredError, Transfer,
-    },
+    cfg::{BlockInstruction, Cfg, CfgEdge, CfgNodeId, Transfer},
     ir::{Primitive, Stmt},
 };
 use std::collections::{BTreeSet, HashSet};
 
+#[derive(Debug, thiserror::Error)]
+pub enum RamseyError {
+    #[error("control-flow graph has an irreducible back edge from {from} to {to}")]
+    IrreducibleBackEdge { from: String, to: String },
+    #[error("branch target {0} is not in the structured context")]
+    MissingContext(String),
+}
+
 pub fn structure(
     cfg: Cfg,
     variable_name: impl Fn(crate::structured::cfg::VariableId) -> String + 'static,
-) -> Result<Vec<Stmt>, StructuredError> {
+) -> Result<Vec<Stmt>, RamseyError> {
     let analyses = Analyses::new(&cfg)?;
     let mut structurer = Structurer {
         cfg,
@@ -18,6 +24,7 @@ pub fn structure(
     };
     let mut body = structurer.do_tree(structurer.cfg.entry, &[])?;
     drop_redundant_terminal_continues(&mut body);
+    simplify_redundant_blocks(&mut body);
     Ok(body)
 }
 
@@ -30,7 +37,7 @@ struct Analyses {
 }
 
 impl Analyses {
-    fn new(cfg: &Cfg) -> Result<Self, StructuredError> {
+    fn new(cfg: &Cfg) -> Result<Self, RamseyError> {
         let rpo = reverse_postorder(cfg);
         let mut rpo_index = vec![usize::MAX; cfg.nodes.len()];
         for (index, node) in rpo.iter().enumerate() {
@@ -55,7 +62,7 @@ impl Analyses {
             for successor in node.successors() {
                 if rpo_index[successor] <= rpo_index[node_index] {
                     if !dominators[node_index].contains(&successor) {
-                        return Err(StructuredError::IrreducibleBackEdge {
+                        return Err(RamseyError::IrreducibleBackEdge {
                             from: cfg.label(node_index),
                             to: cfg.label(successor),
                         });
@@ -100,7 +107,7 @@ impl Structurer {
         &mut self,
         node: CfgNodeId,
         context: &[ContextFrame],
-    ) -> Result<Vec<Stmt>, StructuredError> {
+    ) -> Result<Vec<Stmt>, RamseyError> {
         let mut inner_context = context.to_vec();
         let mut code = if self.analyses.loop_headers.contains(&node) {
             inner_context.insert(0, ContextFrame::LoopHeadedBy(node));
@@ -120,7 +127,7 @@ impl Structurer {
         node: CfgNodeId,
         mut merge_children: Vec<CfgNodeId>,
         context: &[ContextFrame],
-    ) -> Result<Vec<Stmt>, StructuredError> {
+    ) -> Result<Vec<Stmt>, RamseyError> {
         if let Some(merge_child) = merge_children.pop() {
             let mut block_context = context.to_vec();
             block_context.insert(0, ContextFrame::BlockFollowedBy(merge_child));
@@ -154,18 +161,6 @@ impl Structurer {
                     else_body: self.do_edge(node, &else_edge, &else_context)?,
                 });
             }
-            Transfer::Switch { selector, edges } => {
-                let mut case_bodies = Vec::new();
-                for edge in edges {
-                    let mut case_context = context.to_vec();
-                    case_context.insert(0, ContextFrame::IfThenElse);
-                    case_bodies.push(self.do_edge(node, &edge, &case_context)?);
-                }
-                code.push(Stmt::Switch {
-                    selector: (self.variable_name)(selector),
-                    cases: case_bodies,
-                });
-            }
         }
         Ok(code)
     }
@@ -175,7 +170,7 @@ impl Structurer {
         source: CfgNodeId,
         edge: &CfgEdge,
         context: &[ContextFrame],
-    ) -> Result<Vec<Stmt>, StructuredError> {
+    ) -> Result<Vec<Stmt>, RamseyError> {
         let mut code = self.edge_bindings(edge);
         code.extend(self.do_branch(source, edge.target, context)?);
         Ok(code)
@@ -186,7 +181,7 @@ impl Structurer {
         source: CfgNodeId,
         target: CfgNodeId,
         context: &[ContextFrame],
-    ) -> Result<Vec<Stmt>, StructuredError> {
+    ) -> Result<Vec<Stmt>, RamseyError> {
         if self.is_backward(source, target) {
             return Ok(vec![Stmt::Continue(self.cfg.label(target))]);
         }
@@ -225,7 +220,7 @@ impl Structurer {
         self.analyses.rpo_index[target] <= self.analyses.rpo_index[source]
     }
 
-    fn index(&self, target: CfgNodeId, context: &[ContextFrame]) -> Result<usize, StructuredError> {
+    fn index(&self, target: CfgNodeId, context: &[ContextFrame]) -> Result<usize, RamseyError> {
         for (index, frame) in context.iter().enumerate() {
             let matches = match frame {
                 ContextFrame::IfThenElse => false,
@@ -237,7 +232,7 @@ impl Structurer {
                 return Ok(index);
             }
         }
-        Err(StructuredError::MissingContext(self.cfg.label(target)))
+        Err(RamseyError::MissingContext(self.cfg.label(target)))
     }
 
     fn block_statements(&self, block: &[BlockInstruction]) -> Vec<Stmt> {
@@ -248,27 +243,24 @@ impl Structurer {
     }
 
     fn block_instruction_statement(&self, instruction: &BlockInstruction) -> Stmt {
-        let lhs = instruction
-            .lhs
+        let outputs = instruction
+            .results
             .iter()
             .map(|id| (self.variable_name)(*id))
             .collect::<Vec<_>>();
-        match &instruction.rhs {
-            BlockInstructionRhs::Primitive { operation, args } if operation == "gpu.sync" => {
-                Stmt::Barrier
-            }
-            BlockInstructionRhs::Primitive { operation, args } => Stmt::Primitive(Primitive {
-                name: operation.clone(),
-                inputs: args.iter().map(|id| (self.variable_name)(*id)).collect(),
-                outputs: lhs,
-                code: String::new(),
-            }),
-            BlockInstructionRhs::Call { function, args } => Stmt::Call {
-                function: function.clone(),
-                inputs: args.iter().map(|id| (self.variable_name)(*id)).collect(),
-                outputs: lhs,
-            },
+        if instruction.operation == "gpu.sync" {
+            return Stmt::Barrier;
         }
+        Stmt::Primitive(Primitive {
+            name: instruction.operation.clone(),
+            inputs: instruction
+                .args
+                .iter()
+                .map(|id| (self.variable_name)(*id))
+                .collect(),
+            outputs,
+            code: String::new(),
+        })
     }
 }
 
@@ -375,5 +367,94 @@ fn drop_redundant_terminal_continues(stmts: &mut Vec<Stmt>) {
     }
     if matches!(stmts.last(), Some(Stmt::Continue(_))) {
         stmts.pop();
+    }
+}
+
+fn simplify_redundant_blocks(stmts: &mut Vec<Stmt>) {
+    let mut simplified = Vec::new();
+    for mut stmt in std::mem::take(stmts) {
+        simplify_stmt(&mut stmt);
+        match stmt {
+            Stmt::Block { label, mut body } => {
+                if remove_terminal_breaks_to(&mut body, &label) {
+                    simplified.extend(body);
+                } else {
+                    simplified.push(Stmt::Block { label, body });
+                }
+            }
+            other => simplified.push(other),
+        }
+    }
+    *stmts = simplified;
+}
+
+fn simplify_stmt(stmt: &mut Stmt) {
+    match stmt {
+        Stmt::Block { body, .. } | Stmt::Loop { body, .. } | Stmt::For { body, .. } => {
+            simplify_redundant_blocks(body)
+        }
+        Stmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            simplify_redundant_blocks(then_body);
+            simplify_redundant_blocks(else_body);
+        }
+        Stmt::Switch { cases, .. } => {
+            for body in cases {
+                simplify_redundant_blocks(body);
+            }
+        }
+        Stmt::Break(_)
+        | Stmt::Continue(_)
+        | Stmt::Return
+        | Stmt::Barrier
+        | Stmt::Assign { .. }
+        | Stmt::Call { .. }
+        | Stmt::Primitive(_)
+        | Stmt::Comment(_) => {}
+    }
+}
+
+fn remove_terminal_breaks_to(stmts: &mut [Stmt], label: &str) -> bool {
+    let mut removed = false;
+    for stmt in stmts {
+        match stmt {
+            Stmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                removed |= remove_terminal_break_to(then_body, label);
+                removed |= remove_terminal_break_to(else_body, label);
+            }
+            Stmt::Switch { cases, .. } => {
+                for body in cases {
+                    removed |= remove_terminal_break_to(body, label);
+                }
+            }
+            Stmt::Block { body, .. } | Stmt::Loop { body, .. } | Stmt::For { body, .. } => {
+                removed |= remove_terminal_breaks_to(body, label);
+            }
+            Stmt::Break(_)
+            | Stmt::Continue(_)
+            | Stmt::Return
+            | Stmt::Barrier
+            | Stmt::Assign { .. }
+            | Stmt::Call { .. }
+            | Stmt::Primitive(_)
+            | Stmt::Comment(_) => {}
+        }
+    }
+    removed
+}
+
+fn remove_terminal_break_to(stmts: &mut Vec<Stmt>, label: &str) -> bool {
+    if matches!(stmts.last(), Some(Stmt::Break(break_label)) if break_label == label) {
+        stmts.pop();
+        true
+    } else {
+        false
     }
 }

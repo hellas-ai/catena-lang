@@ -25,9 +25,10 @@ For example:
     a => b      ~> ERROR                # closures must not survive lowering
     f32         ~> Erased               # empty (no representation)
 
-Thus, we can map each interface `Vec<Type>` to a `Vec<CType>` (of possibly shorter length).
-However, for simplicity, we'll use `1` as the empty type, and use a dummy
-value `catena_unit_t` at codegen time.
+    a * b       ~> lower(a), lower(b)   # products maximally expanded into scalars
+
+Thus, we can map each interface `Vec<Type>` to a `Vec<LoweredType>`;
+when rendering, `Erased` values will simply not appear.
 
 ## Monomorphisation
 

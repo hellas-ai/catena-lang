@@ -2,6 +2,8 @@ use crate::compile::{CompileGraph, CompileTheory};
 use open_hypergraphs::lax::NodeId;
 use std::collections::{HashMap, HashSet};
 
+// CFG model
+
 pub type CfgNodeId = usize;
 pub type OperationId = usize;
 pub type OperationName = String;
@@ -107,6 +109,8 @@ impl Cfg {
     }
 }
 
+// CFG construction
+
 #[derive(Debug)]
 struct CfgBuilder<'a> {
     compile_graph: &'a CompileGraph,
@@ -206,7 +210,7 @@ impl<'a> CfgBuilder<'a> {
     }
 
     fn data_cfg_fragment(&mut self, boundary: &BoundaryWires) -> DataCfgFragment {
-        let operations_by_cfg_node = data_operations_by_cfg_node(
+        let operations_by_cfg_node = partition_data_operations_by_internal_wires(
             self.compile_graph,
             &self.operation_instances,
             &self.data_operation_ids,
@@ -298,6 +302,8 @@ impl<'a> CfgBuilder<'a> {
     }
 }
 
+// CFG construction state
+
 #[derive(Debug, Default)]
 struct CfgNodeIdAllocator {
     next: CfgNodeId,
@@ -359,6 +365,8 @@ struct ControlCfgFragment {
     control_operation_by_node: HashMap<CfgNodeId, OperationInstance>,
     node_by_entry_wire: HashMap<VariableId, CfgNodeId>,
 }
+
+// Control expansion
 
 #[derive(Debug, Clone)]
 struct ExpandedControlGraph {
@@ -489,6 +497,8 @@ impl<'a> ControlExpander<'a> {
     }
 }
 
+// CFG node drafts
+
 fn cfg_node_from_control_draft(
     node: CfgNodeDraft,
     control_operation_by_node: &HashMap<CfgNodeId, OperationInstance>,
@@ -544,6 +554,8 @@ fn block_instruction(operation: OperationInstance) -> BlockInstruction {
         results: operation.outputs,
     }
 }
+
+// Transfers
 
 fn data_transfer(
     boundaries: &CfgNodeBoundaries,
@@ -660,7 +672,9 @@ fn is_branch_operation(operation: &OperationInstance) -> bool {
     operation.outputs.len() > 1 || operation.name.contains("branch") || operation.name == "if"
 }
 
-fn data_operations_by_cfg_node(
+// Data operation partitioning
+
+fn partition_data_operations_by_internal_wires(
     compile_graph: &CompileGraph,
     operation_instances: &[OperationInstance],
     data_operation_ids: &[OperationId],
@@ -703,6 +717,8 @@ fn data_operations_by_cfg_node(
 
     operations_by_cfg_node
 }
+
+// Boundary wiring
 
 #[derive(Debug, Clone)]
 struct BoundaryWires {
@@ -815,6 +831,8 @@ fn exits_for_node(
     }
     exits
 }
+
+// Compile graph accessors
 
 fn operation_instance(
     compile_graph: &CompileGraph,
@@ -964,6 +982,8 @@ fn predecessors(nodes: &[CfgNode]) -> Vec<Vec<CfgNodeId>> {
     predecessors
 }
 
+// Union-find
+
 struct UnionFind {
     parents: Vec<usize>,
 }
@@ -994,6 +1014,8 @@ impl UnionFind {
         }
     }
 }
+
+// Variable naming
 
 pub(crate) fn variable_name(id: VariableId) -> String {
     if id > usize::MAX / 2 {

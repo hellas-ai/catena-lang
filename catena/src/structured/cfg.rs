@@ -1,5 +1,13 @@
 use crate::compile::{CompileGraph, CompileTheory};
-use open_hypergraphs::lax::NodeId;
+use open_hypergraphs::{
+    category::Arrow,
+    lax::NodeId,
+    strict::vec::{
+        FiniteFunction as StrictFiniteFunction, Hypergraph as StrictHypergraph,
+        IndexedCoproduct as StrictIndexedCoproduct, OpenHypergraph as StrictOpenHypergraph,
+        SemifiniteFunction as StrictSemifiniteFunction, VecArray,
+    },
+};
 use std::collections::{HashMap, HashSet};
 
 // CFG model
@@ -9,6 +17,26 @@ pub type OperationId = usize;
 pub type OperationName = String;
 pub type VariableId = usize;
 pub type VariableName = String;
+
+const MONOIDAL_STRUCTURE_OPERATIONS: &[&str] = &[
+    "val.*.intro",
+    "val.*.elim",
+    "val.+.intro",
+    "val.+.elim",
+    "2.intro",
+    "2.elim",
+    "distl",
+    "distr",
+];
+
+const CONTROL_FLOW_ONLY_OPERATIONS: &[&str] = &["merge", "never"];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CfgOperationRole {
+    Instruction,
+    MonoidalStructure,
+    ControlFlow,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OperationInstance {
@@ -22,6 +50,13 @@ pub struct OperationInstance {
 pub enum CfgError {
     #[error("cfg only accepts data regions; got {0}")]
     UnsupportedTheory(CompileTheory),
+    #[error("monoidal-structure wire `{wire}` produced by `{operation}` cannot resolve to an atom")]
+    UnresolvedMonoidalStructureAtom {
+        wire: VariableId,
+        operation: OperationName,
+    },
+    #[error("cycle while resolving monoidal-structure wire `{0}`")]
+    MonoidalStructureCycle(VariableId),
 }
 
 #[derive(Debug, Clone)]
@@ -165,7 +200,7 @@ impl<'a> CfgBuilder<'a> {
         );
 
         let control_fragment = self.control_cfg_fragment()?;
-        let data_fragment = self.data_cfg_fragment(&boundary);
+        let data_fragment = self.data_cfg_fragment(&boundary)?;
 
         Ok(self.compose_fragments(data_fragment, control_fragment))
     }
@@ -195,7 +230,7 @@ impl<'a> CfgBuilder<'a> {
                     nodes.push(CfgNodeDraft {
                         id,
                         params: operation.inputs.clone(),
-                        block: vec![block_instruction(operation)],
+                        block: block_instructions(operation)?,
                     });
                     current_branch = control_operation_by_node
                         .get(&id)
@@ -264,7 +299,10 @@ impl<'a> CfgBuilder<'a> {
         cfg
     }
 
-    fn data_cfg_fragment(&mut self, boundary: &BoundaryWires) -> DataCfgFragment {
+    fn data_cfg_fragment(&mut self, boundary: &BoundaryWires) -> Result<DataCfgFragment, CfgError> {
+        let monoidal_structure_graph =
+            MonoidalStructureSubgraph::from_compile_graph(self.compile_graph);
+        let monoidal_structure_resolver = MonoidalStructureResolver::new(monoidal_structure_graph);
         let operations_by_cfg_node = partition_data_operations_by_internal_wires(
             self.compile_graph,
             &self.operation_instances,
@@ -278,23 +316,28 @@ impl<'a> CfgBuilder<'a> {
             .into_iter()
             .map(|operations| {
                 let id = self.node_ids.allocate();
-                let (node, boundaries) =
-                    data_cfg_node_draft(self.compile_graph, id, operations, boundary);
+                let (node, boundaries) = data_cfg_node_draft(
+                    self.compile_graph,
+                    id,
+                    operations,
+                    boundary,
+                    &monoidal_structure_resolver,
+                )?;
 
                 for point in &boundaries.entries {
                     node_by_entry_wire.insert(point.wire, id);
                 }
 
                 node_boundaries.push(boundaries);
-                node
+                Ok(node)
             })
-            .collect();
+            .collect::<Result<Vec<_>, CfgError>>()?;
 
-        DataCfgFragment {
+        Ok(DataCfgFragment {
             nodes,
             wiring: CfgWiring { node_boundaries },
             node_by_entry_wire,
-        }
+        })
     }
 
     fn compose_fragments(
@@ -652,32 +695,304 @@ fn data_cfg_node_draft(
     id: CfgNodeId,
     operations: Vec<OperationInstance>,
     boundary: &BoundaryWires,
-) -> (CfgNodeDraft, CfgNodeBoundaries) {
+    resolver: &MonoidalStructureResolver,
+) -> Result<(CfgNodeDraft, CfgNodeBoundaries), CfgError> {
     let entries = entries_for_node(compile_graph, &operations, boundary);
     let exits = exits_for_node(compile_graph, &operations, boundary);
     let params = entries.iter().map(|entry| entry.wire).collect();
     let block = operations
         .into_iter()
-        .map(block_instruction)
-        .collect::<Vec<_>>();
+        .map(|operation| block_instruction(operation, resolver))
+        .filter_map(Result::transpose)
+        .collect::<Result<Vec<_>, CfgError>>()?;
 
-    (
+    Ok((
         CfgNodeDraft { id, params, block },
         CfgNodeBoundaries {
             node: id,
             entries,
             exits,
         },
-    )
+    ))
 }
 
-fn block_instruction(operation: OperationInstance) -> BlockInstruction {
-    BlockInstruction {
-        operation_id: operation.id,
-        operation: operation.name,
-        args: operation.inputs,
-        results: operation.outputs,
+fn block_instructions(operation: OperationInstance) -> Result<Vec<BlockInstruction>, CfgError> {
+    let resolver = MonoidalStructureResolver::new(MonoidalStructureSubgraph::empty());
+    Ok(block_instruction(operation, &resolver)?
+        .into_iter()
+        .collect())
+}
+
+fn block_instruction(
+    operation: OperationInstance,
+    resolver: &MonoidalStructureResolver,
+) -> Result<Option<BlockInstruction>, CfgError> {
+    match cfg_operation_role(&operation.name) {
+        CfgOperationRole::Instruction => Ok(Some(BlockInstruction {
+            operation_id: operation.id,
+            operation: operation.name,
+            args: resolver.resolve_variables(operation.inputs)?,
+            results: resolver.resolve_variables(operation.outputs)?,
+        })),
+        CfgOperationRole::MonoidalStructure | CfgOperationRole::ControlFlow => Ok(None),
     }
+}
+
+fn cfg_operation_role(operation: &str) -> CfgOperationRole {
+    if operation.starts_with("control.") {
+        return CfgOperationRole::ControlFlow;
+    }
+
+    let local = local_operation_name(operation);
+    if CONTROL_FLOW_ONLY_OPERATIONS.contains(&local) {
+        CfgOperationRole::ControlFlow
+    } else if MONOIDAL_STRUCTURE_OPERATIONS.contains(&local) {
+        CfgOperationRole::MonoidalStructure
+    } else {
+        CfgOperationRole::Instruction
+    }
+}
+
+// Monoidal-structure subgraph construction and interpretation
+
+#[derive(Debug, Clone)]
+struct MonoidalStructureSubgraph {
+    graph: StrictOpenHypergraph<crate::lang::Obj, crate::lang::Arr>,
+}
+
+impl MonoidalStructureSubgraph {
+    fn empty() -> Self {
+        Self {
+            graph: empty_monoidal_structure_graph(),
+        }
+    }
+
+    fn from_compile_graph(compile_graph: &CompileGraph) -> Self {
+        let monoidal_structure_operations = (0..operation_names(compile_graph).len())
+            .filter(|operation_id| {
+                matches!(
+                    cfg_operation_role(&operation_names(compile_graph)[*operation_id].to_string()),
+                    CfgOperationRole::MonoidalStructure
+                )
+            })
+            .collect::<Vec<_>>();
+        let wire_count = compile_graph.graph.h.w.0.len();
+        let source_lengths = monoidal_structure_operations
+            .iter()
+            .map(|operation_id| operation_sources(compile_graph, *operation_id).len())
+            .collect::<Vec<_>>();
+        let target_lengths = monoidal_structure_operations
+            .iter()
+            .map(|operation_id| operation_targets(compile_graph, *operation_id).len())
+            .collect::<Vec<_>>();
+        let source_values = monoidal_structure_operations
+            .iter()
+            .flat_map(|operation_id| {
+                operation_sources(compile_graph, *operation_id)
+                    .into_iter()
+                    .map(|wire| wire.0)
+            })
+            .collect::<Vec<_>>();
+        let target_values = monoidal_structure_operations
+            .iter()
+            .flat_map(|operation_id| {
+                operation_targets(compile_graph, *operation_id)
+                    .into_iter()
+                    .map(|wire| wire.0)
+            })
+            .collect::<Vec<_>>();
+        let operations = monoidal_structure_operations
+            .iter()
+            .map(|operation_id| operation_names(compile_graph)[*operation_id].clone())
+            .collect::<Vec<_>>();
+
+        Self {
+            graph: StrictOpenHypergraph {
+                s: StrictFiniteFunction::identity(wire_count),
+                t: StrictFiniteFunction::identity(wire_count),
+                h: StrictHypergraph {
+                    s: indexed_coproduct(source_lengths, source_values, wire_count),
+                    t: indexed_coproduct(target_lengths, target_values, wire_count),
+                    w: compile_graph.graph.h.w.clone(),
+                    x: StrictSemifiniteFunction::new(VecArray(operations)),
+                },
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct MonoidalStructureResolver {
+    subgraph: MonoidalStructureSubgraph,
+}
+
+impl MonoidalStructureResolver {
+    fn new(subgraph: MonoidalStructureSubgraph) -> Self {
+        Self { subgraph }
+    }
+
+    fn resolve_variables(&self, variables: Vec<VariableId>) -> Result<Vec<VariableId>, CfgError> {
+        variables
+            .into_iter()
+            .map(|variable| self.resolve_atom(variable))
+            .collect()
+    }
+
+    fn resolve_atom(&self, variable: VariableId) -> Result<VariableId, CfgError> {
+        self.resolve_atom_inner(variable, &mut HashSet::new())
+    }
+
+    fn resolve_atom_inner(
+        &self,
+        variable: VariableId,
+        seen: &mut HashSet<VariableId>,
+    ) -> Result<VariableId, CfgError> {
+        if !seen.insert(variable) {
+            return Err(CfgError::MonoidalStructureCycle(variable));
+        }
+
+        let Some((operation_id, output_index)) =
+            producer_of_monoidal_structure_wire(&self.subgraph.graph, variable)
+        else {
+            return Ok(variable);
+        };
+
+        let operation = monoidal_structure_operation_name(&self.subgraph.graph, operation_id);
+        match operation.as_str() {
+            "val.*.elim" => {
+                self.resolve_val_product_elim_component(operation_id, output_index, seen)
+            }
+            _ => Err(CfgError::UnresolvedMonoidalStructureAtom {
+                wire: variable,
+                operation,
+            }),
+        }
+    }
+
+    fn resolve_val_product_elim_component(
+        &self,
+        elim_operation: OperationId,
+        component: usize,
+        seen: &mut HashSet<VariableId>,
+    ) -> Result<VariableId, CfgError> {
+        let packed_sources =
+            monoidal_structure_operation_sources(&self.subgraph.graph, elim_operation);
+        let [packed] = packed_sources.as_slice() else {
+            return Err(CfgError::UnresolvedMonoidalStructureAtom {
+                wire: usize::MAX,
+                operation: monoidal_structure_operation_name(&self.subgraph.graph, elim_operation),
+            });
+        };
+        let Some((intro_operation, _)) =
+            producer_of_monoidal_structure_wire(&self.subgraph.graph, packed.0)
+        else {
+            return Err(CfgError::UnresolvedMonoidalStructureAtom {
+                wire: packed.0,
+                operation: monoidal_structure_operation_name(&self.subgraph.graph, elim_operation),
+            });
+        };
+        let operation = monoidal_structure_operation_name(&self.subgraph.graph, intro_operation);
+        if operation != "val.*.intro" {
+            return Err(CfgError::UnresolvedMonoidalStructureAtom {
+                wire: packed.0,
+                operation,
+            });
+        }
+        let sources = monoidal_structure_operation_sources(&self.subgraph.graph, intro_operation);
+        let source =
+            sources
+                .get(component)
+                .ok_or_else(|| CfgError::UnresolvedMonoidalStructureAtom {
+                    wire: packed.0,
+                    operation: "val.*.intro".to_string(),
+                })?;
+        self.resolve_atom_inner(source.0, seen)
+    }
+}
+
+fn empty_monoidal_structure_graph() -> StrictOpenHypergraph<crate::lang::Obj, crate::lang::Arr> {
+    StrictOpenHypergraph {
+        s: StrictFiniteFunction::identity(0),
+        t: StrictFiniteFunction::identity(0),
+        h: StrictHypergraph {
+            s: indexed_coproduct(Vec::new(), Vec::new(), 0),
+            t: indexed_coproduct(Vec::new(), Vec::new(), 0),
+            w: StrictSemifiniteFunction::new(VecArray(Vec::new())),
+            x: StrictSemifiniteFunction::new(VecArray(Vec::new())),
+        },
+    }
+}
+
+fn indexed_coproduct(
+    segment_lengths: Vec<usize>,
+    values: Vec<usize>,
+    target: usize,
+) -> StrictIndexedCoproduct<StrictFiniteFunction> {
+    let total = segment_lengths.iter().sum::<usize>();
+    debug_assert_eq!(total, values.len());
+    let sources = StrictFiniteFunction::new(VecArray(segment_lengths), total + 1)
+        .expect("monoidal-structure subgraph segment lengths must form a valid indexed coproduct");
+    let values = StrictFiniteFunction::new(VecArray(values), target)
+        .expect("monoidal-structure subgraph incidence values must reference existing wires");
+    StrictIndexedCoproduct::new(sources, values)
+        .expect("monoidal-structure subgraph incidence must be valid")
+}
+
+fn subgraph_operation_count(
+    subgraph: &StrictOpenHypergraph<crate::lang::Obj, crate::lang::Arr>,
+) -> usize {
+    subgraph.h.x.0.len()
+}
+
+fn producer_of_monoidal_structure_wire(
+    subgraph: &StrictOpenHypergraph<crate::lang::Obj, crate::lang::Arr>,
+    wire: VariableId,
+) -> Option<(OperationId, usize)> {
+    (0..subgraph_operation_count(subgraph)).find_map(|operation_id| {
+        monoidal_structure_operation_targets(subgraph, operation_id)
+            .iter()
+            .position(|target| target.0 == wire)
+            .map(|output_index| (operation_id, output_index))
+    })
+}
+
+fn monoidal_structure_operation_sources(
+    subgraph: &StrictOpenHypergraph<crate::lang::Obj, crate::lang::Arr>,
+    operation_id: OperationId,
+) -> Vec<NodeId> {
+    subgraph
+        .h
+        .s
+        .clone()
+        .into_iter()
+        .nth(operation_id)
+        .map(|sources| sources.table.0.into_iter().map(NodeId).collect())
+        .unwrap_or_default()
+}
+
+fn monoidal_structure_operation_name(
+    subgraph: &StrictOpenHypergraph<crate::lang::Obj, crate::lang::Arr>,
+    operation_id: OperationId,
+) -> String {
+    local_operation_name(&subgraph.h.x.0[operation_id].to_string()).to_string()
+}
+
+fn monoidal_structure_operation_targets(
+    subgraph: &StrictOpenHypergraph<crate::lang::Obj, crate::lang::Arr>,
+    operation_id: OperationId,
+) -> Vec<NodeId> {
+    subgraph
+        .h
+        .t
+        .clone()
+        .into_iter()
+        .nth(operation_id)
+        .map(|targets| targets.table.0.into_iter().map(NodeId).collect())
+        .unwrap_or_default()
+}
+
+fn local_operation_name(operation: &str) -> &str {
+    operation.strip_prefix("data.").unwrap_or(operation)
 }
 
 // Transfers

@@ -42,9 +42,9 @@
 
     ({gpu.state [.b]} * [coargs.])
 
-    gpu.launch_params
+    (gpu.launch_params val)
     ([.args coargs] -> val)
   }
   ->
-  ([x b.b] gpu.buf))
+  ([x b.b] gpu.buf val))
 })

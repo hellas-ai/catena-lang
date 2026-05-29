@@ -36,11 +36,11 @@
     ({gpu.state 1} * [args_tail.])
     ({gpu.env [.args_tail]} * [args.])
     ({gpu.state bool} * [coargs.])
-    gpu.launch_params
+    (gpu.launch_params val)
     ([.args coargs] -> val)
   }
   ->
-  (bool gpu.buf) =
+  (bool gpu.buf val) =
   gpu.materialize)
 
 

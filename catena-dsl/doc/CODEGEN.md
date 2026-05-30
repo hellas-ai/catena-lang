@@ -18,7 +18,7 @@ We need to represent each catena type as a C type.
 For example:
 
 
-    val(Ix n)   ~> u64                  # Indexes over space n map to u64
+    val(Ix n)   ~> u64                  # TODO: indexes over space n map to u64
     val(f32 )   ~> float
     val(bool)   ~> bool
 
@@ -107,15 +107,25 @@ So in general, codegen does *not* synthesize a definition unless it is actually
 used with a specific (monomorphic) type.
 In fact, what we do is:
 
-- For each op, definition, create a mapping `Name → List<Vec<Type>>`, where `Type` is a `Tree`
-- This records all the different types the op is instantiated with
-- Fill this dict by...
-    - Walk all definitions
-    - For each internal op (including definitions called)...
-    - Record the *instantiated types* passed to each in the outer mapping
+- Find entrypoints: `program` definitions whose declared interface is already monomorphic
+- Seed a worklist with those entrypoint instances
+- For each retained internal op use:
+    - Primitive ops are rendered inline or via prelude support
+    - `program` definition uses enqueue a specialised definition instance
+    - Retained polymorphic uses are errors
+    - Erased polymorphic uses are ignored
 
-Codegen then synthesizes a C function for each pair of `(op_name, type)`, using
-a unique integer (the position in the above list) to keep them distinct.
+Codegen then synthesizes a C function for each pair of `(op_name,
+specialization_key)`, where the specialization key records the concrete source
+and target interface types used at that occurrence, plus any erased static
+operands that affect generated code, such as direct function symbols.
+Entrypoints keep predictable symbol names; internal specialisations use
+deterministic mangled names.
+
+For now, function symbols do not propagate through arbitrary dataflow.
+`gpu.materialize` only accepts an immediate direct function symbol; if a function
+symbol flows through `if`, product construction, `eval`, etc., codegen rejects it
+until symbolic propagation is implemented.
 
 ## Host/Device Distinction
 
@@ -130,18 +140,24 @@ different address spaces.
 
 Function types `->` are no longer represented at runtime.
 Instead, we try to "propagate" the function symbols through the program.
-The initial approach does this naively (no propagation), while later approaches
-may change this.
+The initial version of this is to simply mark the output node of any `->`
+constant without further propagating.
+
+Moreover, ordinary synthesized functions are emitted as `__host__ __device__`.
+Generated `gpu.materialize` kernels are emitted as `__global__`. Entrypoint
+wrapper functions are host-callable and launch kernels where needed.
 
 ## Kernel Launches
 
 The motivating example here is `gpu.materialize`.
-Assuming we pass a genuine device pointer argument defining the 'innards' of
-the kernel, how should we synthesize this?
-The actual definition must be a `__global__` (i.e., a kernel).
+When concretized with a specific function symbol, the actual definition must be
+a `__global__` (i.e., a kernel).
+But this is not just another C program to call: it must be launched as a kernel.
 
-The solution is we synthesize both the global definition -- prefixed with
-`__global__` -- as well as a 'wrapper function' that calls it.
+**Solution**
+
+synthesize both the global definition -- prefixed with `__global__` -- as well
+as a 'wrapper function' that calls it.
 
 # Deficiencies
 

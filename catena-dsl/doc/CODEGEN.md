@@ -23,7 +23,7 @@ For example:
     val(bool)   ~> bool
 
     val(buf t)  ~> *t                   # pointer to t, representing allocated array
-    a -> b      ~> lower(a) -> lower(b) # here -> is short for a c function pointer
+    a -> b      ~> ERROR                # we do *not* support runtime function values. These must be statically known.
     a => b      ~> ERROR                # closures must not survive lowering
     f32         ~> Erased               # empty (no representation)
 
@@ -62,12 +62,25 @@ Now, when generating code intended to be called externally, we also want:
 This third point means that every *call* to an operation must be *monomorphic*.
 To sketch our solution:
 
-- A "monomorphic" type is one which has a single type representation
+- A "monomorphic" type is monomorphic for codegen if representation lowering succeeds:
+    - Every retained runtime component has a concrete `CType`
+    - Any remaining polymorphism is erased
+    - E.g., `t ● val(buf t)` is not monomorphic, but `t ● val(buf bool)` is (if t is erased). See the table below for more examples.
 - Codegen also records a list of *monomorphic entrypoints*
     - (an entrypoint is simply a definition whose type is already monomorphic)
 - Within each definition body...
     - Polymorphic usages of a definition cause an error
     - Each monomorphic usage of an operation (or definition) generates a specialisation
+
+| Type | Codegen-monomorphic? | Reason |
+| --- | --- | --- |
+| `val(bool)` | yes | lowers to `bool` |
+| `val(buf bool)` | yes | lowers to `bool *` |
+| `val(buf t)` | no | retained buffer element type is unknown |
+| `t` | yes, for ABI purposes | `t` is erased |
+| `t * val(bool)` | yes, for ABI purposes | `t` is erased; retained component lowers to `bool` |
+| `val(t)` | no | runtime value type is unknown |
+| `a -> b` | no | runtime function values are not represented |
 
 **Solution Detail**
 
@@ -91,7 +104,7 @@ specialisation of `id`.
     void id_0(bool x0, bool* r0) { ... }
 
 So in general, codegen does *not* synthesize a definition unless it is actually
-used with a specific type.
+used with a specific (monomorphic) type.
 In fact, what we do is:
 
 - For each op, definition, create a mapping `Name → List<Vec<Type>>`, where `Type` is a `Tree`
@@ -109,23 +122,16 @@ a unique integer (the position in the above list) to keep them distinct.
 Now suppose we want to use `gpu.materialize` to perform a simple copy.
 Thus, the kernel to launch is (more or less) the identity function.
 
-However, we must pass a *device* pointer; this requires a declaration like
-
-    __device__ void id(??? x0, ???* r0) {
-        *r0 = x
-    }
-
-The problem here is that catena's surface language does not distinguish between
-host and device pointers, but Hip/CUDA do.
+Originally, we passed a function pointer (`->` type).
+However, this has the problem that function pointers on host/device have
+different address spaces.
 
 **Solution**
 
-The runtime representation of function pointers is a *pair* of:
-
-- Host fn pointer
-- Device fn pointer
-
-When *using* a function pointer, we pick whichever is correct based on the context we're in.
+Function types `->` are no longer represented at runtime.
+Instead, we try to "propagate" the function symbols through the program.
+The initial approach does this naively (no propagation), while later approaches
+may change this.
 
 ## Kernel Launches
 

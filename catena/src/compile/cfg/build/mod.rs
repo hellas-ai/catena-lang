@@ -12,13 +12,10 @@ mod normalize;
 mod operation;
 
 use self::{
-    compose::{
-        BranchTargets, ControlPlan, DataPlan, compose_control_region, compose_data_region,
-        remap_transfer_targets,
-    },
-    control::{ControlExpander, ExpandedControlItem},
+    compose::{BranchTargets, ControlPlan, DataPlan, compose_data_region, remap_transfer_targets},
+    control::{ControlPlanItem, EmbeddedControlSkeleton, EmbeddedControlSkeletonBuilder},
     data::{
-        DataBoundaries, block_instructions, control_region_block_instructions, data_cfg_node_draft,
+        DataBoundaries, block_instructions, data_cfg_node_draft,
         partition_data_operations_by_internal_wires,
     },
     monoidal::{MonoidalStructureResolver, MonoidalStructureSubgraph},
@@ -99,9 +96,9 @@ impl<'a> CfgBuilder<'a> {
     }
 
     pub(super) fn build(mut self) -> Result<Cfg, CfgError> {
-        match self.compile_graph.theory {
+        match &self.compile_graph.theory {
             CompileTheory::Data => self.build_data_cfg(),
-            CompileTheory::Control => self.build_control_cfg(),
+            theory => Err(CfgError::UnsupportedTheory(theory.clone())),
         }
     }
 
@@ -115,7 +112,13 @@ impl<'a> CfgBuilder<'a> {
         // CFG shape:
         //
         //   [data block] -> [control node] -> [data block]
-        let control_plan = self.control_cfg_fragment()?;
+        let embedded_control = EmbeddedControlSkeletonBuilder::new(
+            self.compile_graph,
+            &self.operations.operations,
+            self.monoidal_structure_resolver.subgraph().clone(),
+        )
+        .build(&self.operations.control_ids)?;
+        let control_plan = self.control_plan_from_embedded_skeleton(embedded_control)?;
         let control_operations = control_plan
             .control_operation_by_node
             .values()
@@ -127,86 +130,47 @@ impl<'a> CfgBuilder<'a> {
             &self.wire_map,
             &self.monoidal_structure_resolver,
         );
-        let data_plan = self.data_cfg_fragment(&boundary)?;
+        let data_plan = self.data_plan(&boundary)?;
         Ok(compose_data_region(data_plan, control_plan))
     }
 
-    fn build_control_cfg(&mut self) -> Result<Cfg, CfgError> {
-        // A top-level control region has no surrounding data partition. We only expand its control skeleton and any nested data CFGs, then compose those pieces directly.
-        let control_plan = self.control_cfg_fragment()?;
-        Ok(compose_control_region(
-            control_plan,
-            self.compile_graph,
-            &self.wire_map,
-        ))
-    }
+    fn control_plan_from_embedded_skeleton(
+        &mut self,
+        embedded_control: EmbeddedControlSkeleton,
+    ) -> Result<ControlPlan, CfgError> {
+        let mut plan = ControlPlan {
+            nodes: Vec::new(),
+            nested_data_nodes: Vec::new(),
+            node_by_control_operation: HashMap::new(),
+            control_operation_by_node: HashMap::new(),
+            node_by_entry_wire: HashMap::new(),
+            nested_data_node_by_entry_wire: HashMap::new(),
+            branch_targets: BranchTargets::new(),
+        };
 
-    fn control_cfg_fragment(&mut self) -> Result<ControlPlan, CfgError> {
-        // Expand control operations before building final CFG nodes.
-        //
-        // Control children are inlined:
-        //
-        //   control.foo(...)
-        //
-        // becomes the operations inside foo's control graph.
-        //
-        // Data children are compiled recursively and kept as nested CFGs:
-        //
-        //   if ----branch 0----> data child CFG
-        //      `---branch 1----> data child CFG
-        //
-        // At this phase we allocate fresh node ids for all control drafts and remap nested CFG node ids so every node id is unique in the eventual composed CFG.
-        let expanded_control = ControlExpander::new(
-            self.compile_graph,
-            &self.operations.operations,
-            self.monoidal_structure_resolver.subgraph().clone(),
-        )
-        .expand(&self.operations.control_ids)?;
-
-        let mut node_by_control_operation = HashMap::new();
-        let mut control_operation_by_node = HashMap::new();
-        let mut node_by_entry_wire = HashMap::new();
-        let mut nested_data_nodes = Vec::new();
-        let mut nested_data_node_by_entry_wire = HashMap::new();
-        let mut branch_targets = BranchTargets::new();
-        let mut nodes = Vec::new();
-
-        for item in expanded_control.items {
+        for item in embedded_control.items {
             match item {
-                ExpandedControlItem::Control(operation) => {
+                ControlPlanItem::Control(operation) => {
                     // A control operation becomes a CFG node draft. Its inputs are node params because a predecessor must pass those wires along the eventual CFG edge.
                     let id = self.node_ids.allocate();
-                    node_by_control_operation.insert(operation.id, id);
-                    control_operation_by_node.insert(id, operation.clone());
+                    plan.node_by_control_operation.insert(operation.id, id);
+                    plan.control_operation_by_node.insert(id, operation.clone());
                     for input in &operation.inputs {
-                        node_by_entry_wire.insert(*input, id);
+                        plan.node_by_entry_wire.insert(*input, id);
                     }
-                    nodes.push(CfgNodeDraft {
+                    plan.nodes.push(CfgNodeDraft {
                         id,
                         params: operation.inputs.clone(),
-                        block: if matches!(self.compile_graph.theory, CompileTheory::Control) {
-                            control_region_block_instructions(operation)
-                        } else {
-                            block_instructions(operation)
-                        },
+                        block: block_instructions(operation),
                     });
                 }
-                ExpandedControlItem::DataCfg {
+                ControlPlanItem::DataCfg {
                     branch_arm,
                     call,
                     cfg,
                 } => {
                     // A nested data child has already been compiled into a CFG.
                     // We remap its node ids into this builder's id space, then remember which wires can enter that nested CFG.
-                    //
-                    // If the data child is a branch arm, also record the edge from the branch node to this data CFG entry:
-                    //
-                    //        [branch]
-                    //        /     \
-                    //   arm 0       arm 1
-                    //    edge        edge
-                    //     |           |
-                    // [data cfg]  [data cfg]
                     let remapped_cfg = self.remap_cfg_nodes(cfg);
                     if let Some(entry) = remapped_cfg
                         .nodes
@@ -214,11 +178,11 @@ impl<'a> CfgBuilder<'a> {
                         .find(|node| node.id == remapped_cfg.entry)
                     {
                         for input in &call.inputs {
-                            nested_data_node_by_entry_wire.insert(*input, entry.id);
+                            plan.nested_data_node_by_entry_wire.insert(*input, entry.id);
                         }
                         if let Some(branch_arm) = branch_arm {
                             let successors =
-                                branch_targets.entry(branch_arm.branch.id).or_default();
+                                plan.branch_targets.entry(branch_arm.branch.id).or_default();
                             let arg = if entry.params.is_empty() {
                                 branch_arm
                                     .branch
@@ -237,25 +201,23 @@ impl<'a> CfgBuilder<'a> {
                             });
                         }
                     }
-                    nested_data_nodes.extend(remapped_cfg.nodes);
+                    plan.nested_data_nodes.extend(remapped_cfg.nodes);
                 }
             }
         }
 
-        for (visible_operation, entry_operation) in expanded_control.visible_operation_to_entry {
-            if let Some(entry_node) = node_by_control_operation.get(&entry_operation).copied() {
-                node_by_control_operation.insert(visible_operation, entry_node);
+        for (visible_operation, entry_operation) in embedded_control.visible_operation_to_entry {
+            if let Some(entry_node) = plan
+                .node_by_control_operation
+                .get(&entry_operation)
+                .copied()
+            {
+                plan.node_by_control_operation
+                    .insert(visible_operation, entry_node);
             }
         }
-        Ok(ControlPlan {
-            nodes,
-            nested_data_nodes,
-            node_by_control_operation,
-            control_operation_by_node,
-            node_by_entry_wire,
-            nested_data_node_by_entry_wire,
-            branch_targets,
-        })
+
+        Ok(plan)
     }
 
     fn remap_cfg_nodes(&mut self, mut cfg: Cfg) -> Cfg {
@@ -282,7 +244,7 @@ impl<'a> CfgBuilder<'a> {
         cfg
     }
 
-    fn data_cfg_fragment(&mut self, boundary: &DataBoundaries) -> Result<DataPlan, CfgError> {
+    fn data_plan(&mut self, boundary: &DataBoundaries) -> Result<DataPlan, CfgError> {
         // Partition data operations by internal wires. Operations connected only through non-boundary wires stay in the same data block:
         //
         //   a -> op1 -> w -> op2 -> b       w is internal

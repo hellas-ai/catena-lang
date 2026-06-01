@@ -40,15 +40,17 @@ test_case "check pooling" \
   --command check \
   --input "examples/puzzles/pooling.hex"
 
-test_case "compile user-u32-identity" \
-  --command compile \
-  --input "examples/user-program.hex" \
-  --expected "compile/user-u32-identity.structured-ir" \
-  -- \
-  --emit structured-ir \
-  --theory control \
-  --entry user.u32.identity \
-  --no-proof
+# CFG construction is currently exercised only through data-theory entry points.
+# Re-enable this when top-level control CFG lowering is part of the supported surface.
+# test_case "compile user-u32-identity" \
+#   --command compile \
+#   --input "examples/user-program.hex" \
+#   --expected "compile/user-u32-identity.structured-ir" \
+#   -- \
+#   --emit structured-ir \
+#   --theory control \
+#   --entry user.u32.identity \
+#   --no-proof
 test_case "compile user-u32-inc-unless-max" \
   --command compile \
   --input "examples/user-program.hex" \

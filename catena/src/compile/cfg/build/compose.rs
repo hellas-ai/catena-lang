@@ -1,11 +1,7 @@
-use std::collections::{HashMap, HashSet};
-
-use open_hypergraphs::lax::NodeId;
-
-use crate::compile::CompileGraph;
+use std::collections::HashMap;
 
 use super::normalize::normalize_cfg;
-use super::operation::{OperationInstance, is_branch_operation, source_nodes, target_nodes};
+use super::operation::{OperationInstance, is_branch_operation};
 use crate::compile::cfg::model::{
     BoundaryKind, Cfg, CfgEdge, CfgNode, CfgNodeBoundaries, CfgNodeDraft, CfgNodeId, CfgWiring,
     OperationId, Transfer, VariableId,
@@ -128,63 +124,6 @@ pub(super) fn compose_data_region(data_plan: DataPlan, control_plan: ControlPlan
     }));
 
     let entry = data_region_entry(&nodes, &wiring);
-    normalize_cfg(Cfg {
-        entry,
-        nodes,
-        predecessors: Vec::new(),
-    })
-}
-
-pub(super) fn compose_control_region(
-    control_plan: ControlPlan,
-    compile_graph: &CompileGraph,
-    wire_map: &HashMap<NodeId, VariableId>,
-) -> Cfg {
-    let ControlPlan {
-        nodes: control_nodes,
-        nested_data_nodes,
-        node_by_control_operation: _,
-        control_operation_by_node,
-        node_by_entry_wire: control_node_by_entry_wire,
-        nested_data_node_by_entry_wire,
-        branch_targets,
-    } = control_plan;
-    let data_node_by_entry_wire = nested_data_node_by_entry_wire;
-
-    let mut nodes = control_nodes
-        .into_iter()
-        .map(|node| {
-            let operation = control_operation_by_node
-                .get(&node.id)
-                .expect("control node must have source operation");
-            let transfer = top_level_control_transfer(
-                node.id,
-                operation,
-                &control_node_by_entry_wire,
-                &data_node_by_entry_wire,
-                &branch_targets,
-                compile_graph,
-                wire_map,
-            );
-            CfgNode {
-                id: node.id,
-                params: node.params,
-                block: node.block,
-                transfer,
-            }
-        })
-        .collect::<Vec<_>>();
-
-    nodes.extend(nested_data_nodes.into_iter().map(|mut node| {
-        node.transfer = resolve_nested_data_return(
-            node.transfer,
-            &control_node_by_entry_wire,
-            &data_node_by_entry_wire,
-        );
-        node
-    }));
-
-    let entry = control_region_entry(&nodes, compile_graph, wire_map);
     normalize_cfg(Cfg {
         entry,
         nodes,
@@ -418,39 +357,6 @@ fn control_successors(
     successors
 }
 
-fn top_level_control_transfer(
-    node: CfgNodeId,
-    operation: &OperationInstance,
-    control_node_by_entry_wire: &HashMap<VariableId, CfgNodeId>,
-    data_node_by_entry_wire: &HashMap<VariableId, CfgNodeId>,
-    branch_targets: &BranchTargets,
-    compile_graph: &CompileGraph,
-    wire_map: &HashMap<NodeId, VariableId>,
-) -> Transfer {
-    let transfer = control_transfer(
-        node,
-        operation,
-        control_node_by_entry_wire,
-        data_node_by_entry_wire,
-        branch_targets,
-    );
-    if !matches!(transfer, Transfer::Return(_)) {
-        return transfer;
-    }
-
-    let region_targets = target_nodes(compile_graph)
-        .into_iter()
-        .map(|wire| wire_map.get(&wire).copied().unwrap_or(wire.0))
-        .collect::<HashSet<_>>();
-    let returns = operation
-        .outputs
-        .iter()
-        .copied()
-        .filter(|wire| region_targets.contains(wire))
-        .collect::<Vec<_>>();
-    Transfer::Return(returns)
-}
-
 fn data_region_entry(nodes: &[CfgNode], wiring: &CfgWiring) -> CfgNodeId {
     let region_entries = nodes_with_boundary(wiring, BoundaryKind::RegionEntry);
     region_entries
@@ -458,28 +364,6 @@ fn data_region_entry(nodes: &[CfgNode], wiring: &CfgWiring) -> CfgNodeId {
         .copied()
         .find(|entry| node_is_non_empty(nodes, *entry))
         .or_else(|| region_entries.into_iter().next())
-        .or_else(|| first_node(nodes))
-        .unwrap_or(0)
-}
-
-fn control_region_entry(
-    nodes: &[CfgNode],
-    compile_graph: &CompileGraph,
-    wire_map: &HashMap<NodeId, VariableId>,
-) -> CfgNodeId {
-    let region_sources = source_nodes(compile_graph)
-        .into_iter()
-        .map(|wire| wire_map.get(&wire).copied().unwrap_or(wire.0))
-        .collect::<HashSet<_>>();
-
-    nodes
-        .iter()
-        .find(|node| {
-            node.params
-                .iter()
-                .any(|param| region_sources.contains(param))
-        })
-        .map(|node| node.id)
         .or_else(|| first_node(nodes))
         .unwrap_or(0)
 }

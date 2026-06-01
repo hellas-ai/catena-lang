@@ -7,8 +7,8 @@ use crate::compile::CompileGraph;
 use super::{
     monoidal::MonoidalStructureResolver,
     operation::{
-        OperationInstance, OperationKind, local_operation_name, mapped_wire, operation_kind,
-        operation_names, source_nodes, target_nodes,
+        OperationInstance, OperationKind, mapped_wire, operation_kind, operation_names,
+        source_nodes, target_nodes,
     },
 };
 use crate::compile::cfg::model::{
@@ -222,20 +222,6 @@ pub(super) fn data_cfg_node_draft(
 
 pub(super) fn block_instructions(operation: OperationInstance) -> Vec<BlockInstruction> {
     block_instruction(operation).into_iter().collect()
-}
-
-pub(super) fn control_region_block_instructions(
-    operation: OperationInstance,
-) -> Vec<BlockInstruction> {
-    if local_operation_name(&operation.name) == "never" {
-        return vec![BlockInstruction {
-            operation_id: operation.id,
-            operation: operation.name,
-            args: operation.inputs,
-            results: Vec::new(),
-        }];
-    }
-    block_instructions(operation)
 }
 
 pub(super) fn block_instruction(operation: OperationInstance) -> Option<BlockInstruction> {

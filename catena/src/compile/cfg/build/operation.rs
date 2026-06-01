@@ -23,7 +23,7 @@ pub(super) const MONOIDAL_STRUCTURE_OPERATIONS: &[&str] = &[
 pub(super) const CONTROL_FLOW_ONLY_OPERATIONS: &[&str] = &["merge", "never"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum CfgOperationRole {
+pub(super) enum OperationKind {
     Instruction,
     MonoidalStructure,
     ControlFlow,
@@ -65,16 +65,16 @@ impl PreparedOperations {
         let mut control_ids = Vec::new();
         let mut data_ids = Vec::new();
         for operation in &operations {
-            match cfg_operation_role(&operation.name) {
-                CfgOperationRole::MonoidalStructure => {}
-                CfgOperationRole::ControlFlow => control_ids.push(operation.id),
-                CfgOperationRole::Instruction
+            match operation_kind(&operation.name) {
+                OperationKind::MonoidalStructure => {}
+                OperationKind::ControlFlow => control_ids.push(operation.id),
+                OperationKind::Instruction
                     if matches!(compile_graph.theory, CompileTheory::Control)
                         || is_control_operation(compile_graph, &operation.name) =>
                 {
                     control_ids.push(operation.id)
                 }
-                CfgOperationRole::Instruction => data_ids.push(operation.id),
+                OperationKind::Instruction => data_ids.push(operation.id),
             }
         }
 
@@ -86,18 +86,18 @@ impl PreparedOperations {
     }
 }
 
-pub(super) fn cfg_operation_role(operation: &str) -> CfgOperationRole {
+pub(super) fn operation_kind(operation: &str) -> OperationKind {
     if operation.starts_with("control.") {
-        return CfgOperationRole::ControlFlow;
+        return OperationKind::ControlFlow;
     }
 
     let local = local_operation_name(operation);
     if CONTROL_FLOW_ONLY_OPERATIONS.contains(&local) {
-        CfgOperationRole::ControlFlow
+        OperationKind::ControlFlow
     } else if MONOIDAL_STRUCTURE_OPERATIONS.contains(&local) {
-        CfgOperationRole::MonoidalStructure
+        OperationKind::MonoidalStructure
     } else {
-        CfgOperationRole::Instruction
+        OperationKind::Instruction
     }
 }
 
@@ -177,10 +177,7 @@ fn resolve_instruction_inputs(
     monoidal_structure_resolver: &MonoidalStructureResolver<'_>,
 ) -> Result<Vec<VariableId>, CfgError> {
     if !is_control_operation(compile_graph, &operation.name)
-        && matches!(
-            cfg_operation_role(&operation.name),
-            CfgOperationRole::Instruction
-        )
+        && matches!(operation_kind(&operation.name), OperationKind::Instruction)
     {
         monoidal_structure_resolver.resolve_variables(operation.inputs)
     } else {

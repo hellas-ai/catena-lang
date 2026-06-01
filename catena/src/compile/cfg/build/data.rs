@@ -7,13 +7,13 @@ use crate::compile::CompileGraph;
 use super::{
     monoidal::MonoidalStructureResolver,
     operation::{
-        CfgOperationRole, OperationInstance, cfg_operation_role, local_operation_name, mapped_wire,
+        OperationInstance, OperationKind, local_operation_name, mapped_wire, operation_kind,
         operation_names, source_nodes, target_nodes,
     },
 };
 use crate::compile::cfg::model::{
-    BlockInstruction, BoundaryKind, BoundaryPoint, CfgError, CfgNodeBoundaries, CfgNodeDraft,
-    CfgNodeId, OperationId, VariableId,
+    BlockInstruction, BoundaryKind, BoundaryPoint, CfgNodeBoundaries, CfgNodeDraft, CfgNodeId,
+    OperationId, VariableId,
 };
 
 #[derive(Debug, Clone)]
@@ -193,14 +193,14 @@ pub(super) fn data_cfg_node_draft(
     id: CfgNodeId,
     operations: Vec<OperationInstance>,
     boundary: &DataBoundaries,
-) -> Result<(CfgNodeDraft, CfgNodeBoundaries), CfgError> {
+) -> (CfgNodeDraft, CfgNodeBoundaries) {
     let entries = entries_for_node(compile_graph, &operations, boundary);
     let exits = exits_for_node(compile_graph, &operations, boundary);
     let block = operations
         .into_iter()
         .map(block_instruction)
-        .filter_map(Result::transpose)
-        .collect::<Result<Vec<_>, CfgError>>()?;
+        .flatten()
+        .collect::<Vec<_>>();
     let used_inputs = block
         .iter()
         .flat_map(|instruction| instruction.args.iter().copied())
@@ -210,47 +210,43 @@ pub(super) fn data_cfg_node_draft(
         .filter_map(|entry| used_inputs.contains(&entry.wire).then_some(entry.wire))
         .collect();
 
-    Ok((
+    (
         CfgNodeDraft { id, params, block },
         CfgNodeBoundaries {
             node: id,
             entries,
             exits,
         },
-    ))
+    )
 }
 
-pub(super) fn block_instructions(
-    operation: OperationInstance,
-) -> Result<Vec<BlockInstruction>, CfgError> {
-    Ok(block_instruction(operation)?.into_iter().collect())
+pub(super) fn block_instructions(operation: OperationInstance) -> Vec<BlockInstruction> {
+    block_instruction(operation).into_iter().collect()
 }
 
 pub(super) fn control_region_block_instructions(
     operation: OperationInstance,
-) -> Result<Vec<BlockInstruction>, CfgError> {
+) -> Vec<BlockInstruction> {
     if local_operation_name(&operation.name) == "never" {
-        return Ok(vec![BlockInstruction {
+        return vec![BlockInstruction {
             operation_id: operation.id,
             operation: operation.name,
             args: operation.inputs,
             results: Vec::new(),
-        }]);
+        }];
     }
     block_instructions(operation)
 }
 
-pub(super) fn block_instruction(
-    operation: OperationInstance,
-) -> Result<Option<BlockInstruction>, CfgError> {
-    match cfg_operation_role(&operation.name) {
-        CfgOperationRole::Instruction => Ok(Some(BlockInstruction {
+pub(super) fn block_instruction(operation: OperationInstance) -> Option<BlockInstruction> {
+    match operation_kind(&operation.name) {
+        OperationKind::Instruction => Some(BlockInstruction {
             operation_id: operation.id,
             operation: operation.name,
             args: operation.inputs,
             results: operation.outputs,
-        })),
-        CfgOperationRole::MonoidalStructure | CfgOperationRole::ControlFlow => Ok(None),
+        }),
+        OperationKind::MonoidalStructure | OperationKind::ControlFlow => None,
     }
 }
 // Data operation partitioning

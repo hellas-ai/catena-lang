@@ -185,9 +185,9 @@ impl<'a> CfgBuilder<'a> {
                         id,
                         params: operation.inputs.clone(),
                         block: if matches!(self.compile_graph.theory, CompileTheory::Control) {
-                            control_region_block_instructions(operation)?
+                            control_region_block_instructions(operation)
                         } else {
-                            block_instructions(operation)?
+                            block_instructions(operation)
                         },
                     });
                 }
@@ -309,7 +309,7 @@ impl<'a> CfgBuilder<'a> {
         for operations in operations_by_cfg_node {
             let id = self.node_ids.allocate();
             let (node, boundaries) =
-                data_cfg_node_draft(self.compile_graph, id, operations, boundary)?;
+                data_cfg_node_draft(self.compile_graph, id, operations, boundary);
 
             for point in &boundaries.entries {
                 node_by_entry_wire.insert(point.wire, id);

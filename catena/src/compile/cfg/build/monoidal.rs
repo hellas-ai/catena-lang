@@ -153,12 +153,9 @@ pub(super) struct MonoidalStructureResolver<'a> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum MonoidalValue {
     Atom(VariableId),
-    Product {
-        origin: Option<VariableId>,
-        components: Vec<MonoidalValue>,
-    },
+    Product(Vec<MonoidalValue>),
     Coproduct {
-        condition: Box<MonoidalValue>,
+        discriminator: Box<MonoidalValue>,
         branches: Vec<MonoidalValue>,
     },
     Unit,
@@ -225,12 +222,11 @@ impl<'a> MonoidalStructureResolver<'a> {
             .unwrap_or(MonoidalValue::Atom(variable))
         {
             MonoidalValue::Atom(atom) => Ok(atom),
-            MonoidalValue::Coproduct { condition, .. } => {
-                atom_value(*condition).ok_or_else(|| CfgError::UnresolvedMonoidalStructureAtom {
+            MonoidalValue::Coproduct { discriminator, .. } => atom_value(*discriminator)
+                .ok_or_else(|| CfgError::UnresolvedMonoidalStructureAtom {
                     wire: variable,
                     operation: "coproduct discriminator".to_string(),
-                })
-            }
+                }),
             value => Err(CfgError::UnresolvedMonoidalStructureAtom {
                 wire: variable,
                 operation: format!("{value:?}"),
@@ -240,12 +236,12 @@ impl<'a> MonoidalStructureResolver<'a> {
 
     pub(super) fn resolve_branch_payload_wire(&self, variable: VariableId) -> VariableId {
         match self.values.get(&variable).cloned() {
-            Some(MonoidalValue::Product { mut components, .. }) if components.len() > 1 => {
-                origin_wire(components.remove(1))
+            Some(MonoidalValue::Product(mut components)) if components.len() > 1 => {
+                wire_for_value(components.remove(1), &self.values)
                     .or_else(|| self.branch_payload_from_producer(variable))
                     .unwrap_or(variable)
             }
-            Some(value) => origin_wire(value)
+            Some(value) => wire_for_value(value, &self.values)
                 .or_else(|| self.branch_payload_from_producer(variable))
                 .unwrap_or(variable),
             None => self
@@ -280,9 +276,9 @@ impl<'a> MonoidalStructureResolver<'a> {
                     .clone();
                 product_components_from_value(branch)
                     .and_then(|mut components| (components.len() > 1).then(|| components.remove(1)))
-                    .and_then(origin_wire)
+                    .and_then(|value| wire_for_value(value, &self.values))
             }
-            "elim2" => origin_wire(value_of(variable, &self.values)),
+            "elim2" => wire_for_value(value_of(variable, &self.values), &self.values),
             _ => None,
         }
     }
@@ -331,10 +327,7 @@ fn interpret_monoidal_operation(
             if let Some(target) = single_target(targets) {
                 values.insert(
                     target,
-                    MonoidalValue::Product {
-                        origin: Some(target),
-                        components: source_values(sources, values),
-                    },
+                    MonoidalValue::Product(source_values(sources, values)),
                 );
             }
         }
@@ -350,10 +343,7 @@ fn interpret_monoidal_operation(
             if let (Some(source), Some(target)) = (single_source(sources), single_target(targets)) {
                 values.insert(
                     target,
-                    MonoidalValue::Product {
-                        origin: Some(target),
-                        components: vec![MonoidalValue::Unit, value_of(source, values)],
-                    },
+                    MonoidalValue::Product(vec![MonoidalValue::Unit, value_of(source, values)]),
                 );
             }
         }
@@ -376,7 +366,7 @@ fn interpret_monoidal_operation(
                 values.insert(
                     target,
                     MonoidalValue::Coproduct {
-                        condition: Box::new(value_of(source, values)),
+                        discriminator: Box::new(value_of(source, values)),
                         branches: vec![MonoidalValue::Unit, MonoidalValue::Unit],
                     },
                 );
@@ -392,7 +382,7 @@ fn interpret_monoidal_operation(
                 values.insert(
                     target,
                     MonoidalValue::Coproduct {
-                        condition: Box::new(MonoidalValue::Unit),
+                        discriminator: Box::new(MonoidalValue::Unit),
                         branches: source_values(sources, values),
                     },
                 );
@@ -412,21 +402,18 @@ fn interpret_monoidal_operation(
             };
             if let Some([left, right]) = product_pair(source, values)
                 && let MonoidalValue::Coproduct {
-                    condition,
+                    discriminator,
                     branches,
                 } = left
             {
                 let distributed = branches
                     .into_iter()
-                    .map(|branch| MonoidalValue::Product {
-                        origin: None,
-                        components: vec![branch, right.clone()],
-                    })
+                    .map(|branch| MonoidalValue::Product(vec![branch, right.clone()]))
                     .collect();
                 assign_targets(
                     targets,
                     vec![MonoidalValue::Coproduct {
-                        condition,
+                        discriminator,
                         branches: distributed,
                     }],
                     values,
@@ -439,21 +426,18 @@ fn interpret_monoidal_operation(
             };
             if let Some([left, right]) = product_pair(source, values)
                 && let MonoidalValue::Coproduct {
-                    condition,
+                    discriminator,
                     branches,
                 } = right
             {
                 let distributed = branches
                     .into_iter()
-                    .map(|branch| MonoidalValue::Product {
-                        origin: None,
-                        components: vec![left.clone(), branch],
-                    })
+                    .map(|branch| MonoidalValue::Product(vec![left.clone(), branch]))
                     .collect();
                 assign_targets(
                     targets,
                     vec![MonoidalValue::Coproduct {
-                        condition,
+                        discriminator,
                         branches: distributed,
                     }],
                     values,
@@ -468,7 +452,7 @@ fn interpret_monoidal_operation(
                 let eliminated = branches
                     .into_iter()
                     .filter_map(|branch| match branch {
-                        MonoidalValue::Product { mut components, .. } if components.len() > 1 => {
+                        MonoidalValue::Product(mut components) if components.len() > 1 => {
                             Some(components.remove(1))
                         }
                         _ => None,
@@ -482,7 +466,7 @@ fn interpret_monoidal_operation(
                 values.insert(
                     target,
                     MonoidalValue::Coproduct {
-                        condition: Box::new(MonoidalValue::Unit),
+                        discriminator: Box::new(MonoidalValue::Unit),
                         branches: source_values(sources, values),
                     },
                 );
@@ -527,16 +511,16 @@ fn collect_atom_variables(value: MonoidalValue, atoms: &mut Vec<VariableId>) {
                 atoms.push(atom);
             }
         }
-        MonoidalValue::Product { components, .. } => {
+        MonoidalValue::Product(components) => {
             for component in components {
                 collect_atom_variables(component, atoms);
             }
         }
         MonoidalValue::Coproduct {
-            condition,
+            discriminator,
             branches,
         } => {
-            collect_atom_variables(*condition, atoms);
+            collect_atom_variables(*discriminator, atoms);
             for branch in branches {
                 collect_atom_variables(branch, atoms);
             }
@@ -545,11 +529,29 @@ fn collect_atom_variables(value: MonoidalValue, atoms: &mut Vec<VariableId>) {
     }
 }
 
-fn origin_wire(value: MonoidalValue) -> Option<VariableId> {
-    match value {
-        MonoidalValue::Atom(atom) => Some(atom),
-        MonoidalValue::Product { origin, .. } => origin,
-        MonoidalValue::Coproduct { .. } | MonoidalValue::Unit => None,
+fn atom_from_value(value: MonoidalValue) -> Option<VariableId> {
+    let mut atoms = Vec::new();
+    collect_atom_variables(value, &mut atoms);
+    match atoms.as_slice() {
+        [atom] => Some(*atom),
+        [] | [_, ..] => None,
+    }
+}
+
+fn wire_for_value(
+    value: MonoidalValue,
+    values: &HashMap<VariableId, MonoidalValue>,
+) -> Option<VariableId> {
+    if let MonoidalValue::Atom(atom) = value {
+        return Some(atom);
+    }
+
+    let mut matching_wires = values
+        .iter()
+        .filter_map(|(wire, candidate)| (candidate == &value).then_some(*wire));
+    match (matching_wires.next(), matching_wires.next()) {
+        (Some(wire), None) => Some(wire),
+        _ => atom_from_value(value),
     }
 }
 
@@ -582,7 +584,7 @@ fn product_components(
 
 fn product_components_from_value(value: MonoidalValue) -> Option<Vec<MonoidalValue>> {
     match value {
-        MonoidalValue::Product { components, .. } => Some(components),
+        MonoidalValue::Product(components) => Some(components),
         _ => None,
     }
 }

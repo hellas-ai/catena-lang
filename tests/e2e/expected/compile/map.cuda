@@ -1,0 +1,25 @@
+#include <stdint.h>
+
+__global__ void user_f32_map_add_ten(float* a, float* output) {
+    uint3 worker_block = blockIdx;
+    uint3 worker_thread = threadIdx;
+    uint64_t view = (uint64_t)worker_block.x * blockDim.x + worker_thread.x;
+    // safety: certified by user.f32.map-add-ten.a.view.safe-access
+    float a_value = a[view];
+    float one = 1.0f;
+    float two = one + one;
+    float four = two + two;
+    float eight = four + four;
+    float ten = eight + two;
+    float mapped = a_value + ten;
+    // safety: certified by user.f32.map-add-ten.output.view.safe-access
+    output[view] = mapped;
+    auto output_mapped = output;
+    return;
+}
+
+void launch_user_f32_map_add_ten(uint64_t block_count, uint64_t thread_count, float* a, float* output) {
+    dim3 block(thread_count);
+    dim3 grid(block_count);
+    user_f32_map_add_ten<<<grid, block>>>(a, output);
+}

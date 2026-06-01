@@ -1,0 +1,22 @@
+#include <stdint.h>
+
+__global__ void user_f32_broadcast_add(uint64_t rows, uint64_t cols, uint64_t tile_rows, uint64_t tile_cols, float* a, float* b, float* output) {
+    uint3 worker_block = blockIdx;
+    uint3 worker_thread = threadIdx;
+    uint64_t ij_row = (uint64_t)worker_block.y * tile_rows + worker_thread.y;
+    uint64_t ij_col = (uint64_t)worker_block.x * tile_cols + worker_thread.x;
+    uint64_t i = ij_row;
+    uint64_t j = ij_col;
+    float a_value = a[i];
+    float b_value = b[j];
+    float sum = a_value + b_value;
+    output[ij_row * cols + ij_col] = sum;
+    auto output_summed = output;
+    return;
+}
+
+void launch_user_f32_broadcast_add(uint64_t rows, uint64_t cols, uint64_t tile_rows, uint64_t tile_cols, float* a, float* b, float* output) {
+    dim3 block(tile_cols, tile_rows);
+    dim3 grid(((cols + tile_cols - 1) / tile_cols), ((rows + tile_rows - 1) / tile_rows));
+    user_f32_broadcast_add<<<grid, block>>>(rows, cols, tile_rows, tile_cols, a, b, output);
+}

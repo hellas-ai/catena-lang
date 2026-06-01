@@ -73,6 +73,9 @@ pub(super) fn dimension_expr(
             .get(leaf)
             .cloned()
             .ok_or_else(|| missing_extent(*leaf)),
+        Tree::Node(op, 0, children) if op.to_string() == "1" && children.is_empty() => {
+            Ok("1".to_string())
+        }
         Tree::Node(op, 0, children)
             if matches!(op.to_string().as_str(), "nat.mul" | "*") && children.len() == 2 =>
         {
@@ -112,6 +115,12 @@ fn dimension_expr_with_static(
                 .ok_or_else(|| missing_extent(*leaf))?,
             is_static: static_extent_leaves.contains(leaf),
         }),
+        Tree::Node(op, 0, children) if op.to_string() == "1" && children.is_empty() => {
+            Ok(DimensionExpr {
+                expr: "1".to_string(),
+                is_static: true,
+            })
+        }
         Tree::Node(op, 0, children)
             if matches!(op.to_string().as_str(), "nat.mul" | "*") && children.len() == 2 =>
         {

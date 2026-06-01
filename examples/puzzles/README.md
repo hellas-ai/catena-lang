@@ -13,7 +13,20 @@ Inspirations
 - generated code has a lot of `auto output_summed = output`. The reason is that the hypergraph representation is basically SSA, that is, each assignment creates a new variable. In CUDA code we should identify wires that represent the same variable and remove those expressions.
 
 * Should we allocate global memory in launcher? Now it looks quite unsafe since we compute the size in the launcher, but we don't allocate the memory.
-* We add guards to ensure that indices are not out of bound. This could happen if launches have extra threads. In general, threads/blocks are configured at run time. I don't know if we can be smarter and detect unsafety at compile time.
 
-- Right now the compiler is conservative and emits guards for each view. To remove redundant input guards, we’d need to represent view expressions symbolically and check implication against existing guards.
-  - For example, in `user.f32.broadcast-add-singleton-matrix-inputs`, the output view is `ij = (i, j)` for an output shaped `[tile_rows, tile_cols]`. The output guard proves `i < tile_rows` and `j < tile_cols`. The input views are built by unflattening `j` as `[1, tile_cols]`, giving `(0, j)`, and unflattening `i` as `[tile_rows, 1]`, giving `(i, 0)`. Once the output guard holds, those input accesses are already safe: `0 < 1`, `j < tile_cols`, and `i < tile_rows`. The extra input checks are therefore redundant, but the compiler currently does not prove that relationship.
+### Broadcast proof
+
+`user.f32.broadcast-add-singleton-matrix-inputs` proves memory safety with `examples/puzzles/broadcast.proof.hex`.
+
+The output view is `ij = (i, j)` for an output shaped
+`[grid_rows * tile_rows, grid_cols * tile_cols]`. Proving `ij` safe for the
+output gives `i < grid_rows * tile_rows` and `j < grid_cols * tile_cols`.
+
+The singleton input views are explicit reshapes:
+
+- `reshape(j, shape.row-mul(grid_cols, tile_cols)) = (0, j)`
+- `reshape(i, shape.col-mul(grid_rows, tile_rows)) = (i, 0)`
+
+Therefore the row-vector access is safe because `0 < 1` and
+`j < grid_cols * tile_cols`; the column-vector access is safe because
+`i < grid_rows * tile_rows` and `0 < 1`.

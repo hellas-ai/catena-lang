@@ -31,6 +31,7 @@
   (arr gpu.grid.view : 1 -> 1)
   (arr gpu.view.linearize : 1 -> 1)
   (arr gpu.view.group : 2 -> 1)
+  (arr gpu.view.reshape : 2 -> 1)
   (arr gpu.view.group-by-tile : 3 -> 1)
   (arr gpu.view.row : 1 -> 1)
   (arr gpu.view.col : 1 -> 1)
@@ -38,6 +39,11 @@
   (arr gpu.global.store : 3 -> 1)
   (arr gpu.shared.load : 2 -> 1)
   (arr gpu.shared.store : 3 -> 1)
+  (arr gpu.shape.row : 1 -> 1)
+  (arr gpu.shape.row-mul : 2 -> 1)
+  (arr gpu.shape.col : 1 -> 1)
+  (arr gpu.shape.col-mul : 2 -> 1)
+  (arr gpu.shape.2d : 2 -> 1)
 })
 
 (theory gpu.proof syntax {
@@ -184,6 +190,66 @@
         (({({[n] [count]} nat.ceil-div) [count]} 2d) view)}
        |-)))
 
+  # reshape-row
+  #
+  #        Gamma |- e : view(cols 1d)
+  #   ---------------------------------------------
+  #    Gamma |- reshape(e, 1, cols) : view({1 cols} 2d)
+
+  (arr reshape-row :
+    ([gamma expr cols]
+      ({[gamma] [expr] (([cols] 1d) view)} |-)) ->
+    ([gamma expr cols . gamma expr cols cols]
+      ({[gamma]
+        ({[expr] ([cols] gpu.shape.row)} gpu.view.reshape)
+        (({1 [cols]} 2d) view)}
+       |-)))
+
+  # reshape-row-mul
+  #
+  #        Gamma |- e : view((lhs * rhs) 1d)
+  #   ---------------------------------------------------------------
+  #    Gamma |- reshape(e, 1, lhs * rhs) : view({1 (lhs * rhs)} 2d)
+
+  (arr reshape-row-mul :
+    ([gamma expr lhs rhs]
+      ({[gamma] [expr] ((({[lhs] [rhs]} nat.mul) 1d) view)} |-)) ->
+    ([gamma expr lhs rhs . gamma expr lhs rhs lhs rhs]
+      ({[gamma]
+        ({[expr] ({[lhs] [rhs]} gpu.shape.row-mul)} gpu.view.reshape)
+        (({1 ({[lhs] [rhs]} nat.mul)} 2d) view)}
+       |-)))
+
+  # reshape-col
+  #
+  #        Gamma |- e : view(rows 1d)
+  #   ---------------------------------------------
+  #    Gamma |- reshape(e, rows, 1) : view({rows 1} 2d)
+
+  (arr reshape-col :
+    ([gamma expr rows]
+      ({[gamma] [expr] (([rows] 1d) view)} |-)) ->
+    ([gamma expr rows . gamma expr rows rows]
+      ({[gamma]
+        ({[expr] ([rows] gpu.shape.col)} gpu.view.reshape)
+        (({[rows] 1} 2d) view)}
+       |-)))
+
+  # reshape-col-mul
+  #
+  #        Gamma |- e : view((lhs * rhs) 1d)
+  #   ---------------------------------------------------------------
+  #    Gamma |- reshape(e, lhs * rhs, 1) : view({(lhs * rhs) 1} 2d)
+
+  (arr reshape-col-mul :
+    ([gamma expr lhs rhs]
+      ({[gamma] [expr] ((({[lhs] [rhs]} nat.mul) 1d) view)} |-)) ->
+    ([gamma expr lhs rhs . gamma expr lhs rhs lhs rhs]
+      ({[gamma]
+        ({[expr] ({[lhs] [rhs]} gpu.shape.col-mul)} gpu.view.reshape)
+        (({({[lhs] [rhs]} nat.mul) 1} 2d) view)}
+       |-)))
+
   # group-by-tile
   #
   #    Gamma |- e : view(({grid_2d tile_2d} *))
@@ -196,6 +262,24 @@
       ({[gamma] [expr] (({({[grid-rows] [grid-cols]} 2d) ({[tile-rows] [tile-cols]} 2d)} *) view)}
        |-)) ->
     ([gamma expr grid-rows grid-cols tile-rows tile-cols
+      . gamma expr tile-rows tile-cols grid-rows tile-rows grid-cols tile-cols]
+      ({[gamma]
+        ({[expr] [tile-rows] [tile-cols]} gpu.view.group-by-tile)
+        (({({[grid-rows] [tile-rows]} nat.mul) ({[grid-cols] [tile-cols]} nat.mul)} 2d) view)}
+       |-)))
+
+  # group-by-tile-2d-2d
+  #
+  #    Gamma |- e : view({grid_cols grid_rows tile_cols tile_rows} 4d)
+  #   ----------------------------------------------------------------------
+  #    Gamma |- group-by-tile(e, tile_rows, tile_cols)
+  #           : view({grid_rows * tile_rows, grid_cols * tile_cols} 2d)
+
+  (arr group-by-tile-2d-2d :
+    ([gamma expr grid-cols grid-rows tile-cols tile-rows]
+      ({[gamma] [expr] (({[grid-cols] [grid-rows] [tile-cols] [tile-rows]} 4d) view)}
+       |-)) ->
+    ([gamma expr grid-cols grid-rows tile-cols tile-rows
       . gamma expr tile-rows tile-cols grid-rows tile-rows grid-cols tile-cols]
       ({[gamma]
         ({[expr] [tile-rows] [tile-cols]} gpu.view.group-by-tile)

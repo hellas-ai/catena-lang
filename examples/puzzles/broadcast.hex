@@ -39,33 +39,39 @@
 
 #
 # Variant where inputs are represented as [1, tile_cols] and [tile_rows, 1].
-# Use one_row = 1 and one_col = 1.
+# The target shape of each reshape is explicit:
+#   shape.row-mul(grid_cols, tile_cols) = {1 (grid_cols * tile_cols)} 2d
+#   shape.col-mul(grid_rows, tile_rows) = {(grid_rows * tile_rows) 1} 2d
+#   reshape(j, shape.row-mul(grid_cols, tile_cols)) = (0, j)
+#   reshape(i, shape.col-mul(grid_rows, tile_rows)) = (i, 0)
 #
 
 (def data user.f32.broadcast-add-singleton-matrix-inputs :
     {
-      (([.one_row] extent) val)
-      (([.one_col] extent) val)
       (([.tile_rows] extent) val)
       (([.tile_cols] extent) val)
-      (({({[one_col] [one_row]} 2d) ({[tile_cols] [tile_rows]} 2d)} gpu.grid) val)
-      (({f32 ({[one_row] [tile_cols]} 2d)} gpu.global) val)
-      (({f32 ({[tile_rows] [one_col]} 2d)} gpu.global) val)
-      (({f32 ({[tile_rows] [tile_cols]} 2d)} gpu.global) val)
+      (([.grid_cols] extent) val)
+      (([.grid_rows] extent) val)
+      (({({[grid_cols] [grid_rows]} 2d) ({[tile_cols] [tile_rows]} 2d)} gpu.grid) val)
+      (({f32 ({1 ({[grid_cols] [tile_cols]} nat.mul)} 2d)} gpu.global) val)
+      (({f32 ({({[grid_rows] [tile_rows]} nat.mul) 1} 2d)} gpu.global) val)
+      (({f32 ({({[grid_rows] [tile_rows]} nat.mul) ({[grid_cols] [tile_cols]} nat.mul)} 2d)} gpu.global) val)
     } ->
     {
-      [one_row one_col tile_rows tile_cols.]
-      (({f32 ({[one_row] [tile_cols]} 2d)} gpu.global) val)
-      (({f32 ({[tile_rows] [one_col]} 2d)} gpu.global) val)
-      (({f32 ({[tile_rows] [tile_cols]} 2d)} gpu.global) val)
+      [tile_rows tile_cols grid_cols grid_rows.]
+      (({f32 ({1 ({[grid_cols] [tile_cols]} nat.mul)} 2d)} gpu.global) val)
+      (({f32 ({({[grid_rows] [tile_rows]} nat.mul) 1} 2d)} gpu.global) val)
+      (({f32 ({({[grid_rows] [tile_rows]} nat.mul) ({[grid_cols] [tile_cols]} nat.mul)} 2d)} gpu.global) val)
     }
-    = {[one_row one_col tile_rows tile_cols grid a b output.]
+    = {[tile_rows tile_cols grid_cols grid_rows grid a b output.]
       ([.grid] gpu.grid.view [worker.])
       ([.worker tile_rows tile_cols] gpu.view.group-by-tile [ij.])
       ([.ij] gpu.view.row [i.])
       ([.ij] gpu.view.col [j.])
-      ([.j tile_cols] gpu.view.group [a_view.])
-      ([.i one_col] gpu.view.group [b_view.])
+      ([.grid_cols tile_cols] gpu.shape.row-mul [a_shape.])
+      ([.grid_rows tile_rows] gpu.shape.col-mul [b_shape.])
+      ([.j a_shape] gpu.view.reshape [a_view.])
+      ([.i b_shape] gpu.view.reshape [b_view.])
       ([.a a_view] gpu.global.load [a_value.])
       ([.b b_view] gpu.global.load [b_value.])
       ([.a_value b_value] f32.add [sum.])

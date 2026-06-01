@@ -1,0 +1,29 @@
+#include <stdint.h>
+
+__global__ void user_f32_broadcast_add_singleton_matrix_inputs(uint64_t tile_rows, uint64_t tile_cols, uint64_t grid_cols, uint64_t grid_rows, float* a, float* b, float* output) {
+    uint3 worker_block = blockIdx;
+    uint3 worker_thread = threadIdx;
+    uint64_t ij_row = (uint64_t)worker_block.y * tile_rows + worker_thread.y;
+    uint64_t ij_col = (uint64_t)worker_block.x * tile_cols + worker_thread.x;
+    uint64_t i = ij_row;
+    uint64_t j = ij_col;
+    uint64_t a_view_row = 0;
+    uint64_t a_view_col = j;
+    uint64_t b_view_row = i;
+    uint64_t b_view_col = 0;
+    // safety: certified by user.f32.broadcast-add-singleton-matrix-inputs.a.a_view.safe-access
+    float a_value = a[a_view_row * (grid_cols * tile_cols) + a_view_col];
+    // safety: certified by user.f32.broadcast-add-singleton-matrix-inputs.b.b_view.safe-access
+    float b_value = b[b_view_row * 1 + b_view_col];
+    float sum = a_value + b_value;
+    // safety: certified by user.f32.broadcast-add-singleton-matrix-inputs.output.ij.safe-access
+    output[ij_row * (grid_cols * tile_cols) + ij_col] = sum;
+    auto output_summed = output;
+    return;
+}
+
+void launch_user_f32_broadcast_add_singleton_matrix_inputs(uint64_t tile_rows, uint64_t tile_cols, uint64_t grid_cols, uint64_t grid_rows, float* a, float* b, float* output) {
+    dim3 block(tile_cols, tile_rows);
+    dim3 grid(grid_cols, grid_rows);
+    user_f32_broadcast_add_singleton_matrix_inputs<<<grid, block>>>(tile_rows, tile_cols, grid_cols, grid_rows, a, b, output);
+}

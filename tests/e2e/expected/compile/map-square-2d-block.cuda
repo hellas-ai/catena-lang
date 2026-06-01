@@ -1,0 +1,24 @@
+#include <stdint.h>
+
+__global__ void user_f32_map_square_2d_block_add_ten(uint64_t rows, uint64_t cols, uint64_t tile_rows, uint64_t tile_cols, float* a, float* output) {
+    uint3 worker_block = blockIdx;
+    uint3 worker_thread = threadIdx;
+    uint64_t ij_row = (uint64_t)worker_block.y * tile_rows + worker_thread.y;
+    uint64_t ij_col = (uint64_t)worker_block.x * tile_cols + worker_thread.x;
+    float a_value = a[ij_row * cols + ij_col];
+    float one = 1.0f;
+    float two = one + one;
+    float four = two + two;
+    float eight = four + four;
+    float ten = eight + two;
+    float mapped = a_value + ten;
+    output[ij_row * cols + ij_col] = mapped;
+    auto output_mapped = output;
+    return;
+}
+
+void launch_user_f32_map_square_2d_block_add_ten(uint64_t rows, uint64_t cols, uint64_t tile_rows, uint64_t tile_cols, float* a, float* output) {
+    dim3 block(tile_cols, tile_rows);
+    dim3 grid(((cols + tile_cols - 1) / tile_cols), ((rows + tile_rows - 1) / tile_rows));
+    user_f32_map_square_2d_block_add_ten<<<grid, block>>>(rows, cols, tile_rows, tile_cols, a, output);
+}

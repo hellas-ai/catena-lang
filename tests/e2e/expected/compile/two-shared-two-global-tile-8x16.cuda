@@ -1,0 +1,38 @@
+#include <stdint.h>
+
+#ifndef TILE_ROWS
+#define TILE_ROWS 8
+#endif
+#ifndef TILE_COLS
+#define TILE_COLS 16
+#endif
+
+__global__ void user_f32_two_shared_two_global(uint64_t block_count, uint64_t thread_count, float* out_a, float* out_b) {
+    __shared__ float tile_a[TILE_ROWS][TILE_COLS];
+    __shared__ float tile_b[TILE_ROWS][TILE_COLS];
+
+    uint3 worker_block = blockIdx;
+    uint3 worker_thread = threadIdx;
+    uint64_t worker_x = worker_thread.x;
+    uint64_t worker_y = worker_thread.y;
+    uint64_t worker_z = worker_thread.z;
+    float one = 1.0f;
+    float zero = 0.0f;
+    tile_a[worker_x][worker_y] = one;
+    auto tile_a_filled = tile_a;
+    tile_b[worker_x][worker_y] = zero;
+    auto tile_b_filled = tile_b;
+    float from_tile_a = tile_a_filled[worker_x][worker_y];
+    float from_tile_b = tile_b_filled[worker_x][worker_y];
+    out_a[worker_block.x * thread_count + worker_thread.x] = from_tile_a;
+    auto out_a_filled = out_a;
+    out_b[worker_block.x * thread_count + worker_thread.x] = from_tile_b;
+    auto out_b_filled = out_b;
+    return;
+}
+
+void launch_user_f32_two_shared_two_global(uint64_t block_count, uint64_t thread_count, float* out_a, float* out_b) {
+    dim3 block(thread_count);
+    dim3 grid(block_count);
+    user_f32_two_shared_two_global<<<grid, block>>>(block_count, thread_count, out_a, out_b);
+}

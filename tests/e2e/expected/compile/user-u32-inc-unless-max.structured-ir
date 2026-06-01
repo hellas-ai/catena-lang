@@ -1,0 +1,10 @@
+program user_u32_inc_unless_max()
+  w4 = u32.max()
+  is_max = u32.eq(x, w4)
+  w5 = 2.elim(is_max)
+  w6 = val.*.intro(w5, x)
+  distr(w6)
+  return
+  val.+.elim(w7)
+  return
+  return

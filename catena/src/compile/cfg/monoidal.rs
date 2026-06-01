@@ -260,6 +260,17 @@ impl<'a> MonoidalStructureResolver<'a> {
         }
     }
 
+    pub(super) fn atom_variables(&self, variable: VariableId) -> Vec<VariableId> {
+        let value = self
+            .values
+            .get(&variable)
+            .cloned()
+            .unwrap_or(MonoidalValue::Atom(variable));
+        let mut atoms = Vec::new();
+        collect_atom_variables(value, &mut atoms);
+        atoms
+    }
+
     fn branch_payload_from_producer(&self, variable: VariableId) -> Option<VariableId> {
         let (operation_id, branch) =
             producer_of_monoidal_structure_wire(&self.subgraph.graph, variable)?;
@@ -512,6 +523,31 @@ fn atom_value(value: MonoidalValue) -> Option<VariableId> {
     match value {
         MonoidalValue::Atom(atom) => Some(atom),
         _ => None,
+    }
+}
+
+fn collect_atom_variables(value: MonoidalValue, atoms: &mut Vec<VariableId>) {
+    match value {
+        MonoidalValue::Atom(atom) => {
+            if !atoms.contains(&atom) {
+                atoms.push(atom);
+            }
+        }
+        MonoidalValue::Product { components, .. } => {
+            for component in components {
+                collect_atom_variables(component, atoms);
+            }
+        }
+        MonoidalValue::Coproduct {
+            condition,
+            branches,
+        } => {
+            collect_atom_variables(*condition, atoms);
+            for branch in branches {
+                collect_atom_variables(branch, atoms);
+            }
+        }
+        MonoidalValue::Unit => {}
     }
 }
 

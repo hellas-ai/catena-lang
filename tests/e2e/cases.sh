@@ -36,6 +36,9 @@ test_case "check map proof" \
 test_case "check zip" \
   --command check \
   --input "examples/puzzles/zip.hex"
+test_case "check pooling" \
+  --command check \
+  --input "examples/puzzles/pooling.hex"
 
 test_case "compile user-u32-identity" \
   --command compile \
@@ -110,6 +113,15 @@ test_case "compile zip" \
   --emit cuda \
   --theory data \
   --entry user.f32.zip-add \
+  --no-proof
+test_case "compile pooling" \
+  --command compile \
+  --input "examples/puzzles/pooling.hex" \
+  --expected "compile/pooling.cuda" \
+  -- \
+  --emit cuda \
+  --theory data \
+  --entry user.f32.pooling-last-three \
   --no-proof
 test_case "compile map-square-2d" \
   --command compile \

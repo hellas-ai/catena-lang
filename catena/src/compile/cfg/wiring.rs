@@ -9,6 +9,7 @@ use super::{
         BoundaryKind, BoundaryPoint, CfgEdge, CfgNode, CfgNodeBoundaries, CfgNodeDraft, CfgNodeId,
         CfgWiring, OperationId, Transfer, VariableId,
     },
+    monoidal::MonoidalStructureResolver,
     operation::{OperationInstance, mapped_wire, source_nodes, target_nodes},
 };
 
@@ -141,21 +142,22 @@ pub(super) fn control_transfer(
     data_node_by_entry_wire: &HashMap<VariableId, CfgNodeId>,
     branch_data_successors: &HashMap<OperationId, Vec<CfgEdge>>,
 ) -> Transfer {
-    let successors = control_successors(
-        operation,
-        control_node_by_entry_wire,
-        data_node_by_entry_wire,
-    );
-    if is_branch_operation(operation) && successors.len() >= 2 {
+    if let Some(successors) = branch_data_successors.get(&operation.id)
+        && successors.len() >= 2
+    {
         return Transfer::If {
             condition: branch_condition(operation),
             then_edge: successors[0].clone(),
             else_edge: successors[1].clone(),
         };
     }
-    if let Some(successors) = branch_data_successors.get(&operation.id)
-        && successors.len() >= 2
-    {
+
+    let successors = control_successors(
+        operation,
+        control_node_by_entry_wire,
+        data_node_by_entry_wire,
+    );
+    if is_branch_operation(operation) && successors.len() >= 2 {
         return Transfer::If {
             condition: branch_condition(operation),
             then_edge: successors[0].clone(),
@@ -236,14 +238,15 @@ pub(super) struct BoundaryWires {
 impl BoundaryWires {
     pub(super) fn from_region_and_control_operations(
         compile_graph: &CompileGraph,
-        operation_instances: &[OperationInstance],
-        control_operation_ids: &[OperationId],
+        control_operations: &[OperationInstance],
         wire_map: &HashMap<NodeId, VariableId>,
+        monoidal_structure_resolver: &MonoidalStructureResolver<'_>,
     ) -> Self {
-        let region_sources = source_nodes(compile_graph)
-            .into_iter()
-            .map(|wire| NodeId(mapped_wire(wire, wire_map)))
-            .collect::<HashSet<_>>();
+        let region_sources = region_boundary_wires(
+            source_nodes(compile_graph),
+            wire_map,
+            monoidal_structure_resolver,
+        );
         let region_targets = target_nodes(compile_graph)
             .into_iter()
             .map(|wire| NodeId(mapped_wire(wire, wire_map)))
@@ -254,23 +257,23 @@ impl BoundaryWires {
         let mut control_sources_by_boundary_wire = HashMap::new();
         let mut control_targets_by_boundary_wire = HashMap::new();
 
-        for operation_id in control_operation_ids {
-            for wire in &operation_instances[*operation_id].outputs {
+        for operation in control_operations {
+            for wire in &operation.outputs {
                 let wire = NodeId(*wire);
                 all.insert(wire);
                 control_sources_by_boundary_wire
                     .entry(wire)
                     .or_insert_with(Vec::new)
-                    .push(*operation_id);
+                    .push(operation.id);
             }
 
-            for wire in &operation_instances[*operation_id].inputs {
-                let wire = NodeId(*wire);
+            for wire in control_input_boundary_wires(operation) {
+                let wire = NodeId(wire);
                 all.insert(wire);
                 control_targets_by_boundary_wire
                     .entry(wire)
                     .or_insert_with(Vec::new)
-                    .push(*operation_id);
+                    .push(operation.id);
             }
         }
 
@@ -282,6 +285,35 @@ impl BoundaryWires {
             control_targets_by_boundary_wire,
         }
     }
+}
+
+fn region_boundary_wires(
+    wires: Vec<NodeId>,
+    wire_map: &HashMap<NodeId, VariableId>,
+    monoidal_structure_resolver: &MonoidalStructureResolver<'_>,
+) -> HashSet<NodeId> {
+    let mut result = HashSet::new();
+    for wire in wires {
+        let wire = mapped_wire(wire, wire_map);
+        result.insert(NodeId(wire));
+        result.extend(
+            monoidal_structure_resolver
+                .atom_variables(wire)
+                .into_iter()
+                .map(NodeId),
+        );
+    }
+    result
+}
+
+fn control_input_boundary_wires(operation: &OperationInstance) -> Vec<VariableId> {
+    let mut wires = operation.inputs.clone();
+    if let Some(condition) = operation.branch_condition
+        && !wires.contains(&condition)
+    {
+        wires.push(condition);
+    }
+    wires
 }
 
 pub(super) fn entries_for_node(

@@ -4,6 +4,7 @@ mod data;
 mod model;
 #[allow(dead_code)]
 mod monoidal;
+mod normalize;
 mod operation;
 mod wiring;
 

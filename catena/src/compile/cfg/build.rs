@@ -15,13 +15,14 @@ use super::{
         OperationId, VariableId,
     },
     monoidal::{MonoidalStructureResolver, MonoidalStructureSubgraph},
+    normalize::normalize_cfg,
     operation::{
-        OperationInstance, effective_operation_instance, is_branch_operation, is_control_operation,
-        operation_names,
+        CfgOperationRole, OperationInstance, cfg_operation_role, effective_operation_instance,
+        is_branch_operation, is_control_operation, operation_names,
     },
     wiring::{
         BoundaryWires, cfg_node_from_control_draft, data_transfer, nodes_with_boundary,
-        predecessors, remap_transfer_targets, resolve_nested_data_return,
+        remap_transfer_targets, resolve_nested_data_return,
     },
 };
 
@@ -97,26 +98,30 @@ impl<'a> CfgBuilder<'a> {
             .collect::<Result<Vec<_>, CfgError>>()?;
 
         for operation in &self.operation_instances {
-            if matches!(self.compile_graph.theory, CompileTheory::Control)
-                || is_control_operation(self.compile_graph, &operation.name)
-            {
-                self.control_operation_ids.push(operation.id);
-            } else {
-                self.data_operation_ids.push(operation.id);
+            match cfg_runtime_role(self.compile_graph, operation) {
+                Some(CfgOperationRole::ControlFlow) => {
+                    self.control_operation_ids.push(operation.id)
+                }
+                Some(CfgOperationRole::Instruction) => self.data_operation_ids.push(operation.id),
+                Some(CfgOperationRole::MonoidalStructure) | None => {}
             }
         }
         Ok(())
     }
 
     fn build_data_cfg(&mut self) -> Result<Cfg, CfgError> {
+        let control_fragment = self.control_cfg_fragment()?;
+        let control_operations = control_fragment
+            .control_operation_by_node
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
         let boundary = BoundaryWires::from_region_and_control_operations(
             self.compile_graph,
-            &self.operation_instances,
-            &self.control_operation_ids,
+            &control_operations,
             &self.wire_map,
+            &self.monoidal_structure_resolver,
         );
-
-        let control_fragment = self.control_cfg_fragment()?;
         let data_fragment = self.data_cfg_fragment(&boundary)?;
         Ok(self.compose_fragments(data_fragment, control_fragment))
     }
@@ -178,13 +183,17 @@ impl<'a> CfgBuilder<'a> {
                         }
                         if let Some(branch) = &current_branch {
                             let successors = branch_data_successors.entry(branch.id).or_default();
-                            let arg = branch
-                                .outputs
-                                .get(successors.len())
-                                .copied()
-                                .or_else(|| call.inputs.first().copied())
-                                .into_iter()
-                                .collect();
+                            let arg = if entry.params.is_empty() {
+                                branch
+                                    .outputs
+                                    .get(successors.len())
+                                    .copied()
+                                    .or_else(|| call.inputs.first().copied())
+                                    .into_iter()
+                                    .collect()
+                            } else {
+                                entry.params.clone()
+                            };
                             successors.push(CfgEdge {
                                 target: entry.id,
                                 args: arg,
@@ -279,6 +288,42 @@ impl<'a> CfgBuilder<'a> {
         } = control_fragment;
         let mut data_node_by_entry_wire = data_node_by_entry_wire;
         data_node_by_entry_wire.extend(nested_data_node_by_entry_wire);
+        let preludes = nested_data_prelude_entries(&nested_data_nodes, &control_node_by_entry_wire);
+        data_node_by_entry_wire.extend(preludes);
+        let mut synthetic_return_nodes = Vec::new();
+        let mut next_synthetic_node = control_nodes
+            .iter()
+            .map(|node| node.id)
+            .chain(nested_data_nodes.iter().map(|node| node.id))
+            .chain(data_nodes.iter().map(|node| node.id))
+            .max()
+            .map(|id| id + 1)
+            .unwrap_or(0);
+        for operation in control_operation_by_node.values() {
+            if !is_branch_operation(operation) {
+                continue;
+            }
+            for (index, output) in operation.outputs.iter().copied().enumerate() {
+                let has_branch_data_successor = branch_data_successors
+                    .get(&operation.id)
+                    .is_some_and(|successors| successors.get(index).is_some());
+                if has_branch_data_successor
+                    || control_node_by_entry_wire.contains_key(&output)
+                    || data_node_by_entry_wire.contains_key(&output)
+                {
+                    continue;
+                }
+                let id = next_synthetic_node;
+                next_synthetic_node += 1;
+                data_node_by_entry_wire.insert(output, id);
+                synthetic_return_nodes.push(CfgNode {
+                    id,
+                    params: vec![output],
+                    block: Vec::new(),
+                    transfer: super::model::Transfer::Return(vec![output]),
+                });
+            }
+        }
 
         let boundaries_by_node = wiring
             .node_boundaries
@@ -306,6 +351,7 @@ impl<'a> CfgBuilder<'a> {
             );
             node
         }));
+        nodes.extend(synthetic_return_nodes);
         nodes.extend(data_nodes.into_iter().map(|node| {
             let boundaries = boundaries_by_node
                 .get(&node.id)
@@ -317,22 +363,12 @@ impl<'a> CfgBuilder<'a> {
                 transfer: data_transfer(boundaries, &node_by_control_operation),
             }
         }));
-        for node in &mut nodes {
-            prune_unused_params(node);
-        }
-        let entry = nodes_with_boundary(&wiring, BoundaryKind::RegionEntry)
-            .into_iter()
-            .next()
-            .or_else(|| nodes.first().map(|node| node.id))
-            .unwrap_or(0);
-        nodes.sort_by_key(|node| node.id);
-        let predecessors = predecessors(&nodes);
-
-        Cfg {
+        let entry = cfg_entry_from_region_entries(&nodes, &wiring);
+        normalize_cfg(Cfg {
             entry,
             nodes,
-            predecessors,
-        }
+            predecessors: Vec::new(),
+        })
     }
 
     fn compose_top_level_control(&self, control_fragment: ControlCfgFragment) -> Cfg {
@@ -379,9 +415,6 @@ impl<'a> CfgBuilder<'a> {
             );
             node
         }));
-        for node in &mut nodes {
-            prune_unused_params(node);
-        }
 
         let region_sources = crate::compile::cfg::operation::source_nodes(self.compile_graph)
             .into_iter()
@@ -397,15 +430,54 @@ impl<'a> CfgBuilder<'a> {
             .map(|node| node.id)
             .or_else(|| nodes.first().map(|node| node.id))
             .unwrap_or(0);
-        nodes.sort_by_key(|node| node.id);
-        let predecessors = predecessors(&nodes);
-
-        Cfg {
+        normalize_cfg(Cfg {
             entry,
             nodes,
-            predecessors,
+            predecessors: Vec::new(),
+        })
+    }
+}
+
+fn cfg_runtime_role(
+    compile_graph: &CompileGraph,
+    operation: &OperationInstance,
+) -> Option<CfgOperationRole> {
+    match cfg_operation_role(&operation.name) {
+        CfgOperationRole::MonoidalStructure => None,
+        CfgOperationRole::ControlFlow => Some(CfgOperationRole::ControlFlow),
+        CfgOperationRole::Instruction if matches!(compile_graph.theory, CompileTheory::Control) => {
+            Some(CfgOperationRole::ControlFlow)
+        }
+        CfgOperationRole::Instruction if is_control_operation(compile_graph, &operation.name) => {
+            Some(CfgOperationRole::ControlFlow)
+        }
+        CfgOperationRole::Instruction => Some(CfgOperationRole::Instruction),
+    }
+}
+
+fn nested_data_prelude_entries(
+    nested_data_nodes: &[CfgNode],
+    control_node_by_entry_wire: &HashMap<VariableId, CfgNodeId>,
+) -> HashMap<VariableId, CfgNodeId> {
+    let mut entries = HashMap::new();
+    for node in nested_data_nodes {
+        let target = match &node.transfer {
+            super::model::Transfer::Goto(edge) => Some(edge.target),
+            super::model::Transfer::Return(values) => values
+                .iter()
+                .find_map(|value| control_node_by_entry_wire.get(value).copied()),
+            super::model::Transfer::If { .. } => None,
+        };
+        let Some(target) = target else {
+            continue;
+        };
+        for (wire, control_node) in control_node_by_entry_wire {
+            if *control_node == target {
+                entries.insert(*wire, node.id);
+            }
         }
     }
+    entries
 }
 
 fn top_level_control_transfer(
@@ -441,30 +513,20 @@ fn top_level_control_transfer(
     super::model::Transfer::Return(returns)
 }
 
-fn prune_unused_params(node: &mut CfgNode) {
-    let mut used = node
-        .block
+fn cfg_entry_from_region_entries(nodes: &[CfgNode], wiring: &CfgWiring) -> CfgNodeId {
+    let region_entries = nodes_with_boundary(wiring, BoundaryKind::RegionEntry);
+    region_entries
         .iter()
-        .flat_map(|instruction| instruction.args.iter().copied())
-        .collect::<std::collections::HashSet<_>>();
-    match &node.transfer {
-        super::model::Transfer::Goto(edge) => {
-            used.extend(edge.args.iter().copied());
-        }
-        super::model::Transfer::If {
-            condition,
-            then_edge,
-            else_edge,
-        } => {
-            used.insert(*condition);
-            used.extend(then_edge.args.iter().copied());
-            used.extend(else_edge.args.iter().copied());
-        }
-        super::model::Transfer::Return(values) => {
-            used.extend(values.iter().copied());
-        }
-    }
-    node.params.retain(|param| used.contains(param));
+        .copied()
+        .find(|entry| {
+            nodes
+                .iter()
+                .find(|node| node.id == *entry)
+                .is_some_and(|node| !node.block.is_empty())
+        })
+        .or_else(|| region_entries.into_iter().next())
+        .or_else(|| nodes.first().map(|node| node.id))
+        .unwrap_or(0)
 }
 
 // CFG construction state

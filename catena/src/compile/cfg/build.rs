@@ -6,7 +6,10 @@ use crate::compile::{CompileGraph, CompileTheory};
 
 use super::{
     control::{ControlExpander, ExpandedControlItem},
-    data::{block_instructions, data_cfg_node_draft, partition_data_operations_by_internal_wires},
+    data::{
+        block_instructions, control_region_block_instructions, data_cfg_node_draft,
+        partition_data_operations_by_internal_wires,
+    },
     model::{
         BoundaryKind, Cfg, CfgEdge, CfgError, CfgNode, CfgNodeDraft, CfgNodeId, CfgWiring,
         OperationId, VariableId,
@@ -69,15 +72,15 @@ impl<'a> CfgBuilder<'a> {
     }
 
     pub(super) fn build(mut self) -> Result<Cfg, CfgError> {
-        self.reject_non_data_region()?;
         self.collect_operations()?;
-        self.build_data_cfg()
-    }
-
-    fn reject_non_data_region(&self) -> Result<(), CfgError> {
-        match &self.compile_graph.theory {
-            CompileTheory::Data => Ok(()),
-            other => Err(CfgError::UnsupportedTheory(other.clone())),
+        if matches!(self.compile_graph.theory, CompileTheory::Data) {
+            self.build_data_cfg()
+        } else if matches!(self.compile_graph.theory, CompileTheory::Control) {
+            self.build_control_cfg()
+        } else {
+            Err(CfgError::UnsupportedTheory(
+                self.compile_graph.theory.clone(),
+            ))
         }
     }
 
@@ -94,7 +97,9 @@ impl<'a> CfgBuilder<'a> {
             .collect::<Result<Vec<_>, CfgError>>()?;
 
         for operation in &self.operation_instances {
-            if is_control_operation(self.compile_graph, &operation.name) {
+            if matches!(self.compile_graph.theory, CompileTheory::Control)
+                || is_control_operation(self.compile_graph, &operation.name)
+            {
                 self.control_operation_ids.push(operation.id);
             } else {
                 self.data_operation_ids.push(operation.id);
@@ -114,6 +119,11 @@ impl<'a> CfgBuilder<'a> {
         let control_fragment = self.control_cfg_fragment()?;
         let data_fragment = self.data_cfg_fragment(&boundary)?;
         Ok(self.compose_fragments(data_fragment, control_fragment))
+    }
+
+    fn build_control_cfg(&mut self) -> Result<Cfg, CfgError> {
+        let control_fragment = self.control_cfg_fragment()?;
+        Ok(self.compose_top_level_control(control_fragment))
     }
 
     fn control_cfg_fragment(&mut self) -> Result<ControlCfgFragment, CfgError> {
@@ -145,7 +155,11 @@ impl<'a> CfgBuilder<'a> {
                     nodes.push(CfgNodeDraft {
                         id,
                         params: operation.inputs.clone(),
-                        block: block_instructions(operation)?,
+                        block: if matches!(self.compile_graph.theory, CompileTheory::Control) {
+                            control_region_block_instructions(operation)?
+                        } else {
+                            block_instructions(operation)?
+                        },
                     });
                     current_branch = control_operation_by_node
                         .get(&id)
@@ -187,7 +201,6 @@ impl<'a> CfgBuilder<'a> {
                 node_by_control_operation.insert(visible_operation, entry_node);
             }
         }
-
         Ok(ControlCfgFragment {
             nodes,
             nested_data_nodes,
@@ -229,9 +242,6 @@ impl<'a> CfgBuilder<'a> {
             let id = self.node_ids.allocate();
             let (node, boundaries) =
                 data_cfg_node_draft(self.compile_graph, id, operations, boundary)?;
-            if node.block.is_empty() && boundaries.exits.is_empty() {
-                continue;
-            }
 
             for point in &boundaries.entries {
                 node_by_entry_wire.insert(point.wire, id);
@@ -324,6 +334,111 @@ impl<'a> CfgBuilder<'a> {
             predecessors,
         }
     }
+
+    fn compose_top_level_control(&self, control_fragment: ControlCfgFragment) -> Cfg {
+        let ControlCfgFragment {
+            nodes: control_nodes,
+            nested_data_nodes,
+            node_by_control_operation: _,
+            control_operation_by_node,
+            node_by_entry_wire: control_node_by_entry_wire,
+            nested_data_node_by_entry_wire,
+            branch_data_successors,
+        } = control_fragment;
+        let data_node_by_entry_wire = nested_data_node_by_entry_wire;
+
+        let mut nodes = control_nodes
+            .into_iter()
+            .map(|node| {
+                let operation = control_operation_by_node
+                    .get(&node.id)
+                    .expect("control node must have source operation");
+                let transfer = top_level_control_transfer(
+                    node.id,
+                    operation,
+                    &control_node_by_entry_wire,
+                    &data_node_by_entry_wire,
+                    &branch_data_successors,
+                    self.compile_graph,
+                    &self.wire_map,
+                );
+                CfgNode {
+                    id: node.id,
+                    params: node.params,
+                    block: node.block,
+                    transfer,
+                }
+            })
+            .collect::<Vec<_>>();
+
+        nodes.extend(nested_data_nodes.into_iter().map(|mut node| {
+            node.transfer = resolve_nested_data_return(
+                node.transfer,
+                &control_node_by_entry_wire,
+                &data_node_by_entry_wire,
+            );
+            node
+        }));
+        for node in &mut nodes {
+            prune_unused_params(node);
+        }
+
+        let region_sources = crate::compile::cfg::operation::source_nodes(self.compile_graph)
+            .into_iter()
+            .filter_map(|wire| self.wire_map.get(&wire).copied().or(Some(wire.0)))
+            .collect::<std::collections::HashSet<_>>();
+        let entry = nodes
+            .iter()
+            .find(|node| {
+                node.params
+                    .iter()
+                    .any(|param| region_sources.contains(param))
+            })
+            .map(|node| node.id)
+            .or_else(|| nodes.first().map(|node| node.id))
+            .unwrap_or(0);
+        nodes.sort_by_key(|node| node.id);
+        let predecessors = predecessors(&nodes);
+
+        Cfg {
+            entry,
+            nodes,
+            predecessors,
+        }
+    }
+}
+
+fn top_level_control_transfer(
+    node: CfgNodeId,
+    operation: &OperationInstance,
+    control_node_by_entry_wire: &HashMap<VariableId, CfgNodeId>,
+    data_node_by_entry_wire: &HashMap<VariableId, CfgNodeId>,
+    branch_data_successors: &HashMap<OperationId, Vec<CfgEdge>>,
+    compile_graph: &CompileGraph,
+    wire_map: &HashMap<NodeId, VariableId>,
+) -> super::model::Transfer {
+    let transfer = crate::compile::cfg::wiring::control_transfer(
+        node,
+        operation,
+        control_node_by_entry_wire,
+        data_node_by_entry_wire,
+        branch_data_successors,
+    );
+    if !matches!(transfer, super::model::Transfer::Return(_)) {
+        return transfer;
+    }
+
+    let region_targets = crate::compile::cfg::operation::target_nodes(compile_graph)
+        .into_iter()
+        .map(|wire| wire_map.get(&wire).copied().unwrap_or(wire.0))
+        .collect::<std::collections::HashSet<_>>();
+    let returns = operation
+        .outputs
+        .iter()
+        .copied()
+        .filter(|wire| region_targets.contains(wire))
+        .collect::<Vec<_>>();
+    super::model::Transfer::Return(returns)
 }
 
 fn prune_unused_params(node: &mut CfgNode) {

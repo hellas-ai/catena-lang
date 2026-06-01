@@ -8,7 +8,7 @@ pub type VariableName = String;
 
 #[derive(Debug, thiserror::Error)]
 pub enum CfgError {
-    #[error("cfg only accepts data regions; got {0}")]
+    #[error("cfg does not support theory `{0}`")]
     UnsupportedTheory(CompileTheory),
     #[error("monoidal-structure wire `{wire}` produced by `{operation}` cannot resolve to an atom")]
     UnresolvedMonoidalStructureAtom {

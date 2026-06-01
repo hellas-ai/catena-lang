@@ -6,7 +6,10 @@ use crate::compile::CompileGraph;
 
 use super::{
     model::{BlockInstruction, CfgError, CfgNodeBoundaries, CfgNodeDraft, CfgNodeId, OperationId},
-    operation::{CfgOperationRole, OperationInstance, cfg_operation_role, operation_names},
+    operation::{
+        CfgOperationRole, OperationInstance, cfg_operation_role, local_operation_name,
+        operation_names,
+    },
     wiring::{BoundaryWires, entries_for_node, exits_for_node},
 };
 
@@ -46,6 +49,20 @@ pub(super) fn block_instructions(
     operation: OperationInstance,
 ) -> Result<Vec<BlockInstruction>, CfgError> {
     Ok(block_instruction(operation)?.into_iter().collect())
+}
+
+pub(super) fn control_region_block_instructions(
+    operation: OperationInstance,
+) -> Result<Vec<BlockInstruction>, CfgError> {
+    if local_operation_name(&operation.name) == "never" {
+        return Ok(vec![BlockInstruction {
+            operation_id: operation.id,
+            operation: operation.name,
+            args: operation.inputs,
+            results: Vec::new(),
+        }]);
+    }
+    block_instructions(operation)
 }
 
 pub(super) fn block_instruction(

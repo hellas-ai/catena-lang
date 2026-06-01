@@ -5,8 +5,7 @@ use open_hypergraphs::lax::NodeId;
 use crate::compile::{CompileGraph, CompileTheory};
 
 use super::{
-    build::{CfgBuilder, OperationIdAllocator, VariableIdAllocator},
-    model::{Cfg, CfgError, OperationId, VariableId},
+    CfgBuilder, OperationIdAllocator, VariableIdAllocator,
     monoidal::{MonoidalStructureResolver, MonoidalStructureSubgraph},
     operation::{
         OperationInstance, all_operation_wires, child_data_graph_for_operation,
@@ -14,6 +13,7 @@ use super::{
         operation_targets, source_nodes, target_nodes,
     },
 };
+use crate::compile::cfg::model::{Cfg, CfgError, OperationId, VariableId};
 
 // Control expansion
 
@@ -26,7 +26,17 @@ pub(super) struct ExpandedControlGraph {
 #[derive(Debug, Clone)]
 pub(super) enum ExpandedControlItem {
     Control(OperationInstance),
-    DataCfg { call: OperationInstance, cfg: Cfg },
+    DataCfg {
+        branch_arm: Option<ExpandedBranchArm>,
+        call: OperationInstance,
+        cfg: Cfg,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct ExpandedBranchArm {
+    pub(super) branch: OperationInstance,
+    pub(super) index: usize,
 }
 
 #[derive(Debug)]
@@ -98,9 +108,14 @@ impl<'a> ControlExpander<'a> {
     ) -> Result<(), CfgError> {
         let Some(child) = self.child_control_graph(compile_graph, &call.name) else {
             if let Some(child) = child_data_graph_for_operation(compile_graph, &call.name) {
-                let call = self.call_with_branch_payload(call, monoidal_structure_subgraph);
+                let (call, branch_arm) =
+                    self.call_with_branch_payload(call, monoidal_structure_subgraph);
                 let cfg = self.remapped_data_cfg(child, &call, monoidal_structure_subgraph)?;
-                output.push(ExpandedControlItem::DataCfg { call, cfg });
+                output.push(ExpandedControlItem::DataCfg {
+                    branch_arm,
+                    call,
+                    cfg,
+                });
                 return Ok(());
             }
             let mut operation = call.clone();
@@ -143,9 +158,9 @@ impl<'a> ControlExpander<'a> {
         &mut self,
         call: &OperationInstance,
         monoidal_structure_subgraph: &MonoidalStructureSubgraph,
-    ) -> OperationInstance {
+    ) -> (OperationInstance, Option<ExpandedBranchArm>) {
         let Some(branch) = self.current_branch.as_ref() else {
-            return call.clone();
+            return (call.clone(), None);
         };
         let branch_index = self
             .branch_data_successor_counts
@@ -153,7 +168,7 @@ impl<'a> ControlExpander<'a> {
             .and_modify(|count| *count += 1)
             .or_insert(1);
         let Some(payload) = branch.outputs.get(*branch_index - 1).copied() else {
-            return call.clone();
+            return (call.clone(), None);
         };
         let monoidal_structure_resolver = MonoidalStructureResolver::from_subgraph(
             self.compile_graph,
@@ -173,7 +188,13 @@ impl<'a> ControlExpander<'a> {
         if let Some(input) = call.inputs.first_mut() {
             *input = payload;
         }
-        call
+        (
+            call,
+            Some(ExpandedBranchArm {
+                branch: branch.clone(),
+                index: *branch_index - 1,
+            }),
+        )
     }
 
     fn child_control_graph(
@@ -258,7 +279,7 @@ impl<'a> ControlExpander<'a> {
             child,
             variable_map,
             Some(monoidal_structure_subgraph.clone()),
-        )
+        )?
         .build()
     }
 }

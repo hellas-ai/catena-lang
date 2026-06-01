@@ -10,13 +10,11 @@ use open_hypergraphs::{
 use std::collections::HashMap;
 
 use crate::compile::CompileGraph;
+use crate::compile::cfg::model::{CfgError, OperationId, VariableId};
 
-use super::{
-    model::{CfgError, OperationId, VariableId},
-    operation::{
-        CONTROL_FLOW_ONLY_OPERATIONS, MONOIDAL_STRUCTURE_OPERATIONS, local_operation_name,
-        operation_names, operation_sources, operation_targets,
-    },
+use super::operation::{
+    CONTROL_FLOW_ONLY_OPERATIONS, MONOIDAL_STRUCTURE_OPERATIONS, local_operation_name,
+    operation_names, operation_sources, operation_targets,
 };
 
 // Monoidal-structure subgraph construction and interpretation
@@ -27,10 +25,6 @@ pub(super) struct MonoidalStructureSubgraph {
 }
 
 impl MonoidalStructureSubgraph {
-    pub(super) fn from_compile_graph(compile_graph: &CompileGraph) -> Self {
-        Self::from_compile_graph_with_context(compile_graph, None, None)
-    }
-
     pub(super) fn from_compile_graph_with_context(
         compile_graph: &CompileGraph,
         wire_map: Option<&std::collections::HashMap<NodeId, VariableId>>,

@@ -1,12 +1,5 @@
 mod build;
-mod control;
-mod data;
 mod model;
-#[allow(dead_code)]
-mod monoidal;
-mod normalize;
-mod operation;
-mod wiring;
 
 pub use model::{
     BlockInstruction, BoundaryKind, BoundaryPoint, Cfg, CfgEdge, CfgError, CfgNode,

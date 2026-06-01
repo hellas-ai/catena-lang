@@ -1,16 +1,14 @@
 use std::collections::{HashMap, HashSet};
 
-use super::{
-    model::{Cfg, CfgEdge, CfgNode, CfgNodeId, Transfer},
-    wiring::{predecessors, remap_transfer_targets},
-};
+use super::compose::{predecessors, remap_transfer_targets};
+use crate::compile::cfg::model::{Cfg, CfgEdge, CfgNode, CfgNodeId, Transfer};
 
 pub(super) fn normalize_cfg(mut cfg: Cfg) -> Cfg {
     for node in &mut cfg.nodes {
         prune_unused_params(node);
     }
-    bypass_empty_goto_nodes(&mut cfg.nodes, &mut cfg.entry);
-    compact_node_ids(&mut cfg.nodes, &mut cfg.entry);
+    bypass_empty_goto_nodes_preserving_entry(&mut cfg.nodes, &mut cfg.entry);
+    compact_node_ids_preserving_entry(&mut cfg.nodes, &mut cfg.entry);
     cfg.nodes.sort_by_key(|node| node.id);
     cfg.predecessors = predecessors(&cfg.nodes);
     cfg
@@ -42,7 +40,7 @@ fn prune_unused_params(node: &mut CfgNode) {
     node.params.retain(|param| used.contains(param));
 }
 
-fn bypass_empty_goto_nodes(nodes: &mut Vec<CfgNode>, entry: &mut CfgNodeId) {
+fn bypass_empty_goto_nodes_preserving_entry(nodes: &mut Vec<CfgNode>, entry: &mut CfgNodeId) {
     let bypasses = nodes
         .iter()
         .filter_map(|node| {
@@ -92,7 +90,7 @@ fn bypass_edge(mut edge: CfgEdge, bypasses: &HashMap<CfgNodeId, CfgEdge>) -> Cfg
     edge
 }
 
-fn compact_node_ids(nodes: &mut [CfgNode], entry: &mut CfgNodeId) {
+fn compact_node_ids_preserving_entry(nodes: &mut [CfgNode], entry: &mut CfgNodeId) {
     nodes.sort_by_key(|node| node.id);
     let node_id_by_old = nodes
         .iter()

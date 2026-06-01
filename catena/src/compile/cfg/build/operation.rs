@@ -1,12 +1,10 @@
 use open_hypergraphs::lax::NodeId;
 use std::collections::HashMap;
 
+use crate::compile::cfg::model::{CfgError, OperationId, OperationName, VariableId};
 use crate::compile::{CompileGraph, CompileTheory};
 
-use super::{
-    model::{CfgError, OperationId, OperationName, VariableId},
-    monoidal::MonoidalStructureResolver,
-};
+use super::monoidal::MonoidalStructureResolver;
 
 pub(super) const MONOIDAL_STRUCTURE_OPERATIONS: &[&str] = &[
     "val.*.intro",

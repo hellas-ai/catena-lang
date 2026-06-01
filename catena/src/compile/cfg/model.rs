@@ -96,7 +96,7 @@ pub enum BoundaryKind {
 
 impl Cfg {
     pub fn from_compile_graph(compile_graph: &CompileGraph) -> Result<Self, CfgError> {
-        CfgBuilder::new(compile_graph).build()
+        CfgBuilder::new(compile_graph)?.build()
     }
 
     pub(crate) fn label(&self, node: CfgNodeId) -> String {

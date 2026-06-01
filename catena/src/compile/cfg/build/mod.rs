@@ -10,7 +10,6 @@ mod data;
 mod monoidal;
 mod normalize;
 mod operation;
-mod runtime;
 
 use self::{
     compose::{
@@ -23,7 +22,7 @@ use self::{
         partition_data_operations_by_internal_wires,
     },
     monoidal::{MonoidalStructureResolver, MonoidalStructureSubgraph},
-    runtime::RuntimeGraph,
+    operation::PreparedOperations,
 };
 use super::model::{
     Cfg, CfgEdge, CfgError, CfgNodeDraft, CfgNodeId, CfgWiring, OperationId, VariableId,
@@ -36,10 +35,10 @@ use super::model::{
 // - control operations that become CFG nodes/transfers,
 // - monoidal-structure operations that only repack wires.
 //
-// We do not lower the hypergraph operation-by-operation. Instead we first interpret the monoidal subgraph, then build a CFG from the remaining runtime structure:
+// We do not lower the hypergraph operation-by-operation. Instead we first interpret the monoidal subgraph, then build a CFG from the operations that still have CFG meaning:
 //
 //   CompileGraph
-//     -> RuntimeGraph      remove non-runtime operations, resolve wires
+//     -> PreparedOperations resolve wires and split data/control operations
 //     -> ControlPlan       expand control children and nested data calls
 //     -> DataBoundaries    decide where data blocks start/end
 //     -> DataPlan          partition data operations into CFG block drafts
@@ -54,7 +53,7 @@ pub(super) struct CfgBuilder<'a> {
     wire_map: HashMap<NodeId, VariableId>,
     monoidal_structure_resolver: MonoidalStructureResolver<'a>,
     node_ids: CfgNodeIdAllocator,
-    runtime: RuntimeGraph,
+    operations: PreparedOperations,
 }
 
 impl<'a> CfgBuilder<'a> {
@@ -74,7 +73,7 @@ impl<'a> CfgBuilder<'a> {
         wire_map: HashMap<NodeId, VariableId>,
         inherited_monoidal_structure: Option<MonoidalStructureSubgraph>,
     ) -> Result<Self, CfgError> {
-        // Build the resolver before collecting runtime operations. The resolver interprets structural wiring such as:
+        // Build the resolver before collecting CFG operations. The resolver interprets structural wiring such as:
         //
         //   x y --val.*.intro--> p --val.*.elim--> u v
         //
@@ -88,14 +87,14 @@ impl<'a> CfgBuilder<'a> {
             Some(&wire_map),
             inherited_monoidal_structure.as_ref(),
         );
-        let runtime =
-            RuntimeGraph::collect(compile_graph, &wire_map, &monoidal_structure_resolver)?;
+        let operations =
+            PreparedOperations::collect(compile_graph, &wire_map, &monoidal_structure_resolver)?;
         Ok(Self {
             compile_graph,
             wire_map,
             monoidal_structure_resolver,
             node_ids: CfgNodeIdAllocator::default(),
-            runtime,
+            operations,
         })
     }
 
@@ -159,10 +158,10 @@ impl<'a> CfgBuilder<'a> {
         // At this phase we allocate fresh node ids for all control drafts and remap nested CFG node ids so every node id is unique in the eventual composed CFG.
         let expanded_control = ControlExpander::new(
             self.compile_graph,
-            &self.runtime.operations,
+            &self.operations.operations,
             self.monoidal_structure_resolver.subgraph().clone(),
         )
-        .expand(&self.runtime.control_ids)?;
+        .expand(&self.operations.control_ids)?;
 
         let mut node_by_control_operation = HashMap::new();
         let mut control_operation_by_node = HashMap::new();
@@ -284,7 +283,7 @@ impl<'a> CfgBuilder<'a> {
     }
 
     fn data_cfg_fragment(&mut self, boundary: &DataBoundaries) -> Result<DataPlan, CfgError> {
-        // Partition runtime data operations by internal wires. Operations connected only through non-boundary wires stay in the same data block:
+        // Partition data operations by internal wires. Operations connected only through non-boundary wires stay in the same data block:
         //
         //   a -> op1 -> w -> op2 -> b       w is internal
         //
@@ -299,8 +298,8 @@ impl<'a> CfgBuilder<'a> {
         // becomes a data node with explicit entry/exit boundary metadata.
         let operations_by_cfg_node = partition_data_operations_by_internal_wires(
             self.compile_graph,
-            &self.runtime.operations,
-            &self.runtime.data_ids,
+            &self.operations.operations,
+            &self.operations.data_ids,
             &boundary.all,
         );
         let mut node_by_entry_wire = HashMap::new();

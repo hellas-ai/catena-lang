@@ -38,6 +38,54 @@ pub(super) struct OperationInstance {
     pub branch_condition: Option<VariableId>,
 }
 
+#[derive(Debug, Clone)]
+pub(super) struct PreparedOperations {
+    pub(super) operations: Vec<OperationInstance>,
+    pub(super) control_ids: Vec<OperationId>,
+    pub(super) data_ids: Vec<OperationId>,
+}
+
+impl PreparedOperations {
+    pub(super) fn collect(
+        compile_graph: &CompileGraph,
+        wire_map: &HashMap<NodeId, VariableId>,
+        monoidal_structure_resolver: &MonoidalStructureResolver<'_>,
+    ) -> Result<Self, CfgError> {
+        let operations = (0..operation_names(compile_graph).len())
+            .map(|operation_id| {
+                effective_operation_instance(
+                    compile_graph,
+                    operation_id,
+                    wire_map,
+                    monoidal_structure_resolver,
+                )
+            })
+            .collect::<Result<Vec<_>, CfgError>>()?;
+
+        let mut control_ids = Vec::new();
+        let mut data_ids = Vec::new();
+        for operation in &operations {
+            match cfg_operation_role(&operation.name) {
+                CfgOperationRole::MonoidalStructure => {}
+                CfgOperationRole::ControlFlow => control_ids.push(operation.id),
+                CfgOperationRole::Instruction
+                    if matches!(compile_graph.theory, CompileTheory::Control)
+                        || is_control_operation(compile_graph, &operation.name) =>
+                {
+                    control_ids.push(operation.id)
+                }
+                CfgOperationRole::Instruction => data_ids.push(operation.id),
+            }
+        }
+
+        Ok(Self {
+            operations,
+            control_ids,
+            data_ids,
+        })
+    }
+}
+
 pub(super) fn cfg_operation_role(operation: &str) -> CfgOperationRole {
     if operation.starts_with("control.") {
         return CfgOperationRole::ControlFlow;

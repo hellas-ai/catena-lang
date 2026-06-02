@@ -69,8 +69,10 @@ Some ideas:
 
 Actually, what we'll go with is a kind of hybrid approach:
 
-- Add an opaque `mem` type, representing a sized handle to some memory
+- Add an opaque `mem` type, representing a sized handle to some *owned* memory
+    - Also a `mem` version
 - This is isomorphic to `void* × size_t` (and in fact lowers to it)
+    - See [this tweet](https://x.com/ZPostFacto/status/2061537537932636194)
 - There is no runtime "fat pair", it actually ends up as two arguments
 - To recover a dependently typed buf, we have...
     - `mem -> buf n t ● (n : u64)`
@@ -157,3 +159,45 @@ Conceptually, this is precisely what we want!
 However, something is missing:
 
 The type `buf (n * n) f32` is not monomorphisable
+
+
+    # need a primitive
+    index.zero : (|- n > 0) -> val(t)
+
+    # need
+    assert.positive : val(n) -> (|- n > 0)
+
+    array.head-or-zero : buf n t -> t
+    array.head-or-zero = if n > 0 {
+        // we have (|- n > 0) here
+    } else {
+        // we have (|- ¬ n > 0) here
+    }
+
+    // contract here is that buf has size n
+    void array_head_or_zero(*t buf, size_t n, *t result) {
+        if n == 0 {
+            *result = 0
+        } else {
+            *result = buf[0]
+        }
+    }
+
+    // first problem: buf n t is not monomorphizable because n is free
+
+    foo : buf (n + m) t
+
+
+- mem (internally is just a pair of a pointer and a len)
+
+
+
+    # now we transform n → (a + b)
+    u32.from-mem : mem -> buf n u32
+
+
+    # this is similar to reshape(?)
+    buf.substitute : val(buf x t) ● (|- x = y) -> val(buf y t)
+
+    suppose have p : |- a + b = n
+    buf.substitute : 

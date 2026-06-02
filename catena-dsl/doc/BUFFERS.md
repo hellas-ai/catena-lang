@@ -1,18 +1,22 @@
 # Buffers, Indexes, and Finite Sets
 
-This document concerns the design of *buffers*, *indices*, and *finite spaces* in catena.
+This document concerns the design of *buffers*, *indices*, and *index spaces* in catena.
 In short:
 
 - Buffers are memory regions with dependent-typed size
 - Indices represent *positions* in a buffer
-- Finite spaces are the sets representing the *sizes* of buffers and indices
+- Index spaces are the sets representing the *sizes* of buffers and indices
+    - they are *iterable*
 
 A quick example: we may represent a 2D matrix `x` of `f32` elements with dimensions `(a, b)` as
 
     x : Ix (a, b) => f32
 
-Now suppose this is backed by a buffer; the closure must internally represent the indexing into this buffer explicitly.
-For example, let's say our buffer `m` is a single element `c`, and `x` is the "broadcast" version.
+Now suppose this is backed by a buffer; the closure must internally represent
+the indexing into this buffer explicitly.
+
+For example, let's say our buffer `m` is a single element `c`, and `x` is the
+"broadcast" of this buffer to the space `(a, b)`.
 Then
 
     m : buf 1 f32
@@ -32,15 +36,56 @@ Thus:
 **The main memory types in catena** are therefore:
 
 - `buf n t`: an owned buffer of `n` elements of type `t`. `n` must be a type-level u64 here.
-- `ref n t`: same as `buf`, but merely a read-only reference; can be copied freely but not written.
-- `Ix s`: an index (value) in some finite set s
+- `ref n t`: same as `buf`, but merely a read-only reference; can be copied freely but not written to.
+    - Used primarily for passing in model weights
+- `Ix s`: an index: a value of a finite set s
 
-There is a minor hiccup with this design: *entrypoints*.
-Consider the "ref.head" example below
+This is mathematically straightforward, but an implementation detail rears its
+ugly head:
+
+> How do we get dependently-typed buffers into the program?
+
+Consider for example the `ref.head` program, which returns the first element of
+an array reference, or zero for an empty reference.
+
+    ref.head-or-zero : val(ref n u32) -> val(u32)
+
+This seems fine, but when we try to *lower* `ref.head`, we see a problem:
+
+1. `ref n u32` is not monomorphic: `n` is a free type variable
+2. If `ref n u32` lowers to a pointer, its size can never be measured (pointers don't have associated lengths)
+
+So how do we write programs that deal with buffers of "proven size"?
+Some ideas:
+
+1. Runtime representation of `ref n t` is a *pair* of ref and size (simplest?)
+    - problem: we need to use templates in codegen - polymorphic over t!
+2. A `ref` cannot be passed as an argument, but must be *fetched* by some API (e.g. "load" op - ref by id; ids are passed in?)
+    - The API, being 'internal', provides proofs of length
+3. We expose a type for the ABI like `ref.typed n t` which *is* a pair of ptr/len, but can be unwrapped to `ref n t`
+    - explicit iso `ref.typed n t ↔ ref n t * u64`
+4. There is a special predicate `is.length(b, n)` which can be interpreted by runtime as an input constraint to signal a 'boundary contract'
+5. Hybrid of 3 and 4: expose a boundary-only ABI type which lowers inline to ptr/len arguments, and also signals the runtime/checker to enforce the length contract before refining to `ref n t`.
+
+Actually, what we'll go with is a kind of hybrid approach:
+
+- Add an opaque `mem` type, representing a sized handle to some memory
+- This is isomorphic to `void* × size_t` (and in fact lowers to it)
+- There is no runtime "fat pair", it actually ends up as two arguments
+- To recover a dependently typed buf, we have...
+    - `mem -> buf n t ● (n : u64)`
+- Then we can test `n` explicitly, e.g.
+    - `nz : (n : u64) -> |- n > 0`
+
+NOTE: for this to work, we need "type ascription"; i.e., named variables at the
+type level!
+This allows us to name runtime values at type level!
+
+**NOTE: BELOW HERE IS WIP NOTES**
 
 # Detail
 
-Let's look at each in more detail.
+Let's look at each part of the design in detail (WIP)
 
 ## Buffers
 
@@ -64,9 +109,10 @@ Some design notes:
 
 These are the least well defined. However, 
 
+
 # Examples
 
-The following examples demonstrate how we can write various 
+The following are examples of various programs involving buffers.
 
 ## buf.head
 
@@ -106,8 +152,6 @@ There's a few pieces missing:
     # multiply a n×n-sized buffer interpreted in row-major order by the identity matrix
     mul-id : buf (n*n) f32 -> (Ix (n, n) => f32)
     mul-id b = ???
-
-
 
 Conceptually, this is precisely what we want!
 However, something is missing:

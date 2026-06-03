@@ -62,8 +62,10 @@ impl BoundaryWires {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct OperationRegion {
     kind: RegionKind,
-    operations: Vec<usize>,
+    operations: Vec<OperationId>,
 }
+
+type OperationId = usize;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RegionKind {
@@ -73,9 +75,9 @@ enum RegionKind {
 
 fn partition_regions(graph: &Graph, boundary: &BoundaryWires) -> Vec<OperationRegion> {
     let mut uf = UnionFind::new(operation_count(graph));
-    let mut operations_by_wire = HashMap::<NodeId, Vec<usize>>::new();
+    let mut operations_by_wire = HashMap::<NodeId, Vec<OperationId>>::new();
 
-    for operation_id in 0..operation_count(graph) {
+    for operation_id in operation_ids(graph) {
         for wire in operation_wires(graph, operation_id) {
             if !boundary.contains(wire) {
                 operations_by_wire
@@ -103,7 +105,7 @@ fn collect_regions(graph: &Graph, mut uf: UnionFind) -> Vec<OperationRegion> {
     let mut region_by_root = HashMap::<usize, usize>::new();
     let mut regions = Vec::<OperationRegion>::new();
 
-    for operation_id in 0..operation_count(graph) {
+    for operation_id in operation_ids(graph) {
         let root = uf.find(operation_id);
         let next_region = regions.len();
         let region_id = *region_by_root.entry(root).or_insert_with(|| {
@@ -119,7 +121,7 @@ fn collect_regions(graph: &Graph, mut uf: UnionFind) -> Vec<OperationRegion> {
     regions
 }
 
-fn region_kind(graph: &Graph, operation_id: usize) -> RegionKind {
+fn region_kind(graph: &Graph, operation_id: OperationId) -> RegionKind {
     if is_interleaved_control_operation(graph, operation_id) {
         RegionKind::InterleavedControl
     } else {
@@ -144,7 +146,7 @@ impl WireUses {
             control_outputs: Vec::new(),
         };
 
-        for operation_id in 0..operation_count(graph) {
+        for operation_id in operation_ids(graph) {
             if is_interleaved_control_operation(graph, operation_id) {
                 push_unique_all(
                     &mut uses.control_inputs,
@@ -167,7 +169,11 @@ impl WireUses {
     }
 }
 
-fn is_interleaved_control_operation(graph: &Graph, operation_id: usize) -> bool {
+fn operation_ids(graph: &Graph) -> impl Iterator<Item = OperationId> {
+    0..operation_count(graph)
+}
+
+fn is_interleaved_control_operation(graph: &Graph, operation_id: OperationId) -> bool {
     matches!(
         operation_kind(operation_name(graph, operation_id)),
         OperationKind::InterleavedControl
@@ -175,7 +181,7 @@ fn is_interleaved_control_operation(graph: &Graph, operation_id: usize) -> bool 
 }
 
 fn assert_interleaved_control_operations_are_unary(graph: &Graph) {
-    for operation_id in 0..operation_count(graph) {
+    for operation_id in operation_ids(graph) {
         if !is_interleaved_control_operation(graph, operation_id) {
             continue;
         }
@@ -190,7 +196,7 @@ fn assert_interleaved_control_operations_are_unary(graph: &Graph) {
     }
 }
 
-fn operation_wires(graph: &Graph, operation_id: usize) -> impl Iterator<Item = NodeId> {
+fn operation_wires(graph: &Graph, operation_id: OperationId) -> impl Iterator<Item = NodeId> {
     operation_inputs(graph, operation_id).chain(operation_outputs(graph, operation_id))
 }
 

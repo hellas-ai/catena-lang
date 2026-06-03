@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use open_hypergraphs::lax::NodeId;
 
 use crate::{
@@ -6,6 +8,7 @@ use crate::{
     },
     compile::{CompileGraph, CompileTheory, graph_render},
     stdlib::operations::{OperationKind, operation_kind},
+    union_find::UnionFind,
 };
 
 pub fn render_analysis(graph: &CompileGraph) -> std::io::Result<Vec<u8>> {
@@ -14,7 +17,8 @@ pub fn render_analysis(graph: &CompileGraph) -> std::io::Result<Vec<u8>> {
         "analysis expects a data graph"
     );
 
-    let _boundary_wires = BoundaryWires::from_graph(&graph.graph);
+    let boundary_wires = BoundaryWires::from_graph(&graph.graph);
+    let _regions = partition_regions(&graph.graph, &boundary_wires);
     render_step(AnalysisStep::NormalizedGraph, graph)
 }
 
@@ -45,6 +49,78 @@ impl BoundaryWires {
             data_to_control,
             control_to_data,
         }
+    }
+
+    fn contains(&self, wire: NodeId) -> bool {
+        self.data_to_control.contains(&wire) || self.control_to_data.contains(&wire)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct OperationRegion {
+    kind: RegionKind,
+    operations: Vec<usize>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RegionKind {
+    Data,
+    InterleavedControl,
+}
+
+fn partition_regions(graph: &Graph, boundary: &BoundaryWires) -> Vec<OperationRegion> {
+    let mut uf = UnionFind::new(operation_count(graph));
+    let mut operations_by_wire = HashMap::<NodeId, Vec<usize>>::new();
+
+    for operation_id in 0..operation_count(graph) {
+        for wire in operation_wires(graph, operation_id) {
+            if !boundary.contains(wire) {
+                operations_by_wire
+                    .entry(wire)
+                    .or_default()
+                    .push(operation_id);
+            }
+        }
+    }
+
+    for operations in operations_by_wire.values() {
+        if let Some((first, rest)) = operations.split_first() {
+            for operation in rest {
+                if region_kind(graph, *first) == region_kind(graph, *operation) {
+                    uf.union(*first, *operation);
+                }
+            }
+        }
+    }
+
+    collect_regions(graph, uf)
+}
+
+fn collect_regions(graph: &Graph, mut uf: UnionFind) -> Vec<OperationRegion> {
+    let mut region_by_root = HashMap::<usize, usize>::new();
+    let mut regions = Vec::<OperationRegion>::new();
+
+    for operation_id in 0..operation_count(graph) {
+        let root = uf.find(operation_id);
+        let next_region = regions.len();
+        let region_id = *region_by_root.entry(root).or_insert_with(|| {
+            regions.push(OperationRegion {
+                kind: region_kind(graph, operation_id),
+                operations: Vec::new(),
+            });
+            next_region
+        });
+        regions[region_id].operations.push(operation_id);
+    }
+
+    regions
+}
+
+fn region_kind(graph: &Graph, operation_id: usize) -> RegionKind {
+    if is_interleaved_control_operation(graph, operation_id) {
+        RegionKind::InterleavedControl
+    } else {
+        RegionKind::Data
     }
 }
 
@@ -93,6 +169,10 @@ fn is_interleaved_control_operation(graph: &Graph, operation_id: usize) -> bool 
         operation_kind(operation_name(graph, operation_id)),
         OperationKind::InterleavedControl
     )
+}
+
+fn operation_wires(graph: &Graph, operation_id: usize) -> impl Iterator<Item = NodeId> {
+    operation_inputs(graph, operation_id).chain(operation_outputs(graph, operation_id))
 }
 
 fn push_unique_all(target: &mut Vec<NodeId>, wires: impl IntoIterator<Item = NodeId>) {

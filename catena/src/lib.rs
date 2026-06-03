@@ -10,5 +10,6 @@ pub mod scope;
 pub mod shallow;
 pub mod stdlib;
 pub mod structured;
+pub mod union_find;
 
 pub mod check;

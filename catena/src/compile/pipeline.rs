@@ -6,7 +6,9 @@ use thiserror::Error;
 use crate::{
     check::{CheckError, check as check_elaborated_theory},
     compile::{
-        CompileConfig, CompileGraph, CompileGraphError, check_render, compile_graph,
+        CompileConfig, CompileGraph, CompileGraphError,
+        cfg::render_program_cfg,
+        check_render, compile_graph,
         cuda::CudaOptions,
         cuda::{CudaAbiError, render_cuda_source},
         graph_render,
@@ -49,6 +51,7 @@ use crate::{
 pub enum Emit {
     Cuda,
     CompileGraph,
+    Cfg,
     Elaborated,
     Checked,
     StructuredIr,
@@ -138,7 +141,7 @@ impl CompilePipeline {
                 let graph = Self::compile_graph(checked_elaborated_theory, compile_graph_request)?;
                 Ok(graph_render::nested_svg(&graph)?)
             }
-            Emit::Cuda | Emit::StructuredIr => {
+            Emit::Cfg | Emit::Cuda | Emit::StructuredIr => {
                 self.require_format(OutputFormat::Text)?;
                 let proof_certificates = self.proof_certificates()?;
                 let emit = self.request.emit;
@@ -153,6 +156,9 @@ impl CompilePipeline {
                     .map(|certificates| certificates.verify_graph_properties(&graph))
                     .transpose()?;
                 let program = compile_program_from_graph(&graph)?;
+                if emit == Emit::Cfg {
+                    return Ok(render_program_cfg(&program).into_bytes());
+                }
                 let structured = compile_structured_program(&program)?;
                 Ok(match emit {
                     Emit::Cuda => render_cuda_source(

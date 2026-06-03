@@ -67,6 +67,7 @@ enum Command {
 enum EmitArg {
     Cuda,
     CompileGraph,
+    Cfg,
     Elaborated,
     Checked,
     StructuredIr,
@@ -222,6 +223,7 @@ impl From<EmitArg> for Emit {
         match value {
             EmitArg::Cuda => Emit::Cuda,
             EmitArg::CompileGraph => Emit::CompileGraph,
+            EmitArg::Cfg => Emit::Cfg,
             EmitArg::Elaborated => Emit::Elaborated,
             EmitArg::Checked => Emit::Checked,
             EmitArg::StructuredIr => Emit::StructuredIr,

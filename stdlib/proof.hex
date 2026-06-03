@@ -35,6 +35,17 @@
        (({({[b] false} =) (({[x] [y]} u64.gt) not)} =>) |-)}
       ))
 
+  (arr u64.lt :
+    ([x y b . x y]
+      {([x] u64)
+       ([y] u64)}
+      ) ->
+    ([x y b . b b x y b x y]
+      {([b] bool)
+       (({({[b] true} =) ({[x] [y]} u64.lt)} =>) |-)
+       (({({[b] false} =) (({[x] [y]} u64.lt) not)} =>) |-)}
+      ))
+
   (arr u64.index :
     ([x n . x n x]
       {([x] u64)

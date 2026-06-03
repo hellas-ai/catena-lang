@@ -8,8 +8,8 @@ use super::{
     control::{ControlExpander, ExpandedControlItem},
     data::{block_instructions, data_cfg_node_draft, partition_data_operations_by_internal_wires},
     model::{
-        BoundaryKind, Cfg, CfgEdge, CfgError, CfgNode, CfgNodeDraft, CfgNodeId, CfgWiring,
-        OperationId, VariableId,
+        BoundaryKind, Cfg, CfgEdge, CfgError, CfgNode, CfgNodeDraft, CfgNodeId, CfgOptions,
+        CfgWiring, OperationId, VariableId,
     },
     monoidal::{MonoidalStructureResolver, MonoidalStructureSubgraph},
     operation::{
@@ -33,6 +33,7 @@ pub(super) struct CfgBuilder<'a> {
     operation_instances: Vec<OperationInstance>,
     control_operation_ids: Vec<OperationId>,
     data_operation_ids: Vec<OperationId>,
+    options: CfgOptions,
 }
 
 impl<'a> CfgBuilder<'a> {
@@ -65,7 +66,13 @@ impl<'a> CfgBuilder<'a> {
             operation_instances: Vec::new(),
             control_operation_ids: Vec::new(),
             data_operation_ids: Vec::new(),
+            options: CfgOptions::default(),
         }
+    }
+
+    pub(super) fn with_options(mut self, options: CfgOptions) -> Self {
+        self.options = options;
+        self
     }
 
     pub(super) fn build(mut self) -> Result<Cfg, CfgError> {
@@ -145,7 +152,7 @@ impl<'a> CfgBuilder<'a> {
                     nodes.push(CfgNodeDraft {
                         id,
                         params: operation.inputs.clone(),
-                        block: block_instructions(operation)?,
+                        block: block_instructions(operation, self.options)?,
                     });
                     current_branch = control_operation_by_node
                         .get(&id)
@@ -228,7 +235,7 @@ impl<'a> CfgBuilder<'a> {
         for operations in operations_by_cfg_node {
             let id = self.node_ids.allocate();
             let (node, boundaries) =
-                data_cfg_node_draft(self.compile_graph, id, operations, boundary)?;
+                data_cfg_node_draft(self.compile_graph, id, operations, boundary, self.options)?;
             if node.block.is_empty() && boundaries.exits.is_empty() {
                 continue;
             }

@@ -1,17 +1,21 @@
 # basic datatypes
 (theory type nat {
-  # anonymous runtime values.
-  # val(t) ~= "a runtime value of type t"
-  (arr val : 1 -> 1)
-
   # booleans
+  # NOTE: booleans are special because they appear in `assert`
   (arr bool : 0 -> 1)
+
+  # *type level* bool values
+  (arr bool.t : 0 -> 1)
+  (arr bool.f : 0 -> 1)
 
   # u64
   (arr u64 : 0 -> 1)
 })
 
 (theory program type {
+  # assert (b : bool) -> (|- b = true)
+  (arr assert : ({[b] bool} :) -> ({[b] bool.f} = |-))
+
   # Boolean type literal.
   (arr bool.type : [] -> bool)
 

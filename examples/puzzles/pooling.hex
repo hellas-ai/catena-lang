@@ -1,0 +1,165 @@
+#
+# Pooling puzzle: for a 1D input, write the running sum of the last three
+# positions to the 1D output.
+#
+# The worker of a 1D block/thread grid is a 2D coordinate
+#   (block, thread) : block_count x thread_count
+# so the kernel linearizes it before indexing the 1D arrays.
+#
+#   output[0] = input[0]
+#   output[1] = input[1] + input[0]
+#   output[i] = input[i] + input[i - 1] + input[i - 2], for i >= 2
+#
+
+(def data user.f32.pooling-last-three :
+    {
+      (([.block_count] extent) val)
+      (([.thread_count] extent) val)
+      (({([block_count] 1d) ([thread_count] 1d)} gpu.grid) val)
+      (({f32 (({[block_count] [thread_count]} nat.mul) 1d)} gpu.global) val)
+      (({f32 (({[block_count] [thread_count]} nat.mul) 1d)} gpu.global) val)
+    } ->
+    {
+      [block_count thread_count.]
+      (({f32 (({[block_count] [thread_count]} nat.mul) 1d)} gpu.global) val)
+      (({f32 (({[block_count] [thread_count]} nat.mul) 1d)} gpu.global) val)
+    }
+    = {[block_count thread_count grid input output.]
+      ([.grid] gpu.grid.view [worker.])
+      ([.worker] gpu.view.linearize [index.])
+      ([.index] gpu.view.is-zero [is_zero.])
+      ([.output index] val.*.intro [output_index.])
+      ([.input output_index] val.*.intro [payload.])
+      ([.is_zero payload] if control.user.f32.pool-zero-or-rest [result.])
+      ([.result] val.*.elim [input_result output_pooled.])
+      [.input_result output_pooled]}
+)
+
+(def control user.f32.pool-zero-or-rest :
+    (
+      (({
+        ({f32 ([n] 1d)} gpu.global)
+        ({
+          ({f32 ([n] 1d)} gpu.global)
+          gpu.view
+        } *)
+      } *) val)
+      [payload . payload payload]
+    ) ->
+    (({
+      ({f32 ([n] 1d)} gpu.global)
+      ({f32 ([n] 1d)} gpu.global)
+    } *) val)
+    = ({data.user.f32.pool-at-zero data.user.f32.pool-nonzero} merge)
+)
+
+(def data user.f32.pool-nonzero :
+    (({
+      ({f32 ([n] 1d)} gpu.global)
+      ({
+        ({f32 ([n] 1d)} gpu.global)
+        gpu.view
+      } *)
+    } *) val) ->
+    (({
+      ({f32 ([n] 1d)} gpu.global)
+      ({f32 ([n] 1d)} gpu.global)
+    } *) val)
+    = {[payload.]
+      ([.payload] val.*.elim [input output_index.])
+      ([.output_index] val.*.elim [output index.])
+      ([.index] gpu.view.is-one [is_one.])
+      ([.is_one payload] if control.user.f32.pool-one-or-many [pooled.])
+      [.pooled]
+    }
+)
+
+(def control user.f32.pool-one-or-many :
+    (
+      (({
+        ({f32 ([n] 1d)} gpu.global)
+        ({
+          ({f32 ([n] 1d)} gpu.global)
+          gpu.view
+        } *)
+      } *) val)
+      [payload . payload payload]
+    ) ->
+    (({
+      ({f32 ([n] 1d)} gpu.global)
+      ({f32 ([n] 1d)} gpu.global)
+    } *) val)
+    = ({data.user.f32.pool-at-one data.user.f32.pool-at-many} merge)
+)
+
+(def data user.f32.pool-at-zero :
+    (({
+      ({f32 ([n] 1d)} gpu.global)
+      ({
+        ({f32 ([n] 1d)} gpu.global)
+        gpu.view
+      } *)
+    } *) val) ->
+    (({
+      ({f32 ([n] 1d)} gpu.global)
+      ({f32 ([n] 1d)} gpu.global)
+    } *) val)
+    = {[payload.]
+      ([.payload] val.*.elim [input output_index.])
+      ([.output_index] val.*.elim [output index.])
+      ([.input index] gpu.global.load [current.])
+      ([.output index current] gpu.global.store [output_pooled.])
+      ([.input output_pooled] val.*.intro)
+    }
+)
+
+(def data user.f32.pool-at-one :
+    (({
+      ({f32 ([n] 1d)} gpu.global)
+      ({
+        ({f32 ([n] 1d)} gpu.global)
+        gpu.view
+      } *)
+    } *) val) ->
+    (({
+      ({f32 ([n] 1d)} gpu.global)
+      ({f32 ([n] 1d)} gpu.global)
+    } *) val)
+    = {[payload.]
+      ([.payload] val.*.elim [input output_index.])
+      ([.output_index] val.*.elim [output index.])
+      ([.index] gpu.view.prev [prev.])
+      ([.input index] gpu.global.load [current.])
+      ([.input prev] gpu.global.load [previous.])
+      ([.current previous] f32.add [sum.])
+      ([.output index sum] gpu.global.store [output_pooled.])
+      ([.input output_pooled] val.*.intro)
+    }
+)
+
+(def data user.f32.pool-at-many :
+    (({
+      ({f32 ([n] 1d)} gpu.global)
+      ({
+        ({f32 ([n] 1d)} gpu.global)
+        gpu.view
+      } *)
+    } *) val) ->
+    (({
+      ({f32 ([n] 1d)} gpu.global)
+      ({f32 ([n] 1d)} gpu.global)
+    } *) val)
+    = {[payload.]
+      ([.payload] val.*.elim [input output_index.])
+      ([.output_index] val.*.elim [output index.])
+      ([.index] gpu.view.prev [prev.])
+      ([.index] gpu.view.prev2 [prev2.])
+      ([.input index] gpu.global.load [current.])
+      ([.input prev] gpu.global.load [previous.])
+      ([.input prev2] gpu.global.load [previous2.])
+      ([.current previous] f32.add [partial.])
+      ([.partial previous2] f32.add [sum.])
+      ([.output index sum] gpu.global.store [output_pooled.])
+      ([.input output_pooled] val.*.intro)
+    }
+)

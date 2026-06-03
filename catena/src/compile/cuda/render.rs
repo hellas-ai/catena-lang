@@ -144,6 +144,35 @@ fn render_cuda_stmts(
             Stmt::Return => out.push_str(&format!("{pad}return;\n")),
             Stmt::Barrier => out.push_str(&format!("{pad}__syncthreads();\n")),
             Stmt::Assign { lhs, rhs } => out.push_str(&format!("{pad}{lhs} = {rhs};\n")),
+            Stmt::Call {
+                function,
+                inputs,
+                outputs,
+            } => {
+                let function = sanitize_ident(function);
+                let inputs = inputs
+                    .iter()
+                    .map(|name| abi.rename(name))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                if outputs.is_empty() {
+                    out.push_str(&format!("{pad}{function}({inputs});\n"));
+                } else if outputs.len() == 1 {
+                    out.push_str(&format!(
+                        "{pad}{} = {function}({inputs});\n",
+                        abi.rename(&outputs[0])
+                    ));
+                } else {
+                    out.push_str(&format!(
+                        "{pad}auto [{}] = {function}({inputs});\n",
+                        outputs
+                            .iter()
+                            .map(|name| abi.rename(name))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ));
+                }
+            }
             Stmt::Primitive(primitive) => {
                 let primitive = rename_primitive(primitive, abi);
                 for line in domain.lower_primitive_lines(&primitive, abi) {
@@ -153,6 +182,12 @@ fn render_cuda_stmts(
             Stmt::Comment(comment) => out.push_str(&format!("{pad}// {comment}\n")),
         }
     }
+}
+
+fn sanitize_ident(name: &str) -> String {
+    name.chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+        .collect()
 }
 
 fn rename_primitive(primitive: &Primitive, abi: &CudaKernelAbi) -> Primitive {

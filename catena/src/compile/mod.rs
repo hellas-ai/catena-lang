@@ -1,3 +1,4 @@
+pub mod cfg;
 pub mod check_render;
 pub mod config;
 pub mod cuda;
@@ -11,9 +12,7 @@ pub mod structured;
 
 pub use config::{CompileConfig, TheoryExtension};
 pub use cuda::CudaOptions;
-pub use graph::{
-    CompileGraph, CompileGraphError, CompileTheory, GraphCompileOptions, compile_graph,
-};
+pub use graph::{CompileGraph, CompileGraphError, CompileTheory, compile_graph};
 pub use normalize::{NormalizeGraphError, normalize_graph};
 pub use pipeline::{
     CompilePipeline, CompilePipelineError, CompileRequest, Emit, OutputFormat, compile,

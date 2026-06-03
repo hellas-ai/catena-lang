@@ -31,6 +31,25 @@
     (gpu.view val) ->
     (gpu.view val))
 
+  # Move a 1D view to preceding logical positions. These are intended for
+  # guarded use after a control split has ruled out underflow.
+  (arr gpu.view.prev :
+    (gpu.view val) ->
+    (gpu.view val))
+
+  (arr gpu.view.prev2 :
+    (gpu.view val) ->
+    (gpu.view val))
+
+  # Predicates over 1D views, used to split guarded boundary cases.
+  (arr gpu.view.is-zero :
+    (gpu.view val) ->
+    (2 val))
+
+  (arr gpu.view.is-one :
+    (gpu.view val) ->
+    (2 val))
+
   # Group a linear 1D view into a 2D view with rows of `count` elements.
   # For example, with a row-major layout:
   #   row = view / count

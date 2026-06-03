@@ -1,22 +1,19 @@
 use std::collections::HashMap;
 
-use open_hypergraphs::lax::{NodeId, OpenHypergraph};
 use thiserror::Error;
 
 use crate::{
-    compile::{CompileGraph, CompileTheory},
-    lang::Obj,
-    structured::{
-        StructuredError, cfg,
-        cfg::Cfg,
-        ir::{Primitive, Stmt},
+    compile::{
+        CompileGraph, CompileTheory,
+        cfg::{Cfg, CfgError},
     },
+    lang::Obj,
 };
 
 #[derive(Debug, Error)]
 pub enum ProgramCompileError {
     #[error("failed to build cfg: {0}")]
-    Structure(#[from] StructuredError),
+    Structure(#[from] CfgError),
 }
 
 #[derive(Debug, Clone)]
@@ -92,31 +89,27 @@ fn build_definition(
     let id = DefinitionId(*next_id);
     *next_id += 1;
 
-    let cfg_context = cfg_context(compile_graph);
-    let context = context_for_cfg_context(compile_graph, &cfg_context);
-    let semantics = ProgramSemantics;
-    let cfg_context = cfg_context.with_variables(variables_for_context(&context));
-    let body = match cfg_context.kind() {
-        cfg::GraphKind::Data => cfg::Cfg::from_dataflow_context(&cfg_context, &semantics)?,
-        cfg::GraphKind::Control => cfg::Cfg::from_control_context(&cfg_context, &semantics)?,
-    };
+    let context = context_for_graph(compile_graph);
+    let body = Cfg::from_compile_graph(compile_graph)?;
 
     definitions.insert(
         id,
         Definition {
             id,
-            name: compile_graph.definition.clone(),
-            params: cfg_context
-                .graph()
-                .sources
+            name: compile_graph.definition_name.clone(),
+            params: compile_graph
+                .graph
+                .s
+                .table
                 .iter()
-                .map(|node| VariableId(node.0))
+                .map(|node| VariableId(*node))
                 .collect(),
-            returns: cfg_context
-                .graph()
-                .targets
+            returns: compile_graph
+                .graph
+                .t
+                .table
                 .iter()
-                .map(|node| VariableId(node.0))
+                .map(|node| VariableId(*node))
                 .collect(),
             context,
             body,
@@ -124,19 +117,22 @@ fn build_definition(
     );
 
     for child in &compile_graph.children {
-        build_definition(&child.graph, next_id, definitions)?;
+        if matches!(child.graph.theory, CompileTheory::Data) {
+            build_definition(&child.graph, next_id, definitions)?;
+        }
     }
 
     Ok(id)
 }
 
-fn context_for_cfg_context(compile_graph: &CompileGraph, context: &cfg::BuildContext) -> Context {
+fn context_for_graph(compile_graph: &CompileGraph) -> Context {
     let mut used_names = HashMap::new();
     Context::new(
-        context
-            .graph()
-            .hypergraph
-            .nodes
+        compile_graph
+            .graph
+            .h
+            .w
+            .0
             .iter()
             .cloned()
             .enumerate()
@@ -155,7 +151,7 @@ fn variable_name(
     used_names: &mut HashMap<String, usize>,
 ) -> String {
     let base = compile_graph
-        .variable_names
+        .source_variable_names
         .get(&index)
         .map(|name| sanitize_ident(name))
         .filter(|name| !name.is_empty())
@@ -183,66 +179,4 @@ fn sanitize_ident(name: &str) -> String {
         ident.insert(0, '_');
     }
     ident
-}
-
-fn variables_for_context(context: &Context) -> HashMap<NodeId, String> {
-    context
-        .variables()
-        .map(|variable| (NodeId(variable.id.0), variable.name.clone()))
-        .collect()
-}
-
-#[derive(Debug, Clone, Copy)]
-struct ProgramSemantics;
-
-impl cfg::ArrowSemantics for ProgramSemantics {
-    fn statements(&self, arrow: &cfg::ArrowInstance) -> Vec<Stmt> {
-        if arrow.op == "gpu.sync" {
-            return vec![Stmt::Barrier];
-        }
-        let outputs = if arrow.branch_arity > 1 {
-            vec![branch_tag(arrow), branch_payload(arrow)]
-        } else if arrow.op.starts_with("data.") {
-            arrow.outputs.clone()
-        } else {
-            Vec::new()
-        };
-        vec![Stmt::Primitive(Primitive {
-            name: arrow.op.clone(),
-            inputs: arrow.inputs.clone(),
-            outputs,
-            code: String::new(),
-        })]
-    }
-
-    fn branch_condition_rhs(&self, arrow: &cfg::ArrowInstance, output: usize) -> String {
-        format!("{} == {output}", branch_tag(arrow))
-    }
-}
-
-fn branch_tag(arrow: &cfg::ArrowInstance) -> String {
-    format!("b{}", arrow.id)
-}
-
-fn branch_payload(arrow: &cfg::ArrowInstance) -> String {
-    format!("p{}", arrow.id)
-}
-
-fn cfg_context(graph: &CompileGraph) -> cfg::BuildContext {
-    cfg::BuildContext::new(
-        graph_kind(&graph.theory),
-        OpenHypergraph::from_strict(graph.typed_graph.clone()),
-        graph
-            .children
-            .iter()
-            .map(|child| (child.operation.clone(), cfg_context(&child.graph)))
-            .collect(),
-    )
-}
-
-fn graph_kind(theory: &CompileTheory) -> cfg::GraphKind {
-    match theory {
-        CompileTheory::Data => cfg::GraphKind::Data,
-        CompileTheory::Control => cfg::GraphKind::Control,
-    }
 }

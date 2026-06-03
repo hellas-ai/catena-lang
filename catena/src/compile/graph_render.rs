@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::compile::CompileGraph;
+use crate::{compile::CompileGraph, lang::Obj};
 use graphviz_rust::{
     cmd::{CommandArg, Format},
     dot_structures::{
@@ -11,6 +11,7 @@ use graphviz_rust::{
     printer::PrinterContext,
 };
 use hexpr::Operation;
+use metacat::tree::Tree;
 use open_hypergraphs::strict::vec::OpenHypergraph;
 
 // This is intentionally custom instead of delegating to open-hypergraphs-dot:
@@ -105,11 +106,11 @@ impl NestedDotRenderer {
                     Some(ParentInterface {
                         source_labels: sources
                             .iter()
-                            .map(|node| graph.graph.h.w.0[*node].clone())
+                            .map(|node| object_label(&graph.graph.h.w.0[*node]))
                             .collect(),
                         target_labels: targets
                             .iter()
-                            .map(|node| graph.graph.h.w.0[*node].clone())
+                            .map(|node| object_label(&graph.graph.h.w.0[*node]))
                             .collect(),
                     }),
                 );
@@ -195,11 +196,11 @@ impl NestedDotRenderer {
     fn render_nodes(
         &self,
         prefix: &str,
-        graph: &OpenHypergraph<String, Operation>,
+        graph: &OpenHypergraph<Obj, Operation>,
         stmts: &mut Vec<Stmt>,
     ) {
         for node_index in 0..graph.h.w.0.len() {
-            let label = graph.h.w.0[node_index].clone();
+            let label = object_label(&graph.h.w.0[node_index]);
             stmts.push(node_stmt(
                 &node_id(prefix, node_index),
                 vec![attr_plain("shape", "point"), attr_quoted("xlabel", &label)],
@@ -210,7 +211,7 @@ impl NestedDotRenderer {
     fn render_boundary(
         &self,
         prefix: &str,
-        graph: &OpenHypergraph<String, Operation>,
+        graph: &OpenHypergraph<Obj, Operation>,
         stmts: &mut Vec<Stmt>,
     ) {
         for (index, source) in graph.s.table.iter().enumerate() {
@@ -253,7 +254,7 @@ impl NestedDotRenderer {
     fn render_edge_box(
         &self,
         prefix: &str,
-        graph: &OpenHypergraph<String, Operation>,
+        graph: &OpenHypergraph<Obj, Operation>,
         edge_index: usize,
         operation: &Operation,
         stmts: &mut Vec<Stmt>,
@@ -287,7 +288,7 @@ impl NestedDotRenderer {
     fn render_nested_connections(
         &self,
         prefix: &str,
-        graph: &OpenHypergraph<String, Operation>,
+        graph: &OpenHypergraph<Obj, Operation>,
         edge_index: usize,
         child: &RenderedInterface,
         stmts: &mut Vec<Stmt>,
@@ -318,7 +319,7 @@ impl NestedDotRenderer {
 }
 
 fn qualified_name(graph: &CompileGraph) -> String {
-    format!("{}.{}", graph.theory, graph.definition)
+    format!("{}.{}", graph.theory, graph.definition_name)
 }
 
 fn node_id(prefix: &str, node: usize) -> String {
@@ -341,7 +342,7 @@ fn cluster_id(graph_id: usize) -> String {
     format!("cluster_{graph_id}")
 }
 
-fn edge_sources(graph: &OpenHypergraph<String, Operation>, edge_index: usize) -> Vec<usize> {
+fn edge_sources(graph: &OpenHypergraph<Obj, Operation>, edge_index: usize) -> Vec<usize> {
     graph
         .h
         .s
@@ -352,7 +353,7 @@ fn edge_sources(graph: &OpenHypergraph<String, Operation>, edge_index: usize) ->
         .unwrap_or_default()
 }
 
-fn edge_targets(graph: &OpenHypergraph<String, Operation>, edge_index: usize) -> Vec<usize> {
+fn edge_targets(graph: &OpenHypergraph<Obj, Operation>, edge_index: usize) -> Vec<usize> {
     graph
         .h
         .t
@@ -361,6 +362,53 @@ fn edge_targets(graph: &OpenHypergraph<String, Operation>, edge_index: usize) ->
         .nth(edge_index)
         .map(|targets| targets.table.0)
         .unwrap_or_default()
+}
+
+fn object_label(object: &Obj) -> String {
+    match object {
+        Tree::Empty => "empty".to_string(),
+        Tree::Leaf(index, _) => format!("x{index}"),
+        Tree::Node(op, target_index, children) => {
+            let inner = object_node_label(op, children);
+            if *target_index == 0 {
+                inner
+            } else {
+                format!("π{target_index}({inner})")
+            }
+        }
+    }
+}
+
+fn object_node_label(op: &Operation, children: &[Obj]) -> String {
+    match children.len() {
+        0 => format!("{op}"),
+        1 => format!("{op}({})", object_label(&children[0])),
+        2 => {
+            let op = format!("{op}");
+            if op.starts_with(|c: char| c.is_alphanumeric()) {
+                format!(
+                    "{}({}, {})",
+                    op,
+                    object_label(&children[0]),
+                    object_label(&children[1])
+                )
+            } else {
+                format!(
+                    "{} {op} {}",
+                    object_label(&children[0]),
+                    object_label(&children[1])
+                )
+            }
+        }
+        _ => {
+            let args = children
+                .iter()
+                .map(object_label)
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("{op}({args})")
+        }
+    }
 }
 
 fn interface_source_id(prefix: &str, index: usize) -> String {

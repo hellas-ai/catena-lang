@@ -18,18 +18,36 @@ use thiserror::Error;
 use crate::{compile::config::CompileConfig, lang::Obj, pass::inline::Inline};
 
 type DefinitionGraph = LaxOpenHypergraph<(), Operation>;
-type LabeledGraph = LaxOpenHypergraph<String, Operation>;
-type StrictLabeledGraph = StrictOpenHypergraph<String, Operation>;
 type TypedGraph = LaxOpenHypergraph<Obj, Operation>;
 type StrictTypedGraph = StrictOpenHypergraph<Obj, Operation>;
+
+// CompileGraph construction has four responsibilities:
+//
+// 1. Load one checked definition as a hypergraph.
+// 2. Inline only the local structural wrappers listed below.
+// 3. Typecheck the resulting hypergraph to label every wire with semantic
+//    object/type information while preserving source variable names for
+//    diagnostics.
+// 4. Discover child regions. Local definitions and valid cross-theory calls are
+//    represented as nested CompileGraphs; primitive operations stay as edges.
+//
+// The important invariant is that theory boundaries are visible in the graph.
+// Data/control tensor have different meanings, so cross-theory calls must be
+// child regions unless they are true backend primitives.
+
+// Local definitions are region calls by default. This list is deliberately
+// small: only definitions that are pure structural convenience wrappers should
+// be flattened during CompileGraph construction. Definitions that carry
+// meaningful control/data boundaries, such as `if`, must remain as child
+// regions so structured lowering can see them.
+const INLINE_LOCAL_DEFINITIONS: &[&str] = &["control.elim2", "data.if"];
 
 #[derive(Clone, Debug)]
 pub struct CompileGraph {
     pub theory: CompileTheory,
-    pub definition: String,
-    pub graph: StrictLabeledGraph,
-    pub typed_graph: StrictTypedGraph,
-    pub variable_names: HashMap<usize, String>,
+    pub definition_name: String,
+    pub graph: StrictTypedGraph,
+    pub source_variable_names: HashMap<usize, String>,
     pub children: Vec<NestedCompileGraph>,
 }
 
@@ -68,18 +86,13 @@ pub struct NestedCompileGraph {
     pub graph: CompileGraph,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct GraphCompileOptions {
-    pub no_inline: Vec<String>,
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct GraphCompileLimits {
+struct GraphBuildLimits {
     max_depth: usize,
     max_inline_iterations: usize,
 }
 
-impl Default for GraphCompileLimits {
+impl Default for GraphBuildLimits {
     fn default() -> Self {
         Self {
             max_depth: 32,
@@ -88,16 +101,28 @@ impl Default for GraphCompileLimits {
     }
 }
 
+struct CompiledBody {
+    graph: StrictTypedGraph,
+    source_variable_names: HashMap<usize, String>,
+}
+
+struct LoadedTheoryDefinition {
+    source_type_map: DefinitionGraph,
+    target_type_map: DefinitionGraph,
+    graph: DefinitionGraph,
+    source_variable_names: HashMap<usize, String>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct DefinitionRef {
-    theory: String,
+    theory: CompileTheory,
     definition: String,
 }
 
 impl DefinitionRef {
-    fn new(theory: &str, definition: &str) -> Self {
+    fn new(theory: CompileTheory, definition: &str) -> Self {
         Self {
-            theory: theory.to_string(),
+            theory,
             definition: definition.to_string(),
         }
     }
@@ -107,12 +132,22 @@ impl DefinitionRef {
     }
 }
 
-struct GraphCompileState<'a> {
+struct CompileGraphBuilder<'a> {
     set: &'a TheorySet,
     config: &'a CompileConfig,
-    options: GraphCompileOptions,
-    limits: GraphCompileLimits,
+    inline_policy: InlinePolicy,
+    limits: GraphBuildLimits,
     stack: Vec<DefinitionRef>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum OperationRole {
+    Primitive,
+    LocalDefinition,
+    CrossTheoryDefinition {
+        source_theory: CompileTheory,
+        local_name: String,
+    },
 }
 
 #[derive(Error, Debug)]
@@ -132,9 +167,9 @@ pub enum CompileGraphError {
         definition: String,
         error: metacat::check::Error<Operation>,
     },
-    #[error("recursive or too-deep inline expansion while rendering `{0}`")]
+    #[error("recursive or too-deep inline expansion while building `{0}`")]
     InlineLimit(String),
-    #[error("too-deep nested graph expansion while rendering `{0}`")]
+    #[error("too-deep nested graph expansion while building `{0}`")]
     NestedLimit(String),
     #[error("cyclic nested graph expansion: {}", .cycle.join(" -> "))]
     NestedCycle { cycle: Vec<String> },
@@ -145,33 +180,34 @@ pub fn compile_graph(
     config: &CompileConfig,
     theory: &str,
     definition: &str,
-    options: GraphCompileOptions,
 ) -> Result<CompileGraph, CompileGraphError> {
-    let mut state = GraphCompileState {
+    let theory = CompileTheory::parse(theory)?;
+    let mut builder = CompileGraphBuilder {
         set,
         config,
-        options,
-        limits: GraphCompileLimits::default(),
+        inline_policy: InlinePolicy::default(),
+        limits: GraphBuildLimits::default(),
         stack: Vec::new(),
     };
-    state.compile_nested_graph(theory, definition)
+    builder.compile_region(theory, definition)
 }
 
-impl GraphCompileState<'_> {
-    fn compile_nested_graph(
+impl CompileGraphBuilder<'_> {
+    fn compile_region(
         &mut self,
-        theory_name: &str,
+        compile_theory: CompileTheory,
         definition: &str,
     ) -> Result<CompileGraph, CompileGraphError> {
+        let theory_name = compile_theory.as_str();
         if self.stack.len() > self.limits.max_depth {
             return Err(CompileGraphError::NestedLimit(format!(
                 "{theory_name}.{definition}"
             )));
         }
 
-        let current = DefinitionRef::new(theory_name, definition);
+        let current = DefinitionRef::new(compile_theory.clone(), definition);
         if let Some(index) = self.stack.iter().position(|entry| entry == &current) {
-            // For now graph rendering rejects cyclic cross-theory definitions.
+            // For now CompileGraph construction rejects cyclic nested definitions.
             // We may relax this later and render recursive definitions with
             // back-references instead of expanding them.
             let mut cycle = self.stack[index..]
@@ -182,39 +218,38 @@ impl GraphCompileState<'_> {
             return Err(CompileGraphError::NestedCycle { cycle });
         }
 
+        self.with_region_on_stack(current, |builder| {
+            let theory = builder.compile_theory(&compile_theory)?;
+            let definition_key = parse_operation(definition)?;
+            let body = builder.compile_definition_body(&compile_theory, theory, &definition_key)?;
+            let children = builder.compile_child_regions(&compile_theory, &body.graph)?;
+
+            Ok(CompileGraph {
+                theory: compile_theory,
+                definition_name: definition.to_string(),
+                graph: body.graph,
+                source_variable_names: body.source_variable_names,
+                children,
+            })
+        })
+    }
+
+    fn with_region_on_stack<T>(
+        &mut self,
+        current: DefinitionRef,
+        build: impl FnOnce(&mut Self) -> Result<T, CompileGraphError>,
+    ) -> Result<T, CompileGraphError> {
         self.stack.push(current);
-        let result = self.compile_graph_pipeline(theory_name, definition);
+        let result = build(self);
         self.stack.pop();
         result
     }
 
-    fn compile_graph_pipeline(
-        &mut self,
-        theory_name: &str,
-        definition: &str,
-    ) -> Result<CompileGraph, CompileGraphError> {
-        let syntax = self.syntax_theory()?;
-        let theory = self.theory(theory_name)?;
-        let definition_key = parse_operation(definition)?;
-        let (graph, typed_graph, variable_names) =
-            self.compile_definition_graph(theory_name, theory, syntax, &definition_key)?;
-        let children = self.compile_nested_foreign_graphs(theory_name, &graph)?;
-
-        Ok(CompileGraph {
-            theory: CompileTheory::parse(theory_name)?,
-            definition: definition.to_string(),
-            graph,
-            typed_graph,
-            variable_names,
-            children,
-        })
+    fn compile_theory(&self, compile_theory: &CompileTheory) -> Result<&Theory, CompileGraphError> {
+        self.theory_by_name(compile_theory.as_str())
     }
 
-    fn syntax_theory(&self) -> Result<&Theory, CompileGraphError> {
-        self.theory(self.config.syntax)
-    }
-
-    fn theory(&self, theory_name: &str) -> Result<&Theory, CompileGraphError> {
+    fn theory_by_name(&self, theory_name: &str) -> Result<&Theory, CompileGraphError> {
         let id = TheoryId(
             theory_name
                 .parse()
@@ -226,350 +261,249 @@ impl GraphCompileState<'_> {
             .ok_or_else(|| CompileGraphError::UnknownTheory(theory_name.to_string()))
     }
 
-    fn compile_definition_graph(
+    fn compile_definition_body(
         &self,
-        theory_name: &str,
+        compile_theory: &CompileTheory,
         theory: &Theory,
-        syntax: &Theory,
         definition_key: &Operation,
-    ) -> Result<(StrictLabeledGraph, StrictTypedGraph, HashMap<usize, String>), CompileGraphError>
-    {
-        let arrow = theory
-            .get_arrow(definition_key)
-            .ok_or_else(|| CompileGraphError::UnknownDefinition(definition_key.to_string()))?;
-        let variable_names = arrow
-            .raw
-            .definition
-            .as_ref()
-            .map(|definition| named_variables(theory, definition))
-            .transpose()?
-            .unwrap_or_default();
-        let mut graph = arrow
-            .definition
-            .clone()
-            .ok_or_else(|| CompileGraphError::UnknownDefinition(definition_key.to_string()))?;
-        let definitions = inline_definitions(theory, theory_name, &self.options.no_inline)?;
-        graph = inline_local_definitions(
-            graph,
-            &definitions,
-            self.limits.max_inline_iterations,
+    ) -> Result<CompiledBody, CompileGraphError> {
+        let loaded_definition = load_theory_definition(theory, definition_key)?;
+        let graph = self.inline_selected_local_definitions(
+            compile_theory,
+            theory,
+            loaded_definition.graph,
             definition_key,
         )?;
-
-        let (graph, typed_graph) = annotate_and_label_graph(
+        let graph = typecheck_graph(
             theory,
-            syntax,
             definition_key.as_str(),
-            arrow.type_maps.0.clone(),
-            arrow.type_maps.1.clone(),
+            loaded_definition.source_type_map,
+            loaded_definition.target_type_map,
             graph,
         )?;
 
-        Ok((graph.to_strict(), typed_graph.to_strict(), variable_names))
+        Ok(CompiledBody {
+            graph: graph.to_strict(),
+            source_variable_names: loaded_definition.source_variable_names,
+        })
     }
 
-    fn compile_nested_foreign_graphs(
+    fn compile_child_regions(
         &mut self,
-        theory_name: &str,
-        graph: &StrictLabeledGraph,
+        compile_theory: &CompileTheory,
+        graph: &StrictTypedGraph,
     ) -> Result<Vec<NestedCompileGraph>, CompileGraphError> {
         let mut seen = HashSet::new();
         let mut children = Vec::new();
 
         for operation in graph.h.x.0.iter() {
             let operation_name = operation.to_string();
-            let Some((foreign_theory_name, local_name)) = operation_name.split_once('.') else {
-                continue;
-            };
-            let Some(extension) = self
-                .config
-                .extension_for_target_and_prefix(theory_name, foreign_theory_name)
-            else {
-                continue;
-            };
             if !seen.insert(operation_name.clone()) {
                 continue;
             }
 
-            let graph = self.compile_foreign_child(extension.source, local_name)?;
-            children.push(NestedCompileGraph {
-                operation: operation_name,
-                graph,
-            });
+            match self.classify_operation(compile_theory, &operation_name)? {
+                OperationRole::Primitive => {}
+                OperationRole::LocalDefinition => {
+                    children.push(NestedCompileGraph {
+                        operation: operation_name.clone(),
+                        graph: self.compile_region(compile_theory.clone(), &operation_name)?,
+                    });
+                }
+                OperationRole::CrossTheoryDefinition {
+                    source_theory,
+                    local_name,
+                } => {
+                    let graph = self.compile_cross_theory_child(source_theory, &local_name)?;
+                    children.push(NestedCompileGraph {
+                        operation: operation_name,
+                        graph,
+                    });
+                }
+            }
         }
 
         Ok(children)
     }
 
-    fn compile_foreign_child(
-        &mut self,
-        source_theory: &str,
-        local_name: &str,
-    ) -> Result<CompileGraph, CompileGraphError> {
-        let native_foreign_theory = self.theory(source_theory)?;
-        let fully_qualified = format!("{source_theory}.{local_name}");
-        if definition_exists(native_foreign_theory, local_name)?
-            && !matches_any_no_inline(&fully_qualified, &self.options.no_inline)
-        {
-            self.compile_nested_graph(source_theory, local_name)
-        } else {
-            let syntax = self.syntax_theory()?;
-            compile_primitive_child_graph(syntax, native_foreign_theory, source_theory, local_name)
-        }
-    }
-}
-
-fn inline_local_definitions(
-    mut graph: DefinitionGraph,
-    definitions: &HashMap<Operation, DefinitionGraph>,
-    max_inline_iterations: usize,
-    definition_key: &Operation,
-) -> Result<DefinitionGraph, CompileGraphError> {
-    for _ in 0..max_inline_iterations {
-        let inlinable = inlinable_edges(&graph, definitions);
-        if inlinable.is_empty() {
+    fn inline_selected_local_definitions(
+        &self,
+        compile_theory: &CompileTheory,
+        theory: &Theory,
+        mut graph: DefinitionGraph,
+        definition_key: &Operation,
+    ) -> Result<DefinitionGraph, CompileGraphError> {
+        let definitions = self.inline_policy.definitions_for(compile_theory, theory)?;
+        if definitions.is_empty() {
             return Ok(graph);
         }
 
-        graph.quotient().expect("quotient should be defined");
-        graph = Inline {
-            definitions: definitions.clone(),
+        for _ in 0..self.limits.max_inline_iterations {
+            let inlinable = inlinable_edges(&graph, &definitions);
+            if inlinable.is_empty() {
+                return Ok(graph);
+            }
+
+            graph.quotient().expect("quotient should be defined");
+            graph = Inline {
+                definitions: definitions.clone(),
+            }
+            .map_arrow(&graph);
         }
-        .map_arrow(&graph);
+
+        Err(CompileGraphError::InlineLimit(definition_key.to_string()))
     }
 
-    Err(CompileGraphError::InlineLimit(definition_key.to_string()))
-}
-
-fn annotate_and_label_graph(
-    theory: &Theory,
-    syntax: &Theory,
-    definition: &str,
-    source: DefinitionGraph,
-    target: DefinitionGraph,
-    mut graph: DefinitionGraph,
-) -> Result<(LabeledGraph, TypedGraph), CompileGraphError> {
-    let node_types = check(theory, source, target, &mut graph).map_err(|error| {
-        CompileGraphError::Typecheck {
-            definition: definition.to_string(),
-            error,
+    fn classify_operation(
+        &self,
+        compile_theory: &CompileTheory,
+        operation_name: &str,
+    ) -> Result<OperationRole, CompileGraphError> {
+        if is_qualified_operation(operation_name) {
+            return self.classify_cross_theory_operation(compile_theory, operation_name);
         }
-    })?;
-    let labels = node_types
-        .iter()
-        .map(|tree| {
-            tree.try_pretty(Some(&|op| {
-                syntax
-                    .coarity_of(op)
-                    .ok_or_else(|| CompileGraphError::UnknownOperation(op.to_string()))
-            }))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
 
-    let labeled_graph =
-        graph
-            .clone()
-            .with_nodes(|_| labels)
-            .ok_or_else(|| CompileGraphError::Typecheck {
-                definition: definition.to_string(),
-                error: metacat::check::Error::InvalidTypeMaps,
-            })?;
-    let typed_graph =
-        graph
-            .with_nodes(|_| node_types)
-            .ok_or_else(|| CompileGraphError::Typecheck {
-                definition: definition.to_string(),
-                error: metacat::check::Error::InvalidTypeMaps,
-            })?;
+        self.classify_local_operation(compile_theory, operation_name)
+    }
 
-    Ok((labeled_graph, typed_graph))
-}
+    fn classify_local_operation(
+        &self,
+        compile_theory: &CompileTheory,
+        operation_name: &str,
+    ) -> Result<OperationRole, CompileGraphError> {
+        let theory = self.compile_theory(compile_theory)?;
+        if !definition_exists(theory, operation_name)? {
+            return Ok(OperationRole::Primitive);
+        }
 
-fn definition_exists(theory: &Theory, local_name: &str) -> Result<bool, CompileGraphError> {
-    let operation = parse_operation(local_name)?;
-    Ok(theory
-        .get_arrow(&operation)
-        .and_then(|arrow| arrow.definition.as_ref())
-        .is_some())
-}
+        let qualified_name = format!("{compile_theory}.{operation_name}");
+        if self.inline_policy.should_inline(&qualified_name) {
+            Ok(OperationRole::Primitive)
+        } else {
+            Ok(OperationRole::LocalDefinition)
+        }
+    }
 
-fn compile_primitive_child_graph(
-    syntax: &Theory,
-    theory: &Theory,
-    theory_name: &str,
-    local_name: &str,
-) -> Result<CompileGraph, CompileGraphError> {
-    let operation = parse_operation(local_name)?;
-    let arrow = theory
-        .get_arrow(&operation)
-        .ok_or_else(|| CompileGraphError::UnknownOperation(local_name.to_string()))?;
-    let graph = LaxOpenHypergraph::singleton(
-        operation,
-        vec![(); arrow.type_maps.0.target().len()],
-        vec![(); arrow.type_maps.1.target().len()],
-    );
-    let (graph, typed_graph) = annotate_and_label_graph(
-        theory,
-        syntax,
-        local_name,
-        arrow.type_maps.0.clone(),
-        arrow.type_maps.1.clone(),
-        graph,
-    )?;
+    fn classify_cross_theory_operation(
+        &self,
+        compile_theory: &CompileTheory,
+        operation_name: &str,
+    ) -> Result<OperationRole, CompileGraphError> {
+        self.cross_theory_region_source(compile_theory, operation_name)
+            .map(
+                |(source_theory, local_name)| OperationRole::CrossTheoryDefinition {
+                    source_theory,
+                    local_name: local_name.to_string(),
+                },
+            )
+            .or_else(|error| match error {
+                // Dotted primitive names are allowed. For example, a backend
+                // primitive may be named `gpu.view.linearize` without being a
+                // data/control extension boundary.
+                CompileGraphError::UnknownTheory(_) => Ok(OperationRole::Primitive),
+                other => Err(other),
+            })
+    }
 
-    Ok(CompileGraph {
-        theory: CompileTheory::parse(theory_name)?,
-        definition: local_name.to_string(),
-        graph: graph.to_strict(),
-        typed_graph: typed_graph.to_strict(),
-        variable_names: HashMap::new(),
-        children: Vec::new(),
-    })
-}
-
-fn named_variables(
-    theory: &Theory,
-    definition: &Hexpr,
-) -> Result<HashMap<usize, String>, CompileGraphError> {
-    let graph =
-        interpret_named_variables(&theory.local_signature(), definition).map_err(|_error| {
-            CompileGraphError::Typecheck {
-                definition: "<variable names>".to_string(),
-                error: metacat::check::Error::InvalidTypeMaps,
-            }
-        })?;
-    let quotient = graph.hypergraph.coequalizer();
-    let mut names = HashMap::new();
-    for (node, name) in graph.hypergraph.nodes.iter().enumerate() {
-        let Some(name) = name else {
-            continue;
+    fn cross_theory_region_source<'a>(
+        &self,
+        compile_theory: &CompileTheory,
+        operation_name: &'a str,
+    ) -> Result<(CompileTheory, &'a str), CompileGraphError> {
+        let Some((extension_prefix, local_name)) = operation_name.split_once('.') else {
+            return Err(CompileGraphError::UnknownOperation(
+                operation_name.to_string(),
+            ));
         };
-        names
-            .entry(quotient.table[node])
-            .or_insert_with(|| name.clone());
+        let Some(extension) = self
+            .config
+            .extension_for_target_and_prefix(compile_theory.as_str(), extension_prefix)
+        else {
+            return Err(CompileGraphError::UnknownTheory(
+                extension_prefix.to_string(),
+            ));
+        };
+        Ok((CompileTheory::parse(extension.source)?, local_name))
     }
-    Ok(names)
-}
 
-fn interpret_named_variables<S>(
-    signature: &S,
-    hexpr: &Hexpr,
-) -> Result<LaxOpenHypergraph<Option<String>, Operation>, hexpr::interpret::Error<S::Error>>
-where
-    S: Signature<Arr = Operation>,
-{
-    let mut state = LaxOpenHypergraph::empty();
-    let mut env = HashMap::new();
-    let (sources, targets) = interpret_named_stack(signature, &mut state, &mut env, hexpr)?;
-    state.sources = sources;
-    state.targets = targets;
-    Ok(state)
-}
-
-fn interpret_named_stack<S>(
-    signature: &S,
-    state: &mut LaxOpenHypergraph<Option<String>, Operation>,
-    env: &mut HashMap<Variable, NodeId>,
-    hexpr: &Hexpr,
-) -> Result<Interface, hexpr::interpret::Error<S::Error>>
-where
-    S: Signature<Arr = Operation>,
-{
-    match hexpr {
-        Hexpr::Composition(hexprs) => {
-            let mut iter = hexprs.iter();
-            let Some(mut current) = iter.next() else {
-                return Ok((vec![], vec![]));
-            };
-            let (sources, mut current_targets) =
-                interpret_named_stack(signature, state, env, current)?;
-            for next in iter {
-                let (next_sources, next_targets) =
-                    interpret_named_stack(signature, state, env, next)?;
-                if current_targets.len() != next_sources.len() {
-                    return Err(hexpr::interpret::Error::Composition(
-                        current.clone(),
-                        next.clone(),
-                    ));
-                }
-                for (&target, &source) in current_targets.iter().zip(&next_sources) {
-                    state.unify(target, source);
-                }
-                current_targets = next_targets;
-                current = next;
-            }
-            Ok((sources, current_targets))
-        }
-        Hexpr::Tensor(hexprs) => {
-            let mut sources = Vec::new();
-            let mut targets = Vec::new();
-            for hexpr in hexprs {
-                let (next_sources, next_targets) =
-                    interpret_named_stack(signature, state, env, hexpr)?;
-                sources.extend(next_sources);
-                targets.extend(next_targets);
-            }
-            Ok((sources, targets))
-        }
-        Hexpr::Operation(op) => {
-            let arr = signature
-                .try_parse_op(op)
-                .map_err(|error| hexpr::interpret::Error::Signature(op.clone(), error))?;
-            let (sources, targets) = signature.profile(&arr);
-            let sources = vec![None; sources.len()];
-            let targets = vec![None; targets.len()];
-            let (_, interface) = state.new_operation(arr, sources, targets);
-            Ok(interface)
-        }
-        Hexpr::Frobenius { sources, targets } => {
-            let sources = named_frobenius_variables(sources, env, state);
-            let targets = named_frobenius_variables(targets, env, state);
-            Ok((sources, targets))
+    fn compile_cross_theory_child(
+        &mut self,
+        source_theory: CompileTheory,
+        local_name: &str,
+    ) -> Result<CompileGraph, CompileGraphError> {
+        let native_cross_theory = self.compile_theory(&source_theory)?;
+        if definition_exists(native_cross_theory, local_name)? {
+            self.compile_region(source_theory, local_name)
+        } else {
+            compile_primitive_child_graph(native_cross_theory, source_theory, local_name)
         }
     }
 }
 
-fn named_frobenius_variables(
-    variables: &[Variable],
-    env: &mut HashMap<Variable, NodeId>,
-    state: &mut LaxOpenHypergraph<Option<String>, Operation>,
-) -> Vec<NodeId> {
-    variables
-        .iter()
-        .map(|variable| {
-            if let Some(node) = env.get(variable) {
-                *node
-            } else {
-                let node = state.new_node(Some(variable.to_string()));
-                env.insert(variable.clone(), node);
-                node
-            }
-        })
-        .collect()
+#[derive(Clone, Copy)]
+struct InlinePolicy {
+    local_definitions: &'static [&'static str],
 }
 
-fn inline_definitions(
+impl Default for InlinePolicy {
+    fn default() -> Self {
+        Self {
+            local_definitions: INLINE_LOCAL_DEFINITIONS,
+        }
+    }
+}
+
+impl InlinePolicy {
+    fn should_inline(&self, qualified_name: &str) -> bool {
+        self.local_definitions.contains(&qualified_name)
+    }
+
+    fn definitions_for(
+        &self,
+        compile_theory: &CompileTheory,
+        theory: &Theory,
+    ) -> Result<HashMap<Operation, DefinitionGraph>, CompileGraphError> {
+        let Theory::Theory { arrows, .. } = theory else {
+            return Err(CompileGraphError::NotUserTheory(compile_theory.to_string()));
+        };
+
+        Ok(arrows
+            .iter()
+            .filter_map(|(name, arrow)| {
+                let qualified_name = format!("{compile_theory}.{name}");
+                self.should_inline(&qualified_name)
+                    .then(|| arrow.definition.clone().map(|graph| (name.clone(), graph)))
+                    .flatten()
+            })
+            .collect())
+    }
+}
+
+fn load_theory_definition(
     theory: &Theory,
-    theory_name: &str,
-    no_inline: &[String],
-) -> Result<HashMap<Operation, DefinitionGraph>, CompileGraphError> {
-    let Theory::Theory { arrows, .. } = theory else {
-        return Err(CompileGraphError::NotUserTheory("nat".to_string()));
-    };
-    Ok(arrows
-        .iter()
-        .filter_map(|(name, arrow)| {
-            let local_name = name.to_string();
-            let fully_qualified = format!("{theory_name}.{local_name}");
-            if matches_any_no_inline(&fully_qualified, no_inline)
-                || matches_any_no_inline(&local_name, no_inline)
-            {
-                None
-            } else {
-                arrow.definition.clone().map(|term| (name.clone(), term))
-            }
-        })
-        .collect())
+    definition_key: &Operation,
+) -> Result<LoadedTheoryDefinition, CompileGraphError> {
+    let arrow = theory
+        .get_arrow(definition_key)
+        .ok_or_else(|| CompileGraphError::UnknownDefinition(definition_key.to_string()))?;
+    let graph = arrow
+        .definition
+        .clone()
+        .ok_or_else(|| CompileGraphError::UnknownDefinition(definition_key.to_string()))?;
+    let source_variable_names = arrow
+        .raw
+        .definition
+        .as_ref()
+        .map(|definition| source_variable_names(theory, definition))
+        .transpose()?
+        .unwrap_or_default();
+
+    Ok(LoadedTheoryDefinition {
+        source_type_map: arrow.type_maps.0.clone(),
+        target_type_map: arrow.type_maps.1.clone(),
+        graph,
+        source_variable_names,
+    })
 }
 
 fn inlinable_edges(
@@ -585,42 +519,215 @@ fn inlinable_edges(
         .collect()
 }
 
-fn parse_operation(name: &str) -> Result<Operation, CompileGraphError> {
-    name.parse()
-        .map_err(|_| CompileGraphError::InvalidDefinition(name.to_string()))
+fn typecheck_graph(
+    theory: &Theory,
+    definition: &str,
+    source: DefinitionGraph,
+    target: DefinitionGraph,
+    mut graph: DefinitionGraph,
+) -> Result<TypedGraph, CompileGraphError> {
+    let node_types = check(theory, source, target, &mut graph).map_err(|error| {
+        CompileGraphError::Typecheck {
+            definition: definition.to_string(),
+            error,
+        }
+    })?;
+    let graph = graph
+        .with_nodes(|_| node_types)
+        .ok_or_else(|| CompileGraphError::Typecheck {
+            definition: definition.to_string(),
+            error: metacat::check::Error::InvalidTypeMaps,
+        })?;
+
+    Ok(graph)
 }
 
-fn matches_any_no_inline(name: &str, patterns: &[String]) -> bool {
-    patterns.iter().any(|pattern| glob_match(pattern, name))
+fn definition_exists(theory: &Theory, local_name: &str) -> Result<bool, CompileGraphError> {
+    let operation = parse_operation(local_name)?;
+    Ok(theory
+        .get_arrow(&operation)
+        .and_then(|arrow| arrow.definition.as_ref())
+        .is_some())
 }
 
-fn glob_match(pattern: &str, text: &str) -> bool {
-    let pattern = pattern.as_bytes();
-    let text = text.as_bytes();
-    let (mut p, mut t) = (0, 0);
-    let mut star = None;
-    let mut after_star_text = 0;
+fn is_qualified_operation(operation_name: &str) -> bool {
+    operation_name.split_once('.').is_some()
+}
 
-    while t < text.len() {
-        if p < pattern.len() && pattern[p] == b'*' {
-            star = Some(p);
-            p += 1;
-            after_star_text = t;
-        } else if p < pattern.len() && pattern[p] == text[t] {
-            p += 1;
-            t += 1;
-        } else if let Some(star_index) = star {
-            p = star_index + 1;
-            after_star_text += 1;
-            t = after_star_text;
-        } else {
-            return false;
+fn compile_primitive_child_graph(
+    theory: &Theory,
+    compile_theory: CompileTheory,
+    local_name: &str,
+) -> Result<CompileGraph, CompileGraphError> {
+    let operation = parse_operation(local_name)?;
+    let arrow = theory
+        .get_arrow(&operation)
+        .ok_or_else(|| CompileGraphError::UnknownOperation(local_name.to_string()))?;
+    let graph = LaxOpenHypergraph::singleton(
+        operation,
+        vec![(); arrow.type_maps.0.target().len()],
+        vec![(); arrow.type_maps.1.target().len()],
+    );
+    let graph = typecheck_graph(
+        theory,
+        local_name,
+        arrow.type_maps.0.clone(),
+        arrow.type_maps.1.clone(),
+        graph,
+    )?;
+
+    Ok(CompileGraph {
+        theory: compile_theory,
+        definition_name: local_name.to_string(),
+        graph: graph.to_strict(),
+        source_variable_names: HashMap::new(),
+        children: Vec::new(),
+    })
+}
+
+fn source_variable_names(
+    theory: &Theory,
+    definition: &Hexpr,
+) -> Result<HashMap<usize, String>, CompileGraphError> {
+    let signature = theory.local_signature();
+    let graph = VariableNameInterpreter::new(&signature)
+        .interpret(definition)
+        .map_err(|_error| CompileGraphError::Typecheck {
+            definition: "<variable names>".to_string(),
+            error: metacat::check::Error::InvalidTypeMaps,
+        })?;
+    let quotient = graph.hypergraph.coequalizer();
+    let mut names = HashMap::new();
+    for (node, name) in graph.hypergraph.nodes.iter().enumerate() {
+        let Some(name) = name else {
+            continue;
+        };
+        names
+            .entry(quotient.table[node])
+            .or_insert_with(|| name.clone());
+    }
+    Ok(names)
+}
+
+struct VariableNameInterpreter<'a, S> {
+    signature: &'a S,
+    graph: LaxOpenHypergraph<Option<String>, Operation>,
+    variables: HashMap<Variable, NodeId>,
+}
+
+impl<'a, S> VariableNameInterpreter<'a, S>
+where
+    S: Signature<Arr = Operation>,
+{
+    fn new(signature: &'a S) -> Self {
+        Self {
+            signature,
+            graph: LaxOpenHypergraph::empty(),
+            variables: HashMap::new(),
         }
     }
 
-    while p < pattern.len() && pattern[p] == b'*' {
-        p += 1;
+    fn interpret(
+        mut self,
+        hexpr: &Hexpr,
+    ) -> Result<LaxOpenHypergraph<Option<String>, Operation>, hexpr::interpret::Error<S::Error>>
+    {
+        let (sources, targets) = self.interpret_stack(hexpr)?;
+        self.graph.sources = sources;
+        self.graph.targets = targets;
+        Ok(self.graph)
     }
 
-    p == pattern.len()
+    fn interpret_stack(
+        &mut self,
+        hexpr: &Hexpr,
+    ) -> Result<Interface, hexpr::interpret::Error<S::Error>> {
+        match hexpr {
+            Hexpr::Composition(hexprs) => self.interpret_composition(hexprs),
+            Hexpr::Tensor(hexprs) => self.interpret_tensor(hexprs),
+            Hexpr::Operation(op) => self.interpret_operation(op),
+            Hexpr::Frobenius { sources, targets } => {
+                let sources = self.frobenius_variables(sources);
+                let targets = self.frobenius_variables(targets);
+                Ok((sources, targets))
+            }
+        }
+    }
+
+    fn interpret_composition(
+        &mut self,
+        hexprs: &[Hexpr],
+    ) -> Result<Interface, hexpr::interpret::Error<S::Error>> {
+        let mut iter = hexprs.iter();
+        let Some(mut current) = iter.next() else {
+            return Ok((vec![], vec![]));
+        };
+        let (sources, mut current_targets) = self.interpret_stack(current)?;
+
+        for next in iter {
+            let (next_sources, next_targets) = self.interpret_stack(next)?;
+            if current_targets.len() != next_sources.len() {
+                return Err(hexpr::interpret::Error::Composition(
+                    current.clone(),
+                    next.clone(),
+                ));
+            }
+            for (&target, &source) in current_targets.iter().zip(&next_sources) {
+                self.graph.unify(target, source);
+            }
+            current_targets = next_targets;
+            current = next;
+        }
+
+        Ok((sources, current_targets))
+    }
+
+    fn interpret_tensor(
+        &mut self,
+        hexprs: &[Hexpr],
+    ) -> Result<Interface, hexpr::interpret::Error<S::Error>> {
+        let mut sources = Vec::new();
+        let mut targets = Vec::new();
+        for hexpr in hexprs {
+            let (next_sources, next_targets) = self.interpret_stack(hexpr)?;
+            sources.extend(next_sources);
+            targets.extend(next_targets);
+        }
+        Ok((sources, targets))
+    }
+
+    fn interpret_operation(
+        &mut self,
+        op: &hexpr::Operation,
+    ) -> Result<Interface, hexpr::interpret::Error<S::Error>> {
+        let arr = self
+            .signature
+            .try_parse_op(op)
+            .map_err(|error| hexpr::interpret::Error::Signature(op.clone(), error))?;
+        let (sources, targets) = self.signature.profile(&arr);
+        let sources = vec![None; sources.len()];
+        let targets = vec![None; targets.len()];
+        let (_, interface) = self.graph.new_operation(arr, sources, targets);
+        Ok(interface)
+    }
+
+    fn frobenius_variables(&mut self, variables: &[Variable]) -> Vec<NodeId> {
+        variables
+            .iter()
+            .map(|variable| {
+                if let Some(node) = self.variables.get(variable) {
+                    *node
+                } else {
+                    let node = self.graph.new_node(Some(variable.to_string()));
+                    self.variables.insert(variable.clone(), node);
+                    node
+                }
+            })
+            .collect()
+    }
+}
+
+fn parse_operation(name: &str) -> Result<Operation, CompileGraphError> {
+    name.parse()
+        .map_err(|_| CompileGraphError::InvalidDefinition(name.to_string()))
 }

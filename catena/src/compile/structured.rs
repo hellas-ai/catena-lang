@@ -1,25 +1,34 @@
 use thiserror::Error;
 
 use crate::{
-    compile::program::Program,
+    compile::{
+        cfg,
+        program::{Program, VariableId},
+    },
     structured::{
-        StructuredError,
         ir::{EntryPoint, Stmt, StructuredProgram},
         ramsey,
+        ramsey::RamseyError,
     },
 };
 
 #[derive(Debug, Error)]
 pub enum StructuredCompileError {
     #[error("failed to structure control graph: {0}")]
-    Structure(#[from] StructuredError),
+    Structure(#[from] RamseyError),
 }
 
 pub fn compile_structured_program(
     program: &Program,
 ) -> Result<StructuredProgram, StructuredCompileError> {
     let entry = program.entry_definition();
-    let body = ramsey::structure(entry.body.clone())?;
+    let context = entry.context.clone();
+    let body = ramsey::structure(entry.body.clone(), move |id| {
+        context
+            .variable(VariableId(id))
+            .map(|variable| variable.name.clone())
+            .unwrap_or_else(|| cfg::variable_name(id))
+    })?;
     Ok(structured_program(&entry.name, body))
 }
 

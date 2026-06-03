@@ -50,6 +50,11 @@ pub enum Stmt {
         lhs: String,
         rhs: String,
     },
+    Call {
+        function: String,
+        inputs: Vec<String>,
+        outputs: Vec<String>,
+    },
     Primitive(Primitive),
     Comment(String),
 }
@@ -126,6 +131,21 @@ fn render_ir_stmts(out: &mut String, stmts: &[Stmt], indent: usize) {
             Stmt::Return => out.push_str(&format!("{pad}return\n")),
             Stmt::Barrier => out.push_str(&format!("{pad}barrier\n")),
             Stmt::Assign { lhs, rhs } => out.push_str(&format!("{pad}{lhs} = {rhs}\n")),
+            Stmt::Call {
+                function,
+                inputs,
+                outputs,
+            } => {
+                if outputs.is_empty() {
+                    out.push_str(&format!("{pad}{function}({})\n", inputs.join(", ")));
+                } else {
+                    out.push_str(&format!(
+                        "{pad}{} = {function}({})\n",
+                        outputs.join(", "),
+                        inputs.join(", ")
+                    ));
+                }
+            }
             Stmt::Primitive(primitive) => {
                 if primitive.outputs.is_empty() {
                     if primitive.inputs.is_empty() {

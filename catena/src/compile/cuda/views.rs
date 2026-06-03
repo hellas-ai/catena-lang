@@ -117,6 +117,7 @@ fn collect_shared_aliases(
             | Stmt::Return
             | Stmt::Barrier
             | Stmt::Assign { .. }
+            | Stmt::Call { .. }
             | Stmt::Comment(_) => {}
         }
     }
@@ -166,6 +167,7 @@ fn collect_static_shared_views(
             | Stmt::Return
             | Stmt::Barrier
             | Stmt::Assign { .. }
+            | Stmt::Call { .. }
             | Stmt::Comment(_) => {}
         }
     }
@@ -198,6 +200,7 @@ fn collect_extents_required_by_device_code(stmts: &[Stmt], names: &mut HashSet<S
             | Stmt::Return
             | Stmt::Barrier
             | Stmt::Assign { .. }
+            | Stmt::Call { .. }
             | Stmt::Comment(_) => {}
         }
     }

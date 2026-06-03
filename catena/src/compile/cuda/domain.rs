@@ -230,6 +230,46 @@ impl NamespaceLowering for GpuPrimitives {
             return Some(lines);
         }
 
+        if local.matches(&["view", "prev"]) {
+            let [view] = primitive.inputs.as_slice() else {
+                return None;
+            };
+            let [out] = primitive.outputs.as_slice() else {
+                return None;
+            };
+            return Some(vec![format!("uint64_t {out} = {view} - 1;")]);
+        }
+
+        if local.matches(&["view", "prev2"]) {
+            let [view] = primitive.inputs.as_slice() else {
+                return None;
+            };
+            let [out] = primitive.outputs.as_slice() else {
+                return None;
+            };
+            return Some(vec![format!("uint64_t {out} = {view} - 2;")]);
+        }
+
+        if local.matches(&["view", "is-zero"]) {
+            let [view] = primitive.inputs.as_slice() else {
+                return None;
+            };
+            let [out] = primitive.outputs.as_slice() else {
+                return None;
+            };
+            return Some(vec![format!("bool {out} = {view} == 0;")]);
+        }
+
+        if local.matches(&["view", "is-one"]) {
+            let [view] = primitive.inputs.as_slice() else {
+                return None;
+            };
+            let [out] = primitive.outputs.as_slice() else {
+                return None;
+            };
+            return Some(vec![format!("bool {out} = {view} == 1;")]);
+        }
+
         if local.matches(&["view", "group-by-tile"]) {
             let [view, tile_rows, tile_cols] = primitive.inputs.as_slice() else {
                 return None;

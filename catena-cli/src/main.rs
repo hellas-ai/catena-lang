@@ -70,6 +70,7 @@ enum EmitArg {
     Elaborated,
     Checked,
     StructuredIr,
+    Analysis,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
@@ -225,6 +226,7 @@ impl From<EmitArg> for Emit {
             EmitArg::Elaborated => Emit::Elaborated,
             EmitArg::Checked => Emit::Checked,
             EmitArg::StructuredIr => Emit::StructuredIr,
+            EmitArg::Analysis => Emit::Analysis,
         }
     }
 }

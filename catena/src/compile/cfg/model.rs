@@ -30,6 +30,7 @@ pub struct Cfg {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct CfgOptions {
     pub keep_monoidal_operations: bool,
+    pub keep_control_flow_operations: bool,
 }
 
 #[derive(Debug, Clone)]

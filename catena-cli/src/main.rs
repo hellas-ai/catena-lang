@@ -66,6 +66,10 @@ enum Command {
         /// Keep monoidal-structure operations in CFG output for debugging.
         #[arg(long = "cfg-keep-monoidal-operations")]
         cfg_keep_monoidal_operations: bool,
+
+        /// Keep control-flow-only operations in CFG output for debugging.
+        #[arg(long = "cfg-keep-control-flow-operations")]
+        cfg_keep_control_flow_operations: bool,
     },
 }
 
@@ -102,6 +106,7 @@ fn main() -> anyhow::Result<()> {
             no_proof,
             proof,
             cfg_keep_monoidal_operations,
+            cfg_keep_control_flow_operations,
         } => compile_command(
             paths,
             emit,
@@ -113,6 +118,7 @@ fn main() -> anyhow::Result<()> {
             no_proof,
             proof,
             cfg_keep_monoidal_operations,
+            cfg_keep_control_flow_operations,
         ),
     }
 }
@@ -177,6 +183,7 @@ fn compile_command(
     no_proof: bool,
     proof: Vec<PathBuf>,
     cfg_keep_monoidal_operations: bool,
+    cfg_keep_control_flow_operations: bool,
 ) -> anyhow::Result<()> {
     let mut static_values = std::collections::HashMap::new();
     for (name, value) in cuda_static {
@@ -194,6 +201,7 @@ fn compile_command(
         cuda_options: CudaOptions { static_values },
         cfg_options: CfgOptions {
             keep_monoidal_operations: cfg_keep_monoidal_operations,
+            keep_control_flow_operations: cfg_keep_control_flow_operations,
         },
         proof_check: !no_proof,
         proof_paths: proof,

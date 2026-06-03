@@ -128,6 +128,7 @@ impl<'a> CfgBuilder<'a> {
             self.compile_graph,
             &self.operation_instances,
             self.monoidal_structure_resolver.subgraph().clone(),
+            self.options,
         )
         .expand(&self.control_operation_ids)?;
 

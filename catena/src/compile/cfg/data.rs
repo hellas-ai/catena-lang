@@ -22,6 +22,9 @@ pub(super) fn data_cfg_node_draft(
 ) -> Result<(CfgNodeDraft, CfgNodeBoundaries), CfgError> {
     let entries = entries_for_node(compile_graph, &operations, boundary);
     let exits = exits_for_node(compile_graph, &operations, boundary);
+    let has_non_monoidal_operation = operations.iter().any(|operation| {
+        cfg_operation_role(&operation.name) != CfgOperationRole::MonoidalStructure
+    });
     let block = operations
         .into_iter()
         .map(|operation| block_instruction(operation, options))
@@ -37,7 +40,15 @@ pub(super) fn data_cfg_node_draft(
         .collect();
 
     Ok((
-        CfgNodeDraft { id, params, block },
+        CfgNodeDraft {
+            id,
+            params,
+            block: if has_non_monoidal_operation || !exits.is_empty() {
+                block
+            } else {
+                Vec::new()
+            },
+        },
         CfgNodeBoundaries {
             node: id,
             entries,
@@ -60,6 +71,9 @@ pub(super) fn block_instruction(
     match cfg_operation_role(&operation.name) {
         CfgOperationRole::Instruction => Ok(Some(block_instruction_from_operation(operation))),
         CfgOperationRole::MonoidalStructure if options.keep_monoidal_operations => {
+            Ok(Some(block_instruction_from_operation(operation)))
+        }
+        CfgOperationRole::ControlFlow if options.keep_control_flow_operations => {
             Ok(Some(block_instruction_from_operation(operation)))
         }
         CfgOperationRole::MonoidalStructure | CfgOperationRole::ControlFlow => Ok(None),

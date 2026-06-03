@@ -57,7 +57,9 @@ and allows us to conclude that `|- b = true`.
 Notice this is of course not true in general:
 
 - When `b` is false, the program will crash.
-- When `b` is true, the user is able to use the proof `|- p`
+- When `b` is true, the user is able to use the proof `|- b = true`
+
+`assert` is intended to be the *only* partial operation.
 
 ## Branches
 

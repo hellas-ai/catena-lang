@@ -24,7 +24,7 @@ Then
     m = [0]
 
     x : Fin (a, b) => f32
-    x = \(i, j) -> b[i*a + b]
+    x = \(i, j) -> b[i*a + j]
 
 Here, the *code* x translates logical 2d coordinates into 1d buffer indices.
 

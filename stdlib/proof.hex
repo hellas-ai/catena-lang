@@ -1,0 +1,59 @@
+(theory syntax nat {
+  (arr bool : 1 -> 1)
+  (arr u64 : 1 -> 1)
+  (arr true : 0 -> 1)
+  (arr false : 0 -> 1)
+  (arr = : 2 -> 1)
+  (arr => : 2 -> 1)
+  (arr not : 1 -> 1)
+  (arr |- : 1 -> 1)
+  (arr Ix : 1 -> 1)
+  (arr buf : 2 -> 1)
+
+  (arr u64.gt : 2 -> 1)
+  (arr u64.lt : 2 -> 1)
+})
+
+(theory proof syntax {
+
+
+  (arr assert :
+    ([b p . b b p]
+      {([b] bool)
+       (({({[b] true} =) [p]} =>) |-)}
+      ) ->
+    ([b p . p] ([p] |-)))
+
+  (arr u64.gt :
+    ([x y b . x y]
+      {([x] u64)
+       ([y] u64)}
+      ) ->
+    ([x y b . b b x y b x y]
+      {([b] bool)
+       (({({[b] true} =) ({[x] [y]} u64.gt)} =>) |-)
+       (({({[b] false} =) (({[x] [y]} u64.gt) not)} =>) |-)}
+      ))
+
+  (arr u64.index :
+    ([x n . x n x]
+      {([x] u64)
+       (({[x] [n]} u64.lt) |-)}
+      ) ->
+    ([x n . n] ([n] Ix)))
+
+  (arr write :
+    ([n . n n]
+      {({[n] f32} buf)
+       ([n] Ix)
+       f32}
+      ) ->
+    ([n . n] ({[n] f32} buf)))
+
+  (arr read :
+    ([n . n n]
+      {({[n] f32} buf)
+       ([n] Ix)}
+      ) ->
+    ([n .] f32))
+})

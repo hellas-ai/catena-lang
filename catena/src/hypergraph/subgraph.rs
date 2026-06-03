@@ -4,7 +4,7 @@ use hexpr::Operation;
 use open_hypergraphs::{
     array::vec::VecArray,
     semifinite::SemifiniteFunction,
-    strict::vec::{FiniteFunction, Hypergraph, IndexedCoproduct},
+    strict::vec::{FiniteFunction, Hypergraph, IndexedCoproduct, OpenHypergraph},
 };
 use thiserror::Error;
 
@@ -18,6 +18,19 @@ pub type WireId = usize;
 pub struct Subgraph {
     pub graph: HostHypergraph,
     pub embedding: SubgraphEmbedding,
+}
+
+impl Subgraph {
+    pub fn open_graph(&self) -> OpenHypergraph<Obj, Operation> {
+        let wire_count = self.graph.w.0.len();
+        OpenHypergraph {
+            s: FiniteFunction::new(VecArray(Vec::new()), wire_count)
+                .expect("empty source boundary is valid"),
+            t: FiniteFunction::new(VecArray(Vec::new()), wire_count)
+                .expect("empty target boundary is valid"),
+            h: self.graph.clone(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

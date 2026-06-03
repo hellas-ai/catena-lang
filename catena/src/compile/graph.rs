@@ -40,7 +40,7 @@ type StrictTypedGraph = StrictOpenHypergraph<Obj, Operation>;
 // be flattened during CompileGraph construction. Definitions that carry
 // meaningful control/data boundaries, such as `if`, must remain as child
 // regions so structured lowering can see them.
-const INLINE_LOCAL_DEFINITIONS: &[&str] = &["control.elim2", "data.if"];
+const INLINE_LOCAL_DEFINITIONS: &[&str] = &["data.if"];
 
 #[derive(Clone, Debug)]
 pub struct CompileGraph {

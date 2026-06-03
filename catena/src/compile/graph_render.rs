@@ -364,7 +364,7 @@ fn edge_targets(graph: &OpenHypergraph<Obj, Operation>, edge_index: usize) -> Ve
         .unwrap_or_default()
 }
 
-fn object_label(object: &Obj) -> String {
+pub(crate) fn object_label(object: &Obj) -> String {
     match object {
         Tree::Empty => "empty".to_string(),
         Tree::Leaf(index, _) => format!("x{index}"),

@@ -90,6 +90,7 @@ dependencies = [
  "libloading",
  "metacat",
  "open-hypergraphs",
+ "open-hypergraphs-dot",
  "tempfile",
  "thiserror",
 ]
@@ -477,6 +478,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "35368b8ccf2a61fdb493242cb5b0420d6c46f0e285d1f5ab14dbd2f94e7e4f6a"
 dependencies = [
  "num-traits",
+]
+
+[[package]]
+name = "open-hypergraphs-dot"
+version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cf800a0036834718dcd70c606745afdaa93e8fb80828806341bbf8454cc76c0f"
+dependencies = [
+ "dot-structures",
+ "graphviz-rust",
+ "open-hypergraphs",
 ]
 
 [[package]]

@@ -1,18 +1,34 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, io, path::PathBuf};
 
 use open_hypergraphs::lax::NodeId;
+use open_hypergraphs_dot::{Options, svg::to_svg_with};
 
 use crate::{
     compile::graph_ops::{
         Graph, operation_count, operation_inputs, operation_name, operation_outputs,
     },
-    compile::{CompileGraph, CompileTheory, graph_render},
-    hypergraph::subgraph::subgraph_from_operations,
+    compile::{CompileGraph, CompileTheory, graph_render::object_label},
+    hypergraph::subgraph::{Subgraph, subgraph_from_operations},
+    lang::Obj,
     stdlib::operations::{OperationKind, operation_kind},
     union_find::UnionFind,
 };
 
 pub fn render_analysis(graph: &CompileGraph) -> std::io::Result<Vec<u8>> {
+    Ok(render_analysis_artifacts(graph)?
+        .into_iter()
+        .find(|artifact| artifact.path == PathBuf::from("normalized.svg"))
+        .expect("analysis artifacts include normalized graph")
+        .contents)
+}
+
+#[derive(Debug, Clone)]
+pub struct AnalysisArtifact {
+    pub path: PathBuf,
+    pub contents: Vec<u8>,
+}
+
+pub fn render_analysis_artifacts(graph: &CompileGraph) -> std::io::Result<Vec<AnalysisArtifact>> {
     assert!(
         matches!(graph.theory, CompileTheory::Data),
         "analysis expects a data graph"
@@ -21,25 +37,25 @@ pub fn render_analysis(graph: &CompileGraph) -> std::io::Result<Vec<u8>> {
     // I don't know if it is too strict, but I cannot imagine a case when it is not true
     // better fail early and loud if I am wrong!
     assert_interleaved_control_operations_are_unary(&graph.graph);
-    let boundary_wires = BoundaryWires::from_graph(&graph.graph);
-    let regions = partition_regions(&graph.graph, &boundary_wires);
-    let _subgraphs = regions
-        .iter()
-        .map(|region| subgraph_from_operations(&graph.graph.h, region.operations.iter().copied()))
-        .collect::<Result<Vec<_>, _>>()
-        .expect("analysis region subgraphs should be valid");
-    render_step(AnalysisStep::NormalizedGraph, graph)
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum AnalysisStep {
-    NormalizedGraph,
-}
-
-fn render_step(step: AnalysisStep, graph: &CompileGraph) -> std::io::Result<Vec<u8>> {
-    match step {
-        AnalysisStep::NormalizedGraph => graph_render::nested_svg(graph),
-    }
+    let _boundary_wires = BoundaryWires::from_graph(&graph.graph);
+    let regions = partition_regions(&graph.graph);
+    let region_svgs = render_region_svgs(graph, &regions)?;
+    let before_split = graph_svg(&graph.graph)?;
+    let mut artifacts = vec![
+        AnalysisArtifact {
+            path: PathBuf::from("before-split.svg"),
+            contents: before_split.clone(),
+        },
+        AnalysisArtifact {
+            path: PathBuf::from("normalized.svg"),
+            contents: before_split,
+        },
+    ];
+    artifacts.extend(region_svgs.into_iter().map(|region| AnalysisArtifact {
+        path: PathBuf::from("regions").join(region.file_name),
+        contents: region.svg,
+    }));
+    Ok(artifacts)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -59,10 +75,6 @@ impl BoundaryWires {
             control_to_data,
         }
     }
-
-    fn contains(&self, wire: NodeId) -> bool {
-        self.data_to_control.contains(&wire) || self.control_to_data.contains(&wire)
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -79,18 +91,73 @@ enum RegionKind {
     InterleavedControl,
 }
 
-fn partition_regions(graph: &Graph, boundary: &BoundaryWires) -> Vec<OperationRegion> {
+#[derive(Debug, Clone)]
+struct RegionSvg {
+    file_name: String,
+    svg: Vec<u8>,
+}
+
+fn render_region_svgs(
+    parent: &CompileGraph,
+    regions: &[OperationRegion],
+) -> io::Result<Vec<RegionSvg>> {
+    regions
+        .iter()
+        .enumerate()
+        .map(|(region_index, region)| render_region_svg(parent, region_index, region))
+        .collect()
+}
+
+fn render_region_svg(
+    parent: &CompileGraph,
+    region_index: usize,
+    region: &OperationRegion,
+) -> io::Result<RegionSvg> {
+    let subgraph = subgraph_from_operations(&parent.graph.h, region.operations.iter().copied())
+        .map_err(io::Error::other)?;
+    Ok(RegionSvg {
+        file_name: region_svg_file_name(region_index, region.kind),
+        svg: subgraph_svg(&subgraph)?,
+    })
+}
+
+fn graph_svg(graph: &Graph) -> io::Result<Vec<u8>> {
+    let graph = open_hypergraphs::lax::OpenHypergraph::from_strict(graph.clone());
+    to_svg_with(&graph, &dot_options()).map_err(io::Error::other)
+}
+
+fn subgraph_svg(subgraph: &Subgraph) -> io::Result<Vec<u8>> {
+    graph_svg(&subgraph.open_graph())
+}
+
+fn dot_options() -> Options<Obj, hexpr::Operation> {
+    let mut options = Options::default().lr();
+    options.node_label = Box::new(object_label);
+    options.edge_label = Box::new(|operation: &hexpr::Operation| operation.to_string());
+    options
+}
+
+fn region_svg_file_name(region_index: usize, kind: RegionKind) -> String {
+    format!("{region_index:03}-{}.svg", region_kind_name(kind))
+}
+
+fn region_kind_name(kind: RegionKind) -> &'static str {
+    match kind {
+        RegionKind::Data => "data",
+        RegionKind::InterleavedControl => "control",
+    }
+}
+
+fn partition_regions(graph: &Graph) -> Vec<OperationRegion> {
     let mut uf = UnionFind::new(operation_count(graph));
     let mut operations_by_wire = HashMap::<NodeId, Vec<OperationId>>::new();
 
     for operation_id in operation_ids(graph) {
         for wire in operation_wires(graph, operation_id) {
-            if !boundary.contains(wire) {
-                operations_by_wire
-                    .entry(wire)
-                    .or_default()
-                    .push(operation_id);
-            }
+            operations_by_wire
+                .entry(wire)
+                .or_default()
+                .push(operation_id);
         }
     }
 

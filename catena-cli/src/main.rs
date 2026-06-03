@@ -1,6 +1,9 @@
 use std::path::PathBuf;
 
-use catena::compile::{CompilePipeline, CompileRequest, CudaOptions, Emit, OutputFormat, compile};
+use catena::compile::{
+    CompilePipeline, CompileRequest, CudaOptions, Emit, OutputFormat, analysis, compile,
+    normalize_graph,
+};
 use clap::{Parser, Subcommand, ValueEnum};
 
 #[derive(Parser)]
@@ -174,6 +177,21 @@ fn compile_command(
         }
     }
 
+    if emit == EmitArg::Analysis
+        && let Some(output) = output
+    {
+        return analysis_command(
+            paths,
+            theory,
+            entry,
+            format,
+            CudaOptions { static_values },
+            !no_proof,
+            proof,
+            output,
+        );
+    }
+
     let generated = compile(CompileRequest {
         paths,
         emit: emit.into(),
@@ -186,6 +204,51 @@ fn compile_command(
     })?;
 
     write_output(output, &generated)
+}
+
+fn analysis_command(
+    paths: Vec<PathBuf>,
+    theory: Option<String>,
+    entry: Option<String>,
+    format: Option<OutputFormatArg>,
+    cuda_options: CudaOptions,
+    proof_check: bool,
+    proof_paths: Vec<PathBuf>,
+    output: PathBuf,
+) -> anyhow::Result<()> {
+    let request = CompileRequest {
+        paths,
+        emit: Emit::Analysis,
+        theory,
+        entry,
+        format: format.map(Into::into),
+        cuda_options,
+        proof_check,
+        proof_paths,
+    };
+    if let Some(format) = request.format
+        && format != OutputFormat::Svg
+    {
+        anyhow::bail!("--format {format:?} is not supported when emitting Analysis");
+    }
+
+    let mut pipeline = CompilePipeline::new(request);
+    let compile_graph_request = pipeline.compile_graph_request()?;
+    let checked_elaborated_theory = pipeline.checked_elaborated_theory()?;
+    let compile_graph =
+        CompilePipeline::compile_graph(checked_elaborated_theory, compile_graph_request)?;
+    let graph = normalize_graph(&compile_graph)?;
+    let artifacts = analysis::render_analysis_artifacts(&graph)?;
+
+    std::fs::create_dir_all(&output)?;
+    for artifact in artifacts {
+        let path = output.join(artifact.path);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(path, artifact.contents)?;
+    }
+    Ok(())
 }
 
 fn parse_cuda_static(value: &str) -> Result<(String, u64), String> {

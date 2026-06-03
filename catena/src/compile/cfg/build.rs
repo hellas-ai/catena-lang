@@ -8,8 +8,8 @@ use super::{
     control::{ControlExpander, ExpandedControlItem},
     data::{block_instructions, data_cfg_node_draft, partition_data_operations_by_internal_wires},
     model::{
-        BoundaryKind, Cfg, CfgEdge, CfgError, CfgNode, CfgNodeDraft, CfgNodeId, CfgOptions,
-        CfgWiring, OperationId, VariableId,
+        Cfg, CfgEdge, CfgError, CfgNode, CfgNodeDraft, CfgNodeId, CfgOptions, CfgWiring,
+        OperationId, VariableId,
     },
     monoidal::{MonoidalStructureResolver, MonoidalStructureSubgraph},
     operation::{
@@ -96,6 +96,7 @@ impl<'a> CfgBuilder<'a> {
                     operation_id,
                     &self.wire_map,
                     &self.monoidal_structure_resolver,
+                    self.options,
                 )
             })
             .collect::<Result<Vec<_>, CfgError>>()?;
@@ -318,7 +319,7 @@ impl<'a> CfgBuilder<'a> {
         for node in &mut nodes {
             prune_unused_params(node);
         }
-        let entry = nodes_with_boundary(&wiring, BoundaryKind::RegionEntry)
+        let entry = nodes_with_boundary(&wiring, super::model::BoundaryKind::RegionEntry)
             .into_iter()
             .next()
             .or_else(|| nodes.first().map(|node| node.id))

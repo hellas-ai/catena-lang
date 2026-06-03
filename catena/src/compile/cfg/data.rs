@@ -22,9 +22,6 @@ pub(super) fn data_cfg_node_draft(
 ) -> Result<(CfgNodeDraft, CfgNodeBoundaries), CfgError> {
     let entries = entries_for_node(compile_graph, &operations, boundary);
     let exits = exits_for_node(compile_graph, &operations, boundary);
-    let has_non_monoidal_operation = operations.iter().any(|operation| {
-        cfg_operation_role(&operation.name) != CfgOperationRole::MonoidalStructure
-    });
     let block = operations
         .into_iter()
         .map(|operation| block_instruction(operation, options))
@@ -40,15 +37,7 @@ pub(super) fn data_cfg_node_draft(
         .collect();
 
     Ok((
-        CfgNodeDraft {
-            id,
-            params,
-            block: if has_non_monoidal_operation || !exits.is_empty() {
-                block
-            } else {
-                Vec::new()
-            },
-        },
+        CfgNodeDraft { id, params, block },
         CfgNodeBoundaries {
             node: id,
             entries,

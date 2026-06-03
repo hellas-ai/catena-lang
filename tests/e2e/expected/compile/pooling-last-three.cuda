@@ -1,0 +1,40 @@
+#include <stdint.h>
+
+__global__ void user_f32_pooling_last_three(float* input, float* output) {
+    uint3 worker_block = blockIdx;
+    uint3 worker_thread = threadIdx;
+    uint64_t index = (uint64_t)worker_block.x * blockDim.x + worker_thread.x;
+    bool is_zero = index == 0;
+    if (is_zero) {
+        float w26 = input[index];
+        output[index] = w26;
+        auto w27 = output;
+    } else {
+        bool w32 = index == 1;
+        if (w32) {
+            uint64_t w46 = index - 1;
+            float w47 = input[index];
+            float w48 = input[w46];
+            float w49 = w47 + w48;
+            output[index] = w49;
+            auto w50 = output;
+        } else {
+            uint64_t w55 = index - 1;
+            uint64_t w56 = index - 2;
+            float w57 = input[index];
+            float w58 = input[w55];
+            float w59 = input[w56];
+            float w60 = w57 + w58;
+            float w61 = w60 + w59;
+            output[index] = w61;
+            auto w62 = output;
+        }
+    }
+    return;
+}
+
+void launch_user_f32_pooling_last_three(uint64_t block_count, uint64_t thread_count, float* input, float* output) {
+    dim3 block(thread_count);
+    dim3 grid(block_count);
+    user_f32_pooling_last_three<<<grid, block>>>(input, output);
+}

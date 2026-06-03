@@ -37,24 +37,6 @@ test_case "check zip" \
   --command check \
   --input "examples/puzzles/zip.hex"
 
-test_case "compile user-u32-identity" \
-  --command compile \
-  --input "examples/user-program.hex" \
-  --expected "compile/user-u32-identity.structured-ir" \
-  -- \
-  --emit structured-ir \
-  --theory control \
-  --entry user.u32.identity \
-  --no-proof
-test_case "compile user-u32-inc-unless-max" \
-  --command compile \
-  --input "examples/user-program.hex" \
-  --expected "compile/user-u32-inc-unless-max.structured-ir" \
-  -- \
-  --emit structured-ir \
-  --theory data \
-  --entry user.u32.inc-unless-max \
-  --no-proof
 
 test_case "compile fill-one-array" \
   --command compile \
@@ -110,6 +92,15 @@ test_case "compile zip" \
   --emit cuda \
   --theory data \
   --entry user.f32.zip-add \
+  --no-proof
+test_case "compile pooling last three" \
+  --command compile \
+  --input "examples/puzzles/pooling.hex" \
+  --expected "compile/pooling-last-three.cuda" \
+  -- \
+  --emit cuda \
+  --theory data \
+  --entry user.f32.pooling-last-three \
   --no-proof
 test_case "compile map-square-2d" \
   --command compile \

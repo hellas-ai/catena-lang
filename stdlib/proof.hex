@@ -12,6 +12,8 @@
 
   (arr u64.gt : 2 -> 1)
   (arr u64.lt : 2 -> 1)
+  (arr u64.mul : 2 -> 1)
+  (arr u64.add : 2 -> 1)
 })
 
 (theory proof syntax {
@@ -46,8 +48,22 @@
        (({({[b] false} =) (({[x] [y]} u64.lt) not)} =>) |-)}
       ))
 
+  (arr u64.mul :
+    ([x y . x y]
+      {([x] u64)
+       ([y] u64)}
+      ) ->
+    ([x y . x y] (({[x] [y]} u64.mul) u64)))
+
+  (arr u64.add :
+    ([x y . x y]
+      {([x] u64)
+       ([y] u64)}
+      ) ->
+    ([x y . x y] (({[x] [y]} u64.add) u64)))
+
   (arr u64.index :
-    ([x n . x n x]
+    ([x n . x x n]
       {([x] u64)
        (({[x] [n]} u64.lt) |-)}
       ) ->
@@ -67,4 +83,25 @@
        ([n] Ix)}
       ) ->
     ([n .] f32))
+
+  (def user.f32.write-imj :
+    ([i j m n . i j m n n]
+      {([i] u64)
+       ([j] u64)
+       ([m] u64)
+       ([n] u64)
+       ({[n] f32} buf)
+       f32}
+      ) ->
+    ([i j m n . n] ({[n] f32} buf))
+    =
+    {[i j m n buffer value.]
+      ([.i m] u64.mul [im.])
+      ([.im j] u64.add [index.])
+      ([.index n] u64.lt [is-in-bounds in-bounds-if-true in-bounds-if-false.])
+      ([.is-in-bounds in-bounds-if-true] assert [in-bounds.])
+      ([.index in-bounds] u64.index [ix.])
+      ([.buffer ix value] write [updated.])
+      [.updated]}
+  )
 })

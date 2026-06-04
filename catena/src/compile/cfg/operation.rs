@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use crate::compile::{CompileGraph, CompileTheory};
 
 use super::{
-    model::{CfgError, OperationId, OperationName, VariableId},
+    model::{CfgError, CfgOptions, OperationId, OperationName, VariableId},
     monoidal::MonoidalStructureResolver,
 };
 
@@ -103,6 +103,7 @@ pub(super) fn effective_operation_instance(
     operation_id: OperationId,
     wire_map: &HashMap<NodeId, VariableId>,
     monoidal_structure_resolver: &MonoidalStructureResolver<'_>,
+    options: CfgOptions,
 ) -> Result<OperationInstance, CfgError> {
     let mut operation = operation_instance(compile_graph, operation_id);
     operation.inputs = operation
@@ -116,6 +117,7 @@ pub(super) fn effective_operation_instance(
         compile_graph,
         operation.clone(),
         monoidal_structure_resolver,
+        options,
     )?;
     operation.outputs = operation
         .outputs
@@ -129,8 +131,10 @@ fn resolve_instruction_inputs(
     compile_graph: &CompileGraph,
     operation: OperationInstance,
     monoidal_structure_resolver: &MonoidalStructureResolver<'_>,
+    options: CfgOptions,
 ) -> Result<Vec<VariableId>, CfgError> {
-    if !is_control_operation(compile_graph, &operation.name)
+    if !options.keep_monoidal_operations
+        && !is_control_operation(compile_graph, &operation.name)
         && matches!(
             cfg_operation_role(&operation.name),
             CfgOperationRole::Instruction

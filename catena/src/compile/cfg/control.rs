@@ -6,7 +6,7 @@ use crate::compile::{CompileGraph, CompileTheory};
 
 use super::{
     build::{CfgBuilder, OperationIdAllocator, VariableIdAllocator},
-    model::{Cfg, CfgError, OperationId, VariableId},
+    model::{Cfg, CfgError, CfgOptions, OperationId, VariableId},
     monoidal::{MonoidalStructureResolver, MonoidalStructureSubgraph},
     operation::{
         OperationInstance, all_operation_wires, child_data_graph_for_operation,
@@ -39,6 +39,7 @@ pub(super) struct ControlExpander<'a> {
     branch_payload_by_operation: HashMap<OperationId, VariableId>,
     operation_ids: OperationIdAllocator,
     variable_ids: VariableIdAllocator,
+    options: CfgOptions,
 }
 
 impl<'a> ControlExpander<'a> {
@@ -46,6 +47,7 @@ impl<'a> ControlExpander<'a> {
         compile_graph: &'a CompileGraph,
         operation_instances: &'a [OperationInstance],
         monoidal_structure_subgraph: MonoidalStructureSubgraph,
+        options: CfgOptions,
     ) -> Self {
         Self {
             compile_graph,
@@ -56,6 +58,7 @@ impl<'a> ControlExpander<'a> {
             branch_payload_by_operation: HashMap::new(),
             operation_ids: OperationIdAllocator::new(operation_instances.len()),
             variable_ids: VariableIdAllocator::new(next_variable_id(operation_instances)),
+            options,
         }
     }
 
@@ -259,6 +262,7 @@ impl<'a> ControlExpander<'a> {
             variable_map,
             Some(monoidal_structure_subgraph.clone()),
         )
+        .with_options(self.options)
         .build()
     }
 }

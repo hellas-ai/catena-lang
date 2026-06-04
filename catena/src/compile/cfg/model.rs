@@ -27,6 +27,12 @@ pub struct Cfg {
     pub(crate) predecessors: Vec<Vec<CfgNodeId>>,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct CfgOptions {
+    pub keep_monoidal_operations: bool,
+    pub keep_control_flow_operations: bool,
+}
+
 #[derive(Debug, Clone)]
 pub struct CfgNode {
     pub id: CfgNodeId,
@@ -96,7 +102,14 @@ pub enum BoundaryKind {
 
 impl Cfg {
     pub fn from_compile_graph(compile_graph: &CompileGraph) -> Result<Self, CfgError> {
-        CfgBuilder::new(compile_graph).build()
+        Self::from_compile_graph_with_options(compile_graph, CfgOptions::default())
+    }
+
+    pub fn from_compile_graph_with_options(
+        compile_graph: &CompileGraph,
+        options: CfgOptions,
+    ) -> Result<Self, CfgError> {
+        CfgBuilder::new(compile_graph).with_options(options).build()
     }
 
     pub(crate) fn label(&self, node: CfgNodeId) -> String {

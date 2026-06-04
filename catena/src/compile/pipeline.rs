@@ -6,12 +6,17 @@ use thiserror::Error;
 use crate::{
     check::{CheckError, check as check_elaborated_theory},
     compile::{
-        CompileConfig, CompileGraph, CompileGraphError, analysis, check_render, compile_graph,
+        CompileConfig, CompileGraph, CompileGraphError, analysis,
+        cfg::{CfgOptions, render_program_cfg},
+        check_render, compile_graph,
         cuda::CudaOptions,
         cuda::{CudaAbiError, render_cuda_source},
         graph_render,
         normalize::{NormalizeGraphError, normalize_graph},
-        program::{ProgramCompileError, compile_program_from_graph},
+        program::{
+            ProgramCompileError, ProgramCompileOptions, compile_program_from_graph,
+            compile_program_from_graph_with_options,
+        },
         proof::{ProofCertificateError, ProofCertificates},
         structured::{StructuredCompileError, compile_structured_program},
     },
@@ -50,6 +55,7 @@ use crate::{
 pub enum Emit {
     Cuda,
     CompileGraph,
+    Cfg,
     Elaborated,
     Checked,
     StructuredIr,
@@ -70,6 +76,7 @@ pub struct CompileRequest {
     pub entry: Option<String>,
     pub format: Option<OutputFormat>,
     pub cuda_options: CudaOptions,
+    pub cfg_options: CfgOptions,
     pub proof_check: bool,
     pub proof_paths: Vec<PathBuf>,
 }
@@ -149,7 +156,7 @@ impl CompilePipeline {
                 let graph = normalize_graph(&compile_graph)?;
                 Ok(analysis::render_analysis(&graph)?)
             }
-            Emit::Cuda | Emit::StructuredIr => {
+            Emit::Cfg | Emit::Cuda | Emit::StructuredIr => {
                 self.require_format(OutputFormat::Text)?;
                 let proof_certificates = self.proof_certificates()?;
                 let emit = self.request.emit;
@@ -163,6 +170,15 @@ impl CompilePipeline {
                     .as_ref()
                     .map(|certificates| certificates.verify_graph_properties(&graph))
                     .transpose()?;
+                if emit == Emit::Cfg {
+                    let program = compile_program_from_graph_with_options(
+                        &graph,
+                        ProgramCompileOptions {
+                            cfg: self.request.cfg_options,
+                        },
+                    )?;
+                    return Ok(render_program_cfg(&program).into_bytes());
+                }
                 let program = compile_program_from_graph(&graph)?;
                 let structured = compile_structured_program(&program)?;
                 Ok(match emit {

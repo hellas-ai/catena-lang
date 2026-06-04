@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use open_hypergraphs::lax::NodeId;
 
@@ -8,13 +8,13 @@ use super::{
     control::{ControlExpander, ExpandedControlItem},
     data::{block_instructions, data_cfg_node_draft, partition_data_operations_by_internal_wires},
     model::{
-        BoundaryKind, Cfg, CfgEdge, CfgError, CfgNode, CfgNodeDraft, CfgNodeId, CfgWiring,
+        Cfg, CfgEdge, CfgError, CfgNode, CfgNodeDraft, CfgNodeId, CfgOptions, CfgWiring,
         OperationId, VariableId,
     },
     monoidal::{MonoidalStructureResolver, MonoidalStructureSubgraph},
     operation::{
-        OperationInstance, effective_operation_instance, is_branch_operation, is_control_operation,
-        local_operation_name, operation_names,
+        CfgOperationRole, OperationInstance, cfg_operation_role, effective_operation_instance,
+        is_branch_operation, is_control_operation, local_operation_name, operation_names,
     },
     wiring::{
         BoundaryWires, cfg_node_from_control_draft, data_transfer, nodes_with_boundary,
@@ -33,6 +33,7 @@ pub(super) struct CfgBuilder<'a> {
     operation_instances: Vec<OperationInstance>,
     control_operation_ids: Vec<OperationId>,
     data_operation_ids: Vec<OperationId>,
+    options: CfgOptions,
 }
 
 impl<'a> CfgBuilder<'a> {
@@ -65,7 +66,13 @@ impl<'a> CfgBuilder<'a> {
             operation_instances: Vec::new(),
             control_operation_ids: Vec::new(),
             data_operation_ids: Vec::new(),
+            options: CfgOptions::default(),
         }
+    }
+
+    pub(super) fn with_options(mut self, options: CfgOptions) -> Self {
+        self.options = options;
+        self
     }
 
     pub(super) fn build(mut self) -> Result<Cfg, CfgError> {
@@ -89,6 +96,7 @@ impl<'a> CfgBuilder<'a> {
                     operation_id,
                     &self.wire_map,
                     &self.monoidal_structure_resolver,
+                    self.options,
                 )
             })
             .collect::<Result<Vec<_>, CfgError>>()?;
@@ -130,6 +138,7 @@ impl<'a> CfgBuilder<'a> {
             self.compile_graph,
             &self.operation_instances,
             self.monoidal_structure_resolver.subgraph().clone(),
+            self.options,
         )
         .expand(&self.control_operation_ids)?;
 
@@ -154,7 +163,7 @@ impl<'a> CfgBuilder<'a> {
                     nodes.push(CfgNodeDraft {
                         id,
                         params: operation.inputs.clone(),
-                        block: block_instructions(operation)?,
+                        block: block_instructions(operation, self.options)?,
                     });
                     current_branch = control_operation_by_node
                         .get(&id)
@@ -237,7 +246,7 @@ impl<'a> CfgBuilder<'a> {
         for operations in operations_by_cfg_node {
             let id = self.node_ids.allocate();
             let (node, boundaries) =
-                data_cfg_node_draft(self.compile_graph, id, operations, boundary)?;
+                data_cfg_node_draft(self.compile_graph, id, operations, boundary, self.options)?;
             if node.block.is_empty() && boundaries.exits.is_empty() {
                 continue;
             }
@@ -278,6 +287,7 @@ impl<'a> CfgBuilder<'a> {
         } = control_fragment;
         let mut data_node_by_entry_wire = data_node_by_entry_wire;
         data_node_by_entry_wire.extend(nested_data_node_by_entry_wire);
+        let erased_monoidal_wires = self.erased_monoidal_wires(control_operation_by_node.values());
 
         let boundaries_by_node = wiring
             .node_boundaries
@@ -317,9 +327,17 @@ impl<'a> CfgBuilder<'a> {
             }
         }));
         for node in &mut nodes {
+            if !self.options.keep_monoidal_operations {
+                erase_monoidal_structure_params_and_args(
+                    node,
+                    &self.monoidal_structure_resolver,
+                    &erased_monoidal_wires,
+                );
+            }
             prune_unused_params(node);
         }
-        let entry = nodes_with_boundary(&wiring, BoundaryKind::RegionEntry)
+        truncate_edge_args_to_target_params(&mut nodes);
+        let entry = nodes_with_boundary(&wiring, super::model::BoundaryKind::RegionEntry)
             .into_iter()
             .next()
             .or_else(|| nodes.first().map(|node| node.id))
@@ -332,6 +350,28 @@ impl<'a> CfgBuilder<'a> {
             nodes,
             predecessors,
         }
+    }
+
+    fn erased_monoidal_wires<'b>(
+        &self,
+        control_operations: impl Iterator<Item = &'b OperationInstance>,
+    ) -> HashSet<VariableId> {
+        let mut wires = self
+            .operation_instances
+            .iter()
+            .filter(|operation| {
+                cfg_operation_role(&operation.name) == CfgOperationRole::MonoidalStructure
+            })
+            .flat_map(|operation| operation.outputs.iter().copied())
+            .collect::<HashSet<_>>();
+        wires.extend(
+            control_operations
+                .filter(|operation| {
+                    cfg_operation_role(&operation.name) == CfgOperationRole::MonoidalStructure
+                })
+                .flat_map(|operation| operation.outputs.iter().copied()),
+        );
+        wires
     }
 }
 
@@ -359,6 +399,72 @@ fn prune_unused_params(node: &mut CfgNode) {
         }
     }
     node.params.retain(|param| used.contains(param));
+}
+
+fn erase_monoidal_structure_params_and_args(
+    node: &mut CfgNode,
+    monoidal_structure_resolver: &MonoidalStructureResolver<'_>,
+    erased_monoidal_wires: &HashSet<VariableId>,
+) {
+    node.params.retain(|param| {
+        !is_erased_monoidal_wire(*param, monoidal_structure_resolver, erased_monoidal_wires)
+    });
+    match &mut node.transfer {
+        super::model::Transfer::Goto(edge) => {
+            edge.args.retain(|arg| {
+                !is_erased_monoidal_wire(*arg, monoidal_structure_resolver, erased_monoidal_wires)
+            });
+        }
+        super::model::Transfer::If {
+            then_edge,
+            else_edge,
+            ..
+        } => {
+            then_edge.args.retain(|arg| {
+                !is_erased_monoidal_wire(*arg, monoidal_structure_resolver, erased_monoidal_wires)
+            });
+            else_edge.args.retain(|arg| {
+                !is_erased_monoidal_wire(*arg, monoidal_structure_resolver, erased_monoidal_wires)
+            });
+        }
+        super::model::Transfer::Return(_) => {}
+    }
+}
+
+fn is_erased_monoidal_wire(
+    variable: VariableId,
+    monoidal_structure_resolver: &MonoidalStructureResolver<'_>,
+    erased_monoidal_wires: &HashSet<VariableId>,
+) -> bool {
+    erased_monoidal_wires.contains(&variable)
+        || monoidal_structure_resolver.is_structure_wire(variable)
+}
+
+fn truncate_edge_args_to_target_params(nodes: &mut [CfgNode]) {
+    let param_counts = nodes
+        .iter()
+        .map(|node| (node.id, node.params.len()))
+        .collect::<HashMap<_, _>>();
+    for node in nodes {
+        match &mut node.transfer {
+            super::model::Transfer::Goto(edge) => truncate_edge_args(edge, &param_counts),
+            super::model::Transfer::If {
+                then_edge,
+                else_edge,
+                ..
+            } => {
+                truncate_edge_args(then_edge, &param_counts);
+                truncate_edge_args(else_edge, &param_counts);
+            }
+            super::model::Transfer::Return(_) => {}
+        }
+    }
+}
+
+fn truncate_edge_args(edge: &mut CfgEdge, param_counts: &HashMap<CfgNodeId, usize>) {
+    if let Some(param_count) = param_counts.get(&edge.target) {
+        edge.args.truncate(*param_count);
+    }
 }
 
 // CFG construction state

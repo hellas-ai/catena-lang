@@ -19,81 +19,94 @@ use crate::{
 // index is the apex element; `child_wires` and `parent_wires` are the two legs.
 #[derive(Debug, Clone)]
 pub(super) struct BoundaryRelation {
+    apexes: Vec<BoundaryApex>,
     pub(super) child_wires: Vec<NodeId>,
     pub(super) parent_wires: Vec<NodeId>,
 }
 
 impl BoundaryRelation {
     pub(super) fn from_boundaries(
+        parent_operation: OperationId,
         source: (&[NodeId], &[NodeId]),
         target: (&[NodeId], &[NodeId]),
     ) -> Self {
-        let links = boundary_links(source.0, source.1)
-            .chain(boundary_links(target.0, target.1))
-            .fold(Vec::<(NodeId, NodeId)>::new(), |mut links, link| {
-                if !links.iter().any(|(child_wire, _)| *child_wire == link.0) {
-                    links.push(link);
-                }
-                links
-            });
+        let links = boundary_links(parent_operation, BoundarySide::Source, source.0, source.1)
+            .chain(boundary_links(
+                parent_operation,
+                BoundarySide::Target,
+                target.0,
+                target.1,
+            ))
+            .fold(
+                Vec::<(BoundaryApex, NodeId, NodeId)>::new(),
+                |mut links, link| {
+                    if !links.iter().any(|(_, child_wire, _)| *child_wire == link.1) {
+                        links.push(link);
+                    }
+                    links
+                },
+            );
         Self::from_links(links)
     }
 
     fn empty() -> Self {
         Self {
+            apexes: Vec::new(),
             child_wires: Vec::new(),
             parent_wires: Vec::new(),
         }
     }
 
-    fn from_links(links: Vec<(NodeId, NodeId)>) -> Self {
-        let (child_wires, parent_wires) = links.into_iter().unzip();
+    fn from_links(links: Vec<(BoundaryApex, NodeId, NodeId)>) -> Self {
+        let mut apexes = Vec::new();
+        let mut child_wires = Vec::new();
+        let mut parent_wires = Vec::new();
+        for (apex, child_wire, parent_wire) in links {
+            apexes.push(apex);
+            child_wires.push(child_wire);
+            parent_wires.push(parent_wire);
+        }
         Self {
+            apexes,
             child_wires,
             parent_wires,
         }
     }
 
-    fn shifted_child_wires(&self, offset: usize) -> impl Iterator<Item = (NodeId, NodeId)> + '_ {
-        self.child_wires
+    fn shifted_child_wires(
+        &self,
+        offset: usize,
+    ) -> impl Iterator<Item = (BoundaryApex, NodeId, NodeId)> + '_ {
+        self.apexes
             .iter()
             .copied()
+            .zip(self.child_wires.iter().copied())
             .zip(self.parent_wires.iter().copied())
-            .map(move |(child_wire, parent_wire)| (NodeId(child_wire.0 + offset), parent_wire))
+            .map(move |((apex, child_wire), parent_wire)| {
+                (apex, NodeId(child_wire.0 + offset), parent_wire)
+            })
     }
 
     pub(super) fn fiber_points_by_wire(
         &self,
-        graph: &Graph,
-        parent_operations: &[OperationId],
-        parent: &Graph,
         wire_count: usize,
     ) -> Vec<Option<BoundaryFiberPoint>> {
+        debug_assert_eq!(self.apexes.len(), self.child_wires.len());
         debug_assert_eq!(self.child_wires.len(), self.parent_wires.len());
         let mut fiber_positions = HashMap::<BoundaryFiber, usize>::new();
         let mut fiber_points = vec![None; wire_count];
-        for (child_wire, parent_wire) in self
-            .child_wires
+        for ((apex, child_wire), parent_wire) in self
+            .apexes
             .iter()
             .copied()
+            .zip(self.child_wires.iter().copied())
             .zip(self.parent_wires.iter().copied())
         {
-            let side = boundary_side(graph, child_wire)
-                .expect("boundary relation child wire must be on the child graph boundary");
-            let parent_operation = parent_operation_for_boundary_link(
-                graph,
-                parent_operations,
-                parent,
-                child_wire,
-                parent_wire,
-                side,
-            )
-            .expect("boundary relation must land on the mapped parent operation boundary");
             let position = fiber_positions
                 .entry(BoundaryFiber {
-                    parent_operation,
+                    parent_operation: apex.parent_operation,
                     parent_wire,
-                    side,
+                    side: apex.side,
                 })
                 .or_default();
             fiber_points[child_wire.0] = Some(BoundaryFiberPoint {
@@ -107,7 +120,13 @@ impl BoundaryRelation {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-enum BoundarySide {
+struct BoundaryApex {
+    parent_operation: OperationId,
+    side: BoundarySide,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(super) enum BoundarySide {
     Source,
     Target,
 }
@@ -151,6 +170,11 @@ impl NestedGraph {
             self.boundary_relation.parent_wires.len(),
             "boundary relation legs must have the same apex size"
         );
+        assert_eq!(
+            self.boundary_relation.apexes.len(),
+            self.boundary_relation.child_wires.len(),
+            "boundary relation apexes and legs must have the same size"
+        );
         for parent_operation in &self.parent_operations {
             assert!(
                 *parent_operation < parent.h.x.0.len(),
@@ -172,25 +196,37 @@ impl NestedGraph {
             );
         }
 
-        for child_operation in 0..self.graph.h.x.0.len() {
-            let parent_operation = self.parent_operations[child_operation];
-            let parent_boundary = operation_boundary(parent, parent_operation);
-            let child_boundary = operation_boundary(&self.graph, child_operation);
-            for (child_wire, parent_wire) in self
-                .boundary_relation
-                .child_wires
-                .iter()
-                .zip(&self.boundary_relation.parent_wires)
-            {
-                if child_boundary.contains(child_wire) {
-                    assert!(
-                        parent_boundary.contains(parent_wire),
-                        "child operation {child_operation} maps to parent operation {parent_operation}, but boundary relation maps child wire {:?} to unrelated parent wire {:?}",
-                        child_wire,
-                        parent_wire
-                    );
+        for ((apex, child_wire), parent_wire) in self
+            .boundary_relation
+            .apexes
+            .iter()
+            .zip(&self.boundary_relation.child_wires)
+            .zip(&self.boundary_relation.parent_wires)
+        {
+            let parent_boundary = operation_side_boundary(parent, apex.parent_operation, apex.side);
+            assert!(
+                parent_boundary.contains(parent_wire),
+                "boundary relation maps to parent wire {:?}, which is not on {:?} boundary of parent operation {}",
+                parent_wire,
+                apex.side,
+                apex.parent_operation
+            );
+            let compatible_child_operation = (0..self.graph.h.x.0.len()).any(|child_operation| {
+                if self.parent_operations[child_operation] != apex.parent_operation {
+                    return false;
                 }
-            }
+                let child_boundary =
+                    operation_side_boundary(&self.graph, child_operation, apex.side);
+                if child_boundary.contains(child_wire) {
+                    return true;
+                }
+                false
+            });
+            assert!(
+                compatible_child_operation,
+                "boundary relation child wire {:?} has no child operation on {:?} boundary mapped to parent operation {}",
+                child_wire, apex.side, apex.parent_operation
+            );
         }
     }
 }
@@ -211,7 +247,7 @@ pub(super) fn tensor_nested_graphs(nested_graphs: Vec<NestedGraph>) -> NestedGra
     let mut source_boundary = Vec::new();
     let mut target_boundary = Vec::new();
     let mut parent_operations = Vec::new();
-    let mut boundary_links = Vec::<(NodeId, NodeId)>::new();
+    let mut boundary_links = Vec::<(BoundaryApex, NodeId, NodeId)>::new();
 
     for nested_graph in nested_graphs {
         let wire_base = wires.len();
@@ -276,15 +312,26 @@ pub(super) fn tensor_nested_graphs(nested_graphs: Vec<NestedGraph>) -> NestedGra
 }
 
 fn boundary_links<'a>(
+    parent_operation: OperationId,
+    side: BoundarySide,
     child_boundary: &'a [NodeId],
     parent_boundary: &'a [NodeId],
-) -> impl Iterator<Item = (NodeId, NodeId)> + 'a {
+) -> impl Iterator<Item = (BoundaryApex, NodeId, NodeId)> + 'a {
     child_boundary
         .iter()
         .copied()
         .enumerate()
-        .filter_map(|(index, child_wire)| {
-            related_parent_wire(index, parent_boundary).map(|parent_wire| (child_wire, parent_wire))
+        .filter_map(move |(index, child_wire)| {
+            related_parent_wire(index, parent_boundary).map(|parent_wire| {
+                (
+                    BoundaryApex {
+                        parent_operation,
+                        side,
+                    },
+                    child_wire,
+                    parent_wire,
+                )
+            })
         })
 }
 
@@ -306,43 +353,6 @@ fn operation_sources(graph: &Graph, operation_id: OperationId) -> Vec<NodeId> {
 
 fn operation_targets(graph: &Graph, operation_id: OperationId) -> Vec<NodeId> {
     operation_outputs(graph, operation_id).collect()
-}
-
-fn operation_boundary(graph: &Graph, operation_id: OperationId) -> Vec<NodeId> {
-    operation_inputs(graph, operation_id)
-        .chain(operation_outputs(graph, operation_id))
-        .collect()
-}
-
-fn boundary_side(graph: &Graph, wire: NodeId) -> Option<BoundarySide> {
-    if boundary_table(&graph.s).contains(&wire) {
-        Some(BoundarySide::Source)
-    } else if boundary_table(&graph.t).contains(&wire) {
-        Some(BoundarySide::Target)
-    } else {
-        None
-    }
-}
-
-fn parent_operation_for_boundary_link(
-    graph: &Graph,
-    parent_operations: &[OperationId],
-    parent: &Graph,
-    child_wire: NodeId,
-    parent_wire: NodeId,
-    side: BoundarySide,
-) -> Option<OperationId> {
-    (0..graph.h.x.0.len()).find_map(|child_operation| {
-        let child_boundary = operation_side_boundary(graph, child_operation, side);
-        if !child_boundary.contains(&child_wire) {
-            return None;
-        }
-        let parent_operation = parent_operations[child_operation];
-        let parent_boundary = operation_side_boundary(parent, parent_operation, side);
-        parent_boundary
-            .contains(&parent_wire)
-            .then_some(parent_operation)
-    })
 }
 
 fn operation_side_boundary(

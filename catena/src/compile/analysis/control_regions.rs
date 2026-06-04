@@ -113,6 +113,7 @@ fn expand_interleaved_control_call(
     let call_inputs = operation_inputs(&parent.graph, operation_id).collect::<Vec<_>>();
     let call_outputs = operation_outputs(&parent.graph, operation_id).collect::<Vec<_>>();
     let boundary_relation = BoundaryRelation::from_boundaries(
+        operation_id,
         (&expanded_source_wires, &call_inputs),
         (&expanded_target_wires, &call_outputs),
     );
@@ -189,7 +190,16 @@ fn quotient_nested_graph(
     let mut duplicate_fiber_point_pairs = Vec::<(usize, usize)>::new();
     let mut operation_projection = Vec::new();
 
-    for boundary_wire in source_boundary.iter().chain(&target_boundary).copied() {
+    for boundary_wire in source_boundary.iter().copied() {
+        ensure_parent_boundary_wire(
+            target,
+            boundary_wire,
+            &mut wires,
+            &mut global_fiber_points,
+            &mut fiber_point_to_global_wire,
+        );
+    }
+    for boundary_wire in target_boundary.iter().copied() {
         ensure_parent_boundary_wire(
             target,
             boundary_wire,
@@ -200,12 +210,9 @@ fn quotient_nested_graph(
     }
 
     let base = wires.len();
-    let nested_fiber_points = nested_graph.boundary_relation.fiber_points_by_wire(
-        &nested_graph.graph,
-        &nested_graph.parent_operations,
-        target,
-        nested_graph.graph.h.w.0.len(),
-    );
+    let nested_fiber_points = nested_graph
+        .boundary_relation
+        .fiber_points_by_wire(nested_graph.graph.h.w.0.len());
     for (wire, fiber_point) in nested_graph
         .graph
         .h

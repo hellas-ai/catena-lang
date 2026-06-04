@@ -125,32 +125,41 @@ fn expand_interleaved_control_call(
         operation_id
     ));
     let operation = operation_name(&parent.graph, operation_id);
-    let child = control_definition_for_operation(parent, operation).unwrap_or_else(|| {
-        panic!("interleaved control operation `{operation}` must resolve to a native control graph")
-    });
+    let native_control_child =
+        control_definition_for_operation(parent, operation).unwrap_or_else(|| {
+            panic!(
+                "interleaved control operation `{operation}` must resolve to a native control graph"
+            )
+        });
 
-    let graph = inline_control_definitions(child);
-    let source_wires = boundary_table(&child.graph.s);
-    let target_wires = boundary_table(&child.graph.t);
-    let expanded_source_wires = boundary_table(&graph.s);
-    let expanded_target_wires = boundary_table(&graph.t);
+    let expanded_control_graph = inline_control_definitions(native_control_child);
+    let native_source_wires = boundary_table(&native_control_child.graph.s);
+    let native_target_wires = boundary_table(&native_control_child.graph.t);
+    let expanded_source_wires = boundary_table(&expanded_control_graph.s);
+    let expanded_target_wires = boundary_table(&expanded_control_graph.t);
     let call_inputs = operation_inputs(&parent.graph, operation_id).collect::<Vec<_>>();
     let call_outputs = operation_outputs(&parent.graph, operation_id).collect::<Vec<_>>();
-    let mut wire_projection = vec![None; graph.h.w.0.len()];
-    for (expanded_wire, source_wire) in expanded_source_wires.into_iter().zip(source_wires.iter()) {
+    let mut wire_projection = vec![None; expanded_control_graph.h.w.0.len()];
+    for (expanded_wire, source_wire) in expanded_source_wires
+        .into_iter()
+        .zip(native_source_wires.iter())
+    {
         wire_projection[expanded_wire.0] =
-            boundary_projection(*source_wire, &source_wires, &call_inputs);
+            boundary_projection(*source_wire, &native_source_wires, &call_inputs);
     }
-    for (expanded_wire, target_wire) in expanded_target_wires.into_iter().zip(target_wires.iter()) {
+    for (expanded_wire, target_wire) in expanded_target_wires
+        .into_iter()
+        .zip(native_target_wires.iter())
+    {
         if wire_projection[expanded_wire.0].is_none() {
             wire_projection[expanded_wire.0] =
-                boundary_projection(*target_wire, &target_wires, &call_outputs);
+                boundary_projection(*target_wire, &native_target_wires, &call_outputs);
         }
     }
-    let operation_count = graph.h.x.0.len();
+    let operation_count = expanded_control_graph.h.x.0.len();
 
     TensorPiece {
-        graph,
+        graph: expanded_control_graph,
         wire_projection,
         operation_projection: vec![operation_id; operation_count],
     }

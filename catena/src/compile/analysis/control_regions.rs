@@ -172,20 +172,6 @@ fn primitive_operation_piece(
     operation_id: OperationId,
     projected_operation_id: OperationId,
 ) -> TensorPiece {
-    primitive_operation_piece_with_name(
-        graph,
-        operation_id,
-        projected_operation_id,
-        operation_name(graph, operation_id),
-    )
-}
-
-fn primitive_operation_piece_with_name(
-    graph: &Graph,
-    operation_id: OperationId,
-    projected_operation_id: OperationId,
-    operation: &str,
-) -> TensorPiece {
     let inputs = operation_inputs(graph, operation_id).collect::<Vec<_>>();
     let outputs = operation_outputs(graph, operation_id).collect::<Vec<_>>();
     let mut local_wire_by_host_wire = HashMap::<NodeId, usize>::new();
@@ -217,7 +203,7 @@ fn primitive_operation_piece_with_name(
             t: indexed_coproduct(vec![target_values.len()], target_values, wire_count),
             w: SemifiniteFunction::new(VecArray(wires)),
             x: SemifiniteFunction::new(VecArray(vec![
-                operation
+                operation_name(graph, operation_id)
                     .parse()
                     .expect("resolved control operation name must be valid"),
             ])),

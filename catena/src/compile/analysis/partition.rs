@@ -30,7 +30,29 @@ pub enum RegionKind {
 }
 
 pub(super) fn partition_data_regions(graph: &Graph) -> Vec<OperationRegion> {
-    partition_by_policy(graph, data_region_kind, data_operations_should_join)
+    let mut uf = UnionFind::new(operation_count(graph));
+    let mut operations_by_wire = HashMap::<NodeId, Vec<OperationId>>::new();
+
+    for operation_id in operation_ids(graph) {
+        for wire in operation_wires(graph, operation_id) {
+            operations_by_wire
+                .entry(wire)
+                .or_default()
+                .push(operation_id);
+        }
+    }
+
+    for operations in operations_by_wire.values() {
+        if let Some((first, rest)) = operations.split_first() {
+            for operation in rest {
+                if data_operations_should_union(graph, *first, *operation) {
+                    uf.union(*first, *operation);
+                }
+            }
+        }
+    }
+
+    collect_regions(graph, uf, data_region_kind)
 }
 
 pub(super) fn partition_control_regions(graph: &Graph) -> Vec<OperationRegion> {
@@ -62,7 +84,7 @@ pub(super) fn partition_control_regions(graph: &Graph) -> Vec<OperationRegion> {
 
         for producer in producers {
             for consumer in consumers {
-                if control_operations_should_join(
+                if control_operations_should_union(
                     graph,
                     *wire,
                     *producer,
@@ -76,36 +98,6 @@ pub(super) fn partition_control_regions(graph: &Graph) -> Vec<OperationRegion> {
     }
 
     collect_regions(graph, uf, control_region_kind)
-}
-
-fn partition_by_policy(
-    graph: &Graph,
-    region_kind: impl Fn(&Graph, OperationId) -> RegionKind,
-    should_join: impl Fn(&Graph, NodeId, OperationId, OperationId) -> bool,
-) -> Vec<OperationRegion> {
-    let mut uf = UnionFind::new(operation_count(graph));
-    let mut operations_by_wire = HashMap::<NodeId, Vec<OperationId>>::new();
-
-    for operation_id in operation_ids(graph) {
-        for wire in operation_wires(graph, operation_id) {
-            operations_by_wire
-                .entry(wire)
-                .or_default()
-                .push(operation_id);
-        }
-    }
-
-    for (wire, operations) in &operations_by_wire {
-        if let Some((first, rest)) = operations.split_first() {
-            for operation in rest {
-                if should_join(graph, *wire, *first, *operation) {
-                    uf.union(*first, *operation);
-                }
-            }
-        }
-    }
-
-    collect_regions(graph, uf, region_kind)
 }
 
 fn collect_regions(
@@ -132,12 +124,7 @@ fn collect_regions(
     regions
 }
 
-fn data_operations_should_join(
-    graph: &Graph,
-    _wire: NodeId,
-    left: OperationId,
-    right: OperationId,
-) -> bool {
+fn data_operations_should_union(graph: &Graph, left: OperationId, right: OperationId) -> bool {
     data_region_kind(graph, left) == data_region_kind(graph, right)
 }
 
@@ -149,7 +136,7 @@ fn data_region_kind(graph: &Graph, operation_id: OperationId) -> RegionKind {
     }
 }
 
-fn control_operations_should_join(
+fn control_operations_should_union(
     graph: &Graph,
     wire: NodeId,
     producer: OperationId,

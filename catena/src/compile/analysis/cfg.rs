@@ -17,7 +17,7 @@ use crate::compile::{
 
 use super::ControlRegionGraph;
 
-pub(super) fn render_flattened_cfg(
+pub(super) fn render_cfg(
     graph: &Graph,
     regions: &[OperationRegion],
     control_region_graphs: &[ControlRegionGraph],
@@ -47,13 +47,13 @@ pub(super) fn render_flattened_cfg(
         predecessors: vec![Vec::new(); nodes.len()],
         nodes,
     };
-    render_program_cfg_with_block_annotations(&flattened_program(graph, cfg), |node| {
+    render_program_cfg_with_block_annotations(&cfg_program(graph, cfg), |node| {
         node_svg_paths.get(&node).map(String::as_str)
     })
     .into_bytes()
 }
 
-fn flattened_program(graph: &Graph, body: Cfg) -> Program {
+fn cfg_program(graph: &Graph, body: Cfg) -> Program {
     let entry = DefinitionId(0);
     Program {
         entry,
@@ -61,7 +61,7 @@ fn flattened_program(graph: &Graph, body: Cfg) -> Program {
             entry,
             Definition {
                 id: entry,
-                name: "flattened-cfg".to_string(),
+                name: "cfg".to_string(),
                 params: graph
                     .s
                     .table

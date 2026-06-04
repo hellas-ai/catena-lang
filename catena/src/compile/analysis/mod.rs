@@ -1,6 +1,6 @@
+mod cfg;
 mod control_regions;
 mod data_regions;
-mod flattened_cfg;
 mod layering;
 mod nested_regions;
 mod partition;
@@ -12,7 +12,7 @@ use std::{fmt::Write, path::PathBuf};
 use crate::compile::{CompileGraph, CompileTheory};
 
 use self::{
-    flattened_cfg::render_flattened_cfg,
+    cfg::render_cfg,
     nested_regions::build_control_region_graphs,
     partition::{
         OperationId, OperationRegion, RegionKind, SourceOperation, partition_data_regions,
@@ -62,7 +62,7 @@ pub fn render_analysis_artifacts(graph: &CompileGraph) -> std::io::Result<Vec<An
     let region_svgs = render_region_svgs(graph, &regions)?;
     let control_region_graphs = build_control_region_graphs(graph, &graph.graph, &regions);
     let source = graph_svg(&graph.graph)?;
-    let flattened_cfg = render_flattened_cfg(&graph.graph, &regions, &control_region_graphs);
+    let cfg = render_cfg(&graph.graph, &regions, &control_region_graphs);
     let mut artifacts = vec![
         analysis_index_artifact(graph, &regions, &control_region_graphs),
         AnalysisArtifact {
@@ -71,7 +71,7 @@ pub fn render_analysis_artifacts(graph: &CompileGraph) -> std::io::Result<Vec<An
         },
         AnalysisArtifact {
             path: PathBuf::from("flattened-cfg.txt"),
-            contents: flattened_cfg,
+            contents: cfg,
         },
     ];
     artifacts.extend(region_svgs.into_iter().map(|region| AnalysisArtifact {

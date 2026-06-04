@@ -13,10 +13,8 @@ use super::{
     },
     monoidal::{MonoidalStructureResolver, MonoidalStructureSubgraph},
     operation::{
-        CfgOperationRole, OperationInstance, OperationInstance, cfg_operation_role,
-        effective_operation_instance, effective_operation_instance, is_branch_operation,
-        is_branch_operation, is_control_operation, is_control_operation, local_operation_name,
-        operation_names, operation_names,
+        CfgOperationRole, OperationInstance, cfg_operation_role, effective_operation_instance,
+        is_branch_operation, is_control_operation, local_operation_name, operation_names,
     },
     wiring::{
         BoundaryWires, cfg_node_from_control_draft, data_transfer, nodes_with_boundary,

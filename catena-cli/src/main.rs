@@ -1,9 +1,8 @@
 use std::path::PathBuf;
 
 use catena::compile::{
-    CompilePipeline, CompilePipeline, CompileRequest, CompileRequest, CudaOptions, CudaOptions,
-    Emit, Emit, OutputFormat, OutputFormat, analysis, cfg::CfgOptions, compile, compile,
-    normalize_graph,
+    CompilePipeline, CompileRequest, CudaOptions, Emit, OutputFormat, analysis, cfg::CfgOptions,
+    compile, normalize_graph,
 };
 use clap::{Parser, Subcommand, ValueEnum};
 

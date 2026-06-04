@@ -122,9 +122,9 @@ fn expand_interleaved_control_call(
         operation_id
     ));
     let operation = operation_name(&parent.graph, operation_id);
-    let Some(child) = control_definition_for_operation(parent, operation) else {
-        return primitive_operation_piece(&parent.graph, operation_id);
-    };
+    let child = control_definition_for_operation(parent, operation).unwrap_or_else(|| {
+        panic!("interleaved control operation `{operation}` must resolve to a native control graph")
+    });
 
     let resolved = expand_control_definition(child);
     let wire_projection = remap_child_projection(&parent.graph, operation_id, child, &resolved);
@@ -164,10 +164,7 @@ fn expand_control_operation(graph: &CompileGraph, operation_id: OperationId) -> 
         };
     }
 
-    primitive_operation_piece(&graph.graph, operation_id)
-}
-
-fn primitive_operation_piece(graph: &Graph, operation_id: OperationId) -> TensorPiece {
+    let graph = &graph.graph;
     let inputs = operation_inputs(graph, operation_id).collect::<Vec<_>>();
     let outputs = operation_outputs(graph, operation_id).collect::<Vec<_>>();
     let mut local_wire_by_host_wire = HashMap::<NodeId, usize>::new();

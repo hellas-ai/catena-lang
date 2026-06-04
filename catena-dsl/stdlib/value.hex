@@ -17,6 +17,9 @@
 
   # Equality
   (arr = : 2 -> 1)
+
+  # negation
+  (arr not : 1 -> 1)
 })
 
 (theory program type {

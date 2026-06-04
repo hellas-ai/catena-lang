@@ -70,12 +70,9 @@
   # Indices & dependent types
   # assert-nz : (n : u64) -> |- (n > 0)
   # (PARTIAL)
-  (def u64.assert-nz : ({[n] u64} :) -> ({[n] 0} > |-) = {[n.]
-    ({[.n] u64.zero} u64.gt [b h_t h_f.])
-    # TODO: need an explicit discard of h_f?
-    ([.b] assert [p_b.])
-    ([.p_b h_t] ax-mp)
-  })
+  (def u64.assert-nz : ({[n] u64} :) -> ({[n] 0} > |-) =
+    ({[x] u64.zero} u64.gt [b ht hf. b ht] assert-then)
+  )
 
   # u64.gt with predicate results
   # u64.gt : (x : u64) ● (y : u64) -> (b : bool) ● (|- b = true => x > y) ● (|- b = false => ¬ (x > y))

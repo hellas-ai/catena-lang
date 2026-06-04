@@ -44,32 +44,66 @@ struct ResolvedGraph {
 }
 
 #[derive(Debug, Clone)]
-struct TensorPiece {
+struct NestedControlGraph {
+    parent_operation: OperationId,
     graph: Graph,
-    wire_projection: Vec<Option<ProjectionKey>>,
-    operation_projection: Vec<OperationId>,
+    boundary_relation: BoundaryRelation,
 }
 
-// Internal quotient key. The public morphism only remembers the original
-// region wire, but quotienting also needs branch position so packed branch
-// alternatives are not identified too early.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-struct ProjectionKey {
-    wire: NodeId,
-    branch: Option<usize>,
+// A span from expanded control boundary wires to the data-theory call boundary.
+// The vector index is the apex element; `child_wires` and `parent_wires` are
+// the two legs of the span.
+#[derive(Debug, Clone)]
+struct BoundaryRelation {
+    child_wires: Vec<NodeId>,
+    parent_wires: Vec<NodeId>,
 }
 
-impl ProjectionKey {
-    fn plain(wire: NodeId) -> Self {
-        Self { wire, branch: None }
-    }
-
-    fn branch(wire: NodeId, branch: usize) -> Self {
+impl BoundaryRelation {
+    fn from_boundaries(source: (&[NodeId], &[NodeId]), target: (&[NodeId], &[NodeId])) -> Self {
+        let links = boundary_links(source.0, source.1)
+            .chain(boundary_links(target.0, target.1))
+            .fold(Vec::<(NodeId, NodeId)>::new(), |mut links, link| {
+                if !links
+                    .iter()
+                    .any(|(expanded_wire, _)| *expanded_wire == link.0)
+                {
+                    links.push(link);
+                }
+                links
+            });
+        let (child_wires, parent_wires) = links.into_iter().unzip();
         Self {
-            wire,
-            branch: Some(branch),
+            child_wires,
+            parent_wires,
         }
     }
+
+    fn fiber_points_by_wire(&self, wire_count: usize) -> Vec<Option<BoundaryFiberPoint>> {
+        debug_assert_eq!(self.child_wires.len(), self.parent_wires.len());
+        let mut fiber_positions = HashMap::<NodeId, usize>::new();
+        let mut fiber_points = vec![None; wire_count];
+        for (child_wire, parent_wire) in self
+            .child_wires
+            .iter()
+            .copied()
+            .zip(self.parent_wires.iter().copied())
+        {
+            let position = fiber_positions.entry(parent_wire).or_default();
+            fiber_points[child_wire.0] = Some(BoundaryFiberPoint {
+                parent_wire,
+                fiber_position: *position,
+            });
+            *position += 1;
+        }
+        fiber_points
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct BoundaryFiberPoint {
+    parent_wire: NodeId,
+    fiber_position: usize,
 }
 
 pub(super) fn process_control_regions(
@@ -90,7 +124,7 @@ fn expand_control_region(
     region_index: usize,
     region: &OperationRegion,
 ) -> ControlRegionGraph {
-    let pieces = region
+    let nested_graphs = region
         .operations
         .iter()
         .copied()
@@ -98,7 +132,7 @@ fn expand_control_region(
         .collect::<Vec<_>>();
     let resolved = quotient_resolved_pieces(
         &parent.graph,
-        pieces,
+        nested_graphs,
         Vec::new(),
         Vec::new(),
         "control region quotient",
@@ -119,7 +153,7 @@ fn expand_control_region(
 fn expand_interleaved_control_call(
     parent: &CompileGraph,
     operation_id: OperationId,
-) -> TensorPiece {
+) -> NestedControlGraph {
     debug_assert!(is_interleaved_control_operation(
         &parent.graph,
         operation_id
@@ -138,23 +172,15 @@ fn expand_interleaved_control_call(
     let expanded_target_wires = boundary_table(&expanded_control_graph.t);
     let call_inputs = operation_inputs(&parent.graph, operation_id).collect::<Vec<_>>();
     let call_outputs = operation_outputs(&parent.graph, operation_id).collect::<Vec<_>>();
-    let mut wire_projection = vec![None; expanded_control_graph.h.w.0.len()];
-    for expanded_wire in &expanded_source_wires {
-        wire_projection[expanded_wire.0] =
-            boundary_projection(*expanded_wire, &expanded_source_wires, &call_inputs);
-    }
-    for expanded_wire in &expanded_target_wires {
-        if wire_projection[expanded_wire.0].is_none() {
-            wire_projection[expanded_wire.0] =
-                boundary_projection(*expanded_wire, &expanded_target_wires, &call_outputs);
-        }
-    }
-    let operation_count = expanded_control_graph.h.x.0.len();
+    let boundary_relation = BoundaryRelation::from_boundaries(
+        (&expanded_source_wires, &call_inputs),
+        (&expanded_target_wires, &call_outputs),
+    );
 
-    TensorPiece {
+    NestedControlGraph {
+        parent_operation: operation_id,
         graph: expanded_control_graph,
-        wire_projection,
-        operation_projection: vec![operation_id; operation_count],
+        boundary_relation,
     }
 }
 
@@ -203,10 +229,13 @@ fn inline_control_definitions(graph: &CompileGraph) -> Graph {
     )
 }
 
-// Tensor expanded pieces and quotient wires whose projection keys agree. The resulting graph keeps a public morphism to target wires, while branch-sensitive projection keys control which packed branch alternatives are identified.
+// Flatten nested control graphs and quotient wires whose boundary-relation
+// fiber points agree. The resulting graph keeps a public morphism to target
+// wires by forgetting the fiber position and remembering only the data-theory
+// wire.
 fn quotient_resolved_pieces(
     target: &Graph,
-    pieces: Vec<TensorPiece>,
+    nested_graphs: Vec<NestedControlGraph>,
     source_boundary: Vec<NodeId>,
     target_boundary: Vec<NodeId>,
     context: &str,
@@ -217,24 +246,27 @@ fn quotient_resolved_pieces(
     let mut target_lengths = Vec::new();
     let mut source_values = Vec::new();
     let mut target_values = Vec::new();
-    let mut projected_wire_to_global = HashMap::<ProjectionKey, usize>::new();
-    let mut global_projection = Vec::<Option<ProjectionKey>>::new();
-    let mut duplicate_projection_pairs = Vec::<(usize, usize)>::new();
+    let mut fiber_point_to_global_wire = HashMap::<BoundaryFiberPoint, usize>::new();
+    let mut global_fiber_points = Vec::<Option<BoundaryFiberPoint>>::new();
+    let mut duplicate_fiber_point_pairs = Vec::<(usize, usize)>::new();
     let mut operation_projection = Vec::new();
 
     for boundary_wire in source_boundary.iter().chain(&target_boundary).copied() {
-        ensure_projected_wire(
+        ensure_parent_boundary_wire(
             target,
             boundary_wire,
             &mut wires,
-            &mut global_projection,
-            &mut projected_wire_to_global,
+            &mut global_fiber_points,
+            &mut fiber_point_to_global_wire,
         );
     }
 
-    for piece in pieces {
+    for nested_graph in nested_graphs {
         let base = wires.len();
-        for (wire, projection) in piece
+        let nested_fiber_points = nested_graph
+            .boundary_relation
+            .fiber_points_by_wire(nested_graph.graph.h.w.0.len());
+        for (wire, fiber_point) in nested_graph
             .graph
             .h
             .w
@@ -242,30 +274,31 @@ fn quotient_resolved_pieces(
             .0
             .iter()
             .cloned()
-            .zip(piece.wire_projection.iter().copied())
+            .zip(nested_fiber_points.iter().copied())
         {
             let global = wires.len();
-            wires.push(match projection {
-                Some(projected) => target.h.w.0.0[projected.wire.0].clone(),
+            wires.push(match fiber_point {
+                Some(fiber_point) => target.h.w.0.0[fiber_point.parent_wire.0].clone(),
                 None => wire,
             });
-            global_projection.push(projection);
-            if let Some(projected) = projection {
-                if let Some(previous) = projected_wire_to_global.get(&projected).copied() {
-                    duplicate_projection_pairs.push((previous, global));
+            global_fiber_points.push(fiber_point);
+            if let Some(fiber_point) = fiber_point {
+                if let Some(previous) = fiber_point_to_global_wire.get(&fiber_point).copied() {
+                    duplicate_fiber_point_pairs.push((previous, global));
                 } else {
-                    projected_wire_to_global.insert(projected, global);
+                    fiber_point_to_global_wire.insert(fiber_point, global);
                 }
             }
         }
 
-        for operation_id in 0..piece.graph.h.x.0.len() {
-            operations.push(piece.graph.h.x.0.0[operation_id].clone());
-            let sources = operation_sources(&piece.graph, operation_id)
+        for operation_id in 0..nested_graph.graph.h.x.0.len() {
+            operations.push(nested_graph.graph.h.x.0.0[operation_id].clone());
+            operation_projection.push(nested_graph.parent_operation);
+            let sources = operation_sources(&nested_graph.graph, operation_id)
                 .into_iter()
                 .map(|wire| base + wire.0)
                 .collect::<Vec<_>>();
-            let targets = operation_targets(&piece.graph, operation_id)
+            let targets = operation_targets(&nested_graph.graph, operation_id)
                 .into_iter()
                 .map(|wire| base + wire.0)
                 .collect::<Vec<_>>();
@@ -274,16 +307,15 @@ fn quotient_resolved_pieces(
             source_values.extend(sources);
             target_values.extend(targets);
         }
-        operation_projection.extend(piece.operation_projection);
     }
 
     let mut uf = UnionFind::new(wires.len());
-    for (left, right) in duplicate_projection_pairs {
+    for (left, right) in duplicate_fiber_point_pairs {
         uf.union(left, right);
     }
 
-    let (class_by_wire, class_projection, class_labels) =
-        quotient_classes(&mut uf, &wires, &global_projection, target);
+    let (class_by_wire, class_fiber_points, class_labels) =
+        quotient_classes(&mut uf, &wires, &global_fiber_points, target);
     let source_values = source_values
         .into_iter()
         .map(|wire| class_by_wire[wire])
@@ -294,11 +326,23 @@ fn quotient_resolved_pieces(
         .collect::<Vec<_>>();
     let source_boundary = source_boundary
         .into_iter()
-        .map(|wire| class_by_wire[projected_wire_to_global[&ProjectionKey::plain(wire)]])
+        .map(|wire| {
+            let fiber_point = BoundaryFiberPoint {
+                parent_wire: wire,
+                fiber_position: 0,
+            };
+            class_by_wire[fiber_point_to_global_wire[&fiber_point]]
+        })
         .collect::<Vec<_>>();
     let target_boundary = target_boundary
         .into_iter()
-        .map(|wire| class_by_wire[projected_wire_to_global[&ProjectionKey::plain(wire)]])
+        .map(|wire| {
+            let fiber_point = BoundaryFiberPoint {
+                parent_wire: wire,
+                fiber_position: 0,
+            };
+            class_by_wire[fiber_point_to_global_wire[&fiber_point]]
+        })
         .collect::<Vec<_>>();
     let wire_count = class_labels.len();
 
@@ -318,84 +362,88 @@ fn quotient_resolved_pieces(
     ResolvedGraph {
         graph,
         morphism: ControlRegionMorphism {
-            wires: class_projection
+            wires: class_fiber_points
                 .iter()
-                .map(|projection| projection.map(|projection| projection.wire))
+                .map(|fiber_point| fiber_point.map(|fiber_point| fiber_point.parent_wire))
                 .collect(),
             operations: operation_projection,
         },
     }
 }
 
-fn ensure_projected_wire(
+fn ensure_parent_boundary_wire(
     target: &Graph,
     wire: NodeId,
     wires: &mut Vec<Obj>,
-    global_projection: &mut Vec<Option<ProjectionKey>>,
-    projected_wire_to_global: &mut HashMap<ProjectionKey, usize>,
+    global_fiber_points: &mut Vec<Option<BoundaryFiberPoint>>,
+    fiber_point_to_global_wire: &mut HashMap<BoundaryFiberPoint, usize>,
 ) {
-    let projection = ProjectionKey::plain(wire);
-    if projected_wire_to_global.contains_key(&projection) {
+    let fiber_point = BoundaryFiberPoint {
+        parent_wire: wire,
+        fiber_position: 0,
+    };
+    if fiber_point_to_global_wire.contains_key(&fiber_point) {
         return;
     }
     let global = wires.len();
     wires.push(target.h.w.0.0[wire.0].clone());
-    global_projection.push(Some(projection));
-    projected_wire_to_global.insert(projection, global);
+    global_fiber_points.push(Some(fiber_point));
+    fiber_point_to_global_wire.insert(fiber_point, global);
 }
 
 fn quotient_classes(
     uf: &mut UnionFind,
     wires: &[Obj],
-    projections: &[Option<ProjectionKey>],
+    fiber_points: &[Option<BoundaryFiberPoint>],
     target: &Graph,
-) -> (Vec<usize>, Vec<Option<ProjectionKey>>, Vec<Obj>) {
+) -> (Vec<usize>, Vec<Option<BoundaryFiberPoint>>, Vec<Obj>) {
     let mut class_by_root = HashMap::<usize, usize>::new();
     let mut class_by_wire = vec![0; wires.len()];
-    let mut class_projection = Vec::<Option<ProjectionKey>>::new();
+    let mut class_fiber_points = Vec::<Option<BoundaryFiberPoint>>::new();
     let mut class_labels = Vec::<Obj>::new();
 
     for wire in 0..wires.len() {
         let root = uf.find(wire);
         let class = *class_by_root.entry(root).or_insert_with(|| {
-            let projection = projections[wire];
-            class_projection.push(projection);
-            class_labels.push(match projection {
-                Some(projected) => target.h.w.0.0[projected.wire.0].clone(),
+            let fiber_point = fiber_points[wire];
+            class_fiber_points.push(fiber_point);
+            class_labels.push(match fiber_point {
+                Some(fiber_point) => target.h.w.0.0[fiber_point.parent_wire.0].clone(),
                 None => wires[wire].clone(),
             });
-            class_projection.len() - 1
+            class_fiber_points.len() - 1
         });
-        if class_projection[class].is_none()
-            && let Some(projected) = projections[wire]
+        if class_fiber_points[class].is_none()
+            && let Some(fiber_point) = fiber_points[wire]
         {
-            class_projection[class] = Some(projected);
-            class_labels[class] = target.h.w.0.0[projected.wire.0].clone();
+            class_fiber_points[class] = Some(fiber_point);
+            class_labels[class] = target.h.w.0.0[fiber_point.parent_wire.0].clone();
         }
         class_by_wire[wire] = class;
     }
 
-    (class_by_wire, class_projection, class_labels)
+    (class_by_wire, class_fiber_points, class_labels)
 }
 
-fn boundary_projection(
-    child_wire: NodeId,
-    child_boundary: &[NodeId],
-    call_boundary: &[NodeId],
-) -> Option<ProjectionKey> {
-    // A unary call boundary is a packed handle for all native child boundary alternatives. Keep the original call wire for the public morphism, but include the child boundary index in the quotient key.
-    if call_boundary.len() == 1 && child_boundary.len() > 1 {
-        return child_boundary
-            .iter()
-            .position(|wire| *wire == child_wire)
-            .map(|branch| ProjectionKey::branch(call_boundary[0], branch));
+fn related_parent_wire(boundary_index: usize, parent_boundary: &[NodeId]) -> Option<NodeId> {
+    if parent_boundary.len() == 1 {
+        parent_boundary.first().copied()
+    } else {
+        parent_boundary.get(boundary_index).copied()
     }
+}
 
+fn boundary_links<'a>(
+    child_boundary: &'a [NodeId],
+    parent_boundary: &'a [NodeId],
+) -> impl Iterator<Item = (NodeId, NodeId)> + 'a {
     child_boundary
         .iter()
-        .position(|wire| *wire == child_wire)
-        .and_then(|index| call_boundary.get(index).copied())
-        .map(ProjectionKey::plain)
+        .copied()
+        .enumerate()
+        .filter_map(|(index, child_wire)| {
+            related_parent_wire(index, parent_boundary).map(|parent_wire| (child_wire, parent_wire))
+        })
 }
 
 // Look up the child graph that gives the native control definition for an operation. Operations without such a child are treated as primitives.

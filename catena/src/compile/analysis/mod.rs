@@ -1,4 +1,5 @@
 mod cfg;
+mod cfg_render;
 mod control_regions;
 mod data_regions;
 mod layering;

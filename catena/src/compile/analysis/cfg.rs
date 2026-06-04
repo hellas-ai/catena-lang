@@ -5,25 +5,47 @@ use crate::compile::{
         DataRegionGraph,
         partition::{OperationRegion, RegionKind},
     },
-    cfg::{
-        BlockInstruction, Cfg, CfgEdge, CfgNode, Transfer,
-        render_program_cfg_with_block_annotations,
-    },
+    cfg::{BlockInstruction, Cfg, CfgEdge, CfgNode, Transfer},
     graph_ops::{Graph, operation_inputs, operation_name, operation_outputs},
-    program::{
-        Context, Definition, DefinitionId, Program, Variable, VariableId as ProgramVariableId,
-    },
 };
 
-use super::ControlRegionGraph;
+use super::{ControlRegionGraph, cfg_render::render_analysis_cfg};
+
+pub(super) struct AnalysisCfg {
+    pub(super) cfg: Cfg,
+    pub(super) block_svg_paths: HashMap<usize, String>,
+}
 
 pub(super) fn render_cfg(
     graph: &Graph,
     regions: &[OperationRegion],
     control_region_graphs: &[ControlRegionGraph],
 ) -> Vec<u8> {
+    let analysis_cfg = build_cfg(graph, regions, control_region_graphs);
+    render_analysis_cfg(graph, analysis_cfg)
+}
+
+fn build_cfg(
+    graph: &Graph,
+    regions: &[OperationRegion],
+    control_region_graphs: &[ControlRegionGraph],
+) -> AnalysisCfg {
+    let mut draft = collect_region_blocks(graph, regions, control_region_graphs);
+    apply_transfer_shapes(&mut draft);
+    let cfg = finalize_cfg(draft.nodes);
+    AnalysisCfg {
+        cfg,
+        block_svg_paths: draft.block_svg_paths,
+    }
+}
+
+fn collect_region_blocks(
+    graph: &Graph,
+    regions: &[OperationRegion],
+    control_region_graphs: &[ControlRegionGraph],
+) -> CfgDraft {
     let mut nodes = Vec::new();
-    let mut node_svg_paths = HashMap::new();
+    let mut block_svg_paths = HashMap::new();
     let mut pending_transfers = Vec::new();
     collect_data_graph_nodes(
         graph,
@@ -37,71 +59,36 @@ pub(super) fn render_cfg(
         },
         false,
         &mut nodes,
-        &mut node_svg_paths,
+        &mut block_svg_paths,
         &mut pending_transfers,
     );
-    apply_pending_transfers(&mut nodes, pending_transfers);
-    assert_dense_unique_block_ids(&nodes);
-    let cfg = Cfg {
-        entry: nodes.first().map(|node| node.id).unwrap_or(0),
-        predecessors: vec![Vec::new(); nodes.len()],
+    CfgDraft {
         nodes,
-    };
-    render_program_cfg_with_block_annotations(&cfg_program(graph, cfg), |node| {
-        node_svg_paths.get(&node).map(String::as_str)
-    })
-    .into_bytes()
-}
-
-fn cfg_program(graph: &Graph, body: Cfg) -> Program {
-    let entry = DefinitionId(0);
-    Program {
-        entry,
-        definitions: HashMap::from([(
-            entry,
-            Definition {
-                id: entry,
-                name: "cfg".to_string(),
-                params: graph
-                    .s
-                    .table
-                    .iter()
-                    .map(|wire| ProgramVariableId(*wire))
-                    .collect(),
-                returns: graph
-                    .t
-                    .table
-                    .iter()
-                    .map(|wire| ProgramVariableId(*wire))
-                    .collect(),
-                context: context_for_graph(graph),
-                body,
-            },
-        )]),
+        block_svg_paths,
+        pending_transfers,
     }
 }
 
-fn context_for_graph(graph: &Graph) -> Context {
-    Context::new(
-        graph
-            .h
-            .w
-            .0
-            .iter()
-            .cloned()
-            .enumerate()
-            .map(|(index, ty)| {
-                (
-                    ProgramVariableId(index),
-                    Variable {
-                        id: ProgramVariableId(index),
-                        name: crate::compile::cfg::variable_name(index),
-                        ty,
-                    },
-                )
-            })
-            .collect(),
-    )
+fn apply_transfer_shapes(draft: &mut CfgDraft) {
+    apply_pending_transfers(
+        &mut draft.nodes,
+        std::mem::take(&mut draft.pending_transfers),
+    );
+}
+
+fn finalize_cfg(nodes: Vec<CfgNode>) -> Cfg {
+    assert_dense_unique_block_ids(&nodes);
+    Cfg {
+        entry: nodes.first().map(|node| node.id).unwrap_or(0),
+        predecessors: vec![Vec::new(); nodes.len()],
+        nodes,
+    }
+}
+
+struct CfgDraft {
+    nodes: Vec<CfgNode>,
+    block_svg_paths: HashMap<usize, String>,
+    pending_transfers: Vec<(usize, PendingTransfer)>,
 }
 
 fn collect_data_graph_nodes(

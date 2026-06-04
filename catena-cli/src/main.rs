@@ -244,6 +244,7 @@ fn analysis_command(
         entry,
         format: format.map(Into::into),
         cuda_options,
+        cfg_options: CfgOptions::default(),
         proof_check,
         proof_paths,
     };

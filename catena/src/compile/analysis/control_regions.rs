@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use open_hypergraphs::{
-    lax::NodeId,
+    lax::{NodeId, OpenHypergraph as LaxOpenHypergraph, functor::Functor},
     strict::vec::{
         FiniteFunction, Hypergraph, IndexedCoproduct, OpenHypergraph, SemifiniteFunction, VecArray,
     },
@@ -17,6 +17,7 @@ use crate::{
         graph_ops::{Graph, operation_inputs, operation_name, operation_outputs},
     },
     lang::Obj,
+    pass::inline::Inline,
     union_find::UnionFind,
 };
 
@@ -136,78 +137,87 @@ fn expand_interleaved_control_call(
     }
 }
 
-// Recursively expand a native control definition by expanding each operation independently, tensoring those pieces, then quotienting according to the original control graph's wiring and open boundary.
+// Expand a native control graph by inlining non-primitive control operations
+// inside it. The returned projection marks only boundary wires; internal wires
+// intentionally stay unmapped so the parent quotient cannot identify them.
 fn expand_control_definition(graph: &CompileGraph) -> ResolvedGraph {
     debug_assert!(matches!(graph.theory, CompileTheory::Control));
-    let pieces = (0..graph.graph.h.x.0.len())
-        .map(|operation_id| expand_control_operation(graph, operation_id))
-        .collect::<Vec<_>>();
-    quotient_resolved_pieces(
-        &graph.graph,
-        pieces,
-        boundary_table(&graph.graph.s),
-        boundary_table(&graph.graph.t),
-        "control graph quotient",
+    let original = graph.graph.clone();
+    let graph = inline_control_definitions(graph);
+    let projection = boundary_projection_for_expanded_control_graph(&graph, &original);
+    let operation_count = graph.h.x.0.len();
+    ResolvedGraph {
+        graph,
+        projection: projection.clone(),
+        morphism: ControlRegionMorphism {
+            wires: projection
+                .iter()
+                .map(|projection| projection.map(|projection| projection.wire))
+                .collect(),
+            operations: (0..operation_count).collect(),
+        },
+    }
+}
+
+fn inline_control_definitions(graph: &CompileGraph) -> Graph {
+    let definitions = graph
+        .children
+        .iter()
+        .filter(|child| matches!(child.graph.theory, CompileTheory::Control))
+        .map(|child| {
+            (
+                child
+                    .operation
+                    .parse()
+                    .expect("control child operation name must be valid"),
+                LaxOpenHypergraph::from_strict(inline_control_definitions(&child.graph)),
+            )
+        })
+        .collect::<HashMap<_, _>>();
+    if definitions.is_empty() {
+        return graph.graph.clone();
+    }
+
+    let mut expanded = LaxOpenHypergraph::from_strict(graph.graph.clone());
+    for _ in 0..64 {
+        let inlinable = expanded
+            .hypergraph
+            .edges
+            .iter()
+            .any(|operation| definitions.contains_key(operation));
+        if !inlinable {
+            return expanded.to_strict();
+        }
+        expanded = Inline {
+            definitions: definitions.clone(),
+        }
+        .map_arrow(&expanded);
+    }
+
+    panic!(
+        "too many control-definition inline iterations while expanding `{}`",
+        graph.definition_name
     )
 }
 
-// Expand one operation inside a native control definition. Child control definitions are inlined recursively; primitives remain as single-edge pieces.
-fn expand_control_operation(graph: &CompileGraph, operation_id: OperationId) -> TensorPiece {
-    let operation = operation_name(&graph.graph, operation_id);
-    if let Some(child) = control_definition_for_operation(graph, operation) {
-        let resolved = expand_control_definition(child);
-        let wire_projection = remap_child_projection(&graph.graph, operation_id, child, &resolved);
-        return TensorPiece {
-            graph: resolved.graph,
-            wire_projection,
-            operation_projection: vec![operation_id; resolved.morphism.operations.len()],
-        };
+fn boundary_projection_for_expanded_control_graph(
+    graph: &Graph,
+    original: &Graph,
+) -> Vec<Option<ProjectionKey>> {
+    let mut projection = vec![None; graph.h.w.0.len()];
+    for (expanded, original) in boundary_table(&graph.s)
+        .into_iter()
+        .zip(boundary_table(&original.s))
+    {
+        projection[expanded.0] = Some(ProjectionKey::plain(original));
     }
-
-    let graph = &graph.graph;
-    let inputs = operation_inputs(graph, operation_id).collect::<Vec<_>>();
-    let outputs = operation_outputs(graph, operation_id).collect::<Vec<_>>();
-    let mut local_wire_by_host_wire = HashMap::<NodeId, usize>::new();
-    let mut wires = Vec::<Obj>::new();
-    let mut wire_projection = Vec::<Option<ProjectionKey>>::new();
-    for wire in inputs.iter().chain(&outputs).copied() {
-        local_wire_by_host_wire.entry(wire).or_insert_with(|| {
-            let local = wires.len();
-            wires.push(graph.h.w.0.0[wire.0].clone());
-            wire_projection.push(Some(ProjectionKey::plain(wire)));
-            local
-        });
+    for (expanded, original) in boundary_table(&graph.t)
+        .into_iter()
+        .zip(boundary_table(&original.t))
+    {
+        projection[expanded.0] = Some(ProjectionKey::plain(original));
     }
-
-    let source_values = inputs
-        .iter()
-        .map(|wire| local_wire_by_host_wire[wire])
-        .collect::<Vec<_>>();
-    let target_values = outputs
-        .iter()
-        .map(|wire| local_wire_by_host_wire[wire])
-        .collect::<Vec<_>>();
-    let wire_count = wires.len();
-    let graph = OpenHypergraph {
-        s: finite_function(source_values.clone(), wire_count),
-        t: finite_function(target_values.clone(), wire_count),
-        h: Hypergraph {
-            s: indexed_coproduct(vec![source_values.len()], source_values, wire_count),
-            t: indexed_coproduct(vec![target_values.len()], target_values, wire_count),
-            w: SemifiniteFunction::new(VecArray(wires)),
-            x: SemifiniteFunction::new(VecArray(vec![
-                operation_name(graph, operation_id)
-                    .parse()
-                    .expect("resolved control operation name must be valid"),
-            ])),
-        },
-    };
-
-    TensorPiece {
-        graph,
-        wire_projection,
-        operation_projection: vec![operation_id],
-    }
+    projection
 }
 
 // Tensor expanded pieces and quotient wires whose projection keys agree. The resulting graph keeps a public morphism to target wires, while branch-sensitive projection keys control which packed branch alternatives are identified.
@@ -405,7 +415,6 @@ fn remap_child_projection(
             let projection = (*projection)?;
             boundary_projection(projection.wire, &source_wires, &call_inputs)
                 .or_else(|| boundary_projection(projection.wire, &target_wires, &call_outputs))
-                .or(Some(projection))
         })
         .collect()
 }

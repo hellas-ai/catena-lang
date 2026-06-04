@@ -123,7 +123,7 @@ fn expand_interleaved_control_call(
     ));
     let operation = operation_name(&parent.graph, operation_id);
     let Some(child) = control_definition_for_operation(parent, operation) else {
-        return primitive_operation_piece(&parent.graph, operation_id, operation_id);
+        return primitive_operation_piece(&parent.graph, operation_id);
     };
 
     let resolved = expand_control_definition(child);
@@ -164,14 +164,10 @@ fn expand_control_operation(graph: &CompileGraph, operation_id: OperationId) -> 
         };
     }
 
-    primitive_operation_piece(&graph.graph, operation_id, operation_id)
+    primitive_operation_piece(&graph.graph, operation_id)
 }
 
-fn primitive_operation_piece(
-    graph: &Graph,
-    operation_id: OperationId,
-    projected_operation_id: OperationId,
-) -> TensorPiece {
+fn primitive_operation_piece(graph: &Graph, operation_id: OperationId) -> TensorPiece {
     let inputs = operation_inputs(graph, operation_id).collect::<Vec<_>>();
     let outputs = operation_outputs(graph, operation_id).collect::<Vec<_>>();
     let mut local_wire_by_host_wire = HashMap::<NodeId, usize>::new();
@@ -213,7 +209,7 @@ fn primitive_operation_piece(
     TensorPiece {
         graph,
         wire_projection,
-        operation_projection: vec![projected_operation_id],
+        operation_projection: vec![operation_id],
     }
 }
 

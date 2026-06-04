@@ -40,6 +40,17 @@ __host__ __device__ static inline void catena_assert(uint8_t condition) {
     }
 }
 
+#ifndef __HIP_DEVICE_COMPILE__
+static inline void catena_hip_check(hipError_t err) {
+    if (err != hipSuccess) {
+        fprintf(stderr, "catena HIP error: %s\n", hipGetErrorString(err));
+        fflush(stderr);
+        __builtin_trap();
+    }
+}
+
+#endif
+
 __host__ __device__ static inline uint64_t catena_launch_len(catena_launch_params_t params) {
     return (uint64_t)params.grid_dim.x * params.grid_dim.y * params.grid_dim.z
         * params.block_dim.x * params.block_dim.y * params.block_dim.z;

@@ -5,6 +5,14 @@
 
 #include "../../report/gpu/program.cpp"
 
+#ifndef __HIP_DEVICE_COMPILE__
+static inline void array_head_hip_check(hipError_t err) {
+  if (err != hipSuccess) {
+    std::cerr << "HIP error: " << hipGetErrorString(err) << std::endl;
+    std::abort();
+  }
+}
+
 int main() {
   std::vector<uint64_t> values = {
       0x123456789abcdef0ULL,
@@ -18,8 +26,16 @@ int main() {
   }
   std::cout << std::dec << std::endl;
 
+  uint64_t *device_values = nullptr;
+  array_head_hip_check(hipMallocManaged(
+      reinterpret_cast<void **>(&device_values),
+      values.size() * sizeof(uint64_t)));
+  for (size_t i = 0; i < values.size(); ++i) {
+    device_values[i] = values[i];
+  }
+
   catena_mem_t mem = {
-      values.data(),
+      device_values,
       values.size() * sizeof(uint64_t),
   };
 
@@ -30,9 +46,12 @@ int main() {
 
   if (out != values.front()) {
     std::cerr << "verification: FAILED" << std::endl;
+    array_head_hip_check(hipFree(device_values));
     return 1;
   }
 
+  array_head_hip_check(hipFree(device_values));
   std::cout << "verification: PASSED" << std::endl;
   return 0;
 }
+#endif

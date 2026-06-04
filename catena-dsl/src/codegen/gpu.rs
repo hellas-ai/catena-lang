@@ -451,7 +451,7 @@ fn render_materialize_call(
         name = output.name
     ));
     out.push_str(&format!(
-        "    hipMalloc((void **)&{name}_data, {name}_len * sizeof({element}));\n",
+        "    catena_hip_check(hipMallocManaged((void **)&{name}_data, {name}_len * sizeof({element})));\n",
         name = output.name,
         element = c_type(element)
     ));

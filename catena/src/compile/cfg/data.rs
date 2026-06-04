@@ -5,7 +5,10 @@ use open_hypergraphs::lax::NodeId;
 use crate::compile::CompileGraph;
 
 use super::{
-    model::{BlockInstruction, CfgError, CfgNodeBoundaries, CfgNodeDraft, CfgNodeId, OperationId},
+    model::{
+        BlockInstruction, CfgError, CfgNodeBoundaries, CfgNodeDraft, CfgNodeId, CfgOptions,
+        OperationId,
+    },
     operation::{CfgOperationRole, OperationInstance, cfg_operation_role, operation_names},
     wiring::{BoundaryWires, entries_for_node, exits_for_node},
 };
@@ -15,12 +18,13 @@ pub(super) fn data_cfg_node_draft(
     id: CfgNodeId,
     operations: Vec<OperationInstance>,
     boundary: &BoundaryWires,
+    options: CfgOptions,
 ) -> Result<(CfgNodeDraft, CfgNodeBoundaries), CfgError> {
     let entries = entries_for_node(compile_graph, &operations, boundary);
     let exits = exits_for_node(compile_graph, &operations, boundary);
     let block = operations
         .into_iter()
-        .map(block_instruction)
+        .map(|operation| block_instruction(operation, options))
         .filter_map(Result::transpose)
         .collect::<Result<Vec<_>, CfgError>>()?;
     let used_inputs = block
@@ -44,21 +48,33 @@ pub(super) fn data_cfg_node_draft(
 
 pub(super) fn block_instructions(
     operation: OperationInstance,
+    options: CfgOptions,
 ) -> Result<Vec<BlockInstruction>, CfgError> {
-    Ok(block_instruction(operation)?.into_iter().collect())
+    Ok(block_instruction(operation, options)?.into_iter().collect())
 }
 
 pub(super) fn block_instruction(
     operation: OperationInstance,
+    options: CfgOptions,
 ) -> Result<Option<BlockInstruction>, CfgError> {
     match cfg_operation_role(&operation.name) {
-        CfgOperationRole::Instruction => Ok(Some(BlockInstruction {
-            operation_id: operation.id,
-            operation: operation.name,
-            args: operation.inputs,
-            results: operation.outputs,
-        })),
+        CfgOperationRole::Instruction => Ok(Some(block_instruction_from_operation(operation))),
+        CfgOperationRole::MonoidalStructure if options.keep_monoidal_operations => {
+            Ok(Some(block_instruction_from_operation(operation)))
+        }
+        CfgOperationRole::ControlFlow if options.keep_control_flow_operations => {
+            Ok(Some(block_instruction_from_operation(operation)))
+        }
         CfgOperationRole::MonoidalStructure | CfgOperationRole::ControlFlow => Ok(None),
+    }
+}
+
+fn block_instruction_from_operation(operation: OperationInstance) -> BlockInstruction {
+    BlockInstruction {
+        operation_id: operation.id,
+        operation: operation.name,
+        args: operation.inputs,
+        results: operation.outputs,
     }
 }
 // Data operation partitioning

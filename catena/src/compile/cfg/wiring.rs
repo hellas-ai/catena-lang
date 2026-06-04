@@ -386,6 +386,7 @@ pub(super) fn nodes_with_boundary(wiring: &CfgWiring, kind: BoundaryKind) -> Vec
         .map(|boundaries| boundaries.node)
         .collect()
 }
+
 pub(super) fn predecessors(nodes: &[CfgNode]) -> Vec<Vec<CfgNodeId>> {
     let mut predecessors = vec![Vec::new(); nodes.len()];
     for node in nodes {

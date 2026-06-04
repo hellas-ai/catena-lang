@@ -1,68 +1,160 @@
-use std::fmt::Write;
+use metacat::tree::Tree;
 
-use super::{Cfg, CfgEdge, CfgNode, Transfer, VariableId, variable_name};
+use crate::{
+    compile::{
+        cfg::{BlockInstruction, CfgEdge, Transfer},
+        program::{Definition, Program, VariableId},
+    },
+    lang::Obj,
+};
 
-pub fn render_cfg(cfg: &Cfg) -> String {
-    let mut output = String::new();
-    writeln!(output, "cfg entry n{}", cfg.entry).expect("write to string cannot fail");
-    output.push('\n');
-    for node in &cfg.nodes {
-        render_node(&mut output, node);
-    }
-    output
-}
-
-fn render_node(output: &mut String, node: &CfgNode) {
-    writeln!(output, "node n{}:", node.id).expect("write to string cannot fail");
-    writeln!(output, "  params: {}", render_variables(&node.params))
-        .expect("write to string cannot fail");
-    output.push_str("  block:\n");
-    if node.block.is_empty() {
-        output.push_str("    <empty>\n");
-    } else {
-        for instruction in &node.block {
-            writeln!(
-                output,
-                "    #{} {}({}) -> {}",
-                instruction.operation_id,
-                instruction.operation,
-                render_variables(&instruction.args),
-                render_variables(&instruction.results),
-            )
-            .expect("write to string cannot fail");
+pub fn render_program_cfg(program: &Program) -> String {
+    let mut out = String::new();
+    let mut definitions = program.definitions.values().collect::<Vec<_>>();
+    definitions.sort_by_key(|definition| definition.id.0);
+    for (index, definition) in definitions.iter().enumerate() {
+        if index > 0 {
+            out.push('\n');
         }
+        render_definition_cfg(&mut out, definition);
     }
-    writeln!(output, "  transfer: {}", render_transfer(&node.transfer))
-        .expect("write to string cannot fail");
-    output.push('\n');
+    out
 }
 
-fn render_transfer(transfer: &Transfer) -> String {
+fn render_definition_cfg(out: &mut String, definition: &Definition) {
+    out.push_str(&format!("definition {}\n", definition.name));
+    out.push_str("  parameters\n");
+    for parameter in &definition.params {
+        out.push_str(&format!(
+            "    {}\n",
+            render_variable(definition, *parameter)
+        ));
+    }
+    out.push_str(&format!(
+        "  entry {}\n",
+        definition.body.label(definition.body.entry)
+    ));
+    out.push_str("  blocks\n");
+
+    for node in &definition.body.nodes {
+        out.push_str(&format!(
+            "    {}({})\n",
+            definition.body.label(node.id),
+            render_wire_ids(definition, &node.params).join(", ")
+        ));
+        for instruction in &node.block {
+            render_instruction(out, definition, instruction);
+        }
+        render_transfer(out, definition, &node.transfer);
+    }
+}
+
+fn render_instruction(out: &mut String, definition: &Definition, instruction: &BlockInstruction) {
+    let results = render_wire_ids(definition, &instruction.results);
+    let args = render_wire_ids(definition, &instruction.args);
+    if results.is_empty() {
+        out.push_str(&format!(
+            "      {}#{}({})\n",
+            instruction.operation,
+            instruction.operation_id,
+            args.join(", ")
+        ));
+    } else {
+        out.push_str(&format!(
+            "      {} = {}#{}({})\n",
+            results.join(", "),
+            instruction.operation,
+            instruction.operation_id,
+            args.join(", ")
+        ));
+    }
+}
+
+fn render_transfer(out: &mut String, definition: &Definition, transfer: &Transfer) {
     match transfer {
-        Transfer::Goto(edge) => format!("goto {}", render_edge(edge)),
+        Transfer::Goto(edge) => {
+            out.push_str(&format!("      goto {}\n", render_edge(definition, edge)));
+        }
         Transfer::If {
             condition,
             then_edge,
             else_edge,
-        } => format!(
-            "if {} then {} else {}",
-            variable_name(*condition),
-            render_edge(then_edge),
-            render_edge(else_edge)
-        ),
-        Transfer::Return(results) => format!("return {}", render_variables(results)),
+        } => {
+            out.push_str(&format!(
+                "      if {} then {} else {}\n",
+                render_wire_id(definition, *condition),
+                render_edge(definition, then_edge),
+                render_edge(definition, else_edge)
+            ));
+        }
+        Transfer::Return(values) => {
+            out.push_str(&format!(
+                "      return {}\n",
+                render_wire_ids(definition, values).join(", ")
+            ));
+        }
     }
 }
 
-fn render_edge(edge: &CfgEdge) -> String {
-    format!("n{}({})", edge.target, render_variables(&edge.args))
+fn render_edge(definition: &Definition, edge: &CfgEdge) -> String {
+    format!(
+        "{}({})",
+        definition.body.label(edge.target),
+        render_wire_ids(definition, &edge.args).join(", ")
+    )
 }
 
-fn render_variables(variables: &[VariableId]) -> String {
-    variables
-        .iter()
-        .copied()
-        .map(variable_name)
-        .collect::<Vec<_>>()
-        .join(", ")
+fn render_variable(definition: &Definition, id: VariableId) -> String {
+    definition
+        .context
+        .variable(id)
+        .map(|variable| format!("{}: {}", variable.name, render_object(&variable.ty)))
+        .unwrap_or_else(|| format!("w{}: <unknown>", id.0))
+}
+
+fn render_wire_ids(
+    definition: &Definition,
+    ids: &[crate::compile::cfg::VariableId],
+) -> Vec<String> {
+    ids.iter()
+        .map(|id| render_wire_id(definition, *id))
+        .collect()
+}
+
+fn render_wire_id(definition: &Definition, id: crate::compile::cfg::VariableId) -> String {
+    definition
+        .context
+        .variable(VariableId(id))
+        .map(|variable| variable.name.clone())
+        .unwrap_or_else(|| crate::compile::cfg::variable_name(id))
+}
+
+fn render_object(object: &Obj) -> String {
+    match object {
+        Tree::Empty => "empty".to_string(),
+        Tree::Leaf(index, _) => format!("x{index}"),
+        Tree::Node(op, target_index, children) => {
+            let inner = render_object_node(op, children);
+            if *target_index == 0 {
+                inner
+            } else {
+                format!("proj{target_index}({inner})")
+            }
+        }
+    }
+}
+
+fn render_object_node(op: &hexpr::Operation, children: &[Obj]) -> String {
+    match children {
+        [] => op.to_string(),
+        [child] => format!("{op}({})", render_object(child)),
+        _ => {
+            let args = children
+                .iter()
+                .map(render_object)
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("{op}({args})")
+        }
+    }
 }

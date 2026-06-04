@@ -5,7 +5,7 @@ use thiserror::Error;
 use crate::{
     compile::{
         CompileGraph, CompileTheory,
-        cfg::{Cfg, CfgError},
+        cfg::{Cfg, CfgError, CfgOptions},
     },
     lang::Obj,
 };
@@ -72,17 +72,30 @@ pub struct DefinitionId(pub usize);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct VariableId(pub usize);
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ProgramCompileOptions {
+    pub cfg: CfgOptions,
+}
+
 pub fn compile_program_from_graph(
     compile_graph: &CompileGraph,
 ) -> Result<Program, ProgramCompileError> {
+    compile_program_from_graph_with_options(compile_graph, ProgramCompileOptions::default())
+}
+
+pub fn compile_program_from_graph_with_options(
+    compile_graph: &CompileGraph,
+    options: ProgramCompileOptions,
+) -> Result<Program, ProgramCompileError> {
     let mut definitions = HashMap::new();
     let mut next_id = 0;
-    let entry = build_definition(compile_graph, &mut next_id, &mut definitions)?;
+    let entry = build_definition(compile_graph, options, &mut next_id, &mut definitions)?;
     Ok(Program { entry, definitions })
 }
 
 fn build_definition(
     compile_graph: &CompileGraph,
+    options: ProgramCompileOptions,
     next_id: &mut usize,
     definitions: &mut HashMap<DefinitionId, Definition>,
 ) -> Result<DefinitionId, ProgramCompileError> {
@@ -90,7 +103,7 @@ fn build_definition(
     *next_id += 1;
 
     let context = context_for_graph(compile_graph);
-    let body = Cfg::from_compile_graph(compile_graph)?;
+    let body = Cfg::from_compile_graph_with_options(compile_graph, options.cfg)?;
 
     definitions.insert(
         id,
@@ -118,7 +131,7 @@ fn build_definition(
 
     for child in &compile_graph.children {
         if matches!(child.graph.theory, CompileTheory::Data) {
-            build_definition(&child.graph, next_id, definitions)?;
+            build_definition(&child.graph, options, next_id, definitions)?;
         }
     }
 

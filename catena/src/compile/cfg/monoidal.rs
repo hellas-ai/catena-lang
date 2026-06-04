@@ -220,6 +220,10 @@ impl<'a> MonoidalStructureResolver<'a> {
             .collect()
     }
 
+    pub(super) fn is_structure_wire(&self, variable: VariableId) -> bool {
+        producer_of_monoidal_structure_wire(&self.subgraph.graph, variable).is_some()
+    }
+
     pub(super) fn resolve_discriminator(
         &self,
         variable: VariableId,

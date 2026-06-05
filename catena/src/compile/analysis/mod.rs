@@ -6,6 +6,7 @@ mod layering;
 mod layers;
 mod nested_regions;
 mod partition;
+mod region_graph;
 mod render;
 mod wires;
 

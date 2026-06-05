@@ -6,7 +6,7 @@ use crate::compile::{
     graph_ops::{Graph, operation_inputs, operation_name, operation_outputs},
 };
 
-use super::cfg_render::render_analysis_cfg;
+use super::{cfg_render::render_analysis_cfg, region_graph::region_graph};
 
 pub(super) struct AnalysisCfg {
     pub(super) cfg: Cfg,
@@ -19,6 +19,7 @@ pub(super) fn render_cfg(root_layer: &Layer) -> Vec<u8> {
 }
 
 fn build_cfg(root_layer: &Layer) -> AnalysisCfg {
+    let _region_graph = region_graph(root_layer);
     let mut draft = collect_region_blocks(root_layer);
     apply_transfer_shapes(&mut draft);
     let cfg = finalize_cfg(draft.nodes);

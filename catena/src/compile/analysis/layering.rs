@@ -139,6 +139,16 @@ impl BoundaryRelation {
         }
         fiber_points
     }
+
+    pub(super) fn child_wires_on_side(&self, side: BoundarySide) -> Vec<NodeId> {
+        let mut wires = Vec::new();
+        for (apex, child_wire) in self.apexes.iter().zip(&self.child_wires) {
+            if apex.side == side && !wires.contains(child_wire) {
+                wires.push(*child_wire);
+            }
+        }
+        wires
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

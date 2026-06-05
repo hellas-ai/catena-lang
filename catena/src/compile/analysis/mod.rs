@@ -19,6 +19,7 @@ use self::{
     layers::root_layer,
     nested_regions::build_control_region_graphs,
     partition::{OperationRegion, RegionKind, partition_data_regions},
+    region_graph::{region_graph, region_graph_trace},
     render::{graph_svg, render_graph_region_svgs, render_region_svgs},
     wires::assert_interleaved_control_operations_are_unary,
 };
@@ -64,6 +65,8 @@ pub fn render_analysis_artifacts(graph: &CompileGraph) -> std::io::Result<Vec<An
     let control_region_graphs = build_control_region_graphs(graph, &graph.graph, &regions);
     let layer = root_layer(graph.graph.clone(), &regions, &control_region_graphs);
     let source = graph_svg(&graph.graph)?;
+    let region_graph = graph_svg(&region_graph(&layer))?;
+    let region_graph_trace = region_graph_trace(&layer);
     let cfg = render_cfg(&layer);
     let mut artifacts = vec![
         analysis_index_artifact(graph, &layer),
@@ -74,6 +77,14 @@ pub fn render_analysis_artifacts(graph: &CompileGraph) -> std::io::Result<Vec<An
         AnalysisArtifact {
             path: PathBuf::from("cfg.txt"),
             contents: cfg,
+        },
+        AnalysisArtifact {
+            path: PathBuf::from("region-graph.svg"),
+            contents: region_graph,
+        },
+        AnalysisArtifact {
+            path: PathBuf::from("region-graph.txt"),
+            contents: region_graph_trace,
         },
     ];
     artifacts.extend(region_svgs.into_iter().map(|region| AnalysisArtifact {
@@ -98,6 +109,8 @@ fn analysis_index_artifact(graph: &CompileGraph, layer: &Layer) -> AnalysisArtif
     index.push_str("# Analysis\n\n");
     index.push_str("- [source graph](source.svg)\n");
     index.push_str("- [cfg](cfg.txt)\n");
+    index.push_str("- [region graph](region-graph.svg)\n");
+    index.push_str("- [region graph trace](region-graph.txt)\n");
     append_item(&mut index, 1, "partitions");
     append_source_regions_index(&mut index, graph, &layer.regions);
     append_item(&mut index, 1, "expansions");

@@ -23,19 +23,26 @@ pub(super) fn render_region_svgs(
     parent: &CompileGraph,
     regions: &[OperationRegion],
 ) -> io::Result<Vec<RegionSvg>> {
+    render_graph_region_svgs(&parent.graph, regions)
+}
+
+pub(super) fn render_graph_region_svgs(
+    graph: &Graph,
+    regions: &[OperationRegion],
+) -> io::Result<Vec<RegionSvg>> {
     regions
         .iter()
         .enumerate()
-        .map(|(region_index, region)| render_region_svg(parent, region_index, region))
+        .map(|(region_index, region)| render_region_svg(graph, region_index, region))
         .collect()
 }
 
 fn render_region_svg(
-    parent: &CompileGraph,
+    graph: &Graph,
     region_index: usize,
     region: &OperationRegion,
 ) -> io::Result<RegionSvg> {
-    let subgraph = subgraph_from_operations(&parent.graph.h, region.operations.iter().copied())
+    let subgraph = subgraph_from_operations(&graph.h, region.operations.iter().copied())
         .map_err(io::Error::other)?;
     Ok(RegionSvg {
         file_name: region_svg_file_name(region_index, region.kind),
@@ -67,5 +74,7 @@ fn region_kind_name(kind: RegionKind) -> &'static str {
     match kind {
         RegionKind::Data => "data",
         RegionKind::InterleavedControl => "control",
+        RegionKind::Control => "native-control",
+        RegionKind::InterleavedData => "interleaved-data",
     }
 }

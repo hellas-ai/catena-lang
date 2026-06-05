@@ -9,46 +9,6 @@ use crate::{
 
 use super::partition::OperationId;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct WireUses {
-    pub(super) data_inputs: Vec<NodeId>,
-    pub(super) data_outputs: Vec<NodeId>,
-    pub(super) control_inputs: Vec<NodeId>,
-    pub(super) control_outputs: Vec<NodeId>,
-}
-
-impl WireUses {
-    pub(super) fn from_graph(graph: &Graph) -> Self {
-        let mut uses = Self {
-            data_inputs: Vec::new(),
-            data_outputs: Vec::new(),
-            control_inputs: Vec::new(),
-            control_outputs: Vec::new(),
-        };
-
-        for operation_id in operation_ids(graph) {
-            if is_interleaved_control_operation(graph, operation_id) {
-                push_unique_all(
-                    &mut uses.control_inputs,
-                    operation_inputs(graph, operation_id),
-                );
-                push_unique_all(
-                    &mut uses.control_outputs,
-                    operation_outputs(graph, operation_id),
-                );
-            } else {
-                push_unique_all(&mut uses.data_inputs, operation_inputs(graph, operation_id));
-                push_unique_all(
-                    &mut uses.data_outputs,
-                    operation_outputs(graph, operation_id),
-                );
-            }
-        }
-
-        uses
-    }
-}
-
 pub(super) fn operation_ids(graph: &Graph) -> impl Iterator<Item = OperationId> {
     0..operation_count(graph)
 }
@@ -57,6 +17,13 @@ pub(super) fn is_interleaved_control_operation(graph: &Graph, operation_id: Oper
     matches!(
         operation_kind(operation_name(graph, operation_id)),
         OperationKind::InterleavedControl
+    )
+}
+
+pub(super) fn is_interleaved_data_operation(graph: &Graph, operation_id: OperationId) -> bool {
+    matches!(
+        operation_kind(operation_name(graph, operation_id)),
+        OperationKind::InterleavedData
     )
 }
 
@@ -81,12 +48,4 @@ pub(super) fn operation_wires(
     operation_id: OperationId,
 ) -> impl Iterator<Item = NodeId> {
     operation_inputs(graph, operation_id).chain(operation_outputs(graph, operation_id))
-}
-
-fn push_unique_all(target: &mut Vec<NodeId>, wires: impl IntoIterator<Item = NodeId>) {
-    for wire in wires {
-        if !target.contains(&wire) {
-            target.push(wire);
-        }
-    }
 }

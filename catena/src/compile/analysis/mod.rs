@@ -8,6 +8,7 @@ mod nested_regions;
 mod partition;
 mod region_graph;
 mod render;
+mod value_equivalence;
 mod wires;
 
 use std::{fmt::Write, path::PathBuf};
@@ -21,6 +22,7 @@ use self::{
     partition::{OperationRegion, RegionKind, partition_data_regions},
     region_graph::{region_graph, region_graph_trace},
     render::{graph_svg, render_graph_region_svgs, render_region_svgs},
+    value_equivalence::value_equivalence_trace,
     wires::assert_interleaved_control_operations_are_unary,
 };
 
@@ -67,6 +69,7 @@ pub fn render_analysis_artifacts(graph: &CompileGraph) -> std::io::Result<Vec<An
     let source = graph_svg(&graph.graph)?;
     let region_graph = graph_svg(&region_graph(&layer))?;
     let region_graph_trace = region_graph_trace(&layer);
+    let value_equivalence_trace = value_equivalence_trace(&layer);
     let cfg = render_cfg(&layer);
     let mut artifacts = vec![
         analysis_index_artifact(graph, &layer),
@@ -85,6 +88,10 @@ pub fn render_analysis_artifacts(graph: &CompileGraph) -> std::io::Result<Vec<An
         AnalysisArtifact {
             path: PathBuf::from("region-graph.txt"),
             contents: region_graph_trace,
+        },
+        AnalysisArtifact {
+            path: PathBuf::from("value-equivalence.txt"),
+            contents: value_equivalence_trace,
         },
     ];
     artifacts.extend(region_svgs.into_iter().map(|region| AnalysisArtifact {
@@ -111,6 +118,7 @@ fn analysis_index_artifact(graph: &CompileGraph, layer: &Layer) -> AnalysisArtif
     index.push_str("- [cfg](cfg.txt)\n");
     index.push_str("- [region graph](region-graph.svg)\n");
     index.push_str("- [region graph trace](region-graph.txt)\n");
+    index.push_str("- [value equivalence](value-equivalence.txt)\n");
     append_item(&mut index, 1, "partitions");
     append_source_regions_index(&mut index, graph, &layer.regions);
     append_item(&mut index, 1, "expansions");

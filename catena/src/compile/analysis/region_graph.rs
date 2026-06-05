@@ -11,7 +11,11 @@ use open_hypergraphs::strict::vec::{
 
 use crate::{
     compile::{
-        analysis::{Layer, Region, partition::RegionKind},
+        analysis::{
+            Layer, NestingMorphism, Region,
+            layering::{BoundaryFiberPoint, BoundarySide},
+            partition::RegionKind,
+        },
         graph_ops::{Graph, operation_inputs, operation_outputs},
     },
     lang::Obj,
@@ -25,6 +29,13 @@ pub(super) fn region_graph(layer: &Layer) -> Graph {
 }
 
 pub(super) fn region_graph_trace(layer: &Layer) -> Vec<u8> {
+    // Debug artifact for auditing the construction on examples. It prints both
+    // the recursive layer tree and the final quotient graph incidence, e.g.:
+    //
+    //   region.1.0.control: (w1) -> (w2, w3)
+    //   region.1.1.0.data: (w2) -> (w4)
+    //   region.1.2.0.data: (w3) -> (w5)
+    //   region.1.3.control: (w4, w5) -> (w6)
     let mut trace = String::new();
     append_layer_trace(&mut trace, layer, &[]);
 
@@ -62,12 +73,26 @@ struct RegionGraphBuilder {
 
 impl RegionGraphBuilder {
     fn add_layer(&mut self, layer: &Layer) {
-        self.add_nested_layer(layer, None, Vec::new());
+        self.visit_layer(layer, None, Vec::new());
     }
 
-    fn add_nested_layer(&mut self, layer: &Layer, parent_layer: Option<usize>, path: Vec<usize>) {
+    // Build a graph whose operations are the leaf regions of the layer tree.
+    //
+    // Example layer shape:
+    //
+    //   root
+    //     region 0: Data                  -> operation region.0.data
+    //     region 1: InterleavedControl    -> descend
+    //       region 0: Control             -> operation region.1.0.control
+    //       region 1: InterleavedData     -> descend
+    //         region 0: Data              -> operation region.1.1.0.data
+    //     region 2: Data                  -> operation region.2.data
+    //
+    // Interleaved regions are not operations here; they only explain where a
+    // child layer is attached.
+    fn visit_layer(&mut self, layer: &Layer, parent_layer: Option<usize>, path: Vec<usize>) {
         let layer_id = self.alloc_layer(layer);
-        self.connect_to_parent(layer, layer_id, parent_layer);
+        self.connect_nested_layer_boundary(layer, layer_id, parent_layer);
 
         let data_context = DataRegionInterfaceContext::new(
             &layer.graph,
@@ -75,19 +100,47 @@ impl RegionGraphBuilder {
             layer.morphism_to_parent.as_ref(),
         );
         for region in &layer.regions {
-            let mut region_path = path.clone();
-            region_path.push(region.index);
-
-            if let Some(expansion) = &region.expansion {
-                self.add_nested_layer(expansion, Some(layer_id), region_path);
-                continue;
-            }
-
-            let interface = RegionInterface::new(&layer.graph, &data_context, region);
-            self.add_region_operation(layer_id, region, region_path, interface);
+            self.visit_region(layer_id, &layer.graph, &data_context, region, &path);
         }
     }
 
+    fn visit_region(
+        &mut self,
+        layer_id: usize,
+        graph: &Graph,
+        data_context: &DataRegionInterfaceContext,
+        region: &Region,
+        parent_path: &[usize],
+    ) {
+        let mut path = parent_path.to_vec();
+        path.push(region.index);
+
+        match (&region.kind, &region.expansion) {
+            (_, Some(expansion)) => self.visit_layer(expansion, Some(layer_id), path),
+            (RegionKind::Data, None) => {
+                let interface = data_context.data_region_interface(graph, region);
+                self.add_region_operation(layer_id, region, path, interface);
+            }
+            (RegionKind::Control, None) => {
+                let interface = RegionInterface::control_region(graph, region);
+                self.add_region_operation(layer_id, region, path, interface);
+            }
+            (RegionKind::InterleavedControl | RegionKind::InterleavedData, None) => {
+                panic!(
+                    "interleaved regions must be expanded before becoming region graph operations"
+                )
+            }
+        }
+    }
+
+    // Each layer graph has its own wire namespace. We allocate one provisional
+    // wire class for each layer wire and later quotient these classes.
+    //
+    //   layer 3 wire 7  -> class c42
+    //   layer 4 wire 7  -> class c99
+    //
+    // They are different until a boundary morphism or region-interface rule
+    // explicitly equates them.
     fn alloc_layer(&mut self, layer: &Layer) -> usize {
         let layer_id = self.next_layer;
         self.next_layer += 1;
@@ -102,7 +155,32 @@ impl RegionGraphBuilder {
         layer_id
     }
 
-    fn connect_to_parent(&mut self, layer: &Layer, layer_id: usize, parent_layer: Option<usize>) {
+    // Connect a child layer back to its parent through the nesting morphism.
+    //
+    // The simple case is one child boundary wire for one parent boundary wire:
+    //
+    //   child w8  ~ parent w11
+    //
+    // Branching/merging needs more care. A packed parent wire may represent
+    // several boundary fibers:
+    //
+    //   child w2 ~ parent w17, fiber 0
+    //   child w3 ~ parent w17, fiber 1
+    //
+    // These must NOT be quotiented together. Otherwise a 1 -> 2 branch becomes
+    // a 1 -> 1 self-connection:
+    //
+    //   wrong:  branch: w1 -> (w2, w2)
+    //   right:  branch: w1 -> (w2, w3)
+    //
+    // So when a parent wire has multiple fibers we allocate one synthetic
+    // parent-side class per fiber position.
+    fn connect_nested_layer_boundary(
+        &mut self,
+        layer: &Layer,
+        layer_id: usize,
+        parent_layer: Option<usize>,
+    ) {
         let Some(parent_layer) = parent_layer else {
             return;
         };
@@ -119,20 +197,45 @@ impl RegionGraphBuilder {
             let Some(fiber_point) = fiber_point else {
                 continue;
             };
-            let child_class = self.layer_wire_class(layer_id, child_wire);
-            let parent_class = if multi_fiber_parent_wires.contains(&fiber_point.parent_wire.0) {
-                self.boundary_fiber_class(
-                    parent_layer,
-                    fiber_point.parent_wire.0,
-                    fiber_point.fiber_position,
-                )
-            } else {
-                self.layer_wire_class(parent_layer, fiber_point.parent_wire.0)
-            };
-            self.equations.push((child_class, parent_class));
+            self.connect_boundary_fiber(
+                layer_id,
+                child_wire,
+                parent_layer,
+                fiber_point.parent_wire.0,
+                fiber_point.fiber_position,
+                multi_fiber_parent_wires.contains(&fiber_point.parent_wire.0),
+            );
         }
     }
 
+    // Add the quotient equation for one child boundary fiber.
+    fn connect_boundary_fiber(
+        &mut self,
+        child_layer: usize,
+        child_wire: usize,
+        parent_layer: usize,
+        parent_wire: usize,
+        fiber_position: usize,
+        parent_wire_has_multiple_fibers: bool,
+    ) {
+        let child_class = self.layer_wire_class(child_layer, child_wire);
+        let parent_class = if parent_wire_has_multiple_fibers {
+            self.boundary_fiber_class(parent_layer, parent_wire, fiber_position)
+        } else {
+            self.layer_wire_class(parent_layer, parent_wire)
+        };
+        self.equations.push((child_class, parent_class));
+    }
+
+    // Emit one leaf-region operation using the already-selected interface.
+    // Interface equations collapse multi-wire data boundaries into the single
+    // data-control token we expose at this level:
+    //
+    //   data candidate inputs:  w2, w4, w9
+    //   exposed input:          w2
+    //   equations:              w2 ~ w4, w2 ~ w9
+    //
+    // The operation itself is still 1 -> 1.
     fn add_region_operation(
         &mut self,
         layer_id: usize,
@@ -205,6 +308,9 @@ impl RegionGraphBuilder {
         class
     }
 
+    // Convert provisional classes into actual graph wires. Only classes used
+    // by emitted region-operation ports become graph wires, so internal layer
+    // wires that are irrelevant to region connectivity disappear here.
     fn finish(self) -> Graph {
         let mut uf = UnionFind::new(self.wire_labels.len());
         for (left, right) in self.equations {
@@ -278,18 +384,14 @@ enum InterfaceWire {
 }
 
 impl RegionInterface {
-    fn new(graph: &Graph, data_context: &DataRegionInterfaceContext, region: &Region) -> Self {
-        match region.kind {
-            RegionKind::Data => data_context.data_region_interface(graph, region),
-            RegionKind::Control => Self::control_region(graph, region),
-            RegionKind::InterleavedControl | RegionKind::InterleavedData => {
-                panic!(
-                    "interleaved regions must be expanded before becoming region graph operations"
-                )
-            }
-        }
-    }
-
+    // Native control regions keep their real control-flow shape.
+    //
+    //   sequential:  1 -> 1
+    //   branch:      1 -> 2
+    //   merge:       2 -> 1
+    //
+    // Anything else means the partitioning did not produce CFG-shaped control
+    // leaves.
     fn control_region(graph: &Graph, region: &Region) -> Self {
         let boundary = RegionBoundary::new(graph, region);
         match (boundary.inputs.len(), boundary.outputs.len()) {
@@ -327,7 +429,7 @@ impl DataRegionInterfaceContext {
     fn new(
         graph: &Graph,
         regions: &[Region],
-        morphism_to_parent: Option<&crate::compile::analysis::NestingMorphism>,
+        morphism_to_parent: Option<&NestingMorphism>,
     ) -> Self {
         let control_operations = regions
             .iter()
@@ -335,30 +437,9 @@ impl DataRegionInterfaceContext {
             .flat_map(|region| region.operations.iter().copied())
             .collect::<Vec<_>>();
 
-        let graph_sources = morphism_to_parent
-            .map(|morphism| {
-                morphism
-                    .boundary_relation
-                    .child_wires_on_side(crate::compile::analysis::layering::BoundarySide::Source)
-                    .into_iter()
-                    .map(|wire| wire.0)
-                    .collect()
-            })
-            .unwrap_or_default();
-        let graph_targets = morphism_to_parent
-            .map(|morphism| {
-                morphism
-                    .boundary_relation
-                    .child_wires_on_side(crate::compile::analysis::layering::BoundarySide::Target)
-                    .into_iter()
-                    .map(|wire| wire.0)
-                    .collect()
-            })
-            .unwrap_or_default();
-
         Self {
-            graph_sources,
-            graph_targets,
+            graph_sources: child_boundary_wires(morphism_to_parent, BoundarySide::Source),
+            graph_targets: child_boundary_wires(morphism_to_parent, BoundarySide::Target),
             control_inputs: unique_wires(
                 control_operations.iter().copied().flat_map(|operation_id| {
                     operation_inputs(graph, operation_id).map(|wire| wire.0)
@@ -370,40 +451,50 @@ impl DataRegionInterfaceContext {
         }
     }
 
+    // Data regions are exposed as 1 -> 1 even if their underlying data block
+    // touches several concrete wires.
+    //
+    // We first find the data wires that matter for region connectivity:
+    //
+    //   entry wires = external layer sources or wires coming from control
+    //   exit wires  = external layer targets or wires going to control
+    //
+    // Then we pick one representative on each side and quotient the rest.
+    //
+    //   candidates:  inputs  [w0, w3]   outputs [w8, w9]
+    //   operation:   w0 -> w8
+    //   equations:   w0 ~ w3, w8 ~ w9
+    //
+    // If a side has no region-connectivity wire, we use a synthetic port:
+    //
+    //   root producer:  _ -> w15
+    //   final sink:     w11 -> _
     fn data_region_interface(&self, graph: &Graph, region: &Region) -> RegionInterface {
         let boundary = self.data_region_boundary(graph, region);
-        let input = boundary.inputs.first().copied();
-        let output = boundary.outputs.first().copied();
-        let equations = boundary
-            .inputs
-            .iter()
-            .copied()
-            .skip(1)
-            .map(|wire| (input.expect("non-empty input boundary"), wire))
-            .chain(
-                boundary
-                    .outputs
-                    .iter()
-                    .copied()
-                    .skip(1)
-                    .map(|wire| (output.expect("non-empty output boundary"), wire)),
-            )
+        let input = representative_or_synthetic(&boundary.inputs);
+        let output = representative_or_synthetic(&boundary.outputs);
+        let equations = collapse_boundary_wires(&boundary.inputs)
+            .into_iter()
+            .chain(collapse_boundary_wires(&boundary.outputs))
             .collect();
+
         RegionInterface {
-            inputs: vec![
-                input
-                    .map(InterfaceWire::Layer)
-                    .unwrap_or(InterfaceWire::Synthetic),
-            ],
-            outputs: vec![
-                output
-                    .map(InterfaceWire::Layer)
-                    .unwrap_or(InterfaceWire::Synthetic),
-            ],
+            inputs: vec![input],
+            outputs: vec![output],
             equations,
         }
     }
 
+    // Data entry/exit wires must be outside the data region itself. This avoids
+    // choosing unpacked internal component wires as block boundaries:
+    //
+    //   w1 = unpack(w0)
+    //   ...
+    //   w8 = pack(...)
+    //
+    // Here w1 may be related to the parent boundary, but it is produced and
+    // consumed inside the data region, so it is not the region exit. The exit is
+    // the produced-not-consumed packed value w8.
     fn data_region_boundary(&self, graph: &Graph, region: &Region) -> RegionBoundary {
         let consumed = region_consumed_wires(graph, region);
         let produced = region_produced_wires(graph, region);
@@ -492,9 +583,43 @@ fn unique_wires(wires: impl IntoIterator<Item = usize>) -> Vec<usize> {
     unique
 }
 
-fn multi_fiber_parent_wires(
-    fiber_points: &[Option<crate::compile::analysis::layering::BoundaryFiberPoint>],
-) -> HashSet<usize> {
+fn representative_or_synthetic(wires: &[usize]) -> InterfaceWire {
+    wires
+        .first()
+        .copied()
+        .map(InterfaceWire::Layer)
+        .unwrap_or(InterfaceWire::Synthetic)
+}
+
+fn collapse_boundary_wires(wires: &[usize]) -> Vec<(usize, usize)> {
+    let Some(first) = wires.first().copied() else {
+        return Vec::new();
+    };
+    wires
+        .iter()
+        .copied()
+        .skip(1)
+        .map(|wire| (first, wire))
+        .collect()
+}
+
+fn child_boundary_wires(
+    morphism_to_parent: Option<&NestingMorphism>,
+    side: BoundarySide,
+) -> Vec<usize> {
+    morphism_to_parent
+        .map(|morphism| {
+            morphism
+                .boundary_relation
+                .child_wires_on_side(side)
+                .into_iter()
+                .map(|wire| wire.0)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn multi_fiber_parent_wires(fiber_points: &[Option<BoundaryFiberPoint>]) -> HashSet<usize> {
     let mut fibers_by_parent_wire = HashMap::<usize, HashSet<usize>>::new();
     for fiber_point in fiber_points.iter().flatten() {
         fibers_by_parent_wire
@@ -634,7 +759,15 @@ fn append_layer_trace(trace: &mut String, layer: &Layer, path: &[usize]) {
             writeln!(trace, "    expands").expect("write to string cannot fail");
             append_layer_trace(trace, expansion, &region_path);
         } else {
-            let interface = RegionInterface::new(&layer.graph, &data_context, region);
+            let interface = match region.kind {
+                RegionKind::Data => data_context.data_region_interface(&layer.graph, region),
+                RegionKind::Control => RegionInterface::control_region(&layer.graph, region),
+                RegionKind::InterleavedControl | RegionKind::InterleavedData => {
+                    panic!(
+                        "interleaved regions must be expanded before becoming region graph operations"
+                    )
+                }
+            };
             writeln!(
                 trace,
                 "    leaf interface: ({}) -> ({})",

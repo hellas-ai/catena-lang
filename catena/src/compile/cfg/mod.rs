@@ -13,4 +13,4 @@ pub use model::{
     CfgNodeBoundaries, CfgNodeId, CfgOptions, CfgWiring, OperationId, OperationName, Transfer,
     VariableId, VariableName, variable_name,
 };
-pub use render::render_program_cfg;
+pub use render::{render_program_cfg, render_program_cfg_with_block_annotations};

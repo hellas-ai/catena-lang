@@ -2,13 +2,20 @@ use metacat::tree::Tree;
 
 use crate::{
     compile::{
-        cfg::{BlockInstruction, CfgEdge, Transfer},
+        cfg::{BlockInstruction, CfgEdge, CfgNodeId, Transfer},
         program::{Definition, Program, VariableId},
     },
     lang::Obj,
 };
 
 pub fn render_program_cfg(program: &Program) -> String {
+    render_program_cfg_with_block_annotations(program, |_| None)
+}
+
+pub fn render_program_cfg_with_block_annotations<'a>(
+    program: &Program,
+    block_annotation: impl Fn(CfgNodeId) -> Option<&'a str>,
+) -> String {
     let mut out = String::new();
     let mut definitions = program.definitions.values().collect::<Vec<_>>();
     definitions.sort_by_key(|definition| definition.id.0);
@@ -16,12 +23,16 @@ pub fn render_program_cfg(program: &Program) -> String {
         if index > 0 {
             out.push('\n');
         }
-        render_definition_cfg(&mut out, definition);
+        render_definition_cfg(&mut out, definition, &block_annotation);
     }
     out
 }
 
-fn render_definition_cfg(out: &mut String, definition: &Definition) {
+fn render_definition_cfg<'a>(
+    out: &mut String,
+    definition: &Definition,
+    block_annotation: &impl Fn(CfgNodeId) -> Option<&'a str>,
+) {
     out.push_str(&format!("definition {}\n", definition.name));
     out.push_str("  parameters\n");
     for parameter in &definition.params {
@@ -37,9 +48,12 @@ fn render_definition_cfg(out: &mut String, definition: &Definition) {
     out.push_str("  blocks\n");
 
     for node in &definition.body.nodes {
+        out.push_str(&format!("    {}", definition.body.label(node.id)));
+        if let Some(annotation) = block_annotation(node.id) {
+            out.push_str(&format!(" [{annotation}]"));
+        }
         out.push_str(&format!(
-            "    {}({})\n",
-            definition.body.label(node.id),
+            "({})\n",
             render_wire_ids(definition, &node.params).join(", ")
         ));
         for instruction in &node.block {

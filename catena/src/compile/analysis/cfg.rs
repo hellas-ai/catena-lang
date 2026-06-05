@@ -16,15 +16,24 @@ use super::{
 pub(super) struct AnalysisCfg {
     pub(super) cfg: Cfg,
     pub(super) globals: Vec<usize>,
+    pub(super) wire_names: HashMap<usize, String>,
     pub(super) block_svg_paths: HashMap<usize, String>,
 }
 
-pub(super) fn render_cfg(root_layer: &Layer, options: CfgOptions) -> Vec<u8> {
-    let analysis_cfg = build_cfg(root_layer, options);
+pub(super) fn render_cfg(
+    root_layer: &Layer,
+    wire_names: HashMap<usize, String>,
+    options: CfgOptions,
+) -> Vec<u8> {
+    let analysis_cfg = build_cfg(root_layer, wire_names, options);
     render_analysis_cfg(&root_layer.graph, analysis_cfg)
 }
 
-fn build_cfg(root_layer: &Layer, options: CfgOptions) -> AnalysisCfg {
+fn build_cfg(
+    root_layer: &Layer,
+    wire_names: HashMap<usize, String>,
+    options: CfgOptions,
+) -> AnalysisCfg {
     let region_graph = region_graph_with_regions(root_layer);
     let connectivity = RegionGraphConnectivity::new(&region_graph.graph);
     let value_equivalences = value_equivalences(root_layer);
@@ -52,6 +61,7 @@ fn build_cfg(root_layer: &Layer, options: CfgOptions) -> AnalysisCfg {
             nodes,
         },
         globals,
+        wire_names,
         block_svg_paths,
     }
 }

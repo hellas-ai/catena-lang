@@ -14,6 +14,7 @@ pub(super) fn render_analysis_cfg(graph: &Graph, analysis_cfg: AnalysisCfg) -> V
     let AnalysisCfg {
         cfg,
         globals,
+        wire_names,
         block_svg_paths,
     } = analysis_cfg;
     let program = cfg_program(graph, cfg);
@@ -23,8 +24,12 @@ pub(super) fn render_analysis_cfg(graph: &Graph, analysis_cfg: AnalysisCfg) -> V
     writeln!(&mut out, "definition {}", definition.name).expect("write to string cannot fail");
     writeln!(&mut out, "  parameters").expect("write to string cannot fail");
     for parameter in &definition.params {
-        writeln!(&mut out, "    {}", render_variable(definition, *parameter))
-            .expect("write to string cannot fail");
+        writeln!(
+            &mut out,
+            "    {}",
+            render_variable(definition, &wire_names, *parameter)
+        )
+        .expect("write to string cannot fail");
     }
 
     writeln!(&mut out, "  globals").expect("write to string cannot fail");
@@ -32,7 +37,7 @@ pub(super) fn render_analysis_cfg(graph: &Graph, analysis_cfg: AnalysisCfg) -> V
         writeln!(
             &mut out,
             "    {}",
-            render_variable(definition, ProgramVariableId(global))
+            render_variable(definition, &wire_names, ProgramVariableId(global))
         )
         .expect("write to string cannot fail");
     }
@@ -54,13 +59,13 @@ pub(super) fn render_analysis_cfg(graph: &Graph, analysis_cfg: AnalysisCfg) -> V
         writeln!(
             &mut out,
             "({})",
-            render_wire_ids(definition, &node.params).join(", ")
+            render_wire_ids(definition, &wire_names, &node.params).join(", ")
         )
         .expect("write to string cannot fail");
         for instruction in &node.block {
-            render_instruction(&mut out, definition, instruction);
+            render_instruction(&mut out, definition, &wire_names, instruction);
         }
-        render_transfer(&mut out, definition, &node.transfer);
+        render_transfer(&mut out, definition, &wire_names, &node.transfer);
     }
 
     out.into_bytes()
@@ -117,9 +122,14 @@ fn context_for_graph(graph: &Graph) -> Context {
     )
 }
 
-fn render_instruction(out: &mut String, definition: &Definition, instruction: &BlockInstruction) {
-    let results = render_wire_ids(definition, &instruction.results);
-    let args = render_wire_ids(definition, &instruction.args);
+fn render_instruction(
+    out: &mut String,
+    definition: &Definition,
+    wire_names: &HashMap<usize, String>,
+    instruction: &BlockInstruction,
+) {
+    let results = render_wire_ids(definition, wire_names, &instruction.results);
+    let args = render_wire_ids(definition, wire_names, &instruction.args);
     if results.is_empty() {
         writeln!(
             out,
@@ -142,11 +152,20 @@ fn render_instruction(out: &mut String, definition: &Definition, instruction: &B
     }
 }
 
-fn render_transfer(out: &mut String, definition: &Definition, transfer: &Transfer) {
+fn render_transfer(
+    out: &mut String,
+    definition: &Definition,
+    wire_names: &HashMap<usize, String>,
+    transfer: &Transfer,
+) {
     match transfer {
         Transfer::Goto(edge) => {
-            writeln!(out, "      goto {}", render_edge(definition, edge))
-                .expect("write to string cannot fail");
+            writeln!(
+                out,
+                "      goto {}",
+                render_edge(definition, wire_names, edge)
+            )
+            .expect("write to string cannot fail");
         }
         Transfer::If {
             condition,
@@ -156,9 +175,9 @@ fn render_transfer(out: &mut String, definition: &Definition, transfer: &Transfe
             writeln!(
                 out,
                 "      if {} then {} else {}",
-                render_wire_id(definition, *condition),
-                render_edge(definition, then_edge),
-                render_edge(definition, else_edge)
+                render_wire_id(definition, wire_names, *condition),
+                render_edge(definition, wire_names, then_edge),
+                render_edge(definition, wire_names, else_edge)
             )
             .expect("write to string cannot fail");
         }
@@ -166,44 +185,66 @@ fn render_transfer(out: &mut String, definition: &Definition, transfer: &Transfe
             writeln!(
                 out,
                 "      return {}",
-                render_wire_ids(definition, values).join(", ")
+                render_wire_ids(definition, wire_names, values).join(", ")
             )
             .expect("write to string cannot fail");
         }
     }
 }
 
-fn render_edge(definition: &Definition, edge: &CfgEdge) -> String {
+fn render_edge(
+    definition: &Definition,
+    wire_names: &HashMap<usize, String>,
+    edge: &CfgEdge,
+) -> String {
     format!(
         "{}({})",
         definition.body.label(edge.target),
-        render_wire_ids(definition, &edge.args).join(", ")
+        render_wire_ids(definition, wire_names, &edge.args).join(", ")
     )
 }
 
-fn render_variable(definition: &Definition, id: ProgramVariableId) -> String {
+fn render_variable(
+    definition: &Definition,
+    wire_names: &HashMap<usize, String>,
+    id: ProgramVariableId,
+) -> String {
+    let rendered_id = render_wire_id(definition, wire_names, id.0);
     definition
         .context
         .variable(id)
-        .map(|variable| format!("{}: {}", variable.name, render_object(&variable.ty)))
-        .unwrap_or_else(|| format!("w{}: <global>", id.0))
+        .map(|variable| format!("{rendered_id}: {}", render_object(&variable.ty)))
+        .unwrap_or_else(|| format!("{rendered_id}: <global>"))
 }
 
 fn render_wire_ids(
     definition: &Definition,
+    wire_names: &HashMap<usize, String>,
     ids: &[crate::compile::cfg::VariableId],
 ) -> Vec<String> {
     ids.iter()
-        .map(|id| render_wire_id(definition, *id))
+        .map(|id| render_wire_id(definition, wire_names, *id))
         .collect()
 }
 
-fn render_wire_id(definition: &Definition, id: crate::compile::cfg::VariableId) -> String {
-    definition
+fn render_wire_id(
+    definition: &Definition,
+    wire_names: &HashMap<usize, String>,
+    id: crate::compile::cfg::VariableId,
+) -> String {
+    let wire = definition
         .context
         .variable(ProgramVariableId(id))
         .map(|variable| variable.name.clone())
-        .unwrap_or_else(|| crate::compile::cfg::variable_name(id))
+        .unwrap_or_else(|| crate::compile::cfg::variable_name(id));
+    match wire_names.get(&id) {
+        Some(name) => format!("{wire} /* {} */", render_wire_name_annotation(name)),
+        None => wire,
+    }
+}
+
+fn render_wire_name_annotation(name: &str) -> String {
+    name.replace("*/", "* /")
 }
 
 fn render_object(object: &crate::lang::Obj) -> String {

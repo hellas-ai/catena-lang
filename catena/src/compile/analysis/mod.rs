@@ -73,7 +73,7 @@ pub fn render_analysis_artifacts(
     let region_graph = graph_svg(&region_graph(&layer))?;
     let region_graph_trace = region_graph_trace(&layer);
     let value_equivalence_trace = value_equivalence_trace(&layer);
-    let cfg = render_cfg(&layer, cfg_options);
+    let cfg = render_cfg(&layer, graph.source_variable_names.clone(), cfg_options);
     let mut artifacts = vec![
         analysis_index_artifact(graph, &layer),
         AnalysisArtifact {

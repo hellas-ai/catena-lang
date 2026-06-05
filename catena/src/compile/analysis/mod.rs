@@ -1,30 +1,35 @@
+mod cfg;
+mod cfg_render;
 mod control_regions;
 mod data_regions;
 mod layering;
+mod layers;
 mod nested_regions;
 mod partition;
+mod region_graph;
 mod render;
+mod value_equivalence;
 mod wires;
 
 use std::{fmt::Write, path::PathBuf};
 
-use crate::compile::{CompileGraph, CompileTheory};
+use crate::compile::{CompileGraph, CompileTheory, cfg::CfgOptions};
 
 use self::{
+    cfg::render_cfg,
+    layers::root_layer,
     nested_regions::build_control_region_graphs,
-    partition::{
-        OperationId, OperationRegion, RegionKind, SourceOperation, partition_data_regions,
-    },
+    partition::{OperationRegion, RegionKind, partition_data_regions},
+    region_graph::{region_graph, region_graph_trace},
     render::{graph_svg, render_graph_region_svgs, render_region_svgs},
+    value_equivalence::value_equivalence_trace,
     wires::assert_interleaved_control_operations_are_unary,
 };
 
-pub use control_regions::ControlRegionGraph;
-pub use data_regions::DataRegionGraph;
-pub use layering::NestedGraph;
+pub use layering::{Layer, NestingMorphism, Region};
 
 pub fn render_analysis(graph: &CompileGraph) -> std::io::Result<Vec<u8>> {
-    Ok(render_analysis_artifacts(graph)?
+    Ok(render_analysis_artifacts(graph, CfgOptions::default())?
         .into_iter()
         .find(|artifact| artifact.path == PathBuf::from("source.svg"))
         .expect("analysis artifacts include source graph")
@@ -37,17 +42,21 @@ pub struct AnalysisArtifact {
     pub contents: Vec<u8>,
 }
 
-pub fn control_region_graphs(graph: &CompileGraph) -> Vec<ControlRegionGraph> {
+pub fn layer(graph: &CompileGraph) -> Layer {
     assert!(
         matches!(graph.theory, CompileTheory::Data),
         "analysis expects a data graph"
     );
     assert_interleaved_control_operations_are_unary(&graph.graph);
     let regions = partition_data_regions(&graph.graph);
-    build_control_region_graphs(graph, &graph.graph, &regions)
+    let control_region_graphs = build_control_region_graphs(graph, &graph.graph, &regions);
+    root_layer(graph.graph.clone(), &regions, &control_region_graphs)
 }
 
-pub fn render_analysis_artifacts(graph: &CompileGraph) -> std::io::Result<Vec<AnalysisArtifact>> {
+pub fn render_analysis_artifacts(
+    graph: &CompileGraph,
+    cfg_options: CfgOptions,
+) -> std::io::Result<Vec<AnalysisArtifact>> {
     assert!(
         matches!(graph.theory, CompileTheory::Data),
         "analysis expects a data graph"
@@ -59,48 +68,64 @@ pub fn render_analysis_artifacts(graph: &CompileGraph) -> std::io::Result<Vec<An
     let regions = partition_data_regions(&graph.graph);
     let region_svgs = render_region_svgs(graph, &regions)?;
     let control_region_graphs = build_control_region_graphs(graph, &graph.graph, &regions);
+    let layer = root_layer(graph.graph.clone(), &regions, &control_region_graphs);
     let source = graph_svg(&graph.graph)?;
+    let region_graph = graph_svg(&region_graph(&layer))?;
+    let region_graph_trace = region_graph_trace(&layer);
+    let value_equivalence_trace = value_equivalence_trace(&layer);
+    let cfg = render_cfg(&layer, graph.source_variable_names.clone(), cfg_options);
     let mut artifacts = vec![
-        analysis_index_artifact(graph, &regions, &control_region_graphs),
+        analysis_index_artifact(graph, &layer),
         AnalysisArtifact {
             path: PathBuf::from("source.svg"),
             contents: source,
+        },
+        AnalysisArtifact {
+            path: PathBuf::from("cfg.txt"),
+            contents: cfg,
+        },
+        AnalysisArtifact {
+            path: PathBuf::from("region-graph.svg"),
+            contents: region_graph,
+        },
+        AnalysisArtifact {
+            path: PathBuf::from("region-graph.txt"),
+            contents: region_graph_trace,
+        },
+        AnalysisArtifact {
+            path: PathBuf::from("value-equivalence.txt"),
+            contents: value_equivalence_trace,
         },
     ];
     artifacts.extend(region_svgs.into_iter().map(|region| AnalysisArtifact {
         path: PathBuf::from("regions").join(region.file_name),
         contents: region.svg,
     }));
-    for control_region in &control_region_graphs {
-        render_control_region_graph_artifacts(
-            &mut artifacts,
-            PathBuf::from("control-regions"),
-            control_region,
-        )?;
+    for region in &layer.regions {
+        if let Some(expansion) = &region.expansion {
+            render_layer_expansion_artifacts(
+                &mut artifacts,
+                PathBuf::from("control-regions"),
+                region.index,
+                expansion,
+            )?;
+        }
     }
     Ok(artifacts)
 }
 
-fn analysis_index_artifact(
-    graph: &CompileGraph,
-    regions: &[OperationRegion],
-    control_region_graphs: &[ControlRegionGraph],
-) -> AnalysisArtifact {
+fn analysis_index_artifact(graph: &CompileGraph, layer: &Layer) -> AnalysisArtifact {
     let mut index = String::new();
     index.push_str("# Analysis\n\n");
     index.push_str("- [source graph](source.svg)\n");
+    index.push_str("- [cfg](cfg.txt)\n");
+    index.push_str("- [region graph](region-graph.svg)\n");
+    index.push_str("- [region graph trace](region-graph.txt)\n");
+    index.push_str("- [value equivalence](value-equivalence.txt)\n");
     append_item(&mut index, 1, "partitions");
-    append_source_regions_index(&mut index, graph, regions);
+    append_source_regions_index(&mut index, graph, &layer.regions);
     append_item(&mut index, 1, "expansions");
-    for control_region in control_region_graphs {
-        append_control_region_index(
-            &mut index,
-            2,
-            PathBuf::from("control-regions"),
-            None,
-            control_region,
-        );
-    }
+    append_layer_expansion_index(&mut index, 2, PathBuf::from("control-regions"), layer);
 
     AnalysisArtifact {
         path: PathBuf::from("index.md"),
@@ -108,156 +133,91 @@ fn analysis_index_artifact(
     }
 }
 
-fn render_control_region_graph_artifacts(
+fn render_layer_expansion_artifacts(
     artifacts: &mut Vec<AnalysisArtifact>,
     base: PathBuf,
-    control_region: &ControlRegionGraph,
+    expansion_region_index: usize,
+    layer: &Layer,
 ) -> std::io::Result<()> {
     artifacts.push(AnalysisArtifact {
-        path: base.join(format!("{:03}-resolved.svg", control_region.region_index)),
-        contents: graph_svg(&control_region.nested_graph.graph)?,
+        path: base.join(format!("{expansion_region_index:03}-resolved.svg")),
+        contents: graph_svg(&layer.graph)?,
     });
-    if has_interleaved_data_regions(&control_region.regions) {
+
+    if has_interleaved_regions(&layer.regions) {
         artifacts.extend(
-            render_graph_region_svgs(&control_region.nested_graph.graph, &control_region.regions)?
+            render_graph_region_svgs(&layer.graph, &operation_regions(&layer.regions))?
                 .into_iter()
                 .map(|region| AnalysisArtifact {
                     path: base
-                        .join(format!("{:03}-regions", control_region.region_index))
+                        .join(format!("{expansion_region_index:03}-regions"))
                         .join(region.file_name),
                     contents: region.svg,
                 }),
         );
     }
 
-    let data_base = base.join(format!("{:03}-data-regions", control_region.region_index));
-    for data_region in &control_region.data_region_graphs {
-        render_data_region_graph_artifacts(artifacts, data_base.clone(), data_region)?;
+    for region in &layer.regions {
+        if let Some(expansion) = &region.expansion {
+            render_layer_expansion_artifacts(
+                artifacts,
+                base.join(region_expansion_base_dir(
+                    expansion_region_index,
+                    region.kind,
+                )),
+                region.index,
+                expansion,
+            )?;
+        }
     }
 
     Ok(())
 }
 
-fn append_control_region_index(
-    index: &mut String,
-    depth: usize,
-    base: PathBuf,
-    opened_by: Option<&SourceOperation>,
-    control_region: &ControlRegionGraph,
-) {
-    let resolved = base.join(format!("{:03}-resolved.svg", control_region.region_index));
-    append_expanded_graph_node(
-        index,
-        depth,
-        opened_by,
-        &control_region.source_operations,
-        &control_region.nested_graph,
-        resolved,
-    );
-
-    let data_base = base.join(format!("{:03}-data-regions", control_region.region_index));
-    for source_operation in &control_region.source_operations {
-        for data_region in control_region
-            .data_region_graphs
-            .iter()
-            .filter(|data_region| {
-                region_belongs_to_parent_operation(
-                    *data_region,
-                    &control_region.nested_graph,
-                    source_operation.id,
+fn append_layer_expansion_index(index: &mut String, depth: usize, base: PathBuf, layer: &Layer) {
+    for region in &layer.regions {
+        let Some(expansion) = &region.expansion else {
+            continue;
+        };
+        let resolved = base.join(format!("{:03}-resolved.svg", region.index));
+        append_linked_item(
+            index,
+            depth,
+            &region_operations_label(&layer.graph, region),
+            resolved,
+        );
+        append_item(
+            index,
+            depth + 1,
+            &format!(
+                "contains {}",
+                operation_summary(
+                    &expansion
+                        .graph
+                        .h
+                        .x
+                        .0
+                        .0
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>()
                 )
-            })
-        {
-            append_data_region_index(
-                index,
-                depth + 1,
-                data_base.clone(),
-                Some(source_operation),
-                data_region,
-            );
-        }
-    }
-}
-
-fn render_data_region_graph_artifacts(
-    artifacts: &mut Vec<AnalysisArtifact>,
-    base: PathBuf,
-    data_region: &DataRegionGraph,
-) -> std::io::Result<()> {
-    artifacts.push(AnalysisArtifact {
-        path: base.join(format!("{:03}-resolved.svg", data_region.region_index)),
-        contents: graph_svg(&data_region.nested_graph.graph)?,
-    });
-    if has_interleaved_control_regions(&data_region.regions) {
-        artifacts.extend(
-            render_graph_region_svgs(&data_region.nested_graph.graph, &data_region.regions)?
-                .into_iter()
-                .map(|region| AnalysisArtifact {
-                    path: base
-                        .join(format!("{:03}-regions", data_region.region_index))
-                        .join(region.file_name),
-                    contents: region.svg,
-                }),
+            ),
+        );
+        append_layer_expansion_index(
+            index,
+            depth + 1,
+            base.join(nested_expansion_base_dir(region.index, region.kind)),
+            expansion,
         );
     }
-
-    let control_base = base.join(format!("{:03}-control-regions", data_region.region_index));
-    for control_region in &data_region.control_region_graphs {
-        render_control_region_graph_artifacts(artifacts, control_base.clone(), control_region)?;
-    }
-
-    Ok(())
 }
 
-fn append_data_region_index(
-    index: &mut String,
-    depth: usize,
-    base: PathBuf,
-    opened_by: Option<&SourceOperation>,
-    data_region: &DataRegionGraph,
-) {
-    let resolved = base.join(format!("{:03}-resolved.svg", data_region.region_index));
-    append_expanded_graph_node(
-        index,
-        depth,
-        opened_by,
-        &data_region.source_operations,
-        &data_region.nested_graph,
-        resolved,
-    );
-
-    let control_base = base.join(format!("{:03}-control-regions", data_region.region_index));
-    for source_operation in &data_region.source_operations {
-        for control_region in data_region
-            .control_region_graphs
-            .iter()
-            .filter(|control_region| {
-                region_belongs_to_parent_operation(
-                    *control_region,
-                    &data_region.nested_graph,
-                    source_operation.id,
-                )
-            })
-        {
-            append_control_region_index(
-                index,
-                depth + 1,
-                control_base.clone(),
-                Some(source_operation),
-                control_region,
-            );
-        }
-    }
-}
-
-fn append_source_regions_index(
-    index: &mut String,
-    graph: &CompileGraph,
-    regions: &[OperationRegion],
-) {
-    for (region_index, region) in regions.iter().enumerate() {
+fn append_source_regions_index(index: &mut String, graph: &CompileGraph, regions: &[Region]) {
+    for region in regions {
         let file_name = format!(
-            "{region_index:03}-{}.svg",
+            "{:03}-{}.svg",
+            region.index,
             region_kind_file_name(region.kind)
         );
         append_linked_item(
@@ -271,47 +231,6 @@ fn append_source_regions_index(
             PathBuf::from("regions").join(file_name),
         );
     }
-}
-
-fn append_expanded_graph_node(
-    index: &mut String,
-    depth: usize,
-    opened_by: Option<&SourceOperation>,
-    source_operations: &[SourceOperation],
-    nested_graph: &NestedGraph,
-    path: PathBuf,
-) {
-    let relation = opened_by
-        .map(|operation| format!(" opened by `{}`", operation.name))
-        .unwrap_or_default();
-    append_linked_item(
-        index,
-        depth,
-        &format!(
-            "{}{}",
-            source_operation_list_label(source_operations),
-            relation
-        ),
-        path,
-    );
-    append_item(
-        index,
-        depth + 1,
-        &format!(
-            "contains {}",
-            operation_summary(
-                &nested_graph
-                    .graph
-                    .h
-                    .x
-                    .0
-                    .0
-                    .iter()
-                    .map(ToString::to_string)
-                    .collect::<Vec<_>>()
-            )
-        ),
-    );
 }
 
 fn append_item(index: &mut String, depth: usize, label: &str) {
@@ -328,44 +247,13 @@ fn append_linked_item(index: &mut String, depth: usize, label: &str, path: PathB
     .expect("write to string cannot fail");
 }
 
-trait SourceRegionGraph {
-    fn source_operations(&self) -> &[SourceOperation];
-}
-
-impl SourceRegionGraph for ControlRegionGraph {
-    fn source_operations(&self) -> &[SourceOperation] {
-        &self.source_operations
-    }
-}
-
-impl SourceRegionGraph for DataRegionGraph {
-    fn source_operations(&self) -> &[SourceOperation] {
-        &self.source_operations
-    }
-}
-
-fn region_belongs_to_parent_operation(
-    region: &impl SourceRegionGraph,
-    parent: &NestedGraph,
-    parent_operation: OperationId,
-) -> bool {
-    region
-        .source_operations()
-        .first()
-        .and_then(|source_operation| parent.parent_operations.get(source_operation.id))
-        .is_some_and(|mapped_parent| *mapped_parent == parent_operation)
-}
-
-fn has_interleaved_data_regions(regions: &[OperationRegion]) -> bool {
-    regions
-        .iter()
-        .any(|region| matches!(region.kind, RegionKind::InterleavedData))
-}
-
-fn has_interleaved_control_regions(regions: &[OperationRegion]) -> bool {
-    regions
-        .iter()
-        .any(|region| matches!(region.kind, RegionKind::InterleavedControl))
+fn has_interleaved_regions(regions: &[Region]) -> bool {
+    regions.iter().any(|region| {
+        matches!(
+            region.kind,
+            RegionKind::InterleavedData | RegionKind::InterleavedControl
+        )
+    })
 }
 
 fn region_kind_file_name(kind: RegionKind) -> &'static str {
@@ -385,10 +273,7 @@ fn operation_count_label(count: usize) -> String {
     }
 }
 
-fn region_operations_label(
-    graph: &crate::compile::graph_ops::Graph,
-    region: &OperationRegion,
-) -> String {
+fn region_operations_label(graph: &crate::compile::graph_ops::Graph, region: &Region) -> String {
     region
         .operations
         .iter()
@@ -398,12 +283,42 @@ fn region_operations_label(
         .join(", ")
 }
 
-fn source_operation_list_label(source_operations: &[SourceOperation]) -> String {
-    source_operations
+fn operation_regions(regions: &[Region]) -> Vec<OperationRegion> {
+    regions
         .iter()
-        .map(|operation| operation.name.as_str())
-        .collect::<Vec<_>>()
-        .join(", ")
+        .map(|region| OperationRegion {
+            kind: region.kind,
+            operations: region.operations.clone(),
+        })
+        .collect()
+}
+
+fn region_expansion_base_dir(expansion_region_index: usize, kind: RegionKind) -> PathBuf {
+    match kind {
+        RegionKind::InterleavedControl => {
+            PathBuf::from(format!("{expansion_region_index:03}-control-regions"))
+        }
+        RegionKind::InterleavedData => {
+            PathBuf::from(format!("{expansion_region_index:03}-data-regions"))
+        }
+        RegionKind::Data | RegionKind::Control => {
+            panic!("non-interleaved regions do not have expansion directories")
+        }
+    }
+}
+
+fn nested_expansion_base_dir(expansion_region_index: usize, kind: RegionKind) -> PathBuf {
+    match kind {
+        RegionKind::InterleavedControl => {
+            PathBuf::from(format!("{expansion_region_index:03}-data-regions"))
+        }
+        RegionKind::InterleavedData => {
+            PathBuf::from(format!("{expansion_region_index:03}-control-regions"))
+        }
+        RegionKind::Data | RegionKind::Control => {
+            panic!("non-interleaved regions do not have expansion directories")
+        }
+    }
 }
 
 fn operation_summary(operations: &[String]) -> String {

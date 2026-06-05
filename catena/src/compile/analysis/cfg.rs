@@ -1,12 +1,15 @@
-use std::{collections::HashMap, path::PathBuf};
+use std::collections::HashMap;
 
 use crate::compile::{
-    analysis::{Layer, Region, partition::RegionKind},
+    analysis::Layer,
     cfg::{BlockInstruction, Cfg, CfgEdge, CfgNode, Transfer},
     graph_ops::{Graph, operation_inputs, operation_name, operation_outputs},
 };
 
-use super::{cfg_render::render_analysis_cfg, region_graph::region_graph};
+use super::{
+    cfg_render::render_analysis_cfg,
+    region_graph::{RegionGraph, RegionGraphRegion, region_graph_with_regions},
+};
 
 pub(super) struct AnalysisCfg {
     pub(super) cfg: Cfg,
@@ -19,217 +22,117 @@ pub(super) fn render_cfg(root_layer: &Layer) -> Vec<u8> {
 }
 
 fn build_cfg(root_layer: &Layer) -> AnalysisCfg {
-    let _region_graph = region_graph(root_layer);
-    let mut draft = collect_region_blocks(root_layer);
-    apply_transfer_shapes(&mut draft);
-    let cfg = finalize_cfg(draft.nodes);
-    AnalysisCfg {
-        cfg,
-        block_svg_paths: draft.block_svg_paths,
-    }
-}
+    let region_graph = region_graph_with_regions(root_layer);
+    let connectivity = RegionGraphConnectivity::new(&region_graph.graph);
+    let nodes = region_graph
+        .regions
+        .iter()
+        .enumerate()
+        .map(|(node_id, region)| region_cfg_node(node_id, region, &connectivity))
+        .collect::<Vec<_>>();
 
-fn collect_region_blocks(root_layer: &Layer) -> CfgDraft {
-    let mut nodes = Vec::new();
-    let mut block_svg_paths = HashMap::new();
-    let mut pending_transfers = Vec::new();
-    collect_data_layer_blocks(
-        root_layer,
-        DataLayerArtifacts {
-            resolved_svg: PathBuf::from("source.svg"),
-            region_base: PathBuf::from("regions"),
-            region_svgs_rendered: true,
-            control_base: PathBuf::from("control-regions"),
-        },
-        false,
-        &mut nodes,
-        &mut block_svg_paths,
-        &mut pending_transfers,
-    );
-    CfgDraft {
-        nodes,
-        block_svg_paths,
-        pending_transfers,
-    }
-}
-
-fn apply_transfer_shapes(draft: &mut CfgDraft) {
-    apply_pending_transfers(
-        &mut draft.nodes,
-        std::mem::take(&mut draft.pending_transfers),
-    );
-}
-
-fn finalize_cfg(nodes: Vec<CfgNode>) -> Cfg {
     assert_dense_unique_block_ids(&nodes);
-    Cfg {
-        entry: nodes.first().map(|node| node.id).unwrap_or(0),
-        predecessors: vec![Vec::new(); nodes.len()],
-        nodes,
-    }
-}
-
-struct CfgDraft {
-    nodes: Vec<CfgNode>,
-    block_svg_paths: HashMap<usize, String>,
-    pending_transfers: Vec<(usize, PendingTransfer)>,
-}
-
-fn collect_data_layer_blocks(
-    layer: &Layer,
-    artifacts: DataLayerArtifacts,
-    in_control_context: bool,
-    nodes: &mut Vec<CfgNode>,
-    node_svg_paths: &mut HashMap<usize, String>,
-    pending_transfers: &mut Vec<(usize, PendingTransfer)>,
-) {
-    let has_control_transfer =
-        in_control_context || has_interleaved_control_regions(&layer.regions);
-    let boundary_context = DataBoundaryContext::new(&layer.graph, &layer.regions);
-    for region in &layer.regions {
-        if matches!(region.kind, RegionKind::Data) {
-            let id = nodes.len();
-            node_svg_paths.insert(
-                id,
-                data_region_svg_path(region.index, region.kind, &artifacts)
-                    .display()
-                    .to_string(),
-            );
-            push_data_region_node(
-                id,
-                &layer.graph,
-                region,
-                &boundary_context,
-                has_control_transfer,
-                nodes,
-                pending_transfers,
-            );
-        }
-    }
-
-    for region in &layer.regions {
-        if let Some(expansion) = &region.expansion {
-            debug_assert!(matches!(region.kind, RegionKind::InterleavedControl));
-            collect_control_layer_blocks(
-                expansion,
-                artifacts.control_base.clone(),
-                region.index,
-                nodes,
-                node_svg_paths,
-                pending_transfers,
-            );
-        }
-    }
-}
-
-fn collect_control_layer_blocks(
-    layer: &Layer,
-    base: PathBuf,
-    expansion_region_index: usize,
-    nodes: &mut Vec<CfgNode>,
-    node_svg_paths: &mut HashMap<usize, String>,
-    pending_transfers: &mut Vec<(usize, PendingTransfer)>,
-) {
-    let region_svgs_rendered = has_interleaved_data_regions(&layer.regions);
-    for region in &layer.regions {
-        if matches!(region.kind, RegionKind::Control) {
-            let id = nodes.len();
-            node_svg_paths.insert(
-                id,
-                control_region_svg_path(
-                    expansion_region_index,
-                    region.index,
-                    region.kind,
-                    &base,
-                    region_svgs_rendered,
-                )
-                .display()
-                .to_string(),
-            );
-            push_control_region_node(id, &layer.graph, region, nodes, pending_transfers);
-        }
-    }
-
-    let data_base = base.join(format!("{:03}-data-regions", expansion_region_index));
-    for region in &layer.regions {
-        if let Some(expansion) = &region.expansion {
-            debug_assert!(matches!(region.kind, RegionKind::InterleavedData));
-            collect_nested_data_layer_blocks(
-                expansion,
-                data_base.clone(),
-                region.index,
-                nodes,
-                node_svg_paths,
-                pending_transfers,
-            );
-        }
-    }
-}
-
-fn collect_nested_data_layer_blocks(
-    layer: &Layer,
-    base: PathBuf,
-    expansion_region_index: usize,
-    nodes: &mut Vec<CfgNode>,
-    node_svg_paths: &mut HashMap<usize, String>,
-    pending_transfers: &mut Vec<(usize, PendingTransfer)>,
-) {
-    let region_svgs_rendered = has_interleaved_control_regions(&layer.regions);
-    collect_data_layer_blocks(
-        layer,
-        DataLayerArtifacts {
-            resolved_svg: base.join(format!("{:03}-resolved.svg", expansion_region_index)),
-            region_base: base.join(format!("{:03}-regions", expansion_region_index)),
-            region_svgs_rendered,
-            control_base: base.join(format!("{:03}-control-regions", expansion_region_index)),
+    AnalysisCfg {
+        cfg: Cfg {
+            entry: connectivity.entry_node().unwrap_or(0),
+            predecessors: predecessors(&nodes),
+            nodes,
         },
-        true,
-        nodes,
-        node_svg_paths,
-        pending_transfers,
-    );
+        block_svg_paths: region_graph_block_annotations(&region_graph),
+    }
 }
 
-fn push_data_region_node(
-    id: usize,
-    graph: &Graph,
-    region: &Region,
-    boundary_context: &DataBoundaryContext,
-    has_control_regions: bool,
-    nodes: &mut Vec<CfgNode>,
-    pending_transfers: &mut Vec<(usize, PendingTransfer)>,
-) {
-    let boundary = boundary_context.region_boundary(graph, region);
-    nodes.push(CfgNode {
-        id,
-        params: boundary.inputs.clone(),
-        block: region_block(graph, region),
-        transfer: Transfer::Return(Vec::new()),
-    });
-    pending_transfers.push((
-        id,
-        data_region_transfer(id, region.operations.len(), &boundary, has_control_regions),
-    ));
+fn region_cfg_node(
+    node_id: usize,
+    region: &RegionGraphRegion,
+    connectivity: &RegionGraphConnectivity,
+) -> CfgNode {
+    let graph_sources = connectivity.operation_sources(node_id);
+    let graph_targets = connectivity.operation_targets(node_id);
+    CfgNode {
+        id: node_id,
+        params: region.inputs.clone(),
+        block: region_block(&region.graph, &region.region),
+        transfer: region_transfer(node_id, region, &graph_sources, graph_targets, connectivity),
+    }
 }
 
-fn push_control_region_node(
-    id: usize,
-    graph: &Graph,
-    region: &Region,
-    nodes: &mut Vec<CfgNode>,
-    pending_transfers: &mut Vec<(usize, PendingTransfer)>,
-) {
-    let boundary = RegionBoundary::new(graph, region);
-    nodes.push(CfgNode {
-        id,
-        params: boundary.inputs.clone(),
-        block: region_block(graph, region),
-        transfer: Transfer::Return(Vec::new()),
-    });
-    pending_transfers.push((id, control_region_transfer(&boundary)));
+fn region_transfer(
+    node_id: usize,
+    region: &RegionGraphRegion,
+    sources: &[usize],
+    targets: Vec<usize>,
+    connectivity: &RegionGraphConnectivity,
+) -> Transfer {
+    match (sources.len(), targets.len()) {
+        (_, 0) => Transfer::Return(region.outputs.clone()),
+        (_, 1) => goto_or_return(targets[0], &region.outputs, connectivity),
+        (1, 2) => Transfer::If {
+            condition: single_input(node_id, region),
+            then_edge: edge_for_wire(targets[0], output_at(node_id, region, 0), connectivity),
+            else_edge: edge_for_wire(targets[1], output_at(node_id, region, 1), connectivity),
+        },
+        _ => panic!(
+            "unsupported region graph shape for n{node_id} {:?}: {} inputs -> {} outputs",
+            region.kind,
+            sources.len(),
+            targets.len()
+        ),
+    }
 }
 
-fn region_block(graph: &Graph, region: &Region) -> Vec<BlockInstruction> {
+fn goto_or_return(
+    wire: usize,
+    outputs: &[usize],
+    connectivity: &RegionGraphConnectivity,
+) -> Transfer {
+    match connectivity.consumers(wire) {
+        [] => Transfer::Return(outputs.to_vec()),
+        [_] => Transfer::Goto(edge_for_wire(wire, outputs.to_vec(), connectivity)),
+        consumers => panic!(
+            "non-branching region graph wire w{wire} has {} consumers",
+            consumers.len()
+        ),
+    }
+}
+
+fn edge_for_wire(wire: usize, args: Vec<usize>, connectivity: &RegionGraphConnectivity) -> CfgEdge {
+    let consumers = connectivity.consumers(wire);
+    let [target] = consumers else {
+        panic!(
+            "region graph wire w{wire} must have exactly one consumer; got {}",
+            consumers.len()
+        )
+    };
+    CfgEdge {
+        target: *target,
+        args,
+    }
+}
+
+fn single_input(node_id: usize, region: &RegionGraphRegion) -> usize {
+    let [input] = region.inputs.as_slice() else {
+        panic!(
+            "branching region n{node_id} {:?} must have one place-graph input; got {}",
+            region.kind,
+            region.inputs.len()
+        )
+    };
+    *input
+}
+
+fn output_at(node_id: usize, region: &RegionGraphRegion, index: usize) -> Vec<usize> {
+    let Some(output) = region.outputs.get(index).copied() else {
+        panic!(
+            "region n{node_id} {:?} must have output {index}; got {} outputs",
+            region.kind,
+            region.outputs.len()
+        )
+    };
+    vec![output]
+}
+
+fn region_block(graph: &Graph, region: &crate::compile::analysis::Region) -> Vec<BlockInstruction> {
     region
         .operations
         .iter()
@@ -247,215 +150,133 @@ fn region_block(graph: &Graph, region: &Region) -> Vec<BlockInstruction> {
         .collect()
 }
 
-#[derive(Debug, Clone)]
-struct RegionBoundary {
-    inputs: Vec<usize>,
-    outputs: Vec<usize>,
+struct RegionGraphConnectivity {
+    sources_by_operation: Vec<Vec<usize>>,
+    targets_by_operation: Vec<Vec<usize>>,
+    consumers_by_wire: HashMap<usize, Vec<usize>>,
+    producer_by_wire: HashMap<usize, usize>,
 }
 
-#[derive(Debug, Clone)]
-struct DataBoundaryContext {
-    graph_sources: Vec<usize>,
-    graph_targets: Vec<usize>,
-    control_inputs: Vec<usize>,
-    control_outputs: Vec<usize>,
-}
+impl RegionGraphConnectivity {
+    fn new(graph: &Graph) -> Self {
+        let mut sources_by_operation = Vec::new();
+        let mut targets_by_operation = Vec::new();
+        let mut consumers_by_wire = HashMap::<usize, Vec<usize>>::new();
+        let mut producer_by_wire = HashMap::<usize, usize>::new();
 
-impl DataBoundaryContext {
-    fn new(graph: &Graph, regions: &[Region]) -> Self {
-        let control_operations = regions
-            .iter()
-            .filter(|region| matches!(region.kind, RegionKind::InterleavedControl))
-            .flat_map(|region| region.operations.iter().copied())
-            .collect::<Vec<_>>();
+        for operation_id in 0..graph.h.x.0.len() {
+            let sources = operation_inputs(graph, operation_id)
+                .map(|wire| wire.0)
+                .collect::<Vec<_>>();
+            for source in &sources {
+                consumers_by_wire
+                    .entry(*source)
+                    .or_default()
+                    .push(operation_id);
+            }
+
+            let targets = operation_outputs(graph, operation_id)
+                .map(|wire| wire.0)
+                .collect::<Vec<_>>();
+            for target in &targets {
+                let previous = producer_by_wire.insert(*target, operation_id);
+                assert!(
+                    previous.is_none(),
+                    "region graph wire w{target} has multiple producers"
+                );
+            }
+
+            sources_by_operation.push(sources);
+            targets_by_operation.push(targets);
+        }
 
         Self {
-            graph_sources: graph.s.table.iter().copied().collect(),
-            graph_targets: graph.t.table.iter().copied().collect(),
-            control_inputs: unique_wires(
-                control_operations.iter().copied().flat_map(|operation_id| {
-                    operation_inputs(graph, operation_id).map(|wire| wire.0)
-                }),
-            ),
-            control_outputs: unique_wires(control_operations.iter().copied().flat_map(
-                |operation_id| operation_outputs(graph, operation_id).map(|wire| wire.0),
-            )),
+            sources_by_operation,
+            targets_by_operation,
+            consumers_by_wire,
+            producer_by_wire,
         }
     }
 
-    fn region_boundary(&self, graph: &Graph, region: &Region) -> RegionBoundary {
-        let consumed = region_consumed_wires(graph, region);
-        let produced = region_produced_wires(graph, region);
-
-        if self.control_inputs.is_empty() && self.control_outputs.is_empty() {
-            return RegionBoundary::from_consumed_produced(graph, consumed, produced);
-        }
-
-        RegionBoundary {
-            inputs: consumed
-                .iter()
-                .copied()
-                .filter(|wire| {
-                    self.graph_sources.contains(wire) || self.control_outputs.contains(wire)
-                })
-                .collect(),
-            outputs: produced
-                .iter()
-                .copied()
-                .filter(|wire| {
-                    self.graph_targets.contains(wire) || self.control_inputs.contains(wire)
-                })
-                .collect(),
-        }
-    }
-}
-
-impl RegionBoundary {
-    fn new(graph: &Graph, region: &Region) -> Self {
-        let consumed = region_consumed_wires(graph, region);
-        let produced = region_produced_wires(graph, region);
-        Self::from_consumed_produced(graph, consumed, produced)
+    fn operation_sources(&self, operation_id: usize) -> Vec<usize> {
+        self.sources_by_operation[operation_id].clone()
     }
 
-    fn from_consumed_produced(graph: &Graph, consumed: Vec<usize>, produced: Vec<usize>) -> Self {
-        let graph_sources = graph.s.table.iter().copied().collect::<Vec<_>>();
-        let graph_targets = graph.t.table.iter().copied().collect::<Vec<_>>();
-
-        Self {
-            inputs: consumed
-                .iter()
-                .copied()
-                .filter(|wire| !produced.contains(wire) || graph_sources.contains(wire))
-                .collect(),
-            outputs: produced
-                .iter()
-                .copied()
-                .filter(|wire| !consumed.contains(wire) || graph_targets.contains(wire))
-                .collect(),
-        }
+    fn operation_targets(&self, operation_id: usize) -> Vec<usize> {
+        self.targets_by_operation[operation_id].clone()
     }
-}
 
-fn region_consumed_wires(graph: &Graph, region: &Region) -> Vec<usize> {
-    unique_wires(
-        region
-            .operations
+    fn consumers(&self, wire: usize) -> &[usize] {
+        self.consumers_by_wire
+            .get(&wire)
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
+    }
+
+    fn entry_node(&self) -> Option<usize> {
+        self.sources_by_operation
             .iter()
-            .copied()
-            .flat_map(|operation_id| operation_inputs(graph, operation_id).map(|wire| wire.0)),
-    )
+            .enumerate()
+            .find(|(_, sources)| {
+                sources
+                    .iter()
+                    .any(|source| !self.producer_by_wire.contains_key(source))
+            })
+            .map(|(operation_id, _)| operation_id)
+    }
 }
 
-fn region_produced_wires(graph: &Graph, region: &Region) -> Vec<usize> {
-    unique_wires(
-        region
-            .operations
-            .iter()
-            .copied()
-            .flat_map(|operation_id| operation_outputs(graph, operation_id).map(|wire| wire.0)),
-    )
-}
-
-fn unique_wires(wires: impl IntoIterator<Item = usize>) -> Vec<usize> {
-    let mut unique = Vec::new();
-    for wire in wires {
-        if !unique.contains(&wire) {
-            unique.push(wire);
+fn predecessors(nodes: &[CfgNode]) -> Vec<Vec<usize>> {
+    let mut predecessors = vec![Vec::new(); nodes.len()];
+    for node in nodes {
+        for successor in successors(&node.transfer) {
+            predecessors[successor].push(node.id);
         }
     }
-    unique
+    predecessors
 }
 
-#[derive(Debug, Clone)]
-enum PendingTransfer {
-    Goto(Vec<usize>),
-    If {
-        condition: usize,
-        then_args: Vec<usize>,
-        else_args: Vec<usize>,
-    },
-    Return(Vec<usize>),
+fn successors(transfer: &Transfer) -> Vec<usize> {
+    match transfer {
+        Transfer::Goto(edge) => vec![edge.target],
+        Transfer::If {
+            then_edge,
+            else_edge,
+            ..
+        } => vec![then_edge.target, else_edge.target],
+        Transfer::Return(_) => Vec::new(),
+    }
 }
 
-fn data_region_transfer(
-    node_id: usize,
-    operation_count: usize,
-    boundary: &RegionBoundary,
-    has_control_regions: bool,
-) -> PendingTransfer {
-    match (
-        boundary.inputs.len(),
-        boundary.outputs.len(),
-        has_control_regions,
-    ) {
-        // Top-level data-only graph: the single data block is the whole CFG body.
-        (_, _, false) => PendingTransfer::Return(boundary.outputs.clone()),
-        // Data block enters control: boundary inputs collapse to one control token.
-        (_, 1, true) => PendingTransfer::Goto(boundary.outputs.clone()),
-        // Data block exits control: one control token expands to many top-level outputs.
-        (1, _, true) if boundary.outputs.len() > 1 => {
-            PendingTransfer::Return(boundary.outputs.clone())
+fn region_graph_block_annotations(region_graph: &RegionGraph) -> HashMap<usize, String> {
+    region_graph
+        .regions
+        .iter()
+        .enumerate()
+        .map(|(node_id, region)| (node_id, region_path_annotation(&region.path, region.kind)))
+        .collect()
+}
+
+fn region_path_annotation(
+    path: &[usize],
+    kind: crate::compile::analysis::partition::RegionKind,
+) -> String {
+    let path = path
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(".");
+    format!("region.{path}.{}", region_kind_name(kind))
+}
+
+fn region_kind_name(kind: crate::compile::analysis::partition::RegionKind) -> &'static str {
+    match kind {
+        crate::compile::analysis::partition::RegionKind::Data => "data",
+        crate::compile::analysis::partition::RegionKind::Control => "control",
+        crate::compile::analysis::partition::RegionKind::InterleavedControl => {
+            "interleaved-control"
         }
-        _ => panic!(
-            "unsupported data region shape for n{node_id} ({operation_count} operations): {} inputs -> {} outputs",
-            boundary.inputs.len(),
-            boundary.outputs.len()
-        ),
-    }
-}
-
-fn control_region_transfer(boundary: &RegionBoundary) -> PendingTransfer {
-    match (boundary.inputs.len(), boundary.outputs.len()) {
-        // Sequential control.
-        (1, 1) => PendingTransfer::Goto(boundary.outputs.clone()),
-        // Branching control.
-        (1, 2) => PendingTransfer::If {
-            condition: boundary.inputs[0],
-            then_args: vec![boundary.outputs[0]],
-            else_args: vec![boundary.outputs[1]],
-        },
-        // Merge control.
-        (2, 1) => PendingTransfer::Goto(boundary.outputs.clone()),
-        _ => panic!(
-            "unsupported control region shape: {} inputs -> {} outputs",
-            boundary.inputs.len(),
-            boundary.outputs.len()
-        ),
-    }
-}
-
-fn apply_pending_transfers(
-    nodes: &mut [CfgNode],
-    pending_transfers: Vec<(usize, PendingTransfer)>,
-) {
-    for (source, pending_transfer) in pending_transfers {
-        let transfer = match pending_transfer {
-            PendingTransfer::Goto(args) => Transfer::Goto(CfgEdge {
-                target: source,
-                args,
-            }),
-            PendingTransfer::If {
-                condition,
-                then_args,
-                else_args,
-            } => Transfer::If {
-                condition,
-                then_edge: CfgEdge {
-                    target: source,
-                    args: then_args,
-                },
-                else_edge: CfgEdge {
-                    target: source,
-                    args: else_args,
-                },
-            },
-            PendingTransfer::Return(args) => Transfer::Return(args),
-        };
-        let source_node = nodes
-            .iter_mut()
-            .find(|node| node.id == source)
-            .expect("pending transfer source block must exist");
-        source_node.transfer = transfer;
+        crate::compile::analysis::partition::RegionKind::InterleavedData => "interleaved-data",
     }
 }
 
@@ -468,66 +289,4 @@ fn assert_dense_unique_block_ids(nodes: &[CfgNode]) {
     for (expected, id) in ids.into_iter().enumerate() {
         assert_eq!(id, expected, "cfg block ids must be dense after sorting");
     }
-}
-
-#[derive(Debug, Clone)]
-struct DataLayerArtifacts {
-    resolved_svg: PathBuf,
-    region_base: PathBuf,
-    region_svgs_rendered: bool,
-    control_base: PathBuf,
-}
-
-fn data_region_svg_path(
-    region_index: usize,
-    kind: RegionKind,
-    artifacts: &DataLayerArtifacts,
-) -> PathBuf {
-    if artifacts.region_svgs_rendered {
-        artifacts
-            .region_base
-            .join(region_svg_file_name(region_index, kind))
-    } else {
-        artifacts.resolved_svg.clone()
-    }
-}
-
-fn control_region_svg_path(
-    control_region_index: usize,
-    region_index: usize,
-    kind: RegionKind,
-    base: &std::path::Path,
-    region_svgs_rendered: bool,
-) -> PathBuf {
-    if region_svgs_rendered {
-        base.join(format!("{control_region_index:03}-regions"))
-            .join(region_svg_file_name(region_index, kind))
-    } else {
-        base.join(format!("{control_region_index:03}-resolved.svg"))
-    }
-}
-
-fn region_svg_file_name(region_index: usize, kind: RegionKind) -> String {
-    format!("{region_index:03}-{}.svg", region_kind_file_name(kind))
-}
-
-fn region_kind_file_name(kind: RegionKind) -> &'static str {
-    match kind {
-        RegionKind::Data => "data",
-        RegionKind::InterleavedControl => "control",
-        RegionKind::Control => "native-control",
-        RegionKind::InterleavedData => "interleaved-data",
-    }
-}
-
-fn has_interleaved_data_regions(regions: &[Region]) -> bool {
-    regions
-        .iter()
-        .any(|region| matches!(region.kind, RegionKind::InterleavedData))
-}
-
-fn has_interleaved_control_regions(regions: &[Region]) -> bool {
-    regions
-        .iter()
-        .any(|region| matches!(region.kind, RegionKind::InterleavedControl))
 }

@@ -22,7 +22,25 @@ use crate::{
     union_find::UnionFind,
 };
 
+pub(super) struct RegionGraph {
+    pub(super) graph: Graph,
+    pub(super) regions: Vec<RegionGraphRegion>,
+}
+
+pub(super) struct RegionGraphRegion {
+    pub(super) path: Vec<usize>,
+    pub(super) kind: RegionKind,
+    pub(super) graph: Graph,
+    pub(super) region: Region,
+    pub(super) inputs: Vec<usize>,
+    pub(super) outputs: Vec<usize>,
+}
+
 pub(super) fn region_graph(layer: &Layer) -> Graph {
+    region_graph_with_regions(layer).graph
+}
+
+pub(super) fn region_graph_with_regions(layer: &Layer) -> RegionGraph {
     let mut builder = RegionGraphBuilder::default();
     builder.add_layer(layer);
     builder.finish()
@@ -69,6 +87,7 @@ struct RegionGraphBuilder {
     wire_labels: Vec<Obj>,
     equations: Vec<(usize, usize)>,
     operations: Vec<RegionOperation>,
+    regions: Vec<RegionGraphRegion>,
 }
 
 impl RegionGraphBuilder {
@@ -119,11 +138,11 @@ impl RegionGraphBuilder {
             (_, Some(expansion)) => self.visit_layer(expansion, Some(layer_id), path),
             (RegionKind::Data, None) => {
                 let interface = data_context.data_region_interface(graph, region);
-                self.add_region_operation(layer_id, region, path, interface);
+                self.add_region_operation(layer_id, graph, region, path, interface);
             }
             (RegionKind::Control, None) => {
                 let interface = RegionInterface::control_region(graph, region);
-                self.add_region_operation(layer_id, region, path, interface);
+                self.add_region_operation(layer_id, graph, region, path, interface);
             }
             (RegionKind::InterleavedControl | RegionKind::InterleavedData, None) => {
                 panic!(
@@ -239,10 +258,17 @@ impl RegionGraphBuilder {
     fn add_region_operation(
         &mut self,
         layer_id: usize,
+        graph: &Graph,
         region: &Region,
         path: Vec<usize>,
         interface: RegionInterface,
     ) {
+        let place_boundary = RegionBoundary::new(graph, region);
+        let region_inputs = interface_place_wires(&interface.inputs)
+            .unwrap_or_else(|| place_boundary.inputs.clone());
+        let region_outputs = interface_place_wires(&interface.outputs)
+            .unwrap_or_else(|| place_boundary.outputs.clone());
+
         for (left, right) in interface.equations {
             self.equations.push((
                 self.layer_wire_class(layer_id, left),
@@ -265,6 +291,14 @@ impl RegionGraphBuilder {
             operation: region_operation(region, &path),
             sources,
             targets,
+        });
+        self.regions.push(RegionGraphRegion {
+            path,
+            kind: region.kind,
+            graph: graph.clone(),
+            region: region.clone(),
+            inputs: region_inputs,
+            outputs: region_outputs,
         });
     }
 
@@ -311,7 +345,7 @@ impl RegionGraphBuilder {
     // Convert provisional classes into actual graph wires. Only classes used
     // by emitted region-operation ports become graph wires, so internal layer
     // wires that are irrelevant to region connectivity disappear here.
-    fn finish(self) -> Graph {
+    fn finish(self) -> RegionGraph {
         let mut uf = UnionFind::new(self.wire_labels.len());
         for (left, right) in self.equations {
             uf.union(left, right);
@@ -349,7 +383,7 @@ impl RegionGraphBuilder {
         }
 
         let wire_count = wires.len();
-        OpenHypergraph {
+        let graph = OpenHypergraph {
             s: finite_function(Vec::new(), wire_count),
             t: finite_function(Vec::new(), wire_count),
             h: Hypergraph {
@@ -360,7 +394,12 @@ impl RegionGraphBuilder {
             },
         }
         .validate()
-        .expect("region graph must be valid")
+        .expect("region graph must be valid");
+
+        RegionGraph {
+            graph,
+            regions: self.regions,
+        }
     }
 }
 
@@ -589,6 +628,17 @@ fn representative_or_synthetic(wires: &[usize]) -> InterfaceWire {
         .copied()
         .map(InterfaceWire::Layer)
         .unwrap_or(InterfaceWire::Synthetic)
+}
+
+fn interface_place_wires(wires: &[InterfaceWire]) -> Option<Vec<usize>> {
+    let mut place_wires = Vec::new();
+    for wire in wires {
+        match wire {
+            InterfaceWire::Layer(wire) => place_wires.push(*wire),
+            InterfaceWire::Synthetic => return None,
+        }
+    }
+    Some(place_wires)
 }
 
 fn collapse_boundary_wires(wires: &[usize]) -> Vec<(usize, usize)> {

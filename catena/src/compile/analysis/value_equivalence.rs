@@ -16,11 +16,100 @@ use crate::{
 };
 
 pub(super) fn value_equivalence_trace(layer: &Layer) -> Vec<u8> {
+    let equivalences = value_equivalences(layer);
+    equivalences.trace().into_bytes()
+}
+
+pub(super) fn value_equivalences(layer: &Layer) -> ValueEquivalences {
     let region_graph = region_graph_with_regions(layer);
     let mut builder = ValueEquivalenceBuilder::default();
     builder.add_cfg_edge_equations(&region_graph);
     builder.add_monoidal_equations(&region_graph);
-    builder.finish_trace().into_bytes()
+    builder.finish()
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct ValueEquivalences {
+    terms: Vec<ValueTerm>,
+    equations: Vec<ValueEquation>,
+    class_by_term: HashMap<ValueTerm, usize>,
+    variable_by_class: HashMap<usize, usize>,
+}
+
+impl ValueEquivalences {
+    pub(super) fn resolve_wire(&self, region: &[usize], wire: usize) -> usize {
+        self.resolve(region, wire, &[])
+    }
+
+    pub(super) fn resolve(&self, region: &[usize], wire: usize, path: &[ValueProjection]) -> usize {
+        let term = ValueTerm {
+            region: region.to_vec(),
+            wire,
+            path: path
+                .iter()
+                .copied()
+                .map(ValuePathStep::from)
+                .collect::<Vec<_>>(),
+        };
+        self.class_by_term
+            .get(&term)
+            .and_then(|class| self.variable_by_class.get(class))
+            .copied()
+            .unwrap_or(wire)
+    }
+
+    fn trace(&self) -> String {
+        let mut out = String::new();
+        writeln!(&mut out, "# Value Equivalence\n").expect("write to string cannot fail");
+        self.write_equations(&mut out);
+        self.write_classes(&mut out);
+        out
+    }
+
+    fn write_equations(&self, out: &mut String) {
+        writeln!(out, "equations").expect("write to string cannot fail");
+        for equation in &self.equations {
+            writeln!(
+                out,
+                "  {} ~ {}    {}",
+                self.terms[equation.left], self.terms[equation.right], equation.reason
+            )
+            .expect("write to string cannot fail");
+        }
+    }
+
+    fn write_classes(&self, out: &mut String) {
+        let mut classes = BTreeMap::<usize, Vec<&ValueTerm>>::new();
+        for term in &self.terms {
+            if let Some(class) = self.class_by_term.get(term).copied() {
+                classes.entry(class).or_default().push(term);
+            }
+        }
+
+        writeln!(out, "\nclasses").expect("write to string cannot fail");
+        for terms in classes.values() {
+            if terms.len() < 2 {
+                continue;
+            }
+            let rendered = terms.iter().map(ToString::to_string).collect::<Vec<_>>();
+            writeln!(out, "  {}", rendered.join(" = ")).expect("write to string cannot fail");
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(super) enum ValueProjection {
+    Product(usize),
+    Tag,
+}
+
+impl From<ValueProjection> for ValuePathStep {
+    fn from(value: ValueProjection) -> Self {
+        match value {
+            ValueProjection::Product(field) => Self::Product(field),
+            ValueProjection::Tag => Self::Tag,
+        }
+    }
 }
 
 #[derive(Default)]
@@ -375,45 +464,170 @@ impl ValueEquivalenceBuilder {
         id
     }
 
-    fn finish_trace(self) -> String {
+    fn finish(mut self) -> ValueEquivalences {
+        self.add_base_terms_for_observed_paths();
+        self.close_under_congruence();
         let mut union_find = UnionFind::new(self.terms.len());
         for equation in &self.equations {
             union_find.union(equation.left, equation.right);
         }
 
-        let mut out = String::new();
-        writeln!(&mut out, "# Value Equivalence\n").expect("write to string cannot fail");
-        self.write_equations(&mut out);
-        self.write_classes(&mut out, &mut union_find);
-        out
-    }
-
-    fn write_equations(&self, out: &mut String) {
-        writeln!(out, "equations").expect("write to string cannot fail");
-        for equation in &self.equations {
-            writeln!(
-                out,
-                "  {} ~ {}    {}",
-                self.terms[equation.left], self.terms[equation.right], equation.reason
-            )
-            .expect("write to string cannot fail");
-        }
-    }
-
-    fn write_classes(&self, out: &mut String, union_find: &mut UnionFind) {
-        let mut classes = BTreeMap::<usize, Vec<&ValueTerm>>::new();
+        self.add_congruence_equations(&mut union_find);
+        let mut class_by_term = HashMap::new();
         for (id, term) in self.terms.iter().enumerate() {
-            classes.entry(union_find.find(id)).or_default().push(term);
+            class_by_term.insert(term.clone(), union_find.find(id));
         }
 
-        writeln!(out, "\nclasses").expect("write to string cannot fail");
-        for terms in classes.values() {
-            if terms.len() < 2 {
-                continue;
-            }
-            let rendered = terms.iter().map(ToString::to_string).collect::<Vec<_>>();
-            writeln!(out, "  {}", rendered.join(" = ")).expect("write to string cannot fail");
+        let mut terms_by_class = BTreeMap::<usize, Vec<&ValueTerm>>::new();
+        for term in &self.terms {
+            terms_by_class
+                .entry(class_by_term[term])
+                .or_default()
+                .push(term);
         }
+        let mut next_variable = self.terms.iter().map(|term| term.wire).max().unwrap_or(0) + 1;
+        let mut variable_by_class = HashMap::new();
+        for (class, terms) in terms_by_class {
+            if terms.len() > 1 || terms.iter().any(|term| !term.path.is_empty()) {
+                let variable = terms
+                    .iter()
+                    .filter(|term| term.path.is_empty())
+                    .min_by_key(|term| (term.region.as_slice(), term.wire))
+                    .map(|term| term.wire)
+                    .unwrap_or_else(|| {
+                        let variable = next_variable;
+                        next_variable += 1;
+                        variable
+                    });
+                variable_by_class.insert(class, variable);
+            }
+        }
+
+        ValueEquivalences {
+            terms: self.terms,
+            equations: self.equations,
+            class_by_term,
+            variable_by_class,
+        }
+    }
+
+    fn close_under_congruence(&mut self) {
+        loop {
+            let mut union_find = UnionFind::new(self.terms.len());
+            for equation in &self.equations {
+                union_find.union(equation.left, equation.right);
+            }
+            self.add_congruence_equations(&mut union_find);
+
+            let additions = self.congruence_projection_additions(&mut union_find);
+            if additions.is_empty() {
+                break;
+            }
+
+            for (left, right) in additions {
+                self.add_equation(left, right, EquationReason::Congruence);
+            }
+        }
+    }
+
+    fn add_base_terms_for_observed_paths(&mut self) {
+        let base_terms = self
+            .terms
+            .iter()
+            .filter(|term| !term.path.is_empty())
+            .map(|term| ValueTerm {
+                region: term.region.clone(),
+                wire: term.wire,
+                path: Vec::new(),
+            })
+            .collect::<Vec<_>>();
+        for term in base_terms {
+            self.term_id(term);
+        }
+    }
+
+    fn add_congruence_equations(&self, union_find: &mut UnionFind) {
+        let mut terms_by_prefix_and_suffix =
+            BTreeMap::<(usize, Vec<ValuePathStep>), Vec<usize>>::new();
+        for (id, term) in self.terms.iter().enumerate() {
+            for split in 0..term.path.len() {
+                let prefix = ValueTerm {
+                    region: term.region.clone(),
+                    wire: term.wire,
+                    path: term.path[..split].to_vec(),
+                };
+                let Some(prefix_id) = self.term_ids.get(&prefix).copied() else {
+                    continue;
+                };
+                terms_by_prefix_and_suffix
+                    .entry((union_find.find(prefix_id), term.path[split..].to_vec()))
+                    .or_default()
+                    .push(id);
+            }
+        }
+
+        for ids in terms_by_prefix_and_suffix.values() {
+            if let Some(first) = ids.first().copied() {
+                for id in ids.iter().copied().skip(1) {
+                    union_find.union(first, id);
+                }
+            }
+        }
+    }
+
+    fn congruence_projection_additions(
+        &self,
+        union_find: &mut UnionFind,
+    ) -> Vec<(ValueTerm, ValueTerm)> {
+        let mut prefixes_by_class = BTreeMap::<usize, Vec<ValueTerm>>::new();
+        for (id, term) in self.terms.iter().enumerate() {
+            prefixes_by_class
+                .entry(union_find.find(id))
+                .or_default()
+                .push(term.clone());
+        }
+
+        let mut projected_by_prefix_class_and_suffix =
+            BTreeMap::<(usize, Vec<ValuePathStep>), ValueTerm>::new();
+        for term in &self.terms {
+            for split in 0..term.path.len() {
+                let prefix = ValueTerm {
+                    region: term.region.clone(),
+                    wire: term.wire,
+                    path: term.path[..split].to_vec(),
+                };
+                let Some(prefix_id) = self.term_ids.get(&prefix).copied() else {
+                    continue;
+                };
+                let prefix_class = union_find.find(prefix_id);
+                projected_by_prefix_class_and_suffix
+                    .entry((prefix_class, term.path[split..].to_vec()))
+                    .or_insert_with(|| term.clone());
+            }
+        }
+
+        let mut additions = Vec::new();
+        for ((prefix_class, suffix), representative) in projected_by_prefix_class_and_suffix {
+            let Some(prefixes) = prefixes_by_class.get(&prefix_class) else {
+                continue;
+            };
+            for prefix in prefixes {
+                let projected = ValueTerm {
+                    region: prefix.region.clone(),
+                    wire: prefix.wire,
+                    path: prefix
+                        .path
+                        .iter()
+                        .copied()
+                        .chain(suffix.iter().copied())
+                        .collect(),
+                };
+                if !self.term_ids.contains_key(&projected) {
+                    additions.push((projected, representative.clone()));
+                }
+            }
+        }
+        additions
     }
 }
 
@@ -434,6 +648,7 @@ enum EquationReason {
         operation_id: usize,
         operation: &'static str,
     },
+    Congruence,
 }
 
 impl std::fmt::Display for EquationReason {
@@ -449,6 +664,7 @@ impl std::fmt::Display for EquationReason {
                 "[region.{} #{operation_id} {operation}]",
                 path_label(region)
             ),
+            Self::Congruence => write!(f, "[congruence]"),
         }
     }
 }

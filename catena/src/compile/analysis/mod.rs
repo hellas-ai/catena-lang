@@ -13,7 +13,7 @@ mod wires;
 
 use std::{fmt::Write, path::PathBuf};
 
-use crate::compile::{CompileGraph, CompileTheory};
+use crate::compile::{CompileGraph, CompileTheory, cfg::CfgOptions};
 
 use self::{
     cfg::render_cfg,
@@ -29,7 +29,7 @@ use self::{
 pub use layering::{Layer, NestingMorphism, Region};
 
 pub fn render_analysis(graph: &CompileGraph) -> std::io::Result<Vec<u8>> {
-    Ok(render_analysis_artifacts(graph)?
+    Ok(render_analysis_artifacts(graph, CfgOptions::default())?
         .into_iter()
         .find(|artifact| artifact.path == PathBuf::from("source.svg"))
         .expect("analysis artifacts include source graph")
@@ -53,7 +53,10 @@ pub fn layer(graph: &CompileGraph) -> Layer {
     root_layer(graph.graph.clone(), &regions, &control_region_graphs)
 }
 
-pub fn render_analysis_artifacts(graph: &CompileGraph) -> std::io::Result<Vec<AnalysisArtifact>> {
+pub fn render_analysis_artifacts(
+    graph: &CompileGraph,
+    cfg_options: CfgOptions,
+) -> std::io::Result<Vec<AnalysisArtifact>> {
     assert!(
         matches!(graph.theory, CompileTheory::Data),
         "analysis expects a data graph"
@@ -70,7 +73,7 @@ pub fn render_analysis_artifacts(graph: &CompileGraph) -> std::io::Result<Vec<An
     let region_graph = graph_svg(&region_graph(&layer))?;
     let region_graph_trace = region_graph_trace(&layer);
     let value_equivalence_trace = value_equivalence_trace(&layer);
-    let cfg = render_cfg(&layer);
+    let cfg = render_cfg(&layer, cfg_options);
     let mut artifacts = vec![
         analysis_index_artifact(graph, &layer),
         AnalysisArtifact {

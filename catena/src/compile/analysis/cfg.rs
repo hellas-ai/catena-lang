@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use crate::compile::{
     analysis::Layer,
@@ -28,7 +28,7 @@ fn build_cfg(root_layer: &Layer, options: CfgOptions) -> AnalysisCfg {
     let region_graph = region_graph_with_regions(root_layer);
     let connectivity = RegionGraphConnectivity::new(&region_graph.graph);
     let value_equivalences = value_equivalences(root_layer);
-    let nodes = region_graph
+    let mut nodes = region_graph
         .regions
         .iter()
         .enumerate()
@@ -36,17 +36,23 @@ fn build_cfg(root_layer: &Layer, options: CfgOptions) -> AnalysisCfg {
             region_cfg_node(node_id, region, &connectivity, &value_equivalences, options)
         })
         .collect::<Vec<_>>();
+    let mut entry = connectivity.entry_node().unwrap_or(0);
+    let mut block_svg_paths = region_graph_block_annotations(&region_graph);
+
+    if !options.keep_control_flow_operations {
+        (nodes, entry, block_svg_paths) = remove_empty_goto_blocks(nodes, entry, block_svg_paths);
+    }
 
     assert_dense_unique_block_ids(&nodes);
     let globals = cfg_globals(root_layer, &nodes);
     AnalysisCfg {
         cfg: Cfg {
-            entry: connectivity.entry_node().unwrap_or(0),
+            entry,
             predecessors: predecessors(&nodes),
             nodes,
         },
         globals,
-        block_svg_paths: region_graph_block_annotations(&region_graph),
+        block_svg_paths,
     }
 }
 
@@ -89,6 +95,147 @@ fn transfer_values(transfer: &Transfer) -> Vec<usize> {
             .collect(),
         Transfer::Return(values) => values.clone(),
     }
+}
+
+fn remove_empty_goto_blocks(
+    nodes: Vec<CfgNode>,
+    entry: usize,
+    block_svg_paths: HashMap<usize, String>,
+) -> (Vec<CfgNode>, usize, HashMap<usize, String>) {
+    let removable = nodes
+        .iter()
+        .filter(|node| removable_empty_goto_block(node))
+        .map(|node| node.id)
+        .collect::<HashSet<_>>();
+    if removable.is_empty() {
+        return (nodes, entry, block_svg_paths);
+    }
+
+    let redirected_entry = redirect_entry(entry, &nodes, &removable);
+    let mut kept_nodes = nodes
+        .iter()
+        .filter(|node| !removable.contains(&node.id))
+        .cloned()
+        .map(|mut node| {
+            node.transfer = redirect_transfer(node.transfer, &nodes, &removable);
+            node
+        })
+        .collect::<Vec<_>>();
+
+    let id_map = kept_nodes
+        .iter()
+        .enumerate()
+        .map(|(new_id, node)| (node.id, new_id))
+        .collect::<HashMap<_, _>>();
+
+    for (new_id, node) in kept_nodes.iter_mut().enumerate() {
+        node.id = new_id;
+        remap_transfer_targets(&mut node.transfer, &id_map);
+    }
+
+    let block_svg_paths = block_svg_paths
+        .into_iter()
+        .filter_map(|(old_id, annotation)| id_map.get(&old_id).map(|new_id| (*new_id, annotation)))
+        .collect();
+
+    (kept_nodes, id_map[&redirected_entry], block_svg_paths)
+}
+
+fn removable_empty_goto_block(node: &CfgNode) -> bool {
+    node.block.is_empty() && matches!(node.transfer, Transfer::Goto(_))
+}
+
+fn redirect_entry(entry: usize, nodes: &[CfgNode], removable: &HashSet<usize>) -> usize {
+    let edge = redirect_edge(
+        CfgEdge {
+            target: entry,
+            args: Vec::new(),
+        },
+        nodes,
+        removable,
+    );
+    assert!(
+        edge.args.is_empty(),
+        "entry redirection through empty blocks cannot synthesize block arguments"
+    );
+    edge.target
+}
+
+fn redirect_transfer(
+    transfer: Transfer,
+    nodes: &[CfgNode],
+    removable: &HashSet<usize>,
+) -> Transfer {
+    match transfer {
+        Transfer::Goto(edge) => Transfer::Goto(redirect_edge(edge, nodes, removable)),
+        Transfer::If {
+            condition,
+            then_edge,
+            else_edge,
+        } => Transfer::If {
+            condition,
+            then_edge: redirect_edge(then_edge, nodes, removable),
+            else_edge: redirect_edge(else_edge, nodes, removable),
+        },
+        Transfer::Return(values) => Transfer::Return(values),
+    }
+}
+
+fn redirect_edge(mut edge: CfgEdge, nodes: &[CfgNode], removable: &HashSet<usize>) -> CfgEdge {
+    let mut seen = HashSet::new();
+    while removable.contains(&edge.target) {
+        let removed_node = edge.target;
+        assert!(
+            seen.insert(removed_node),
+            "cycle while removing empty cfg block n{}",
+            removed_node
+        );
+        let Transfer::Goto(next) = &nodes[removed_node].transfer else {
+            unreachable!("only empty goto blocks are removable")
+        };
+        edge = CfgEdge {
+            target: next.target,
+            args: redirected_args(&nodes[removed_node], &edge.args, &next.args),
+        };
+    }
+    edge
+}
+
+fn redirected_args(node: &CfgNode, incoming_args: &[usize], outgoing_args: &[usize]) -> Vec<usize> {
+    match (incoming_args, outgoing_args) {
+        (_, []) => Vec::new(),
+        ([incoming], [_outgoing]) => vec![*incoming],
+        ([], outgoing) => outgoing.to_vec(),
+        (incoming, outgoing) if incoming == outgoing => incoming.to_vec(),
+        _ => panic!(
+            "cannot remove empty cfg block n{} with {} params, {} incoming args, and {} outgoing args",
+            node.id,
+            node.params.len(),
+            incoming_args.len(),
+            outgoing_args.len()
+        ),
+    }
+}
+
+fn remap_transfer_targets(transfer: &mut Transfer, id_map: &HashMap<usize, usize>) {
+    match transfer {
+        Transfer::Goto(edge) => remap_edge_target(edge, id_map),
+        Transfer::If {
+            then_edge,
+            else_edge,
+            ..
+        } => {
+            remap_edge_target(then_edge, id_map);
+            remap_edge_target(else_edge, id_map);
+        }
+        Transfer::Return(_) => {}
+    }
+}
+
+fn remap_edge_target(edge: &mut CfgEdge, id_map: &HashMap<usize, usize>) {
+    edge.target = *id_map
+        .get(&edge.target)
+        .unwrap_or_else(|| panic!("missing remapped cfg node id for n{}", edge.target));
 }
 
 fn region_cfg_node(
@@ -288,7 +435,9 @@ fn region_block(
         .iter()
         .copied()
         .filter(|operation_id| {
-            options.keep_monoidal_operations || !is_monoidal_operation(graph, *operation_id)
+            (options.keep_monoidal_operations || !is_monoidal_operation(graph, *operation_id))
+                && (options.keep_control_flow_operations
+                    || !is_control_flow_operation(graph, *operation_id))
         })
         .map(|operation_id| BlockInstruction {
             operation_id,
@@ -317,6 +466,10 @@ fn region_block(
 
 fn is_monoidal_operation(graph: &Graph, operation_id: usize) -> bool {
     actual_operation_kind(operation_name(graph, operation_id)) == OperationKind::MonoidalStructure
+}
+
+fn is_control_flow_operation(graph: &Graph, operation_id: usize) -> bool {
+    actual_operation_kind(operation_name(graph, operation_id)) == OperationKind::ControlFlow
 }
 
 fn region_has_operation(region: &RegionGraphRegion, operation: &str) -> bool {

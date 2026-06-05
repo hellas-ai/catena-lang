@@ -1,36 +1,25 @@
 use std::{collections::HashMap, path::PathBuf};
 
 use crate::compile::{
-    analysis::{
-        DataRegionGraph,
-        partition::{OperationRegion, RegionKind},
-    },
+    analysis::{Layer, Region, partition::RegionKind},
     cfg::{BlockInstruction, Cfg, CfgEdge, CfgNode, Transfer},
     graph_ops::{Graph, operation_inputs, operation_name, operation_outputs},
 };
 
-use super::{ControlRegionGraph, cfg_render::render_analysis_cfg};
+use super::cfg_render::render_analysis_cfg;
 
 pub(super) struct AnalysisCfg {
     pub(super) cfg: Cfg,
     pub(super) block_svg_paths: HashMap<usize, String>,
 }
 
-pub(super) fn render_cfg(
-    graph: &Graph,
-    regions: &[OperationRegion],
-    control_region_graphs: &[ControlRegionGraph],
-) -> Vec<u8> {
-    let analysis_cfg = build_cfg(graph, regions, control_region_graphs);
-    render_analysis_cfg(graph, analysis_cfg)
+pub(super) fn render_cfg(root_layer: &Layer) -> Vec<u8> {
+    let analysis_cfg = build_cfg(root_layer);
+    render_analysis_cfg(&root_layer.graph, analysis_cfg)
 }
 
-fn build_cfg(
-    graph: &Graph,
-    regions: &[OperationRegion],
-    control_region_graphs: &[ControlRegionGraph],
-) -> AnalysisCfg {
-    let mut draft = collect_region_blocks(graph, regions, control_region_graphs);
+fn build_cfg(root_layer: &Layer) -> AnalysisCfg {
+    let mut draft = collect_region_blocks(root_layer);
     apply_transfer_shapes(&mut draft);
     let cfg = finalize_cfg(draft.nodes);
     AnalysisCfg {
@@ -39,19 +28,13 @@ fn build_cfg(
     }
 }
 
-fn collect_region_blocks(
-    graph: &Graph,
-    regions: &[OperationRegion],
-    control_region_graphs: &[ControlRegionGraph],
-) -> CfgDraft {
+fn collect_region_blocks(root_layer: &Layer) -> CfgDraft {
     let mut nodes = Vec::new();
     let mut block_svg_paths = HashMap::new();
     let mut pending_transfers = Vec::new();
-    collect_data_graph_nodes(
-        graph,
-        regions,
-        control_region_graphs,
-        DataGraphArtifacts {
+    collect_data_layer_blocks(
+        root_layer,
+        DataLayerArtifacts {
             resolved_svg: PathBuf::from("source.svg"),
             region_base: PathBuf::from("regions"),
             region_svgs_rendered: true,
@@ -91,30 +74,29 @@ struct CfgDraft {
     pending_transfers: Vec<(usize, PendingTransfer)>,
 }
 
-fn collect_data_graph_nodes(
-    graph: &Graph,
-    regions: &[OperationRegion],
-    control_region_graphs: &[ControlRegionGraph],
-    artifacts: DataGraphArtifacts,
+fn collect_data_layer_blocks(
+    layer: &Layer,
+    artifacts: DataLayerArtifacts,
     in_control_context: bool,
     nodes: &mut Vec<CfgNode>,
     node_svg_paths: &mut HashMap<usize, String>,
     pending_transfers: &mut Vec<(usize, PendingTransfer)>,
 ) {
-    let has_control_transfer = in_control_context || !control_region_graphs.is_empty();
-    let boundary_context = DataBoundaryContext::new(graph, regions);
-    for (region_index, region) in regions.iter().enumerate() {
+    let has_control_transfer =
+        in_control_context || has_interleaved_control_regions(&layer.regions);
+    let boundary_context = DataBoundaryContext::new(&layer.graph, &layer.regions);
+    for region in &layer.regions {
         if matches!(region.kind, RegionKind::Data) {
             let id = nodes.len();
             node_svg_paths.insert(
                 id,
-                data_region_svg_path(region_index, region, &artifacts)
+                data_region_svg_path(region.index, region.kind, &artifacts)
                     .display()
                     .to_string(),
             );
             push_data_region_node(
                 id,
-                graph,
+                &layer.graph,
                 region,
                 &boundary_context,
                 has_control_transfer,
@@ -124,79 +106,81 @@ fn collect_data_graph_nodes(
         }
     }
 
-    for control_region in control_region_graphs {
-        collect_control_graph_nodes(
-            control_region,
-            artifacts.control_base.clone(),
-            nodes,
-            node_svg_paths,
-            pending_transfers,
-        );
+    for region in &layer.regions {
+        if let Some(expansion) = &region.expansion {
+            debug_assert!(matches!(region.kind, RegionKind::InterleavedControl));
+            collect_control_layer_blocks(
+                expansion,
+                artifacts.control_base.clone(),
+                region.index,
+                nodes,
+                node_svg_paths,
+                pending_transfers,
+            );
+        }
     }
 }
 
-fn collect_control_graph_nodes(
-    control_region: &ControlRegionGraph,
+fn collect_control_layer_blocks(
+    layer: &Layer,
     base: PathBuf,
+    expansion_region_index: usize,
     nodes: &mut Vec<CfgNode>,
     node_svg_paths: &mut HashMap<usize, String>,
     pending_transfers: &mut Vec<(usize, PendingTransfer)>,
 ) {
-    let region_svgs_rendered = has_interleaved_data_regions(&control_region.regions);
-    for (region_index, region) in control_region.regions.iter().enumerate() {
+    let region_svgs_rendered = has_interleaved_data_regions(&layer.regions);
+    for region in &layer.regions {
         if matches!(region.kind, RegionKind::Control) {
             let id = nodes.len();
             node_svg_paths.insert(
                 id,
                 control_region_svg_path(
-                    control_region.region_index,
-                    region_index,
-                    region,
+                    expansion_region_index,
+                    region.index,
+                    region.kind,
                     &base,
                     region_svgs_rendered,
                 )
                 .display()
                 .to_string(),
             );
-            push_control_region_node(
-                id,
-                &control_region.nested_graph.graph,
-                region,
+            push_control_region_node(id, &layer.graph, region, nodes, pending_transfers);
+        }
+    }
+
+    let data_base = base.join(format!("{:03}-data-regions", expansion_region_index));
+    for region in &layer.regions {
+        if let Some(expansion) = &region.expansion {
+            debug_assert!(matches!(region.kind, RegionKind::InterleavedData));
+            collect_nested_data_layer_blocks(
+                expansion,
+                data_base.clone(),
+                region.index,
                 nodes,
+                node_svg_paths,
                 pending_transfers,
             );
         }
     }
-
-    let data_base = base.join(format!("{:03}-data-regions", control_region.region_index));
-    for data_region in &control_region.data_region_graphs {
-        collect_nested_data_graph_nodes(
-            data_region,
-            data_base.clone(),
-            nodes,
-            node_svg_paths,
-            pending_transfers,
-        );
-    }
 }
 
-fn collect_nested_data_graph_nodes(
-    data_region: &DataRegionGraph,
+fn collect_nested_data_layer_blocks(
+    layer: &Layer,
     base: PathBuf,
+    expansion_region_index: usize,
     nodes: &mut Vec<CfgNode>,
     node_svg_paths: &mut HashMap<usize, String>,
     pending_transfers: &mut Vec<(usize, PendingTransfer)>,
 ) {
-    let region_svgs_rendered = has_interleaved_control_regions(&data_region.regions);
-    collect_data_graph_nodes(
-        &data_region.nested_graph.graph,
-        &data_region.regions,
-        &data_region.control_region_graphs,
-        DataGraphArtifacts {
-            resolved_svg: base.join(format!("{:03}-resolved.svg", data_region.region_index)),
-            region_base: base.join(format!("{:03}-regions", data_region.region_index)),
+    let region_svgs_rendered = has_interleaved_control_regions(&layer.regions);
+    collect_data_layer_blocks(
+        layer,
+        DataLayerArtifacts {
+            resolved_svg: base.join(format!("{:03}-resolved.svg", expansion_region_index)),
+            region_base: base.join(format!("{:03}-regions", expansion_region_index)),
             region_svgs_rendered,
-            control_base: base.join(format!("{:03}-control-regions", data_region.region_index)),
+            control_base: base.join(format!("{:03}-control-regions", expansion_region_index)),
         },
         true,
         nodes,
@@ -208,7 +192,7 @@ fn collect_nested_data_graph_nodes(
 fn push_data_region_node(
     id: usize,
     graph: &Graph,
-    region: &OperationRegion,
+    region: &Region,
     boundary_context: &DataBoundaryContext,
     has_control_regions: bool,
     nodes: &mut Vec<CfgNode>,
@@ -230,7 +214,7 @@ fn push_data_region_node(
 fn push_control_region_node(
     id: usize,
     graph: &Graph,
-    region: &OperationRegion,
+    region: &Region,
     nodes: &mut Vec<CfgNode>,
     pending_transfers: &mut Vec<(usize, PendingTransfer)>,
 ) {
@@ -244,7 +228,7 @@ fn push_control_region_node(
     pending_transfers.push((id, control_region_transfer(&boundary)));
 }
 
-fn region_block(graph: &Graph, region: &OperationRegion) -> Vec<BlockInstruction> {
+fn region_block(graph: &Graph, region: &Region) -> Vec<BlockInstruction> {
     region
         .operations
         .iter()
@@ -277,7 +261,7 @@ struct DataBoundaryContext {
 }
 
 impl DataBoundaryContext {
-    fn new(graph: &Graph, regions: &[OperationRegion]) -> Self {
+    fn new(graph: &Graph, regions: &[Region]) -> Self {
         let control_operations = regions
             .iter()
             .filter(|region| matches!(region.kind, RegionKind::InterleavedControl))
@@ -298,7 +282,7 @@ impl DataBoundaryContext {
         }
     }
 
-    fn region_boundary(&self, graph: &Graph, region: &OperationRegion) -> RegionBoundary {
+    fn region_boundary(&self, graph: &Graph, region: &Region) -> RegionBoundary {
         let consumed = region_consumed_wires(graph, region);
         let produced = region_produced_wires(graph, region);
 
@@ -326,7 +310,7 @@ impl DataBoundaryContext {
 }
 
 impl RegionBoundary {
-    fn new(graph: &Graph, region: &OperationRegion) -> Self {
+    fn new(graph: &Graph, region: &Region) -> Self {
         let consumed = region_consumed_wires(graph, region);
         let produced = region_produced_wires(graph, region);
         Self::from_consumed_produced(graph, consumed, produced)
@@ -351,7 +335,7 @@ impl RegionBoundary {
     }
 }
 
-fn region_consumed_wires(graph: &Graph, region: &OperationRegion) -> Vec<usize> {
+fn region_consumed_wires(graph: &Graph, region: &Region) -> Vec<usize> {
     unique_wires(
         region
             .operations
@@ -361,7 +345,7 @@ fn region_consumed_wires(graph: &Graph, region: &OperationRegion) -> Vec<usize> 
     )
 }
 
-fn region_produced_wires(graph: &Graph, region: &OperationRegion) -> Vec<usize> {
+fn region_produced_wires(graph: &Graph, region: &Region) -> Vec<usize> {
     unique_wires(
         region
             .operations
@@ -478,22 +462,15 @@ fn assert_dense_unique_block_ids(nodes: &[CfgNode]) {
     let mut ids = nodes.iter().map(|node| node.id).collect::<Vec<_>>();
     ids.sort_unstable();
     ids.dedup();
-    assert_eq!(
-        ids.len(),
-        nodes.len(),
-        "flattened cfg block ids must be unique"
-    );
+    assert_eq!(ids.len(), nodes.len(), "cfg block ids must be unique");
 
     for (expected, id) in ids.into_iter().enumerate() {
-        assert_eq!(
-            id, expected,
-            "flattened cfg block ids must be dense after sorting"
-        );
+        assert_eq!(id, expected, "cfg block ids must be dense after sorting");
     }
 }
 
 #[derive(Debug, Clone)]
-struct DataGraphArtifacts {
+struct DataLayerArtifacts {
     resolved_svg: PathBuf,
     region_base: PathBuf,
     region_svgs_rendered: bool,
@@ -502,13 +479,13 @@ struct DataGraphArtifacts {
 
 fn data_region_svg_path(
     region_index: usize,
-    region: &OperationRegion,
-    artifacts: &DataGraphArtifacts,
+    kind: RegionKind,
+    artifacts: &DataLayerArtifacts,
 ) -> PathBuf {
     if artifacts.region_svgs_rendered {
         artifacts
             .region_base
-            .join(region_svg_file_name(region_index, region.kind))
+            .join(region_svg_file_name(region_index, kind))
     } else {
         artifacts.resolved_svg.clone()
     }
@@ -517,13 +494,13 @@ fn data_region_svg_path(
 fn control_region_svg_path(
     control_region_index: usize,
     region_index: usize,
-    region: &OperationRegion,
+    kind: RegionKind,
     base: &std::path::Path,
     region_svgs_rendered: bool,
 ) -> PathBuf {
     if region_svgs_rendered {
         base.join(format!("{control_region_index:03}-regions"))
-            .join(region_svg_file_name(region_index, region.kind))
+            .join(region_svg_file_name(region_index, kind))
     } else {
         base.join(format!("{control_region_index:03}-resolved.svg"))
     }
@@ -542,13 +519,13 @@ fn region_kind_file_name(kind: RegionKind) -> &'static str {
     }
 }
 
-fn has_interleaved_data_regions(regions: &[OperationRegion]) -> bool {
+fn has_interleaved_data_regions(regions: &[Region]) -> bool {
     regions
         .iter()
         .any(|region| matches!(region.kind, RegionKind::InterleavedData))
 }
 
-fn has_interleaved_control_regions(regions: &[OperationRegion]) -> bool {
+fn has_interleaved_control_regions(regions: &[Region]) -> bool {
     regions
         .iter()
         .any(|region| matches!(region.kind, RegionKind::InterleavedControl))

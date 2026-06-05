@@ -13,7 +13,7 @@ use crate::{
             layering::{
                 BoundaryRelation, NestedGraph, coproduct_over_parent, quotient_over_parent,
             },
-            partition::{OperationId, OperationRegion, RegionKind, SourceOperation},
+            partition::{OperationId, OperationRegion, RegionKind},
             wires::is_interleaved_control_operation,
         },
         graph_ops::{Graph, operation_inputs, operation_name, operation_outputs},
@@ -22,12 +22,11 @@ use crate::{
 };
 
 #[derive(Debug, Clone)]
-pub struct ControlRegionGraph {
-    pub region_index: usize,
-    pub source_operations: Vec<SourceOperation>,
-    pub nested_graph: NestedGraph,
-    pub regions: Vec<OperationRegion>,
-    pub data_region_graphs: Vec<DataRegionGraph>,
+pub(super) struct ControlRegionGraph {
+    pub(super) region_index: usize,
+    pub(super) nested_graph: NestedGraph,
+    pub(super) regions: Vec<OperationRegion>,
+    pub(super) data_region_graphs: Vec<DataRegionGraph>,
 }
 
 pub(super) fn process_control_regions(
@@ -66,7 +65,6 @@ fn expand_control_region(
 
     ControlRegionGraph {
         region_index,
-        source_operations: source_operations(parent_graph, region),
         nested_graph: resolved,
         regions: Vec::new(),
         data_region_graphs: Vec::new(),
@@ -167,16 +165,4 @@ fn control_definition_for_operation<'a>(
 
 fn boundary_table(boundary: &FiniteFunction) -> Vec<NodeId> {
     boundary.table.0.iter().copied().map(NodeId).collect()
-}
-
-fn source_operations(parent_graph: &Graph, region: &OperationRegion) -> Vec<SourceOperation> {
-    region
-        .operations
-        .iter()
-        .copied()
-        .map(|id| SourceOperation {
-            id,
-            name: operation_name(parent_graph, id).to_string(),
-        })
-        .collect()
 }

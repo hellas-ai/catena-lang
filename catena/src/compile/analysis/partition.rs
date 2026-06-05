@@ -21,6 +21,12 @@ pub struct OperationRegion {
 
 pub(super) type OperationId = usize;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SourceOperation {
+    pub id: OperationId,
+    pub name: String,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RegionKind {
     Data,

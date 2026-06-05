@@ -9,33 +9,12 @@ use open_hypergraphs::{
 
 use crate::{
     compile::{
-        analysis::partition::{OperationId, RegionKind},
+        analysis::partition::OperationId,
         graph_ops::{Graph, operation_inputs, operation_outputs},
     },
     lang::Obj,
     union_find::UnionFind,
 };
-
-#[derive(Debug, Clone)]
-pub struct Layer {
-    pub graph: Graph,
-    pub regions: Vec<Region>,
-    pub morphism_to_parent: Option<NestingMorphism>,
-}
-
-#[derive(Debug, Clone)]
-pub struct Region {
-    pub index: usize,
-    pub kind: RegionKind,
-    pub operations: Vec<OperationId>,
-    pub expansion: Option<Box<Layer>>,
-}
-
-#[derive(Debug, Clone)]
-pub struct NestingMorphism {
-    pub operation_map: Vec<OperationId>,
-    pub boundary_relation: BoundaryRelation,
-}
 
 // A span from a child graph boundary to its parent graph boundary. The vector
 // index is the apex element; `child_wires` and `parent_wires` are the two legs.
@@ -139,16 +118,6 @@ impl BoundaryRelation {
         }
         fiber_points
     }
-
-    pub(super) fn child_wires_on_side(&self, side: BoundarySide) -> Vec<NodeId> {
-        let mut wires = Vec::new();
-        for (apex, child_wire) in self.apexes.iter().zip(&self.child_wires) {
-            if apex.side == side && !wires.contains(child_wire) {
-                wires.push(*child_wire);
-            }
-        }
-        wires
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -171,10 +140,10 @@ struct BoundaryFiber {
 }
 
 #[derive(Debug, Clone)]
-pub(super) struct NestedGraph {
-    pub(super) graph: Graph,
-    pub(super) parent_operations: Vec<OperationId>,
-    pub(super) boundary_relation: BoundaryRelation,
+pub struct NestedGraph {
+    pub graph: Graph,
+    pub parent_operations: Vec<OperationId>,
+    pub boundary_relation: BoundaryRelation,
 }
 
 impl NestedGraph {

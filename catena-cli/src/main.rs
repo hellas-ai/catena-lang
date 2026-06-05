@@ -65,17 +65,11 @@ enum Command {
         proof: Vec<PathBuf>,
 
         /// Keep monoidal-structure operations in CFG output for debugging.
-        #[arg(
-            long = "cfg-keep-monoidal-operations",
-            visible_alias = "analysis-cfg-show-monoidal-operations"
-        )]
+        #[arg(long = "cfg-keep-monoidal-operations")]
         cfg_keep_monoidal_operations: bool,
 
         /// Keep control-flow-only operations in CFG output for debugging.
-        #[arg(
-            long = "cfg-keep-control-flow-operations",
-            visible_alias = "analysis-cfg-show-control-flow-operations"
-        )]
+        #[arg(long = "cfg-keep-control-flow-operations")]
         cfg_keep_control_flow_operations: bool,
     },
 }
@@ -212,10 +206,6 @@ fn compile_command(
             !no_proof,
             proof,
             output,
-            CfgOptions {
-                keep_monoidal_operations: cfg_keep_monoidal_operations,
-                keep_control_flow_operations: cfg_keep_control_flow_operations,
-            },
         );
     }
 
@@ -246,7 +236,6 @@ fn analysis_command(
     proof_check: bool,
     proof_paths: Vec<PathBuf>,
     output: PathBuf,
-    cfg_options: CfgOptions,
 ) -> anyhow::Result<()> {
     let request = CompileRequest {
         paths,
@@ -255,7 +244,7 @@ fn analysis_command(
         entry,
         format: format.map(Into::into),
         cuda_options,
-        cfg_options,
+        cfg_options: CfgOptions::default(),
         proof_check,
         proof_paths,
     };
@@ -264,7 +253,6 @@ fn analysis_command(
     {
         anyhow::bail!("--format {format:?} is not supported when emitting Analysis");
     }
-    let cfg_options = request.cfg_options;
 
     let mut pipeline = CompilePipeline::new(request);
     let compile_graph_request = pipeline.compile_graph_request()?;
@@ -272,7 +260,7 @@ fn analysis_command(
     let compile_graph =
         CompilePipeline::compile_graph(checked_elaborated_theory, compile_graph_request)?;
     let graph = normalize_graph(&compile_graph)?;
-    let artifacts = analysis::render_analysis_artifacts(&graph, cfg_options)?;
+    let artifacts = analysis::render_analysis_artifacts(&graph)?;
 
     std::fs::create_dir_all(&output)?;
     for artifact in artifacts {

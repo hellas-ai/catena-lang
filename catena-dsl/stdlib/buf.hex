@@ -1,0 +1,47 @@
+# basic datatypes
+(theory type nat {
+  # ownership modes
+  (arr cap.own : 0 -> 1)
+  (arr cap.ref : 0 -> 1)
+
+  # Memory: untyped, sized bytes, with ownership mode
+  (arr mem : 1 -> 1)
+
+  # Buffers
+  # `buf m n t` is a buffer with ownership mode m of length n with elements of type t.
+  (arr buf : 3 -> 1)
+
+  # Sized types
+  # sizeof(t, s) "the representation size of type t is s bytes"
+  #(arr sizeof : 2 -> 1)
+})
+
+
+(theory program type {
+  ################################################################################
+  # owned memory can be deallocated
+  (arr free : (cap.own mem) -> [])
+
+  ################################################################################
+  # Casting mem to buf and back
+  # TODO: this can lose bytes of mem if sizeof(u64) doesn't cleanly divide num bytes!
+  # buf.to-mem : (n : u64) ● val(buf m n t) -> mem m
+  (arr buf.to-mem : {[m n t.]
+      ({[.n] u64} :)   # n : u64
+      ([.m n t] buf val) # val(buf m n t)
+    } -> ([m n t.m] mem)
+  )
+
+  # mem.cast.u64 : mem m -> (n : u64) ● val(buf m n u64)
+  (arr mem.cast.u64 : ([m n.m] mem) -> {[m n.]
+    ({[.n] u64} :)   # n : u64
+    ({[.m n] u64} buf val) # val(buf m n u64)
+  })
+
+  # TODO: make all mem.cast.* into definitions, using the below:
+  #   mem.cast : mem ● (s : u64) ● sizeof(t, s) -> (n : u64) ● val(buf n t)
+  # and introduce
+  #   u64.sizeof : I -> (s : u64) ● sizeof(u64, s)
+  #   u32.sizeof : I -> (s : u64) ● sizeof(u32, s)
+  #   ... etc.
+})

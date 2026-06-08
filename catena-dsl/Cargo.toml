@@ -1,0 +1,19 @@
+[package]
+name = "catena-dsl"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.101"
+catena = { version = "0.1.0", path = "../catena" }
+clap = { version = "4.5.57", features = ["derive"] }
+hexpr = "0.2.0"
+metacat.workspace = true
+open-hypergraphs.workspace = true
+open-hypergraphs-dot = { version = "0.2.4", features = ["svg"] }
+thiserror = "2.0.18"
+
+# for runtime
+tempfile = "3.23.0"
+libffi = "5.1.0"
+libloading = "0.9.0"

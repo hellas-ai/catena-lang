@@ -1,5 +1,5 @@
 [workspace]
-members = ["catena", "catena-cli"]
+members = ["catena", "catena-cli", "catena-dsl"]
 resolver = "2"
 
 [workspace.dependencies]

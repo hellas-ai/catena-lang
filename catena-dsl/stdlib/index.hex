@@ -1,0 +1,21 @@
+################################################################################
+# Indices
+(theory type nat {
+  # indices
+  # `ix n` is a valid index into any `buf m n t`.
+  (arr ix : 1 -> 1)
+
+  # Numerics (TODO!)
+  (arr 0 : 0 -> 1)
+  (arr > : 2 -> 1)
+})
+
+(theory program type {
+  # indexing buffers
+  # val(ix n) ● val(buf m n t) -> val(t)
+  (arr ix : {[m n t.] ([.n] ix val) ([.m n t] buf val)} -> ([m n t . t] val))
+
+  # the zero index
+  # ix.zero : (|- n > 0) -> val(ix n)
+  (arr ix.zero : ({[n] 0} > |-) -> (ix val))
+})

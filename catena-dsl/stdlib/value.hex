@@ -1,0 +1,37 @@
+# basic datatypes
+(theory type nat {
+  # anonymous runtime values.
+  # val(t) ~= "a runtime value of type t"
+  (arr val : 1 -> 1)
+
+  # value ascription
+  #   x : t
+  # x is the type-level name of a runtime value with type t.
+  (arr :   : 2 -> 1)
+
+  # provability
+  (arr |- : 1 -> 1)
+
+  # implication
+  (arr ==> : 2 -> 1)
+
+  # Equality
+  (arr = : 2 -> 1)
+
+  # negation
+  (arr not : 1 -> 1)
+})
+
+(theory program type {
+  (arr :.forget : : -> ([x t.t] val))
+
+  # Modus ponens:
+  #   h0 : |- φ
+  #   h1 : |- φ → ψ
+  # ----------------
+  #   r0 : |- ψ
+  (arr ax-mp : {[ph ps.] # two metavars
+    ([.ph] |-)            # |- φ
+    ([.ph ps] ==> |-)      # |- (φ → ψ)
+  } -> ([ph ps . ps] |-)) # |- ψ
+})

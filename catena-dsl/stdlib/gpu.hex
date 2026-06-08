@@ -1,0 +1,50 @@
+# Cooperative thread execution primitives
+
+(theory type nat {
+  # the read-only *environment* available to a GPU kernel.
+  # Consists of:
+  #   - Thread ID
+  #   - Block sizes
+  (arr gpu.env : 0 -> 1)
+
+  # A unique type which allows us to force ordering.
+  # This of this as a resource which may not ever be consumed or copied.
+  (arr gpu.state : 0 -> 1)
+
+  # TODO: add lengths!
+  (arr gpu.buf : 1 -> 1)
+
+  # Kernel launch parameters: grid dim and block dim (for now)
+  (arr gpu.3d : 0 -> 1)
+  (arr gpu.launch_params : 0 -> 1)
+})
+
+(theory program type {
+  # Launch parameter construction
+  (arr gpu.3d.intro : (u64 val [x . x x x]) -> gpu.3d)
+  (arr gpu.launch_params.intro : (gpu.3d val [x . x x]) -> (gpu.launch_params val))
+
+  # store a value to global memory
+  #(arr gpu.global.store : gpu.state -> gpu.state)
+
+  # Materialize a buffer by cooperative execution of a kernel `k`,
+  # where k is a function pointer of the following type
+  #
+  #   k : gpu.env × gpu.state × X → gpu.state × B
+  #
+  # Where `X` is the explicitly-passed *environment* of the kernel (common to
+  # all threads).
+  #
+  # gpu.materialize : gpu.launch_params × (gpu.env × gpu.state × X -> gpu.state × B) -> gpu.buf B
+  (arr gpu.materialize : {[x b.]
+    ({gpu.state [.x]} * [args_tail.])
+    ({gpu.env [.args_tail]} * [args.])
+
+    ({gpu.state [.b]} * [coargs.])
+
+    (gpu.launch_params val)
+    ([.args coargs] ->)
+  }
+  ->
+  ([x b.b] gpu.buf val))
+})

@@ -1,0 +1,93 @@
+# basic datatypes
+(theory type nat {
+  # booleans
+  # NOTE: booleans are special because they appear in `assert`
+  (arr bool : 0 -> 1)
+
+  # *type level* bool values
+  (arr bool.t : 0 -> 1)
+  (arr bool.f : 0 -> 1)
+
+  (arr u64 : 0 -> 1)
+})
+
+(theory program type {
+  # assert (b : bool) -> (|- b = true)
+  (arr assert : ({[b] bool} :) -> ({[b] bool.t} = |-))
+
+  # assert-then : (b : bool) (|- b = true => p) -> (|- p)
+  # implementation: ({ assert [h] } ax-mp )
+  (def assert-then : {[b p.]
+    ({[.b] bool} :)
+    ({({[.b] bool.t} =) [.p]} ==> |-)
+  } -> ([b p . p] |-) = ({assert [h]} ax-mp))
+
+  # Boolean type literal.
+  (arr bool.type : [] -> bool)
+
+  # Boolean operations
+  (arr bool.t : [] -> (bool val))
+  (arr bool.f : [] -> (bool val))
+
+  (arr bool.not : (bool val) -> (bool val))
+  (arr bool.or  : {(bool val) (bool val)} -> (bool val))
+  (arr bool.and : {(bool val) (bool val)} -> (bool val))
+
+  # execute one of two *closures* depending on a boolean flag
+  #
+  #   if : 2 ● (A => B) ● (A => B) -> (A => B)
+  (arr bool.if : {bool (=> val)} -> (=> val))
+
+  # Execute one of two *converted closures* depending on a flag
+  # (A "converted closure" is an explicit environment plus a fn pointer)
+  #
+  #   ifc : X ● (X * A -> B) ● Y ● (Y * A -> B) ● Bool ● A -> B
+  #
+  # (shorthand above assumes everything wrapped in `Value`)
+  (arr bool.ifc : {[x y a b.]
+    ([.x])
+    ([.x a] {* [.b]} -> val)
+    ([.y])
+    ([.y a] {* [.b]} -> val)
+    (bool val)
+    ([.a])
+  } -> ([x y a b . b]))
+
+
+  # temp helpers until we add polymorphic versions
+  # unitors and associators for bools only
+  (arr bool.id : (bool val) -> (bool val))
+  (arr bool.copy : (bool val) -> {(bool val) (bool val)})
+  (def bool.li : (bool val) -> {1 (bool val)} = {unit.intro [a]})
+
+  ##############################################################################
+  # u64 methods
+  #
+  # TODO: built in size of u64 bool, etc.
+  # u64.sizeof : I -> (s : u64) ● sizeof(u64, s)
+  (arr u64.zero : [] -> ({0 u64} :))
+
+  # Indices & dependent types
+  # assert-nz : (n : u64) -> |- (n > 0)
+  # (PARTIAL)
+  (def u64.assert-nz : ({[n] u64} :) -> ({[n] 0} > |-) =
+    ({[x] u64.zero} u64.gt [b ht hf. b ht] assert-then)
+  )
+
+  # u64.gt with predicate results
+  # u64.gt : (x : u64) ● (y : u64) -> (b : bool) ● (|- b = true => x > y) ● (|- b = false => ¬ (x > y))
+  (arr u64.gt : {[x y b.]
+    ({[.x] u64} :)
+    ({[.y] u64} :)
+  } -> {[x y b.]
+    # helper defs
+    ({[.b] bool.t} = [b_true .]) # b = true
+    ({[.b] bool.f} = [b_false.]) # b = false
+    ([.x y] > [x_gt_y.])         # x > y
+
+    # outputs
+    ({[.b] bool} :)                     # (b : bool)
+    ([.b_true  x_gt_y] ==> |-)          # |- b = true  ==> (x > y)
+    ([.x_gt_y] {[.b_false] not} ==> |-) # |- b = false ==> ¬ (x > y)
+  })
+})

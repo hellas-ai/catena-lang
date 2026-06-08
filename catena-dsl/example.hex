@@ -1,0 +1,92 @@
+# goal: generate StructuredProgram from this which ends up like
+# void not(x0: bool, x1: *bool) { ... }
+# note: return values are always passed as ptrs
+
+# Boolean examples
+(def program not : (bool val) -> (bool val) = bool.not)
+
+# Test we can use other definnitions
+(def program use-not : (bool val) -> (bool val) = not)
+
+#(def program run-not : (bool val) -> (bool val) = ({defer (name.bool.not lift)} compose run))
+(def program check-defer : (bool val) -> (bool val) = ({defer (name.bool.not lift)} compose run))
+
+(def program test-ifc : {(bool val) (bool val)} -> (bool val) = ([flag arg.]
+  {bool.t name.bool.and bool.t name.bool.or [. flag arg]}
+  bool.ifc
+))
+
+########################################
+# Minimal packed-product example.
+# This returns one value of type (1 * bool), not two free tensor outputs.
+
+(def program run-li : [] -> ({1 (bool val)} *) = (
+  {(bool.t defer) (name.bool.li lift)}
+  compose
+  run
+))
+
+# Exposing function pointers on an entrypoint is intentionally unsupported for now.
+#(def program test-name.bool.li : [] -> ( {(bool val) ({1 (bool val)} *)} ->) = name.bool.li)
+
+# Test that a product type inside another program synthesizes
+(def program run-copy : [] -> ({(bool val) (bool val)} *) = (
+  {(bool.t defer) (name.bool.copy lift)}
+  compose
+  run
+))
+
+
+# Testing monomorphisation
+(def program id : [a] -> [a] = [x])
+(def program use-id : (bool val) -> (bool val) = id)
+
+# Cast owned memory to a u64 buffer, assert it is non-empty, then read element 0.
+(def program array-head-u64 : ([n.] (cap.own mem)) -> ([n.] (u64 val)) = (
+  mem.cast.u64
+  {
+    (u64.assert-nz ix.zero)
+    [b]
+  }
+  ix
+))
+
+# using 'bool' as a substitute for `Ix n` (bool => n = 2!) we check if we can define pointwise addition!
+# TODO
+#(def program pointwise-add : {
+    #({(bool val) (u64 val)} =>) # bool => u64
+    #({(bool val) (u64 val)} =>) # bool => u64
+    #(bool val)                  # bool
+  #} -> {
+    #({(bool val) (u64 val)} =>) # bool => u64
+  #} = {
+  #})
+
+# This has a top-level function pointer input, so it cannot be a backend entrypoint
+# until we monomorphize/specialize it at a known function symbol.
+#(def program materialize-bool : {
+#    ({gpu.state 1} * [args_tail.])
+#    ({gpu.env [.args_tail]} * [args.])
+#    ({gpu.state bool} * [coargs.])
+#    (gpu.launch_params val)
+#    ([.args coargs] ->)
+#  }
+#  ->
+#  (bool gpu.buf val) =
+#  gpu.materialize)
+
+
+# Partial application of 'and' to its first arg.
+# NOTE: this is currently rejected because of => types on interfaces.
+#(def program partial-and-closure : (bool val) -> ({(bool val) (bool val)} =>) = (
+  #{
+    #(
+      #{defer (name.bool.id lift)}
+      #tensor
+    #)
+    #(name.bool.and lift)
+  #}
+  #compose
+  #{(name.bool.li lift) [f]}
+  #compose
+#))

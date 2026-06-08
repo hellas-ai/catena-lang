@@ -1,0 +1,16 @@
+# Function pointers
+(theory type nat {
+  # (A ~> B) is a function *pointer* - has no captured vars
+  (arr -> : 2 -> 1)
+
+  # traditional "eval" for function types; *fully* applies a function
+  # A ● (A ~> B) -> B
+  (arr eval : 2 -> 1)
+})
+
+# Eliminators of function pointers
+#(theory type nat {
+  # TODO!
+  # reduce (n : extent) (x : ix n -> t) (z : t) (add : (t * t) -> t) : t
+  #(arr reduce :
+#})

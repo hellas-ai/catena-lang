@@ -40,14 +40,14 @@ pub(super) struct SharedBinding {
 pub(super) fn bind_global(
     variable: &Variable,
     global: &GpuGlobal<'_>,
+    device_base_name: &str,
     extent_names: &HashMap<usize, String>,
     used_device_names: &mut HashSet<String>,
     used_host_names: &mut HashSet<String>,
 ) -> Result<GlobalBinding, CudaAbiError> {
     let param_ty = cuda_global_param_type(global)?;
-    let base_name = sanitize_ident(&variable.name);
-    let device_name = unique_name(&base_name, used_device_names);
-    let host_name = unique_name(&base_name, used_host_names);
+    let device_name = unique_name(&sanitize_ident(device_base_name), used_device_names);
+    let host_name = unique_name(&sanitize_ident(&variable.name), used_host_names);
     let dimensions = memory_dimension_exprs(
         &global.dimensions,
         extent_names,

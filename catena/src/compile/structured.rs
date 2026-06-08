@@ -1,10 +1,7 @@
 use thiserror::Error;
 
 use crate::{
-    compile::{
-        cfg,
-        program::{Program, VariableId},
-    },
+    compile::{cfg, program::Program},
     structured::{
         ir::{EntryPoint, Stmt, StructuredProgram},
         ramsey,
@@ -22,13 +19,7 @@ pub fn compile_structured_program(
     program: &Program,
 ) -> Result<StructuredProgram, StructuredCompileError> {
     let entry = program.entry_definition();
-    let context = entry.context.clone();
-    let body = ramsey::structure(entry.body.clone(), move |id| {
-        context
-            .variable(VariableId(id))
-            .map(|variable| variable.name.clone())
-            .unwrap_or_else(|| cfg::variable_name(id))
-    })?;
+    let body = ramsey::structure(entry.body.clone(), cfg::variable_name)?;
     Ok(structured_program(&entry.name, body))
 }
 

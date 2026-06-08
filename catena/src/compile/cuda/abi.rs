@@ -34,6 +34,7 @@ use thiserror::Error;
 
 use crate::{
     compile::{
+        cfg,
         cuda::{
             CudaOptions,
             boundary::{KernelInterface, discover_kernel_interface},
@@ -41,7 +42,7 @@ use crate::{
             parameters::SourceParameterContribution,
             resources::SharedIndexing,
             resources::{SharedMemory, SharedMemoryLayout, bind_global, bind_static_shared},
-            util::{sanitize_ident, unique_name},
+            util::unique_name,
             views::{ViewAnalysis, extents_required_by_device_code},
         },
         program::{Definition, Variable},
@@ -62,6 +63,7 @@ pub(super) struct CudaKernelAbi {
     pub(super) dynamic_shared_memory_bytes: Option<String>,
     views: ViewAnalysis,
     cuda_names: HashMap<String, String>,
+    source_name_annotations: HashMap<String, String>,
     access_certificates: HashMap<(String, String), String>,
     view_ranks: HashMap<String, usize>,
     shape_values: HashMap<String, Vec<String>>,
@@ -200,6 +202,7 @@ impl CudaKernelAbi {
             dynamic_shared_memory_bytes,
             views,
             cuda_names: source_parameter_abi.names,
+            source_name_annotations: source_parameter_abi.source_name_annotations,
             access_certificates,
             view_ranks: view_metadata.ranks,
             shape_values: view_metadata.shapes,
@@ -213,6 +216,17 @@ impl CudaKernelAbi {
             .get(name)
             .cloned()
             .unwrap_or_else(|| name.to_string())
+    }
+
+    pub(super) fn source_name_annotation(&self, name: &str) -> Option<&str> {
+        self.source_name_annotations.get(name).map(String::as_str)
+    }
+
+    pub(super) fn annotated_name(&self, name: &str) -> String {
+        match self.source_name_annotation(name) {
+            Some(annotation) => format!("{name} /* {} */", sanitize_comment(annotation)),
+            None => name.to_string(),
+        }
     }
 
     pub(super) fn shared_access(&self, shared: &str, view: &str) -> String {
@@ -724,6 +738,10 @@ fn rename_with(names: &HashMap<String, String>, name: &str) -> String {
     names.get(name).cloned().unwrap_or_else(|| name.to_string())
 }
 
+fn sanitize_comment(comment: &str) -> String {
+    comment.replace("*/", "* /")
+}
+
 struct SourceParameterAbi {
     kernel_interface: KernelInterface,
     device_params: Vec<Param>,
@@ -732,6 +750,7 @@ struct SourceParameterAbi {
     prelude: Vec<String>,
     host_prelude: Vec<String>,
     names: HashMap<String, String>,
+    source_name_annotations: HashMap<String, String>,
     global_shapes: HashMap<String, Vec<String>>,
     shared_layout: SharedMemoryLayout,
     shared_indexing: HashMap<String, SharedIndexing>,
@@ -758,6 +777,7 @@ fn collect_source_parameter_abi(
             prelude: Vec::new(),
             host_prelude: Vec::new(),
             names: HashMap::new(),
+            source_name_annotations: HashMap::new(),
             global_shapes: HashMap::new(),
             shared_layout: SharedMemoryLayout::new(),
             shared_indexing: HashMap::new(),
@@ -778,6 +798,25 @@ fn collect_source_parameter_abi(
 }
 
 impl SourceParameterAbiState {
+    fn device_name_for_source_parameter(&self, source_param: &Variable) -> String {
+        cfg::variable_name(source_param.id.0)
+    }
+
+    fn record_name_mapping(&mut self, source_param: &Variable, device_name: &str) {
+        let wire_name = self.device_name_for_source_parameter(source_param);
+        self.source_parameter_abi
+            .names
+            .insert(source_param.name.clone(), device_name.to_string());
+        self.source_parameter_abi
+            .names
+            .insert(wire_name, device_name.to_string());
+        if source_param.name != device_name {
+            self.source_parameter_abi
+                .source_name_annotations
+                .insert(device_name.to_string(), source_param.name.clone());
+        }
+    }
+
     fn record_source_parameter_contribution(
         &mut self,
         source_param: &Variable,
@@ -813,9 +852,7 @@ impl SourceParameterAbiState {
         else {
             return Err(CudaAbiError::MissingExtentName(leaf));
         };
-        self.source_parameter_abi
-            .names
-            .insert(source_param.name.clone(), host_or_static_name.clone());
+        self.record_name_mapping(source_param, &host_or_static_name);
 
         if self
             .source_parameter_abi
@@ -841,12 +878,10 @@ impl SourceParameterAbiState {
             .contains(&source_param.name)
         {
             let device_name = unique_name(
-                &sanitize_ident(&source_param.name),
+                &self.device_name_for_source_parameter(source_param),
                 &mut self.used_device_names,
             );
-            self.source_parameter_abi
-                .names
-                .insert(source_param.name.clone(), device_name.clone());
+            self.record_name_mapping(source_param, &device_name);
             self.source_parameter_abi.device_params.push(Param {
                 ty: "uint64_t".to_string(),
                 name: device_name,
@@ -867,6 +902,7 @@ impl SourceParameterAbiState {
         let binding = bind_global(
             source_param,
             global,
+            &self.device_name_for_source_parameter(source_param),
             &self.source_parameter_abi.kernel_interface.extent_cuda_names,
             &mut self.used_device_names,
             &mut self
@@ -875,9 +911,7 @@ impl SourceParameterAbiState {
                 .reserved_host_names,
         )?;
 
-        self.source_parameter_abi
-            .names
-            .insert(source_param.name.clone(), binding.device_name.clone());
+        self.record_name_mapping(source_param, &binding.device_name);
         self.source_parameter_abi
             .global_shapes
             .insert(binding.device_name.clone(), binding.dimensions.clone());
@@ -902,7 +936,7 @@ impl SourceParameterAbiState {
         shared: &crate::compile::cuda::boundary::GpuShared<'_>,
     ) -> Result<(), CudaAbiError> {
         let device_name = unique_name(
-            &sanitize_ident(&source_param.name),
+            &self.device_name_for_source_parameter(source_param),
             &mut self.used_device_names,
         );
         let memory = SharedMemory::from_gpu_shared(
@@ -930,9 +964,7 @@ impl SourceParameterAbiState {
             ),
         };
 
-        self.source_parameter_abi
-            .names
-            .insert(source_param.name.clone(), binding.device_name.clone());
+        self.record_name_mapping(source_param, &binding.device_name);
         self.source_parameter_abi
             .shared_indexing
             .insert(binding.device_name.clone(), binding.indexing);

@@ -19,7 +19,7 @@ pub(super) fn render_cuda(
     out.push_str(
         &abi.kernel_params
             .iter()
-            .map(|p| format!("{} {}", p.ty, p.name))
+            .map(|p| format!("{} {}", p.ty, abi.annotated_name(&p.name)))
             .collect::<Vec<_>>()
             .join(", "),
     );
@@ -124,7 +124,7 @@ fn render_cuda_stmts(
                 then_body,
                 else_body,
             } => {
-                out.push_str(&format!("{pad}if ({condition}) {{\n"));
+                out.push_str(&format!("{pad}if ({}) {{\n", abi.annotated_name(condition)));
                 render_cuda_stmts(out, then_body, indent + 1, abi, domain);
                 out.push_str(&format!("{pad}}} else {{\n"));
                 render_cuda_stmts(out, else_body, indent + 1, abi, domain);
@@ -143,7 +143,11 @@ fn render_cuda_stmts(
             Stmt::Continue(label) => out.push_str(&format!("{pad}goto {label}_continue;\n")),
             Stmt::Return => out.push_str(&format!("{pad}return;\n")),
             Stmt::Barrier => out.push_str(&format!("{pad}__syncthreads();\n")),
-            Stmt::Assign { lhs, rhs } => out.push_str(&format!("{pad}{lhs} = {rhs};\n")),
+            Stmt::Assign { lhs, rhs } => out.push_str(&format!(
+                "{pad}{} = {};\n",
+                abi.annotated_name(lhs),
+                abi.annotated_name(rhs)
+            )),
             Stmt::Call {
                 function,
                 inputs,
@@ -175,8 +179,9 @@ fn render_cuda_stmts(
             }
             Stmt::Primitive(primitive) => {
                 let primitive = rename_primitive(primitive, abi);
+                let comment = primitive_line_comment(&primitive, abi);
                 for line in domain.lower_primitive_lines(&primitive, abi) {
-                    out.push_str(&format!("{pad}{line}\n"));
+                    out.push_str(&format!("{pad}{line}{comment}\n"));
                 }
             }
             Stmt::Comment(comment) => out.push_str(&format!("{pad}// {comment}\n")),
@@ -188,6 +193,27 @@ fn sanitize_ident(name: &str) -> String {
     name.chars()
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
         .collect()
+}
+
+fn primitive_line_comment(primitive: &Primitive, abi: &CudaKernelAbi) -> String {
+    let annotations = primitive
+        .outputs
+        .iter()
+        .chain(&primitive.inputs)
+        .filter_map(|name| {
+            abi.source_name_annotation(name)
+                .map(|annotation| format!("{name}: {}", sanitize_comment(annotation)))
+        })
+        .collect::<Vec<_>>();
+    if annotations.is_empty() {
+        String::new()
+    } else {
+        format!(" /* {} */", annotations.join(", "))
+    }
+}
+
+fn sanitize_comment(comment: &str) -> String {
+    comment.replace("*/", "* /")
 }
 
 fn rename_primitive(primitive: &Primitive, abi: &CudaKernelAbi) -> Primitive {

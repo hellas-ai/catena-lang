@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use catena_dsl::runtime::{Runtime, Value};
+use catena_lang::runtime::{Runtime, Value};
 
 fn main() -> anyhow::Result<()> {
     // Load standard library

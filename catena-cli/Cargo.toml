@@ -5,6 +5,6 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1.0.101"
-catena = { version = "0.1.0", path = "../catena" }
+catena-core = { version = "0.1.0", path = "../catena-core" }
 clap = { version = "4.5.57", features = ["derive"] }
 metacat.workspace = true

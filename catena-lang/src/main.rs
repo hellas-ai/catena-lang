@@ -16,7 +16,7 @@ struct Cli {
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     let raw_theories = RawTheorySet::from_files(cli.paths)?;
-    match catena_dsl::compile::compile(raw_theories) {
+    match catena_lang::compile::compile(raw_theories) {
         Ok(report) => {
             report.dump_to_dir(&cli.output_dir)?;
             Ok(())

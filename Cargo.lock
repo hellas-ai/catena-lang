@@ -80,7 +80,17 @@ dependencies = [
 ]
 
 [[package]]
-name = "catena"
+name = "catena-cli"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "catena-core",
+ "clap",
+ "metacat",
+]
+
+[[package]]
+name = "catena-core"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -96,21 +106,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "catena-cli"
+name = "catena-lang"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "catena",
- "clap",
- "metacat",
-]
-
-[[package]]
-name = "catena-dsl"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "catena",
  "clap",
  "hexpr",
  "libffi",

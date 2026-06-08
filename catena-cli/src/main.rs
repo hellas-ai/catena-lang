@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use catena::compile::{
+use catena_core::compile::{
     CompilePipeline, CompileRequest, CudaOptions, Emit, OutputFormat,
     cfg::{self, CfgOptions},
     compile, normalize_graph,

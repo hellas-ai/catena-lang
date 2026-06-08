@@ -7,28 +7,28 @@
 #define TILE_COLS 16
 #endif
 
-__global__ void user_f32_two_shared_two_global(uint64_t block_count, uint64_t thread_count, float* out_a, float* out_b) {
-    __shared__ float tile_a[TILE_ROWS][TILE_COLS];
-    __shared__ float tile_b[TILE_ROWS][TILE_COLS];
+__global__ void user_f32_two_shared_two_global(uint64_t w0 /* block_count */, uint64_t w1 /* thread_count */, float* w7 /* out_a */, float* w8 /* out_b */) {
+    __shared__ float w5[TILE_ROWS][TILE_COLS];
+    __shared__ float w6[TILE_ROWS][TILE_COLS];
 
-    uint3 worker_block = blockIdx;
-    uint3 worker_thread = threadIdx;
-    uint64_t worker_x = worker_thread.x;
-    uint64_t worker_y = worker_thread.y;
-    uint64_t worker_z = worker_thread.z;
-    float one = 1.0f;
-    float zero = 0.0f;
-    tile_a[worker_x][worker_y] = one;
-    auto tile_a_filled = tile_a;
-    tile_b[worker_x][worker_y] = zero;
-    auto tile_b_filled = tile_b;
-    float from_tile_a = tile_a_filled[worker_x][worker_y];
-    float from_tile_b = tile_b_filled[worker_x][worker_y];
-    out_a[worker_block.x * thread_count + worker_thread.x] = from_tile_a;
-    auto out_a_filled = out_a;
-    out_b[worker_block.x * thread_count + worker_thread.x] = from_tile_b;
-    auto out_b_filled = out_b;
-    return;
+    uint3 w9_block = blockIdx; /* w9: worker, w4: grid */
+    uint3 w9_thread = threadIdx; /* w9: worker, w4: grid */
+    uint64_t w9_x = w9_thread.x; /* w9: worker, w4: grid */
+    uint64_t w9_y = w9_thread.y; /* w9: worker, w4: grid */
+    uint64_t w9_z = w9_thread.z; /* w9: worker, w4: grid */
+    float w10 = 1.0f; /* w10: one */
+    float w11 = 0.0f; /* w11: zero */
+    w5[w9_x][w9_y] = w10; /* w12: tile_a_filled, w5: tile_a, w9: worker, w10: one */
+    auto w12 = w5; /* w12: tile_a_filled, w5: tile_a, w9: worker, w10: one */
+    w6[w9_x][w9_y] = w11; /* w13: tile_b_filled, w6: tile_b, w9: worker, w11: zero */
+    auto w13 = w6; /* w13: tile_b_filled, w6: tile_b, w9: worker, w11: zero */
+    float w14 = w12[w9_x][w9_y]; /* w14: from_tile_a, w12: tile_a_filled, w9: worker */
+    float w15 = w13[w9_x][w9_y]; /* w15: from_tile_b, w13: tile_b_filled, w9: worker */
+    w7[w9_block.x * w1 + w9_thread.x] = w14; /* w16: out_a_filled, w7: out_a, w9: worker, w14: from_tile_a */
+    auto w16 = w7; /* w16: out_a_filled, w7: out_a, w9: worker, w14: from_tile_a */
+    w8[w9_block.x * w1 + w9_thread.x] = w15; /* w17: out_b_filled, w8: out_b, w9: worker, w15: from_tile_b */
+    auto w17 = w8; /* w17: out_b_filled, w8: out_b, w9: worker, w15: from_tile_b */
+    return; /* returns w12: tile_a_filled, w13: tile_b_filled, w16: out_a_filled, w17: out_b_filled */
 }
 
 void launch_user_f32_two_shared_two_global(uint64_t block_count, uint64_t thread_count, float* out_a, float* out_b) {

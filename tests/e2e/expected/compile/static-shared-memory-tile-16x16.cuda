@@ -7,23 +7,23 @@
 #define TILE_COLS 16
 #endif
 
-__global__ void user_f32_static_shared_one(uint64_t global_rows, uint64_t global_cols, float* out) {
-    __shared__ float tile[TILE_ROWS][TILE_COLS];
+__global__ void user_f32_static_shared_one(uint64_t w0 /* global_rows */, uint64_t w1 /* global_cols */, float* w6 /* out */) {
+    __shared__ float w5[TILE_ROWS][TILE_COLS];
 
-    uint3 worker_block = blockIdx;
-    uint3 worker_thread = threadIdx;
-    uint64_t worker_x = worker_thread.x;
-    uint64_t worker_y = worker_thread.y;
-    uint64_t worker_z = worker_thread.z;
-    uint64_t out_view_row = (uint64_t)worker_block.y * TILE_ROWS + worker_thread.y;
-    uint64_t out_view_col = (uint64_t)worker_block.x * TILE_COLS + worker_thread.x;
-    float one = 1.0f;
-    tile[worker_x][worker_y] = one;
-    auto tile_filled = tile;
-    float from_tile = tile_filled[worker_x][worker_y];
-    out[out_view_row * global_cols + out_view_col] = from_tile;
-    auto out_filled = out;
-    return;
+    uint3 w7_block = blockIdx; /* w7: worker, w4: grid */
+    uint3 w7_thread = threadIdx; /* w7: worker, w4: grid */
+    uint64_t w7_x = w7_thread.x; /* w7: worker, w4: grid */
+    uint64_t w7_y = w7_thread.y; /* w7: worker, w4: grid */
+    uint64_t w7_z = w7_thread.z; /* w7: worker, w4: grid */
+    uint64_t w8_row = (uint64_t)w7_block.y * TILE_ROWS + w7_thread.y; /* w8: out_view, w7: worker, TILE_ROWS: tile_rows, TILE_COLS: tile_cols */
+    uint64_t w8_col = (uint64_t)w7_block.x * TILE_COLS + w7_thread.x; /* w8: out_view, w7: worker, TILE_ROWS: tile_rows, TILE_COLS: tile_cols */
+    float w9 = 1.0f; /* w9: one */
+    w5[w7_x][w7_y] = w9; /* w10: tile_filled, w5: tile, w7: worker, w9: one */
+    auto w10 = w5; /* w10: tile_filled, w5: tile, w7: worker, w9: one */
+    float w11 = w10[w7_x][w7_y]; /* w11: from_tile, w10: tile_filled, w7: worker */
+    w6[w8_row * w1 + w8_col] = w11; /* w12: out_filled, w6: out, w8: out_view, w11: from_tile */
+    auto w12 = w6; /* w12: out_filled, w6: out, w8: out_view, w11: from_tile */
+    return; /* returns w10: tile_filled, w12: out_filled */
 }
 
 void launch_user_f32_static_shared_one(uint64_t global_rows, uint64_t global_cols, float* out) {

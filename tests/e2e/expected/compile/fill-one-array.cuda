@@ -1,14 +1,13 @@
 #include <stdint.h>
 
-__global__ void user_f32_fill_one(float* out) {
-    uint3 worker_block = blockIdx;
-    uint3 worker_thread = threadIdx;
-    float one = 1.0f;
-    uint64_t out_view = (uint64_t)worker_block.x * blockDim.x + worker_thread.x;
-    // safety: certified by user.f32.fill-one.out.out_view.safe-access
-    out[out_view] = one;
-    auto out_filled = out;
-    return;
+__global__ void user_f32_fill_one(float* w3 /* out */) {
+    uint3 w4_block = blockIdx; /* w4: worker, w2: grid */
+    uint3 w4_thread = threadIdx; /* w4: worker, w2: grid */
+    float w5 = 1.0f; /* w5: one */
+    uint64_t w6 = (uint64_t)w4_block.x * blockDim.x + w4_thread.x; /* w6: out_view, w4: worker */
+    w3[w6] = w5; /* w7: out_filled, w3: out, w6: out_view, w5: one */
+    auto w7 = w3; /* w7: out_filled, w3: out, w6: out_view, w5: one */
+    return; /* returns w7: out_filled */
 }
 
 void launch_user_f32_fill_one(uint64_t block_count, uint64_t thread_count, float* out) {

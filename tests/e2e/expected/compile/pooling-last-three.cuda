@@ -1,36 +1,36 @@
 #include <stdint.h>
 
-__global__ void user_f32_pooling_last_three(float* input, float* output) {
-    uint3 worker_block = blockIdx;
-    uint3 worker_thread = threadIdx;
-    uint64_t index = (uint64_t)worker_block.x * blockDim.x + worker_thread.x;
-    bool is_zero = index == 0;
-    if (is_zero) {
-        float w26 = input[index];
-        output[index] = w26;
-        auto w27 = output;
+__global__ void user_f32_pooling_last_three(float* w3 /* input */, float* w4 /* output */) {
+    uint3 w5_block = blockIdx; /* w5: worker, w2: grid */
+    uint3 w5_thread = threadIdx; /* w5: worker, w2: grid */
+    uint64_t w6 = (uint64_t)w5_block.x * blockDim.x + w5_thread.x; /* w6: index, w5: worker */
+    bool w7 = w6 == 0; /* w7: is_zero, w6: index */
+    if (w7 /* is_zero */) {
+        float w18 = w3[w6]; /* w3: input, w6: index */
+        w4[w6] = w18; /* w4: output, w6: index */
+        auto w39 = w4; /* w4: output, w6: index */
     } else {
-        bool w32 = index == 1;
-        if (w32) {
-            uint64_t w46 = index - 1;
-            float w47 = input[index];
-            float w48 = input[w46];
-            float w49 = w47 + w48;
-            output[index] = w49;
-            auto w50 = output;
+        bool w41 = w6 == 1; /* w6: index */
+        if (w41) {
+            uint64_t w22 = w6 - 1; /* w6: index */
+            float w23 = w3[w6]; /* w3: input, w6: index */
+            float w24 = w3[w22]; /* w3: input */
+            float w25 = w23 + w24;
+            w4[w6] = w25; /* w4: output, w6: index */
+            auto w42 = w4; /* w4: output, w6: index */
         } else {
-            uint64_t w55 = index - 1;
-            uint64_t w56 = index - 2;
-            float w57 = input[index];
-            float w58 = input[w55];
-            float w59 = input[w56];
-            float w60 = w57 + w58;
-            float w61 = w60 + w59;
-            output[index] = w61;
-            auto w62 = output;
+            uint64_t w27 = w6 - 1; /* w6: index */
+            uint64_t w28 = w6 - 2; /* w6: index */
+            float w29 = w3[w6]; /* w3: input, w6: index */
+            float w30 = w3[w27]; /* w3: input */
+            float w31 = w3[w28]; /* w3: input */
+            float w32 = w29 + w30;
+            float w33 = w32 + w31;
+            w4[w6] = w33; /* w4: output, w6: index */
+            auto w43 = w4; /* w4: output, w6: index */
         }
     }
-    return;
+    return; /* returns w12: input_result, w13: output_pooled */
 }
 
 void launch_user_f32_pooling_last_three(uint64_t block_count, uint64_t thread_count, float* input, float* output) {

@@ -1,15 +1,15 @@
 #include <stdint.h>
 
-__global__ void user_f32_zip_add(float* a, float* b, float* output) {
-    uint3 worker_block = blockIdx;
-    uint3 worker_thread = threadIdx;
-    uint64_t view = (uint64_t)worker_block.x * blockDim.x + worker_thread.x;
-    float a_value = a[view];
-    float b_value = b[view];
-    float sum = a_value + b_value;
-    output[view] = sum;
-    auto output_summed = output;
-    return;
+__global__ void user_f32_zip_add(float* w3 /* a */, float* w4 /* b */, float* w5 /* output */) {
+    uint3 w6_block = blockIdx; /* w6: worker, w2: grid */
+    uint3 w6_thread = threadIdx; /* w6: worker, w2: grid */
+    uint64_t w7 = (uint64_t)w6_block.x * blockDim.x + w6_thread.x; /* w7: view, w6: worker */
+    float w8 = w3[w7]; /* w8: a_value, w3: a, w7: view */
+    float w9 = w4[w7]; /* w9: b_value, w4: b, w7: view */
+    float w10 = w8 + w9; /* w10: sum, w8: a_value, w9: b_value */
+    w5[w7] = w10; /* w11: output_summed, w5: output, w7: view, w10: sum */
+    auto w11 = w5; /* w11: output_summed, w5: output, w7: view, w10: sum */
+    return; /* returns w11: output_summed */
 }
 
 void launch_user_f32_zip_add(uint64_t block_count, uint64_t thread_count, float* a, float* b, float* output) {

@@ -1,18 +1,18 @@
 #include <stdint.h>
 
-__global__ void user_f32_broadcast_add(uint64_t rows, uint64_t cols, uint64_t tile_rows, uint64_t tile_cols, float* a, float* b, float* output) {
-    uint3 worker_block = blockIdx;
-    uint3 worker_thread = threadIdx;
-    uint64_t ij_row = (uint64_t)worker_block.y * tile_rows + worker_thread.y;
-    uint64_t ij_col = (uint64_t)worker_block.x * tile_cols + worker_thread.x;
-    uint64_t i = ij_row;
-    uint64_t j = ij_col;
-    float a_value = a[i];
-    float b_value = b[j];
-    float sum = a_value + b_value;
-    output[ij_row * cols + ij_col] = sum;
-    auto output_summed = output;
-    return;
+__global__ void user_f32_broadcast_add(uint64_t w0 /* rows */, uint64_t w1 /* cols */, uint64_t w2 /* tile_rows */, uint64_t w3 /* tile_cols */, float* w5 /* a */, float* w6 /* b */, float* w7 /* output */) {
+    uint3 w8_block = blockIdx; /* w8: worker, w4: grid */
+    uint3 w8_thread = threadIdx; /* w8: worker, w4: grid */
+    uint64_t w9_row = (uint64_t)w8_block.y * w2 + w8_thread.y; /* w9: ij, w8: worker, w2: tile_rows, w3: tile_cols */
+    uint64_t w9_col = (uint64_t)w8_block.x * w3 + w8_thread.x; /* w9: ij, w8: worker, w2: tile_rows, w3: tile_cols */
+    uint64_t w10 = w9_row; /* w10: i, w9: ij */
+    uint64_t w11 = w9_col; /* w11: j, w9: ij */
+    float w12 = w5[w10]; /* w12: a_value, w5: a, w10: i */
+    float w13 = w6[w11]; /* w13: b_value, w6: b, w11: j */
+    float w14 = w12 + w13; /* w14: sum, w12: a_value, w13: b_value */
+    w7[w9_row * w1 + w9_col] = w14; /* w15: output_summed, w7: output, w9: ij, w14: sum */
+    auto w15 = w7; /* w15: output_summed, w7: output, w9: ij, w14: sum */
+    return; /* returns w15: output_summed */
 }
 
 void launch_user_f32_broadcast_add(uint64_t rows, uint64_t cols, uint64_t tile_rows, uint64_t tile_cols, float* a, float* b, float* output) {

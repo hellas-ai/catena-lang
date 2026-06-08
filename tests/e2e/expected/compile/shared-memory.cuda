@@ -1,25 +1,25 @@
 #include <stdint.h>
 
-__global__ void user_f32_shared_one(uint64_t scratch_size, float* out) {
+__global__ void user_f32_shared_one(uint64_t w3_size /* scratch_size */, float* w4 /* out */) {
     extern __shared__ float __shared_mem[];
-    float* scratch = __shared_mem;
+    float* w3 = __shared_mem;
 
-    uint3 worker_block = blockIdx;
-    uint3 worker_thread = threadIdx;
-    uint64_t out_view = (uint64_t)worker_block.x * blockDim.x + worker_thread.x;
-    float one = 1.0f;
-    scratch[worker_thread.x] = one;
-    auto scratch_filled = scratch;
-    float from_scratch = scratch_filled[worker_thread.x];
-    out[out_view] = from_scratch;
-    auto out_filled = out;
-    return;
+    uint3 w5_block = blockIdx; /* w5: worker, w2: grid */
+    uint3 w5_thread = threadIdx; /* w5: worker, w2: grid */
+    uint64_t w6 = (uint64_t)w5_block.x * blockDim.x + w5_thread.x; /* w6: out_view, w5: worker */
+    float w7 = 1.0f; /* w7: one */
+    w3[w5_thread.x] = w7; /* w8: scratch_filled, w3: scratch, w5: worker, w7: one */
+    auto w8 = w3; /* w8: scratch_filled, w3: scratch, w5: worker, w7: one */
+    float w9 = w8[w5_thread.x]; /* w9: from_scratch, w8: scratch_filled, w5: worker */
+    w4[w6] = w9; /* w10: out_filled, w4: out, w6: out_view, w9: from_scratch */
+    auto w10 = w4; /* w10: out_filled, w4: out, w6: out_view, w9: from_scratch */
+    return; /* returns w8: scratch_filled, w10: out_filled */
 }
 
 void launch_user_f32_shared_one(uint64_t block_count, uint64_t thread_count, float* out) {
-    uint64_t scratch_size = thread_count;
+    uint64_t w3_size = thread_count;
 
     dim3 block(thread_count);
     dim3 grid(block_count);
-    user_f32_shared_one<<<grid, block, (scratch_size) * sizeof(float)>>>(scratch_size, out);
+    user_f32_shared_one<<<grid, block, (w3_size) * sizeof(float)>>>(w3_size, out);
 }

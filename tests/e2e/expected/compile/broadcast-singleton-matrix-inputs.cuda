@@ -1,25 +1,22 @@
 #include <stdint.h>
 
-__global__ void user_f32_broadcast_add_singleton_matrix_inputs(uint64_t tile_rows, uint64_t tile_cols, uint64_t grid_cols, uint64_t grid_rows, float* a, float* b, float* output) {
-    uint3 worker_block = blockIdx;
-    uint3 worker_thread = threadIdx;
-    uint64_t ij_row = (uint64_t)worker_block.y * tile_rows + worker_thread.y;
-    uint64_t ij_col = (uint64_t)worker_block.x * tile_cols + worker_thread.x;
-    uint64_t i = ij_row;
-    uint64_t j = ij_col;
-    uint64_t a_view_row = 0;
-    uint64_t a_view_col = j;
-    uint64_t b_view_row = i;
-    uint64_t b_view_col = 0;
-    // safety: certified by user.f32.broadcast-add-singleton-matrix-inputs.a.a_view.safe-access
-    float a_value = a[a_view_row * (grid_cols * tile_cols) + a_view_col];
-    // safety: certified by user.f32.broadcast-add-singleton-matrix-inputs.b.b_view.safe-access
-    float b_value = b[b_view_row * 1 + b_view_col];
-    float sum = a_value + b_value;
-    // safety: certified by user.f32.broadcast-add-singleton-matrix-inputs.output.ij.safe-access
-    output[ij_row * (grid_cols * tile_cols) + ij_col] = sum;
-    auto output_summed = output;
-    return;
+__global__ void user_f32_broadcast_add_singleton_matrix_inputs(uint64_t w0 /* tile_rows */, uint64_t w1 /* tile_cols */, uint64_t w2 /* grid_cols */, uint64_t w3 /* grid_rows */, float* w5 /* a */, float* w6 /* b */, float* w7 /* output */) {
+    uint3 w8_block = blockIdx; /* w8: worker, w4: grid */
+    uint3 w8_thread = threadIdx; /* w8: worker, w4: grid */
+    uint64_t w9_row = (uint64_t)w8_block.y * w0 + w8_thread.y; /* w9: ij, w8: worker, w0: tile_rows, w1: tile_cols */
+    uint64_t w9_col = (uint64_t)w8_block.x * w1 + w8_thread.x; /* w9: ij, w8: worker, w0: tile_rows, w1: tile_cols */
+    uint64_t w10 = w9_row; /* w10: i, w9: ij */
+    uint64_t w11 = w9_col; /* w11: j, w9: ij */
+    uint64_t w14_row = 0; /* w14: a_view, w11: j, w12: a_shape */
+    uint64_t w14_col = w11; /* w14: a_view, w11: j, w12: a_shape */
+    uint64_t w15_row = w10; /* w15: b_view, w10: i, w13: b_shape */
+    uint64_t w15_col = 0; /* w15: b_view, w10: i, w13: b_shape */
+    float w16 = w5[w14_row * (w2 * w1) + w14_col]; /* w16: a_value, w5: a, w14: a_view */
+    float w17 = w6[w15_row * 1 + w15_col]; /* w17: b_value, w6: b, w15: b_view */
+    float w18 = w16 + w17; /* w18: sum, w16: a_value, w17: b_value */
+    w7[w9_row * (w2 * w1) + w9_col] = w18; /* w19: output_summed, w7: output, w9: ij, w18: sum */
+    auto w19 = w7; /* w19: output_summed, w7: output, w9: ij, w18: sum */
+    return; /* returns w19: output_summed */
 }
 
 void launch_user_f32_broadcast_add_singleton_matrix_inputs(uint64_t tile_rows, uint64_t tile_cols, uint64_t grid_cols, uint64_t grid_rows, float* a, float* b, float* output) {

@@ -1,18 +1,18 @@
 #include <stdint.h>
 
-__global__ void user_f32_map_square_2d_add_ten(uint64_t rows, uint64_t cols, float* a, float* output) {
-    uint3 worker_block = blockIdx;
-    uint3 worker_thread = threadIdx;
-    float a_value = a[worker_block.x * cols + worker_thread.x];
-    float one = 1.0f;
-    float two = one + one;
-    float four = two + two;
-    float eight = four + four;
-    float ten = eight + two;
-    float mapped = a_value + ten;
-    output[worker_block.x * cols + worker_thread.x] = mapped;
-    auto output_mapped = output;
-    return;
+__global__ void user_f32_map_square_2d_add_ten(uint64_t w0 /* rows */, uint64_t w1 /* cols */, float* w3 /* a */, float* w4 /* output */) {
+    uint3 w5_block = blockIdx; /* w5: worker, w2: grid */
+    uint3 w5_thread = threadIdx; /* w5: worker, w2: grid */
+    float w6 = w3[w5_block.x * w1 + w5_thread.x]; /* w6: a_value, w3: a, w5: worker */
+    float w7 = 1.0f; /* w7: one */
+    float w8 = w7 + w7; /* w8: two, w7: one */
+    float w9 = w8 + w8; /* w9: four, w8: two */
+    float w10 = w9 + w9; /* w10: eight, w9: four */
+    float w11 = w10 + w8; /* w11: ten, w10: eight, w8: two */
+    float w12 = w6 + w11; /* w12: mapped, w6: a_value, w11: ten */
+    w4[w5_block.x * w1 + w5_thread.x] = w12; /* w13: output_mapped, w4: output, w5: worker, w12: mapped */
+    auto w13 = w4; /* w13: output_mapped, w4: output, w5: worker, w12: mapped */
+    return; /* returns w13: output_mapped */
 }
 
 void launch_user_f32_map_square_2d_add_ten(uint64_t rows, uint64_t cols, float* a, float* output) {

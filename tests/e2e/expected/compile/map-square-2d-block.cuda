@@ -1,20 +1,20 @@
 #include <stdint.h>
 
-__global__ void user_f32_map_square_2d_block_add_ten(uint64_t rows, uint64_t cols, uint64_t tile_rows, uint64_t tile_cols, float* a, float* output) {
-    uint3 worker_block = blockIdx;
-    uint3 worker_thread = threadIdx;
-    uint64_t ij_row = (uint64_t)worker_block.y * tile_rows + worker_thread.y;
-    uint64_t ij_col = (uint64_t)worker_block.x * tile_cols + worker_thread.x;
-    float a_value = a[ij_row * cols + ij_col];
-    float one = 1.0f;
-    float two = one + one;
-    float four = two + two;
-    float eight = four + four;
-    float ten = eight + two;
-    float mapped = a_value + ten;
-    output[ij_row * cols + ij_col] = mapped;
-    auto output_mapped = output;
-    return;
+__global__ void user_f32_map_square_2d_block_add_ten(uint64_t w0 /* rows */, uint64_t w1 /* cols */, uint64_t w2 /* tile_rows */, uint64_t w3 /* tile_cols */, float* w5 /* a */, float* w6 /* output */) {
+    uint3 w7_block = blockIdx; /* w7: worker, w4: grid */
+    uint3 w7_thread = threadIdx; /* w7: worker, w4: grid */
+    uint64_t w8_row = (uint64_t)w7_block.y * w2 + w7_thread.y; /* w8: ij, w7: worker, w2: tile_rows, w3: tile_cols */
+    uint64_t w8_col = (uint64_t)w7_block.x * w3 + w7_thread.x; /* w8: ij, w7: worker, w2: tile_rows, w3: tile_cols */
+    float w9 = w5[w8_row * w1 + w8_col]; /* w9: a_value, w5: a, w8: ij */
+    float w10 = 1.0f; /* w10: one */
+    float w11 = w10 + w10; /* w11: two, w10: one */
+    float w12 = w11 + w11; /* w12: four, w11: two */
+    float w13 = w12 + w12; /* w13: eight, w12: four */
+    float w14 = w13 + w11; /* w14: ten, w13: eight, w11: two */
+    float w15 = w9 + w14; /* w15: mapped, w9: a_value, w14: ten */
+    w6[w8_row * w1 + w8_col] = w15; /* w16: output_mapped, w6: output, w8: ij, w15: mapped */
+    auto w16 = w6; /* w16: output_mapped, w6: output, w8: ij, w15: mapped */
+    return; /* returns w16: output_mapped */
 }
 
 void launch_user_f32_map_square_2d_block_add_ten(uint64_t rows, uint64_t cols, uint64_t tile_rows, uint64_t tile_cols, float* a, float* output) {

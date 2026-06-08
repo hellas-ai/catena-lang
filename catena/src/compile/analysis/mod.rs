@@ -19,7 +19,7 @@ use crate::compile::{
 };
 
 use self::{
-    cfg::{build_cfg as build_analysis_cfg, render_cfg},
+    cfg::{build_cfg as build_analysis_cfg, render_cfg as render_analysis_cfg},
     layers::root_layer,
     nested_regions::build_control_region_graphs,
     partition::{OperationRegion, RegionKind, partition_data_regions},
@@ -70,6 +70,19 @@ pub fn build_cfg(graph: &CompileGraph, cfg_options: CfgOptions) -> Result<Cfg, C
     .cfg)
 }
 
+pub fn render_cfg(graph: &CompileGraph, cfg_options: CfgOptions) -> Result<Vec<u8>, CfgError> {
+    if !matches!(graph.theory, CompileTheory::Data) {
+        return Err(CfgError::UnsupportedTheory(graph.theory.clone()));
+    }
+
+    let layer = layer(graph);
+    Ok(render_analysis_cfg(
+        &layer,
+        graph.source_variable_names.clone(),
+        cfg_options,
+    ))
+}
+
 pub fn render_analysis_artifacts(
     graph: &CompileGraph,
     cfg_options: CfgOptions,
@@ -90,7 +103,7 @@ pub fn render_analysis_artifacts(
     let region_graph = graph_svg(&region_graph(&layer))?;
     let region_graph_trace = region_graph_trace(&layer);
     let value_equivalence_trace = value_equivalence_trace(&layer);
-    let cfg = render_cfg(&layer, graph.source_variable_names.clone(), cfg_options);
+    let cfg = render_analysis_cfg(&layer, graph.source_variable_names.clone(), cfg_options);
     let mut artifacts = vec![
         analysis_index_artifact(graph, &layer),
         AnalysisArtifact {

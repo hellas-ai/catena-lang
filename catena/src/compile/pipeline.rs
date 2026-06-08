@@ -7,16 +7,13 @@ use crate::{
     check::{CheckError, check as check_elaborated_theory},
     compile::{
         CompileConfig, CompileGraph, CompileGraphError, analysis,
-        cfg::{CfgOptions, render_program_cfg},
+        cfg::{CfgError, CfgOptions},
         check_render, compile_graph,
         cuda::CudaOptions,
         cuda::{CudaAbiError, render_cuda_source},
         graph_render,
         normalize::{NormalizeGraphError, normalize_graph},
-        program::{
-            ProgramCompileError, ProgramCompileOptions, compile_program_from_graph,
-            compile_program_from_graph_with_options,
-        },
+        program::{ProgramCompileError, compile_program_from_graph},
         proof::{ProofCertificateError, ProofCertificates},
         structured::{StructuredCompileError, compile_structured_program},
     },
@@ -96,6 +93,8 @@ pub enum CompilePipelineError {
     #[error(transparent)]
     Normalize(#[from] NormalizeGraphError),
     #[error(transparent)]
+    Cfg(#[from] CfgError),
+    #[error(transparent)]
     Program(#[from] ProgramCompileError),
     #[error(transparent)]
     Structured(#[from] StructuredCompileError),
@@ -171,13 +170,7 @@ impl CompilePipeline {
                     .map(|certificates| certificates.verify_graph_properties(&graph))
                     .transpose()?;
                 if emit == Emit::Cfg {
-                    let program = compile_program_from_graph_with_options(
-                        &graph,
-                        ProgramCompileOptions {
-                            cfg: self.request.cfg_options,
-                        },
-                    )?;
-                    return Ok(render_program_cfg(&program).into_bytes());
+                    return Ok(analysis::render_cfg(&graph, self.request.cfg_options)?);
                 }
                 let program = compile_program_from_graph(&graph)?;
                 let structured = compile_structured_program(&program)?;

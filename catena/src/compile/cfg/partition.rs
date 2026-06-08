@@ -29,7 +29,7 @@ pub(super) enum RegionKind {
     InterleavedData,
 }
 
-pub(super) fn partition_data_regions(graph: &Graph) -> Vec<OperationRegion> {
+pub(super) fn partition_regions(graph: &Graph) -> Vec<OperationRegion> {
     let mut uf = UnionFind::new(operation_count(graph));
     let mut operations_by_wire = HashMap::<NodeId, Vec<OperationId>>::new();
 

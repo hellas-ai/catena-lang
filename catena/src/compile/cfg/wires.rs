@@ -27,22 +27,6 @@ pub(super) fn is_interleaved_data_operation(graph: &Graph, operation_id: Operati
     )
 }
 
-pub(super) fn assert_interleaved_control_operations_are_unary(graph: &Graph) {
-    for operation_id in operation_ids(graph) {
-        if !is_interleaved_control_operation(graph, operation_id) {
-            continue;
-        }
-
-        let input_count = operation_inputs(graph, operation_id).count();
-        let output_count = operation_outputs(graph, operation_id).count();
-        assert!(
-            input_count == 1 && output_count == 1,
-            "cfg construction expects interleaved control operations to have arity 1 -> 1, but operation #{operation_id} `{}` has arity {input_count} -> {output_count}",
-            operation_name(graph, operation_id)
-        );
-    }
-}
-
 pub(super) fn operation_wires(
     graph: &Graph,
     operation_id: OperationId,

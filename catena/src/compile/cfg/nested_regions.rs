@@ -3,19 +3,30 @@ use crate::compile::{
     cfg::{
         control_regions::{ControlRegionGraph, process_control_regions},
         data_regions::{DataRegionGraph, process_data_regions},
-        partition::{OperationRegion, partition_control_regions, partition_data_regions},
+        layering::Layer,
+        layers::root_layer,
+        partition::{OperationRegion, partition_control_regions, partition_regions},
     },
     graph_ops::Graph,
 };
 
 const MAX_NESTED_REGION_DEPTH: usize = 16;
 
-pub(super) fn build_control_region_graphs(
+pub(super) fn expand_nested_regions(
     definition_context: &CompileGraph,
-    parent_graph: &Graph,
     regions: &[OperationRegion],
-) -> Vec<ControlRegionGraph> {
-    build_control_region_graphs_at_depth(definition_context, parent_graph, regions, 0)
+) -> Layer {
+    let control_region_graphs = build_control_region_graphs_at_depth(
+        definition_context,
+        &definition_context.graph,
+        regions,
+        0,
+    );
+    root_layer(
+        definition_context.graph.clone(),
+        regions,
+        &control_region_graphs,
+    )
 }
 
 fn build_control_region_graphs_at_depth(
@@ -74,7 +85,7 @@ fn partition_data_region_graphs(
     data_region_graphs
         .into_iter()
         .map(|mut data_region| {
-            data_region.regions = partition_data_regions(&data_region.nested_graph.graph);
+            data_region.regions = partition_regions(&data_region.nested_graph.graph);
             if depth < MAX_NESTED_REGION_DEPTH {
                 data_region.control_region_graphs = build_control_region_graphs_at_depth(
                     definition_context,

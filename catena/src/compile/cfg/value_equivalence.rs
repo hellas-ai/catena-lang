@@ -7,7 +7,7 @@ use crate::{
     compile::{
         cfg::{
             layering::Layer,
-            region_graph::{RegionGraph, RegionGraphRegion, region_graph_with_regions},
+            region_graph::{RegionGraph, RegionGraphRegion, lower_layer_to_region_graph},
         },
         graph_ops::{Graph, operation_inputs, operation_name, operation_outputs},
     },
@@ -16,16 +16,16 @@ use crate::{
 };
 
 pub(super) fn value_equivalence_trace(layer: &Layer) -> Vec<u8> {
-    let equivalences = value_equivalences(layer);
+    let region_graph = lower_layer_to_region_graph(layer);
+    let equivalences = compute_value_equivalences(&region_graph);
     equivalences.trace().into_bytes()
 }
 
-pub(super) fn value_equivalences(layer: &Layer) -> ValueEquivalences {
-    let region_graph = region_graph_with_regions(layer);
+pub(super) fn compute_value_equivalences(region_graph: &RegionGraph) -> ValueEquivalences {
     let mut builder = ValueEquivalenceBuilder::default();
-    builder.add_observed_terms(&region_graph);
-    builder.add_cfg_edge_equations(&region_graph);
-    builder.add_monoidal_equations(&region_graph);
+    builder.add_observed_terms(region_graph);
+    builder.add_cfg_edge_equations(region_graph);
+    builder.add_monoidal_equations(region_graph);
     builder.finish()
 }
 

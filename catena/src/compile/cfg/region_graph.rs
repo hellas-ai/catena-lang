@@ -36,10 +36,10 @@ pub(super) struct RegionGraphRegion {
 }
 
 pub(super) fn region_graph(layer: &Layer) -> Graph {
-    region_graph_with_regions(layer).graph
+    lower_layer_to_region_graph(layer).graph
 }
 
-pub(super) fn region_graph_with_regions(layer: &Layer) -> RegionGraph {
+pub(super) fn lower_layer_to_region_graph(layer: &Layer) -> RegionGraph {
     let mut builder = RegionGraphBuilder::default();
     builder.add_layer(layer);
     builder.finish()

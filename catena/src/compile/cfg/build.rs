@@ -10,19 +10,19 @@ use crate::stdlib::operations::{OperationKind, actual_operation_kind, actual_ope
 use super::{
     layering::Layer,
     partition::RegionKind,
-    region_graph::{RegionGraph, RegionGraphRegion, region_graph_with_regions},
-    value_equivalence::{ValueEquivalences, ValueProjection, value_equivalences},
+    region_graph::{RegionGraph, RegionGraphRegion},
+    value_equivalence::{ValueEquivalences, ValueProjection},
 };
 
-pub(super) fn build_cfg_from_layer(
+pub(super) fn lower_region_graph_to_cfg(
     graph: &CompileGraph,
     root_layer: &Layer,
+    region_graph: &RegionGraph,
+    value_equivalences: &ValueEquivalences,
     wire_names: HashMap<usize, String>,
     options: CfgOptions,
 ) -> CfgBuild {
-    let region_graph = region_graph_with_regions(root_layer);
     let connectivity = RegionGraphConnectivity::new(&region_graph.graph);
-    let value_equivalences = value_equivalences(root_layer);
     let mut nodes = region_graph
         .regions
         .iter()

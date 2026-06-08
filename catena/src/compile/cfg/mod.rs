@@ -22,9 +22,9 @@ pub use model::{Cfg, CfgArtifacts, CfgBuild, CfgError, CfgOptions};
 
 use self::{
     artifact_render::render_cfg_artifacts as render_cfg_artifacts_for_layer,
-    build::build_cfg_from_layer, layers::root_layer, nested_regions::build_control_region_graphs,
-    partition::partition_data_regions, render::render_cfg_build,
-    wires::assert_interleaved_control_operations_are_unary,
+    build::lower_region_graph_to_cfg, nested_regions::expand_nested_regions,
+    partition::partition_regions, region_graph::lower_layer_to_region_graph,
+    render::render_cfg_build, value_equivalence::compute_value_equivalences,
 };
 
 pub fn build_cfg(graph: &CompileGraph, cfg_options: CfgOptions) -> Result<CfgBuild, CfgError> {
@@ -32,14 +32,16 @@ pub fn build_cfg(graph: &CompileGraph, cfg_options: CfgOptions) -> Result<CfgBui
         return Err(CfgError::UnsupportedTheory(graph.theory.clone()));
     }
 
-    assert_interleaved_control_operations_are_unary(&graph.graph);
+    let regions = partition_regions(&graph.graph);
+    let layer = expand_nested_regions(graph, &regions);
+    let region_graph = lower_layer_to_region_graph(&layer);
+    let values = compute_value_equivalences(&region_graph);
 
-    let data_regions = partition_data_regions(&graph.graph);
-    let nested_control_regions = build_control_region_graphs(graph, &graph.graph, &data_regions);
-    let root_layer = root_layer(graph.graph.clone(), &data_regions, &nested_control_regions);
-    Ok(build_cfg_from_layer(
+    Ok(lower_region_graph_to_cfg(
         graph,
-        &root_layer,
+        &layer,
+        &region_graph,
+        &values,
         graph.source_variable_names.clone(),
         cfg_options,
     ))

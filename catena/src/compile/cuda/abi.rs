@@ -190,6 +190,8 @@ impl CudaKernelAbi {
             &source_parameter_abi.names,
             proof_evidence,
         );
+        let source_name_annotations =
+            source_name_annotations(definition, &source_parameter_abi);
 
         Ok(CudaKernelAbi {
             kernel_params: source_parameter_abi.device_params,
@@ -202,7 +204,7 @@ impl CudaKernelAbi {
             dynamic_shared_memory_bytes,
             views,
             cuda_names: source_parameter_abi.names,
-            source_name_annotations: source_parameter_abi.source_name_annotations,
+            source_name_annotations,
             access_certificates,
             view_ranks: view_metadata.ranks,
             shape_values: view_metadata.shapes,
@@ -740,6 +742,25 @@ fn rename_with(names: &HashMap<String, String>, name: &str) -> String {
 
 fn sanitize_comment(comment: &str) -> String {
     comment.replace("*/", "* /")
+}
+
+fn source_name_annotations(
+    definition: &Definition,
+    source_parameter_abi: &SourceParameterAbi,
+) -> HashMap<String, String> {
+    let mut annotations = source_parameter_abi.source_name_annotations.clone();
+    for variable in definition.context.variables() {
+        let wire_name = cfg::variable_name(variable.id.0);
+        let cuda_name = source_parameter_abi
+            .names
+            .get(&wire_name)
+            .cloned()
+            .unwrap_or_else(|| wire_name.clone());
+        if variable.name != cuda_name {
+            annotations.entry(cuda_name).or_insert(variable.name.clone());
+        }
+    }
+    annotations
 }
 
 struct SourceParameterAbi {

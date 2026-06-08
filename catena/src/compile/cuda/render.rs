@@ -196,10 +196,12 @@ fn sanitize_ident(name: &str) -> String {
 }
 
 fn primitive_line_comment(primitive: &Primitive, abi: &CudaKernelAbi) -> String {
+    let mut seen = std::collections::HashSet::new();
     let annotations = primitive
         .outputs
         .iter()
         .chain(&primitive.inputs)
+        .filter(|name| seen.insert((*name).clone()))
         .filter_map(|name| {
             abi.source_name_annotation(name)
                 .map(|annotation| format!("{name}: {}", sanitize_comment(annotation)))

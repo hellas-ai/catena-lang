@@ -23,6 +23,7 @@ pub(super) fn value_equivalence_trace(layer: &Layer) -> Vec<u8> {
 pub(super) fn value_equivalences(layer: &Layer) -> ValueEquivalences {
     let region_graph = region_graph_with_regions(layer);
     let mut builder = ValueEquivalenceBuilder::default();
+    builder.add_observed_terms(&region_graph);
     builder.add_cfg_edge_equations(&region_graph);
     builder.add_monoidal_equations(&region_graph);
     builder.finish()
@@ -33,6 +34,9 @@ pub(super) struct ValueEquivalences {
     terms: Vec<ValueTerm>,
     equations: Vec<ValueEquation>,
     class_by_term: HashMap<ValueTerm, usize>,
+    // Equivalence classes are semantic values spanning region-local wire
+    // namespaces. CFG variable ids must therefore be allocated per class; using
+    // a representative term's local wire number would collide across regions.
     variable_by_class: HashMap<usize, usize>,
 }
 
@@ -120,6 +124,21 @@ struct ValueEquivalenceBuilder {
 }
 
 impl ValueEquivalenceBuilder {
+    fn add_observed_terms(&mut self, region_graph: &RegionGraph) {
+        for region in &region_graph.regions {
+            for wire in region.inputs.iter().chain(&region.outputs) {
+                self.term_id(term(&region.path, *wire));
+            }
+            for operation_id in &region.region.operations {
+                for wire in operation_inputs(&region.graph, *operation_id)
+                    .chain(operation_outputs(&region.graph, *operation_id))
+                {
+                    self.term_id(term(&region.path, wire.0));
+                }
+            }
+        }
+    }
+
     fn add_cfg_edge_equations(&mut self, region_graph: &RegionGraph) {
         let connectivity = RegionGraphConnectivity::new(&region_graph.graph);
         for wire in connectivity.wires() {
@@ -485,22 +504,22 @@ impl ValueEquivalenceBuilder {
                 .or_default()
                 .push(term);
         }
+        let mut used_variables = std::collections::HashSet::new();
         let mut next_variable = self.terms.iter().map(|term| term.wire).max().unwrap_or(0) + 1;
         let mut variable_by_class = HashMap::new();
         for (class, terms) in terms_by_class {
-            if terms.len() > 1 || terms.iter().any(|term| !term.path.is_empty()) {
-                let variable = terms
-                    .iter()
-                    .filter(|term| term.path.is_empty())
-                    .min_by_key(|term| (term.region.as_slice(), term.wire))
-                    .map(|term| term.wire)
-                    .unwrap_or_else(|| {
-                        let variable = next_variable;
+            let variable = preferred_root_variable(&terms)
+                .filter(|variable| used_variables.insert(*variable))
+                .unwrap_or_else(|| {
+                    while used_variables.contains(&next_variable) {
                         next_variable += 1;
-                        variable
-                    });
-                variable_by_class.insert(class, variable);
-            }
+                    }
+                    let variable = next_variable;
+                    used_variables.insert(variable);
+                    next_variable += 1;
+                    variable
+                });
+            variable_by_class.insert(class, variable);
         }
 
         ValueEquivalences {
@@ -722,6 +741,17 @@ fn term(region: &[usize], wire: usize) -> ValueTerm {
     }
 }
 
+fn preferred_root_variable(terms: &[&ValueTerm]) -> Option<usize> {
+    // Region-local wires are not globally unique. Keeping a root-layer base
+    // wire when available preserves source/ABI names, but every other class
+    // must receive a fresh CFG variable id.
+    terms
+        .iter()
+        .filter(|term| term.path.is_empty() && term.region.len() == 1)
+        .min_by_key(|term| (term.region.as_slice(), term.wire))
+        .map(|term| term.wire)
+}
+
 fn monoidal_reason(
     region: &RegionGraphRegion,
     operation_id: usize,
@@ -831,5 +861,49 @@ impl RegionGraphConnectivity {
             .get(&wire)
             .map(Vec::as_slice)
             .unwrap_or(&[])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn distinct_region_classes_do_not_share_local_wire_numbers() {
+        let mut builder = ValueEquivalenceBuilder::default();
+        builder.term_id(term(&[0], 6));
+        builder.term_id(term(&[1, 2, 0], 6));
+
+        let equivalences = builder.finish();
+
+        assert_eq!(equivalences.resolve_wire(&[0], 6), 6);
+        assert_ne!(equivalences.resolve_wire(&[1, 2, 0], 6), 6);
+    }
+
+    #[test]
+    fn local_singleton_terms_receive_fresh_cfg_variables() {
+        let mut builder = ValueEquivalenceBuilder::default();
+        builder.term_id(term(&[1, 2, 0], 4));
+
+        let equivalences = builder.finish();
+
+        assert_ne!(equivalences.resolve_wire(&[1, 2, 0], 4), 4);
+    }
+
+    #[test]
+    fn projected_equivalence_uses_one_fresh_cfg_variable() {
+        let mut builder = ValueEquivalenceBuilder::default();
+        builder.add_equation(
+            term(&[1, 2, 0], 9).tag(),
+            term(&[1, 2, 0], 6),
+            EquationReason::Congruence,
+        );
+
+        let equivalences = builder.finish();
+        let tag = equivalences.resolve(&[1, 2, 0], 9, &[ValueProjection::Tag]);
+        let output = equivalences.resolve_wire(&[1, 2, 0], 6);
+
+        assert_eq!(tag, output);
+        assert_ne!(output, 6);
     }
 }

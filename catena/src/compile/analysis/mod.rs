@@ -62,12 +62,7 @@ pub fn build_cfg(graph: &CompileGraph, cfg_options: CfgOptions) -> Result<Cfg, C
     }
 
     let layer = layer(graph);
-    Ok(build_analysis_cfg(
-        &layer,
-        graph.source_variable_names.clone(),
-        cfg_options,
-    )
-    .cfg)
+    Ok(build_analysis_cfg(&layer, graph.source_variable_names.clone(), cfg_options).cfg)
 }
 
 pub fn render_cfg(graph: &CompileGraph, cfg_options: CfgOptions) -> Result<Vec<u8>, CfgError> {

@@ -374,7 +374,8 @@ fn simplify_redundant_blocks(stmts: &mut Vec<Stmt>) {
         simplify_stmt(&mut stmt);
         match stmt {
             Stmt::Block { label, mut body } => {
-                if remove_terminal_breaks_to(&mut body, &label) {
+                remove_fallthrough_breaks_to(&mut body, &label);
+                if !contains_break_to(&body, &label) {
                     simplified.extend(body);
                 } else {
                     simplified.push(Stmt::Block { label, body });
@@ -415,8 +416,8 @@ fn simplify_stmt(stmt: &mut Stmt) {
     }
 }
 
-fn remove_terminal_breaks_to(stmts: &mut [Stmt], label: &str) -> bool {
-    let mut removed = false;
+fn remove_fallthrough_breaks_to(stmts: &mut Vec<Stmt>, label: &str) {
+    remove_terminal_break_to(stmts, label);
     for stmt in stmts {
         match stmt {
             Stmt::If {
@@ -424,16 +425,21 @@ fn remove_terminal_breaks_to(stmts: &mut [Stmt], label: &str) -> bool {
                 else_body,
                 ..
             } => {
-                removed |= remove_terminal_break_to(then_body, label);
-                removed |= remove_terminal_break_to(else_body, label);
+                // In a branch body, a terminal `break label` is equivalent to
+                // falling out of the enclosing block.
+                remove_fallthrough_breaks_to(then_body, label);
+                remove_fallthrough_breaks_to(else_body, label);
             }
             Stmt::Switch { cases, .. } => {
                 for body in cases {
-                    removed |= remove_terminal_break_to(body, label);
+                    // Each case has its own terminal position.
+                    remove_fallthrough_breaks_to(body, label);
                 }
             }
             Stmt::Block { body, .. } | Stmt::Loop { body, .. } | Stmt::For { body, .. } => {
-                removed |= remove_terminal_breaks_to(body, label);
+                // Keep simplifying nested bodies, but the outer block is only
+                // removed after we prove no `break label` remains anywhere.
+                remove_fallthrough_breaks_to(body, label);
             }
             Stmt::Break(_)
             | Stmt::Continue(_)
@@ -445,14 +451,76 @@ fn remove_terminal_breaks_to(stmts: &mut [Stmt], label: &str) -> bool {
             | Stmt::Comment(_) => {}
         }
     }
-    removed
 }
 
-fn remove_terminal_break_to(stmts: &mut Vec<Stmt>, label: &str) -> bool {
+fn remove_terminal_break_to(stmts: &mut Vec<Stmt>, label: &str) {
     if matches!(stmts.last(), Some(Stmt::Break(break_label)) if break_label == label) {
         stmts.pop();
-        true
-    } else {
-        false
+    }
+}
+
+fn contains_break_to(stmts: &[Stmt], label: &str) -> bool {
+    stmts.iter().any(|stmt| match stmt {
+        Stmt::Block { body, .. } | Stmt::Loop { body, .. } | Stmt::For { body, .. } => {
+            contains_break_to(body, label)
+        }
+        Stmt::If {
+            then_body,
+            else_body,
+            ..
+        } => contains_break_to(then_body, label) || contains_break_to(else_body, label),
+        Stmt::Switch { cases, .. } => cases.iter().any(|body| contains_break_to(body, label)),
+        Stmt::Break(break_label) => break_label == label,
+        Stmt::Continue(_)
+        | Stmt::Return
+        | Stmt::Barrier
+        | Stmt::Assign { .. }
+        | Stmt::Call { .. }
+        | Stmt::Primitive(_)
+        | Stmt::Comment(_) => false,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn removes_block_when_all_breaks_are_fallthrough() {
+        let mut stmts = vec![Stmt::Block {
+            label: "n7".to_string(),
+            body: vec![Stmt::If {
+                condition: "c".to_string(),
+                then_body: vec![Stmt::Break("n7".to_string())],
+                else_body: vec![Stmt::Break("n7".to_string())],
+            }],
+        }];
+
+        simplify_redundant_blocks(&mut stmts);
+
+        assert_eq!(
+            stmts,
+            vec![Stmt::If {
+                condition: "c".to_string(),
+                then_body: Vec::new(),
+                else_body: Vec::new(),
+            }]
+        );
+    }
+
+    #[test]
+    fn keeps_block_when_break_to_label_remains() {
+        let mut stmts = vec![Stmt::Block {
+            label: "n7".to_string(),
+            body: vec![Stmt::If {
+                condition: "c".to_string(),
+                then_body: vec![Stmt::Break("n7".to_string()), Stmt::Return],
+                else_body: vec![Stmt::Break("n7".to_string())],
+            }],
+        }];
+
+        simplify_redundant_blocks(&mut stmts);
+
+        assert!(matches!(stmts.as_slice(), [Stmt::Block { label, .. }] if label == "n7"));
     }
 }

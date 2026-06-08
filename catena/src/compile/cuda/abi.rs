@@ -190,8 +190,7 @@ impl CudaKernelAbi {
             &source_parameter_abi.names,
             proof_evidence,
         );
-        let source_name_annotations =
-            source_name_annotations(definition, &source_parameter_abi);
+        let source_name_annotations = source_name_annotations(definition, &source_parameter_abi);
 
         Ok(CudaKernelAbi {
             kernel_params: source_parameter_abi.device_params,
@@ -757,7 +756,9 @@ fn source_name_annotations(
             .cloned()
             .unwrap_or_else(|| wire_name.clone());
         if variable.name != cuda_name {
-            annotations.entry(cuda_name).or_insert(variable.name.clone());
+            annotations
+                .entry(cuda_name)
+                .or_insert(variable.name.clone());
         }
     }
     annotations

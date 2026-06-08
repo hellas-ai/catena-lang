@@ -268,7 +268,7 @@ fn dump_cfg_artifacts(
     let compile_graph =
         CompilePipeline::compile_graph(checked_elaborated_theory, compile_graph_request)?;
     let graph = normalize_graph(&compile_graph)?;
-    let artifacts = cfg::render_analysis_artifacts(&graph, cfg_options)?;
+    let artifacts = cfg::render_cfg_artifacts(&graph, cfg_options)?;
 
     std::fs::create_dir_all(&output)?;
     for artifact in artifacts {

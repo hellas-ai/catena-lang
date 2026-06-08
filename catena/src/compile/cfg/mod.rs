@@ -39,7 +39,7 @@ pub struct AnalysisArtifact {
     pub contents: Vec<u8>,
 }
 
-pub fn layer(graph: &CompileGraph) -> Layer {
+fn layer(graph: &CompileGraph) -> Layer {
     assert!(
         matches!(graph.theory, CompileTheory::Data),
         "cfg analysis expects a data graph"
@@ -72,7 +72,7 @@ pub fn render_cfg(graph: &CompileGraph, cfg_options: CfgOptions) -> Result<Vec<u
     ))
 }
 
-pub fn render_analysis_artifacts(
+pub fn render_cfg_artifacts(
     graph: &CompileGraph,
     cfg_options: CfgOptions,
 ) -> std::io::Result<Vec<AnalysisArtifact>> {

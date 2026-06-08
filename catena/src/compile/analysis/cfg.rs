@@ -29,7 +29,7 @@ pub(super) fn render_cfg(
     render_analysis_cfg(&root_layer.graph, analysis_cfg)
 }
 
-fn build_cfg(
+pub(super) fn build_cfg(
     root_layer: &Layer,
     wire_names: HashMap<usize, String>,
     options: CfgOptions,

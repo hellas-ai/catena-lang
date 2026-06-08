@@ -13,10 +13,13 @@ mod wires;
 
 use std::{fmt::Write, path::PathBuf};
 
-use crate::compile::{CompileGraph, CompileTheory, cfg::CfgOptions};
+use crate::compile::{
+    CompileGraph, CompileTheory,
+    cfg::{Cfg, CfgError, CfgOptions},
+};
 
 use self::{
-    cfg::render_cfg,
+    cfg::{build_cfg as build_analysis_cfg, render_cfg},
     layers::root_layer,
     nested_regions::build_control_region_graphs,
     partition::{OperationRegion, RegionKind, partition_data_regions},
@@ -51,6 +54,20 @@ pub fn layer(graph: &CompileGraph) -> Layer {
     let regions = partition_data_regions(&graph.graph);
     let control_region_graphs = build_control_region_graphs(graph, &graph.graph, &regions);
     root_layer(graph.graph.clone(), &regions, &control_region_graphs)
+}
+
+pub fn build_cfg(graph: &CompileGraph, cfg_options: CfgOptions) -> Result<Cfg, CfgError> {
+    if !matches!(graph.theory, CompileTheory::Data) {
+        return Err(CfgError::UnsupportedTheory(graph.theory.clone()));
+    }
+
+    let layer = layer(graph);
+    Ok(build_analysis_cfg(
+        &layer,
+        graph.source_variable_names.clone(),
+        cfg_options,
+    )
+    .cfg)
 }
 
 pub fn render_analysis_artifacts(

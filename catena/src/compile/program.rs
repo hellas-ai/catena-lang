@@ -4,7 +4,7 @@ use thiserror::Error;
 
 use crate::{
     compile::{
-        CompileGraph, CompileTheory,
+        CompileGraph, CompileTheory, analysis,
         cfg::{Cfg, CfgError, CfgOptions},
     },
     lang::Obj,
@@ -103,7 +103,7 @@ fn build_definition(
     *next_id += 1;
 
     let context = context_for_graph(compile_graph);
-    let body = Cfg::from_compile_graph_with_options(compile_graph, options.cfg)?;
+    let body = analysis::build_cfg(compile_graph, options.cfg)?;
 
     definitions.insert(
         id,

@@ -1,19 +1,20 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 use crate::compile::{
-    cfg::Layer,
     cfg::{BlockInstruction, Cfg, CfgEdge, CfgNode, CfgOptions, Transfer},
     graph_ops::{Graph, operation_inputs, operation_name, operation_outputs},
 };
 use crate::stdlib::operations::{OperationKind, actual_operation_kind, actual_operation_name};
 
 use super::{
+    layering::Layer,
+    partition::RegionKind,
     region_graph::{RegionGraph, RegionGraphRegion, region_graph_with_regions},
-    render::render_analysis_cfg,
+    render::render_cfg_build,
     value_equivalence::{ValueEquivalences, ValueProjection, value_equivalences},
 };
 
-pub(super) struct AnalysisCfg {
+pub(super) struct CfgBuild {
     pub(super) cfg: Cfg,
     pub(super) globals: Vec<usize>,
     pub(super) wire_names: HashMap<usize, String>,
@@ -25,15 +26,15 @@ pub(super) fn render_cfg(
     wire_names: HashMap<usize, String>,
     options: CfgOptions,
 ) -> Vec<u8> {
-    let analysis_cfg = build_cfg(root_layer, wire_names, options);
-    render_analysis_cfg(&root_layer.graph, analysis_cfg)
+    let cfg_build = build_cfg(root_layer, wire_names, options);
+    render_cfg_build(&root_layer.graph, cfg_build)
 }
 
 pub(super) fn build_cfg(
     root_layer: &Layer,
     wire_names: HashMap<usize, String>,
     options: CfgOptions,
-) -> AnalysisCfg {
+) -> CfgBuild {
     let region_graph = region_graph_with_regions(root_layer);
     let connectivity = RegionGraphConnectivity::new(&region_graph.graph);
     let value_equivalences = value_equivalences(root_layer);
@@ -54,7 +55,7 @@ pub(super) fn build_cfg(
 
     assert_dense_unique_block_ids(&nodes);
     let globals = cfg_globals(root_layer, &nodes);
-    AnalysisCfg {
+    CfgBuild {
         cfg: Cfg {
             entry,
             predecessors: predecessors(&nodes),
@@ -600,10 +601,7 @@ fn region_graph_block_annotations(region_graph: &RegionGraph) -> HashMap<usize, 
         .collect()
 }
 
-fn region_path_annotation(
-    path: &[usize],
-    kind: crate::compile::cfg::partition::RegionKind,
-) -> String {
+fn region_path_annotation(path: &[usize], kind: RegionKind) -> String {
     let path = path
         .iter()
         .map(ToString::to_string)
@@ -612,12 +610,12 @@ fn region_path_annotation(
     format!("region.{path}.{}", region_kind_name(kind))
 }
 
-fn region_kind_name(kind: crate::compile::cfg::partition::RegionKind) -> &'static str {
+fn region_kind_name(kind: RegionKind) -> &'static str {
     match kind {
-        crate::compile::cfg::partition::RegionKind::Data => "data",
-        crate::compile::cfg::partition::RegionKind::Control => "control",
-        crate::compile::cfg::partition::RegionKind::InterleavedControl => "interleaved-control",
-        crate::compile::cfg::partition::RegionKind::InterleavedData => "interleaved-data",
+        RegionKind::Data => "data",
+        RegionKind::Control => "control",
+        RegionKind::InterleavedControl => "interleaved-control",
+        RegionKind::InterleavedData => "interleaved-data",
     }
 }
 

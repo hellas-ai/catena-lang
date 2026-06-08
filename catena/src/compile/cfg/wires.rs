@@ -37,7 +37,7 @@ pub(super) fn assert_interleaved_control_operations_are_unary(graph: &Graph) {
         let output_count = operation_outputs(graph, operation_id).count();
         assert!(
             input_count == 1 && output_count == 1,
-            "analysis expects interleaved control operations to have arity 1 -> 1, but operation #{operation_id} `{}` has arity {input_count} -> {output_count}",
+            "cfg construction expects interleaved control operations to have arity 1 -> 1, but operation #{operation_id} `{}` has arity {input_count} -> {output_count}",
             operation_name(graph, operation_id)
         );
     }

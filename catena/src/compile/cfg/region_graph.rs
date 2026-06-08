@@ -12,8 +12,7 @@ use open_hypergraphs::strict::vec::{
 use crate::{
     compile::{
         cfg::{
-            Layer, NestingMorphism, Region,
-            layering::{BoundaryFiberPoint, BoundarySide},
+            layering::{BoundaryFiberPoint, BoundarySide, Layer, NestingMorphism, Region},
             partition::RegionKind,
         },
         graph_ops::{Graph, operation_inputs, operation_outputs},

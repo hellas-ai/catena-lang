@@ -17,30 +17,29 @@ use crate::{
 };
 
 #[derive(Debug, Clone)]
-pub struct Layer {
-    pub graph: Graph,
-    pub regions: Vec<Region>,
-    pub morphism_to_parent: Option<NestingMorphism>,
+pub(super) struct Layer {
+    pub(super) graph: Graph,
+    pub(super) regions: Vec<Region>,
+    pub(super) morphism_to_parent: Option<NestingMorphism>,
 }
 
 #[derive(Debug, Clone)]
-pub struct Region {
-    pub index: usize,
-    pub kind: RegionKind,
-    pub operations: Vec<OperationId>,
-    pub expansion: Option<Box<Layer>>,
+pub(super) struct Region {
+    pub(super) index: usize,
+    pub(super) kind: RegionKind,
+    pub(super) operations: Vec<OperationId>,
+    pub(super) expansion: Option<Box<Layer>>,
 }
 
 #[derive(Debug, Clone)]
-pub struct NestingMorphism {
-    pub operation_map: Vec<OperationId>,
-    pub boundary_relation: BoundaryRelation,
+pub(super) struct NestingMorphism {
+    pub(super) boundary_relation: BoundaryRelation,
 }
 
 // A span from a child graph boundary to its parent graph boundary. The vector
 // index is the apex element; `child_wires` and `parent_wires` are the two legs.
 #[derive(Debug, Clone)]
-pub struct BoundaryRelation {
+pub(super) struct BoundaryRelation {
     apexes: Vec<BoundaryApex>,
     pub(super) child_wires: Vec<NodeId>,
     pub(super) parent_wires: Vec<NodeId>,

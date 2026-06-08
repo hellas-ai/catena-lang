@@ -8,15 +8,15 @@ use crate::compile::{
     },
 };
 
-use super::build::AnalysisCfg;
+use super::build::CfgBuild;
 
-pub(super) fn render_analysis_cfg(graph: &Graph, analysis_cfg: AnalysisCfg) -> Vec<u8> {
-    let AnalysisCfg {
+pub(super) fn render_cfg_build(graph: &Graph, cfg_build: CfgBuild) -> Vec<u8> {
+    let CfgBuild {
         cfg,
         globals,
         wire_names,
         block_svg_paths,
-    } = analysis_cfg;
+    } = cfg_build;
     let program = cfg_program(graph, cfg);
     let definition = program.entry_definition();
     let mut out = String::new();

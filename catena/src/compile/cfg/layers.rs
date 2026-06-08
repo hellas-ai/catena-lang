@@ -99,7 +99,6 @@ fn control_expansion_for_region(
 
 fn morphism_from_nested_graph(nested_graph: &NestedGraph) -> NestingMorphism {
     NestingMorphism {
-        operation_map: nested_graph.parent_operations.clone(),
         boundary_relation: nested_graph.boundary_relation.clone(),
     }
 }

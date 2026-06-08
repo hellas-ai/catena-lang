@@ -14,15 +14,15 @@ use crate::{
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct OperationRegion {
-    pub kind: RegionKind,
-    pub operations: Vec<OperationId>,
+pub(super) struct OperationRegion {
+    pub(super) kind: RegionKind,
+    pub(super) operations: Vec<OperationId>,
 }
 
 pub(super) type OperationId = usize;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RegionKind {
+pub(super) enum RegionKind {
     Data,
     InterleavedControl,
     Control,

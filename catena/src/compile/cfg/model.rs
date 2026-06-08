@@ -1,10 +1,8 @@
-use crate::compile::{CompileGraph, CompileTheory};
+use crate::compile::CompileTheory;
 
-pub type CfgNodeId = usize;
-pub type OperationId = usize;
-pub type OperationName = String;
-pub type VariableId = usize;
-pub type VariableName = String;
+pub(crate) type CfgNodeId = usize;
+pub(crate) type OperationId = usize;
+pub(crate) type VariableId = usize;
 
 #[derive(Debug, thiserror::Error)]
 pub enum CfgError {
@@ -13,7 +11,6 @@ pub enum CfgError {
 }
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct Cfg {
     pub(crate) entry: CfgNodeId,
     pub(crate) nodes: Vec<CfgNode>,
@@ -27,23 +24,23 @@ pub struct CfgOptions {
 }
 
 #[derive(Debug, Clone)]
-pub struct CfgNode {
-    pub id: CfgNodeId,
-    pub params: Vec<VariableId>,
-    pub block: Vec<BlockInstruction>,
-    pub transfer: Transfer,
+pub(crate) struct CfgNode {
+    pub(crate) id: CfgNodeId,
+    pub(crate) params: Vec<VariableId>,
+    pub(crate) block: Vec<BlockInstruction>,
+    pub(crate) transfer: Transfer,
 }
 
 #[derive(Debug, Clone)]
-pub struct BlockInstruction {
-    pub operation_id: OperationId,
-    pub operation: OperationName,
-    pub args: Vec<VariableId>,
-    pub results: Vec<VariableId>,
+pub(crate) struct BlockInstruction {
+    pub(crate) operation_id: OperationId,
+    pub(crate) operation: String,
+    pub(crate) args: Vec<VariableId>,
+    pub(crate) results: Vec<VariableId>,
 }
 
 #[derive(Debug, Clone)]
-pub enum Transfer {
+pub(crate) enum Transfer {
     Goto(CfgEdge),
     If {
         condition: VariableId,
@@ -54,23 +51,12 @@ pub enum Transfer {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CfgEdge {
-    pub target: CfgNodeId,
-    pub args: Vec<VariableId>,
+pub(crate) struct CfgEdge {
+    pub(crate) target: CfgNodeId,
+    pub(crate) args: Vec<VariableId>,
 }
 
 impl Cfg {
-    pub fn from_compile_graph(compile_graph: &CompileGraph) -> Result<Self, CfgError> {
-        Self::from_compile_graph_with_options(compile_graph, CfgOptions::default())
-    }
-
-    pub fn from_compile_graph_with_options(
-        compile_graph: &CompileGraph,
-        options: CfgOptions,
-    ) -> Result<Self, CfgError> {
-        crate::compile::cfg::build_cfg(compile_graph, options)
-    }
-
     pub(crate) fn label(&self, node: CfgNodeId) -> String {
         format!("n{node}")
     }
@@ -91,7 +77,7 @@ impl CfgNode {
 
 // Variable naming
 
-pub fn variable_name(id: VariableId) -> String {
+pub(crate) fn variable_name(id: VariableId) -> String {
     if id > usize::MAX / 2 {
         format!("s{}", usize::MAX - id)
     } else {

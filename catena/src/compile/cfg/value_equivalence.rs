@@ -6,7 +6,7 @@ use std::{
 use crate::{
     compile::{
         cfg::{
-            Layer,
+            layering::Layer,
             region_graph::{RegionGraph, RegionGraphRegion, region_graph_with_regions},
         },
         graph_ops::{Graph, operation_inputs, operation_name, operation_outputs},

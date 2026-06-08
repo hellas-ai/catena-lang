@@ -16,15 +16,15 @@ use std::{fmt::Write, path::PathBuf};
 
 use crate::compile::{CompileGraph, CompileTheory};
 
-pub use layering::{Layer, NestingMorphism, Region};
-pub use model::{
-    BlockInstruction, Cfg, CfgEdge, CfgError, CfgNode, CfgNodeId, CfgOptions, OperationId,
-    OperationName, Transfer, VariableId, VariableName, variable_name,
+pub use model::{Cfg, CfgError, CfgOptions};
+pub(crate) use model::{
+    BlockInstruction, CfgEdge, CfgNode, CfgNodeId, Transfer, VariableId, variable_name,
 };
 
 use self::{
     artifact_render::{graph_svg, render_graph_region_svgs, render_region_svgs},
-    build::{build_cfg as build_analysis_cfg, render_cfg as render_analysis_cfg},
+    build::{build_cfg as build_layer_cfg, render_cfg as render_layer_cfg},
+    layering::{Layer, Region},
     layers::root_layer,
     nested_regions::build_control_region_graphs,
     partition::{OperationRegion, RegionKind, partition_data_regions},
@@ -34,7 +34,7 @@ use self::{
 };
 
 #[derive(Debug, Clone)]
-pub struct AnalysisArtifact {
+pub struct CfgArtifact {
     pub path: PathBuf,
     pub contents: Vec<u8>,
 }
@@ -42,7 +42,7 @@ pub struct AnalysisArtifact {
 fn layer(graph: &CompileGraph) -> Layer {
     assert!(
         matches!(graph.theory, CompileTheory::Data),
-        "cfg analysis expects a data graph"
+        "cfg construction expects a data graph"
     );
     assert_interleaved_control_operations_are_unary(&graph.graph);
     let regions = partition_data_regions(&graph.graph);
@@ -56,7 +56,7 @@ pub fn build_cfg(graph: &CompileGraph, cfg_options: CfgOptions) -> Result<Cfg, C
     }
 
     let layer = layer(graph);
-    Ok(build_analysis_cfg(&layer, graph.source_variable_names.clone(), cfg_options).cfg)
+    Ok(build_layer_cfg(&layer, graph.source_variable_names.clone(), cfg_options).cfg)
 }
 
 pub fn render_cfg(graph: &CompileGraph, cfg_options: CfgOptions) -> Result<Vec<u8>, CfgError> {
@@ -65,7 +65,7 @@ pub fn render_cfg(graph: &CompileGraph, cfg_options: CfgOptions) -> Result<Vec<u
     }
 
     let layer = layer(graph);
-    Ok(render_analysis_cfg(
+    Ok(render_layer_cfg(
         &layer,
         graph.source_variable_names.clone(),
         cfg_options,
@@ -75,10 +75,10 @@ pub fn render_cfg(graph: &CompileGraph, cfg_options: CfgOptions) -> Result<Vec<u
 pub fn render_cfg_artifacts(
     graph: &CompileGraph,
     cfg_options: CfgOptions,
-) -> std::io::Result<Vec<AnalysisArtifact>> {
+) -> std::io::Result<Vec<CfgArtifact>> {
     assert!(
         matches!(graph.theory, CompileTheory::Data),
-        "cfg analysis expects a data graph"
+        "cfg construction expects a data graph"
     );
 
     assert_interleaved_control_operations_are_unary(&graph.graph);
@@ -90,31 +90,31 @@ pub fn render_cfg_artifacts(
     let region_graph = graph_svg(&region_graph(&layer))?;
     let region_graph_trace = region_graph_trace(&layer);
     let value_equivalence_trace = value_equivalence_trace(&layer);
-    let cfg = render_analysis_cfg(&layer, graph.source_variable_names.clone(), cfg_options);
+    let cfg = render_layer_cfg(&layer, graph.source_variable_names.clone(), cfg_options);
     let mut artifacts = vec![
-        analysis_index_artifact(graph, &layer),
-        AnalysisArtifact {
+        cfg_index_artifact(graph, &layer),
+        CfgArtifact {
             path: PathBuf::from("source.svg"),
             contents: source,
         },
-        AnalysisArtifact {
+        CfgArtifact {
             path: PathBuf::from("cfg.txt"),
             contents: cfg,
         },
-        AnalysisArtifact {
+        CfgArtifact {
             path: PathBuf::from("region-graph.svg"),
             contents: region_graph,
         },
-        AnalysisArtifact {
+        CfgArtifact {
             path: PathBuf::from("region-graph.txt"),
             contents: region_graph_trace,
         },
-        AnalysisArtifact {
+        CfgArtifact {
             path: PathBuf::from("value-equivalence.txt"),
             contents: value_equivalence_trace,
         },
     ];
-    artifacts.extend(region_svgs.into_iter().map(|region| AnalysisArtifact {
+    artifacts.extend(region_svgs.into_iter().map(|region| CfgArtifact {
         path: PathBuf::from("regions").join(region.file_name),
         contents: region.svg,
     }));
@@ -131,9 +131,9 @@ pub fn render_cfg_artifacts(
     Ok(artifacts)
 }
 
-fn analysis_index_artifact(graph: &CompileGraph, layer: &Layer) -> AnalysisArtifact {
+fn cfg_index_artifact(graph: &CompileGraph, layer: &Layer) -> CfgArtifact {
     let mut index = String::new();
-    index.push_str("# Analysis\n\n");
+    index.push_str("# CFG Artifacts\n\n");
     index.push_str("- [source graph](source.svg)\n");
     index.push_str("- [cfg](cfg.txt)\n");
     index.push_str("- [region graph](region-graph.svg)\n");
@@ -144,19 +144,19 @@ fn analysis_index_artifact(graph: &CompileGraph, layer: &Layer) -> AnalysisArtif
     append_item(&mut index, 1, "expansions");
     append_layer_expansion_index(&mut index, 2, PathBuf::from("control-regions"), layer);
 
-    AnalysisArtifact {
+    CfgArtifact {
         path: PathBuf::from("index.md"),
         contents: index.into_bytes(),
     }
 }
 
 fn render_layer_expansion_artifacts(
-    artifacts: &mut Vec<AnalysisArtifact>,
+    artifacts: &mut Vec<CfgArtifact>,
     base: PathBuf,
     expansion_region_index: usize,
     layer: &Layer,
 ) -> std::io::Result<()> {
-    artifacts.push(AnalysisArtifact {
+    artifacts.push(CfgArtifact {
         path: base.join(format!("{expansion_region_index:03}-resolved.svg")),
         contents: graph_svg(&layer.graph)?,
     });
@@ -165,7 +165,7 @@ fn render_layer_expansion_artifacts(
         artifacts.extend(
             render_graph_region_svgs(&layer.graph, &operation_regions(&layer.regions))?
                 .into_iter()
-                .map(|region| AnalysisArtifact {
+                .map(|region| CfgArtifact {
                     path: base
                         .join(format!("{expansion_region_index:03}-regions"))
                         .join(region.file_name),

@@ -4,7 +4,7 @@ use open_hypergraphs::lax::NodeId;
 
 use crate::{
     compile::{
-        analysis::wires::{
+        cfg::wires::{
             is_interleaved_control_operation, is_interleaved_data_operation, operation_ids,
             operation_wires,
         },

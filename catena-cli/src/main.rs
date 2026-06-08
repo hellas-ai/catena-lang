@@ -1,7 +1,8 @@
 use std::path::PathBuf;
 
 use catena::compile::{
-    CompilePipeline, CompileRequest, CudaOptions, Emit, OutputFormat, analysis, cfg::CfgOptions,
+    CompilePipeline, CompileRequest, CudaOptions, Emit, OutputFormat,
+    cfg::{self, CfgOptions},
     compile, normalize_graph,
 };
 use clap::{Parser, Subcommand, ValueEnum};
@@ -272,7 +273,7 @@ fn analysis_command(
     let compile_graph =
         CompilePipeline::compile_graph(checked_elaborated_theory, compile_graph_request)?;
     let graph = normalize_graph(&compile_graph)?;
-    let artifacts = analysis::render_analysis_artifacts(&graph, cfg_options)?;
+    let artifacts = cfg::render_analysis_artifacts(&graph, cfg_options)?;
 
     std::fs::create_dir_all(&output)?;
     for artifact in artifacts {

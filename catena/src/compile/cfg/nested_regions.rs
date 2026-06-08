@@ -1,6 +1,6 @@
 use crate::compile::{
     CompileGraph,
-    analysis::{
+    cfg::{
         control_regions::{ControlRegionGraph, process_control_regions},
         data_regions::{DataRegionGraph, process_data_regions},
         partition::{OperationRegion, partition_control_regions, partition_data_regions},

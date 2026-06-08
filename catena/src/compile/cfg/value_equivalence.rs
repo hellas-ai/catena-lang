@@ -5,7 +5,7 @@ use std::{
 
 use crate::{
     compile::{
-        analysis::{
+        cfg::{
             Layer,
             region_graph::{RegionGraph, RegionGraphRegion, region_graph_with_regions},
         },

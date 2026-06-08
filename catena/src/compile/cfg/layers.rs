@@ -1,5 +1,5 @@
 use crate::compile::{
-    analysis::{
+    cfg::{
         control_regions::ControlRegionGraph,
         data_regions::DataRegionGraph,
         layering::{Layer, NestedGraph, NestingMorphism, Region},

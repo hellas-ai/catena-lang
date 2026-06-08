@@ -1,535 +1,635 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
-use open_hypergraphs::lax::NodeId;
-
-use crate::compile::{CompileGraph, CompileTheory};
+use crate::compile::{
+    cfg::Layer,
+    cfg::{BlockInstruction, Cfg, CfgEdge, CfgNode, CfgOptions, Transfer},
+    graph_ops::{Graph, operation_inputs, operation_name, operation_outputs},
+};
+use crate::stdlib::operations::{OperationKind, actual_operation_kind, actual_operation_name};
 
 use super::{
-    control::{ControlExpander, ExpandedControlItem},
-    data::{block_instructions, data_cfg_node_draft, partition_data_operations_by_internal_wires},
-    model::{
-        Cfg, CfgEdge, CfgError, CfgNode, CfgNodeDraft, CfgNodeId, CfgOptions, CfgWiring,
-        OperationId, VariableId,
-    },
-    monoidal::{MonoidalStructureResolver, MonoidalStructureSubgraph},
-    operation::{
-        CfgOperationRole, OperationInstance, cfg_operation_role, effective_operation_instance,
-        is_branch_operation, is_control_operation, local_operation_name, operation_names,
-    },
-    wiring::{
-        BoundaryWires, cfg_node_from_control_draft, data_transfer, nodes_with_boundary,
-        predecessors, remap_transfer_targets, resolve_nested_data_return,
-    },
+    render::render_analysis_cfg,
+    region_graph::{RegionGraph, RegionGraphRegion, region_graph_with_regions},
+    value_equivalence::{ValueEquivalences, ValueProjection, value_equivalences},
 };
 
-// CFG construction
+pub(super) struct AnalysisCfg {
+    pub(super) cfg: Cfg,
+    pub(super) globals: Vec<usize>,
+    pub(super) wire_names: HashMap<usize, String>,
+    pub(super) block_svg_paths: HashMap<usize, String>,
+}
 
-#[derive(Debug)]
-pub(super) struct CfgBuilder<'a> {
-    compile_graph: &'a CompileGraph,
-    wire_map: HashMap<NodeId, VariableId>,
-    monoidal_structure_resolver: MonoidalStructureResolver<'a>,
-    node_ids: CfgNodeIdAllocator,
-    operation_instances: Vec<OperationInstance>,
-    control_operation_ids: Vec<OperationId>,
-    data_operation_ids: Vec<OperationId>,
+pub(super) fn render_cfg(
+    root_layer: &Layer,
+    wire_names: HashMap<usize, String>,
     options: CfgOptions,
+) -> Vec<u8> {
+    let analysis_cfg = build_cfg(root_layer, wire_names, options);
+    render_analysis_cfg(&root_layer.graph, analysis_cfg)
 }
 
-impl<'a> CfgBuilder<'a> {
-    pub(super) fn new(compile_graph: &'a CompileGraph) -> Self {
-        Self::new_with_context(compile_graph, HashMap::new())
-    }
-
-    pub(super) fn new_with_context(
-        compile_graph: &'a CompileGraph,
-        wire_map: HashMap<NodeId, VariableId>,
-    ) -> Self {
-        Self::new_with_context_and_monoidal(compile_graph, wire_map, None)
-    }
-
-    pub(super) fn new_with_context_and_monoidal(
-        compile_graph: &'a CompileGraph,
-        wire_map: HashMap<NodeId, VariableId>,
-        inherited_monoidal_structure: Option<MonoidalStructureSubgraph>,
-    ) -> Self {
-        let monoidal_structure_resolver = MonoidalStructureResolver::new_with_context(
-            compile_graph,
-            Some(&wire_map),
-            inherited_monoidal_structure.as_ref(),
-        );
-        Self {
-            compile_graph,
-            wire_map,
-            monoidal_structure_resolver,
-            node_ids: CfgNodeIdAllocator::default(),
-            operation_instances: Vec::new(),
-            control_operation_ids: Vec::new(),
-            data_operation_ids: Vec::new(),
-            options: CfgOptions::default(),
-        }
-    }
-
-    pub(super) fn with_options(mut self, options: CfgOptions) -> Self {
-        self.options = options;
-        self
-    }
-
-    pub(super) fn build(mut self) -> Result<Cfg, CfgError> {
-        self.reject_non_data_region()?;
-        self.collect_operations()?;
-        self.build_data_cfg()
-    }
-
-    fn reject_non_data_region(&self) -> Result<(), CfgError> {
-        match &self.compile_graph.theory {
-            CompileTheory::Data => Ok(()),
-            other => Err(CfgError::UnsupportedTheory(other.clone())),
-        }
-    }
-
-    fn collect_operations(&mut self) -> Result<(), CfgError> {
-        self.operation_instances = (0..operation_names(self.compile_graph).len())
-            .map(|operation_id| {
-                effective_operation_instance(
-                    self.compile_graph,
-                    operation_id,
-                    &self.wire_map,
-                    &self.monoidal_structure_resolver,
-                    self.options,
-                )
-            })
-            .collect::<Result<Vec<_>, CfgError>>()?;
-
-        for operation in &self.operation_instances {
-            // Temporary hack: `control.elim2` is a monoidal definition, so it must
-            // remain visible to the monoidal resolver, but expanding it as a CFG
-            // control node breaks branch wiring. Remove this once monoidal
-            // definitions are handled before control expansion.
-            if operation.name.starts_with("control.")
-                && local_operation_name(&operation.name) == "elim2"
-            {
-                continue;
-            }
-            if is_control_operation(self.compile_graph, &operation.name) {
-                self.control_operation_ids.push(operation.id);
-            } else {
-                self.data_operation_ids.push(operation.id);
-            }
-        }
-        Ok(())
-    }
-
-    fn build_data_cfg(&mut self) -> Result<Cfg, CfgError> {
-        let boundary = BoundaryWires::from_region_and_control_operations(
-            self.compile_graph,
-            &self.operation_instances,
-            &self.control_operation_ids,
-            &self.wire_map,
-        );
-
-        let control_fragment = self.control_cfg_fragment()?;
-        let data_fragment = self.data_cfg_fragment(&boundary)?;
-        Ok(self.compose_fragments(data_fragment, control_fragment))
-    }
-
-    fn control_cfg_fragment(&mut self) -> Result<ControlCfgFragment, CfgError> {
-        let expanded_control = ControlExpander::new(
-            self.compile_graph,
-            &self.operation_instances,
-            self.monoidal_structure_resolver.subgraph().clone(),
-            self.options,
-        )
-        .expand(&self.control_operation_ids)?;
-
-        let mut node_by_control_operation = HashMap::new();
-        let mut control_operation_by_node = HashMap::new();
-        let mut node_by_entry_wire = HashMap::new();
-        let mut nested_data_nodes = Vec::new();
-        let mut nested_data_node_by_entry_wire = HashMap::new();
-        let mut branch_data_successors = HashMap::<OperationId, Vec<CfgEdge>>::new();
-        let mut current_branch = None::<OperationInstance>;
-        let mut nodes = Vec::new();
-
-        for item in expanded_control.items {
-            match item {
-                ExpandedControlItem::Control(operation) => {
-                    let id = self.node_ids.allocate();
-                    node_by_control_operation.insert(operation.id, id);
-                    control_operation_by_node.insert(id, operation.clone());
-                    for input in &operation.inputs {
-                        node_by_entry_wire.insert(*input, id);
-                    }
-                    nodes.push(CfgNodeDraft {
-                        id,
-                        params: operation.inputs.clone(),
-                        block: block_instructions(operation, self.options)?,
-                    });
-                    current_branch = control_operation_by_node
-                        .get(&id)
-                        .filter(|operation| is_branch_operation(operation))
-                        .cloned();
-                }
-                ExpandedControlItem::DataCfg { call, cfg } => {
-                    let remapped_cfg = self.remap_cfg_nodes(cfg);
-                    if let Some(entry) = remapped_cfg
-                        .nodes
-                        .iter()
-                        .find(|node| node.id == remapped_cfg.entry)
-                    {
-                        for input in &call.inputs {
-                            nested_data_node_by_entry_wire.insert(*input, entry.id);
-                        }
-                        if let Some(branch) = &current_branch {
-                            let successors = branch_data_successors.entry(branch.id).or_default();
-                            let arg = branch
-                                .outputs
-                                .get(successors.len())
-                                .copied()
-                                .or_else(|| call.inputs.first().copied())
-                                .into_iter()
-                                .collect();
-                            successors.push(CfgEdge {
-                                target: entry.id,
-                                args: arg,
-                            });
-                        }
-                    }
-                    nested_data_nodes.extend(remapped_cfg.nodes);
-                }
-            }
-        }
-
-        for (visible_operation, entry_operation) in expanded_control.visible_operation_to_entry {
-            if let Some(entry_node) = node_by_control_operation.get(&entry_operation).copied() {
-                node_by_control_operation.insert(visible_operation, entry_node);
-            }
-        }
-
-        Ok(ControlCfgFragment {
-            nodes,
-            nested_data_nodes,
-            node_by_control_operation,
-            control_operation_by_node,
-            node_by_entry_wire,
-            nested_data_node_by_entry_wire,
-            branch_data_successors,
-        })
-    }
-
-    fn remap_cfg_nodes(&mut self, mut cfg: Cfg) -> Cfg {
-        let node_id_by_old = cfg
-            .nodes
-            .iter()
-            .map(|node| (node.id, self.node_ids.allocate()))
-            .collect::<HashMap<_, _>>();
-
-        for node in &mut cfg.nodes {
-            node.id = node_id_by_old[&node.id];
-            node.transfer = remap_transfer_targets(node.transfer.clone(), &node_id_by_old);
-        }
-        cfg.entry = node_id_by_old[&cfg.entry];
-        cfg
-    }
-
-    fn data_cfg_fragment(&mut self, boundary: &BoundaryWires) -> Result<DataCfgFragment, CfgError> {
-        let operations_by_cfg_node = partition_data_operations_by_internal_wires(
-            self.compile_graph,
-            &self.operation_instances,
-            &self.data_operation_ids,
-            &boundary.all,
-        );
-        let mut node_by_entry_wire = HashMap::new();
-        let mut node_boundaries = Vec::new();
-
-        let mut nodes = Vec::new();
-        for operations in operations_by_cfg_node {
-            let id = self.node_ids.allocate();
-            let (node, boundaries) =
-                data_cfg_node_draft(self.compile_graph, id, operations, boundary, self.options)?;
-            if node.block.is_empty() && boundaries.exits.is_empty() {
-                continue;
-            }
-
-            for point in &boundaries.entries {
-                node_by_entry_wire.insert(point.wire, id);
-            }
-
-            node_boundaries.push(boundaries);
-            nodes.push(node);
-        }
-
-        Ok(DataCfgFragment {
-            nodes,
-            wiring: CfgWiring { node_boundaries },
-            node_by_entry_wire,
-        })
-    }
-
-    fn compose_fragments(
-        &self,
-        data_fragment: DataCfgFragment,
-        control_fragment: ControlCfgFragment,
-    ) -> Cfg {
-        let DataCfgFragment {
-            nodes: data_nodes,
-            wiring,
-            node_by_entry_wire: data_node_by_entry_wire,
-        } = data_fragment;
-        let ControlCfgFragment {
-            nodes: control_nodes,
-            nested_data_nodes,
-            node_by_control_operation,
-            control_operation_by_node,
-            node_by_entry_wire: control_node_by_entry_wire,
-            nested_data_node_by_entry_wire,
-            branch_data_successors,
-        } = control_fragment;
-        let mut data_node_by_entry_wire = data_node_by_entry_wire;
-        data_node_by_entry_wire.extend(nested_data_node_by_entry_wire);
-        let erased_monoidal_wires = self.erased_monoidal_wires(control_operation_by_node.values());
-
-        let boundaries_by_node = wiring
-            .node_boundaries
-            .iter()
-            .map(|boundaries| (boundaries.node, boundaries))
-            .collect::<HashMap<_, _>>();
-
-        let mut nodes = control_nodes
-            .into_iter()
-            .map(|node| {
-                cfg_node_from_control_draft(
-                    node,
-                    &control_operation_by_node,
-                    &control_node_by_entry_wire,
-                    &data_node_by_entry_wire,
-                    &branch_data_successors,
-                )
-            })
-            .collect::<Vec<_>>();
-        nodes.extend(nested_data_nodes.into_iter().map(|mut node| {
-            node.transfer = resolve_nested_data_return(
-                node.transfer,
-                &control_node_by_entry_wire,
-                &data_node_by_entry_wire,
-            );
-            node
-        }));
-        nodes.extend(data_nodes.into_iter().map(|node| {
-            let boundaries = boundaries_by_node
-                .get(&node.id)
-                .expect("data node must have boundary wiring");
-            CfgNode {
-                id: node.id,
-                params: node.params,
-                block: node.block,
-                transfer: data_transfer(boundaries, &node_by_control_operation),
-            }
-        }));
-        for node in &mut nodes {
-            if !self.options.keep_monoidal_operations {
-                erase_monoidal_structure_params_and_args(
-                    node,
-                    &self.monoidal_structure_resolver,
-                    &erased_monoidal_wires,
-                );
-            }
-            prune_unused_params(node);
-        }
-        truncate_edge_args_to_target_params(&mut nodes);
-        let entry = nodes_with_boundary(&wiring, super::model::BoundaryKind::RegionEntry)
-            .into_iter()
-            .next()
-            .or_else(|| nodes.first().map(|node| node.id))
-            .unwrap_or(0);
-        nodes.sort_by_key(|node| node.id);
-        let predecessors = predecessors(&nodes);
-
-        Cfg {
-            entry,
-            nodes,
-            predecessors,
-        }
-    }
-
-    fn erased_monoidal_wires<'b>(
-        &self,
-        control_operations: impl Iterator<Item = &'b OperationInstance>,
-    ) -> HashSet<VariableId> {
-        let mut wires = self
-            .operation_instances
-            .iter()
-            .filter(|operation| {
-                cfg_operation_role(&operation.name) == CfgOperationRole::MonoidalStructure
-            })
-            .flat_map(|operation| operation.outputs.iter().copied())
-            .collect::<HashSet<_>>();
-        wires.extend(
-            control_operations
-                .filter(|operation| {
-                    cfg_operation_role(&operation.name) == CfgOperationRole::MonoidalStructure
-                })
-                .flat_map(|operation| operation.outputs.iter().copied()),
-        );
-        wires
-    }
-}
-
-fn prune_unused_params(node: &mut CfgNode) {
-    let mut used = node
-        .block
+pub(super) fn build_cfg(
+    root_layer: &Layer,
+    wire_names: HashMap<usize, String>,
+    options: CfgOptions,
+) -> AnalysisCfg {
+    let region_graph = region_graph_with_regions(root_layer);
+    let connectivity = RegionGraphConnectivity::new(&region_graph.graph);
+    let value_equivalences = value_equivalences(root_layer);
+    let mut nodes = region_graph
+        .regions
         .iter()
-        .flat_map(|instruction| instruction.args.iter().copied())
-        .collect::<std::collections::HashSet<_>>();
-    match &node.transfer {
-        super::model::Transfer::Goto(edge) => {
-            used.extend(edge.args.iter().copied());
+        .enumerate()
+        .map(|(node_id, region)| {
+            region_cfg_node(node_id, region, &connectivity, &value_equivalences, options)
+        })
+        .collect::<Vec<_>>();
+    let mut entry = connectivity.entry_node().unwrap_or(0);
+    let mut block_svg_paths = region_graph_block_annotations(&region_graph);
+
+    if !options.keep_control_flow_operations {
+        (nodes, entry, block_svg_paths) = remove_empty_goto_blocks(nodes, entry, block_svg_paths);
+    }
+
+    assert_dense_unique_block_ids(&nodes);
+    let globals = cfg_globals(root_layer, &nodes);
+    AnalysisCfg {
+        cfg: Cfg {
+            entry,
+            predecessors: predecessors(&nodes),
+            nodes,
+        },
+        globals,
+        wire_names,
+        block_svg_paths,
+    }
+}
+
+fn cfg_globals(root_layer: &Layer, nodes: &[CfgNode]) -> Vec<usize> {
+    let defined = root_layer
+        .graph
+        .s
+        .table
+        .iter()
+        .copied()
+        .chain(nodes.iter().flat_map(|node| node.params.iter().copied()))
+        .chain(nodes.iter().flat_map(|node| {
+            node.block
+                .iter()
+                .flat_map(|instruction| instruction.results.iter().copied())
+        }))
+        .collect::<BTreeSet<_>>();
+
+    let mut used = BTreeSet::new();
+    for node in nodes {
+        for instruction in &node.block {
+            used.extend(instruction.args.iter().copied());
         }
-        super::model::Transfer::If {
+        used.extend(transfer_values(&node.transfer));
+    }
+
+    used.difference(&defined).copied().collect::<Vec<_>>()
+}
+
+fn transfer_values(transfer: &Transfer) -> Vec<usize> {
+    match transfer {
+        Transfer::Goto(edge) => edge.args.clone(),
+        Transfer::If {
             condition,
             then_edge,
             else_edge,
-        } => {
-            used.insert(*condition);
-            used.extend(then_edge.args.iter().copied());
-            used.extend(else_edge.args.iter().copied());
-        }
-        super::model::Transfer::Return(values) => {
-            used.extend(values.iter().copied());
-        }
+        } => std::iter::once(*condition)
+            .chain(then_edge.args.iter().copied())
+            .chain(else_edge.args.iter().copied())
+            .collect(),
+        Transfer::Return(values) => values.clone(),
     }
-    node.params.retain(|param| used.contains(param));
 }
 
-fn erase_monoidal_structure_params_and_args(
-    node: &mut CfgNode,
-    monoidal_structure_resolver: &MonoidalStructureResolver<'_>,
-    erased_monoidal_wires: &HashSet<VariableId>,
-) {
-    node.params.retain(|param| {
-        !is_erased_monoidal_wire(*param, monoidal_structure_resolver, erased_monoidal_wires)
-    });
-    match &mut node.transfer {
-        super::model::Transfer::Goto(edge) => {
-            edge.args.retain(|arg| {
-                !is_erased_monoidal_wire(*arg, monoidal_structure_resolver, erased_monoidal_wires)
-            });
-        }
-        super::model::Transfer::If {
+fn remove_empty_goto_blocks(
+    nodes: Vec<CfgNode>,
+    entry: usize,
+    block_svg_paths: HashMap<usize, String>,
+) -> (Vec<CfgNode>, usize, HashMap<usize, String>) {
+    let removable = nodes
+        .iter()
+        .filter(|node| removable_empty_goto_block(node))
+        .map(|node| node.id)
+        .collect::<HashSet<_>>();
+    if removable.is_empty() {
+        return (nodes, entry, block_svg_paths);
+    }
+
+    let redirected_entry = redirect_entry(entry, &nodes, &removable);
+    let mut kept_nodes = nodes
+        .iter()
+        .filter(|node| !removable.contains(&node.id))
+        .cloned()
+        .map(|mut node| {
+            node.transfer = redirect_transfer(node.transfer, &nodes, &removable);
+            node
+        })
+        .collect::<Vec<_>>();
+
+    let id_map = kept_nodes
+        .iter()
+        .enumerate()
+        .map(|(new_id, node)| (node.id, new_id))
+        .collect::<HashMap<_, _>>();
+
+    for (new_id, node) in kept_nodes.iter_mut().enumerate() {
+        node.id = new_id;
+        remap_transfer_targets(&mut node.transfer, &id_map);
+    }
+
+    let block_svg_paths = block_svg_paths
+        .into_iter()
+        .filter_map(|(old_id, annotation)| id_map.get(&old_id).map(|new_id| (*new_id, annotation)))
+        .collect();
+
+    (kept_nodes, id_map[&redirected_entry], block_svg_paths)
+}
+
+fn removable_empty_goto_block(node: &CfgNode) -> bool {
+    node.block.is_empty() && matches!(node.transfer, Transfer::Goto(_))
+}
+
+fn redirect_entry(entry: usize, nodes: &[CfgNode], removable: &HashSet<usize>) -> usize {
+    let edge = redirect_edge(
+        CfgEdge {
+            target: entry,
+            args: Vec::new(),
+        },
+        nodes,
+        removable,
+    );
+    assert!(
+        edge.args.is_empty(),
+        "entry redirection through empty blocks cannot synthesize block arguments"
+    );
+    edge.target
+}
+
+fn redirect_transfer(
+    transfer: Transfer,
+    nodes: &[CfgNode],
+    removable: &HashSet<usize>,
+) -> Transfer {
+    match transfer {
+        Transfer::Goto(edge) => Transfer::Goto(redirect_edge(edge, nodes, removable)),
+        Transfer::If {
+            condition,
+            then_edge,
+            else_edge,
+        } => Transfer::If {
+            condition,
+            then_edge: redirect_edge(then_edge, nodes, removable),
+            else_edge: redirect_edge(else_edge, nodes, removable),
+        },
+        Transfer::Return(values) => Transfer::Return(values),
+    }
+}
+
+fn redirect_edge(mut edge: CfgEdge, nodes: &[CfgNode], removable: &HashSet<usize>) -> CfgEdge {
+    let mut seen = HashSet::new();
+    while removable.contains(&edge.target) {
+        let removed_node = edge.target;
+        assert!(
+            seen.insert(removed_node),
+            "cycle while removing empty cfg block n{}",
+            removed_node
+        );
+        let Transfer::Goto(next) = &nodes[removed_node].transfer else {
+            unreachable!("only empty goto blocks are removable")
+        };
+        edge = CfgEdge {
+            target: next.target,
+            args: redirected_args(&nodes[removed_node], &edge.args, &next.args),
+        };
+    }
+    edge
+}
+
+fn redirected_args(node: &CfgNode, incoming_args: &[usize], outgoing_args: &[usize]) -> Vec<usize> {
+    match (incoming_args, outgoing_args) {
+        (_, []) => Vec::new(),
+        ([incoming], [_outgoing]) => vec![*incoming],
+        ([], outgoing) => outgoing.to_vec(),
+        (incoming, outgoing) if incoming == outgoing => incoming.to_vec(),
+        _ => panic!(
+            "cannot remove empty cfg block n{} with {} params, {} incoming args, and {} outgoing args",
+            node.id,
+            node.params.len(),
+            incoming_args.len(),
+            outgoing_args.len()
+        ),
+    }
+}
+
+fn remap_transfer_targets(transfer: &mut Transfer, id_map: &HashMap<usize, usize>) {
+    match transfer {
+        Transfer::Goto(edge) => remap_edge_target(edge, id_map),
+        Transfer::If {
             then_edge,
             else_edge,
             ..
         } => {
-            then_edge.args.retain(|arg| {
-                !is_erased_monoidal_wire(*arg, monoidal_structure_resolver, erased_monoidal_wires)
-            });
-            else_edge.args.retain(|arg| {
-                !is_erased_monoidal_wire(*arg, monoidal_structure_resolver, erased_monoidal_wires)
-            });
+            remap_edge_target(then_edge, id_map);
+            remap_edge_target(else_edge, id_map);
         }
-        super::model::Transfer::Return(_) => {}
+        Transfer::Return(_) => {}
     }
 }
 
-fn is_erased_monoidal_wire(
-    variable: VariableId,
-    monoidal_structure_resolver: &MonoidalStructureResolver<'_>,
-    erased_monoidal_wires: &HashSet<VariableId>,
-) -> bool {
-    erased_monoidal_wires.contains(&variable)
-        || monoidal_structure_resolver.is_structure_wire(variable)
+fn remap_edge_target(edge: &mut CfgEdge, id_map: &HashMap<usize, usize>) {
+    edge.target = *id_map
+        .get(&edge.target)
+        .unwrap_or_else(|| panic!("missing remapped cfg node id for n{}", edge.target));
 }
 
-fn truncate_edge_args_to_target_params(nodes: &mut [CfgNode]) {
-    let param_counts = nodes
+fn region_cfg_node(
+    node_id: usize,
+    region: &RegionGraphRegion,
+    connectivity: &RegionGraphConnectivity,
+    value_equivalences: &ValueEquivalences,
+    options: CfgOptions,
+) -> CfgNode {
+    let graph_sources = connectivity.operation_sources(node_id);
+    let graph_targets = connectivity.operation_targets(node_id);
+    CfgNode {
+        id: node_id,
+        params: region_params(region, value_equivalences, options),
+        block: region_block(&region.graph, region, value_equivalences, options),
+        transfer: region_transfer(
+            node_id,
+            region,
+            &graph_sources,
+            graph_targets,
+            connectivity,
+            value_equivalences,
+            options,
+        ),
+    }
+}
+
+fn region_transfer(
+    node_id: usize,
+    region: &RegionGraphRegion,
+    sources: &[usize],
+    targets: Vec<usize>,
+    connectivity: &RegionGraphConnectivity,
+    value_equivalences: &ValueEquivalences,
+    options: CfgOptions,
+) -> Transfer {
+    match (sources.len(), targets.len()) {
+        (_, 0) => Transfer::Return(resolve_wires(
+            &region.path,
+            &region.outputs,
+            value_equivalences,
+            options,
+        )),
+        (_, 1) => goto_or_return(
+            targets[0],
+            resolve_wires(&region.path, &region.outputs, value_equivalences, options),
+            transfer_args(&region.path, &region.outputs, value_equivalences, options),
+            connectivity,
+        ),
+        (1, 2) => Transfer::If {
+            condition: branch_condition(node_id, region, value_equivalences, options),
+            then_edge: edge_for_wire(
+                targets[0],
+                transfer_output_at(node_id, region, 0, value_equivalences, options),
+                connectivity,
+            ),
+            else_edge: edge_for_wire(
+                targets[1],
+                transfer_output_at(node_id, region, 1, value_equivalences, options),
+                connectivity,
+            ),
+        },
+        _ => panic!(
+            "unsupported region graph shape for n{node_id} {:?}: {} inputs -> {} outputs",
+            region.kind,
+            sources.len(),
+            targets.len()
+        ),
+    }
+}
+
+fn region_params(
+    region: &RegionGraphRegion,
+    value_equivalences: &ValueEquivalences,
+    options: CfgOptions,
+) -> Vec<usize> {
+    if options.keep_monoidal_operations {
+        resolve_wires(&region.path, &region.inputs, value_equivalences, options)
+    } else {
+        Vec::new()
+    }
+}
+
+fn goto_or_return(
+    wire: usize,
+    return_values: Vec<usize>,
+    edge_args: Vec<usize>,
+    connectivity: &RegionGraphConnectivity,
+) -> Transfer {
+    match connectivity.consumers(wire) {
+        [] => Transfer::Return(return_values),
+        [_] => Transfer::Goto(edge_for_wire(wire, edge_args, connectivity)),
+        consumers => panic!(
+            "non-branching region graph wire w{wire} has {} consumers",
+            consumers.len()
+        ),
+    }
+}
+
+fn edge_for_wire(wire: usize, args: Vec<usize>, connectivity: &RegionGraphConnectivity) -> CfgEdge {
+    let consumers = connectivity.consumers(wire);
+    let [target] = consumers else {
+        panic!(
+            "region graph wire w{wire} must have exactly one consumer; got {}",
+            consumers.len()
+        )
+    };
+    CfgEdge {
+        target: *target,
+        args,
+    }
+}
+
+fn branch_condition(
+    node_id: usize,
+    region: &RegionGraphRegion,
+    value_equivalences: &ValueEquivalences,
+    options: CfgOptions,
+) -> usize {
+    let [input] = region.inputs.as_slice() else {
+        panic!(
+            "branching region n{node_id} {:?} must have one place-graph input; got {}",
+            region.kind,
+            region.inputs.len()
+        )
+    };
+    if options.keep_monoidal_operations {
+        return *input;
+    }
+
+    let projection = if region_has_operation(region, "distr") {
+        vec![ValueProjection::Product(0), ValueProjection::Tag]
+    } else if region_has_operation(region, "distl") {
+        vec![ValueProjection::Product(1), ValueProjection::Tag]
+    } else {
+        Vec::new()
+    };
+    value_equivalences.resolve(&region.path, *input, &projection)
+}
+
+fn transfer_output_at(
+    node_id: usize,
+    region: &RegionGraphRegion,
+    index: usize,
+    value_equivalences: &ValueEquivalences,
+    options: CfgOptions,
+) -> Vec<usize> {
+    let Some(output) = region.outputs.get(index).copied() else {
+        panic!(
+            "region n{node_id} {:?} must have output {index}; got {} outputs",
+            region.kind,
+            region.outputs.len()
+        )
+    };
+    transfer_args(&region.path, &[output], value_equivalences, options)
+}
+
+fn transfer_args(
+    path: &[usize],
+    wires: &[usize],
+    value_equivalences: &ValueEquivalences,
+    options: CfgOptions,
+) -> Vec<usize> {
+    if options.keep_monoidal_operations {
+        resolve_wires(path, wires, value_equivalences, options)
+    } else {
+        Vec::new()
+    }
+}
+
+fn resolve_wires(
+    path: &[usize],
+    wires: &[usize],
+    value_equivalences: &ValueEquivalences,
+    options: CfgOptions,
+) -> Vec<usize> {
+    if options.keep_monoidal_operations {
+        wires.to_vec()
+    } else {
+        wires
+            .iter()
+            .copied()
+            .map(|wire| value_equivalences.resolve_wire(path, wire))
+            .collect()
+    }
+}
+
+fn region_block(
+    graph: &Graph,
+    region: &RegionGraphRegion,
+    value_equivalences: &ValueEquivalences,
+    options: CfgOptions,
+) -> Vec<BlockInstruction> {
+    region
+        .region
+        .operations
         .iter()
-        .map(|node| (node.id, node.params.len()))
-        .collect::<HashMap<_, _>>();
-    for node in nodes {
-        match &mut node.transfer {
-            super::model::Transfer::Goto(edge) => truncate_edge_args(edge, &param_counts),
-            super::model::Transfer::If {
-                then_edge,
-                else_edge,
-                ..
-            } => {
-                truncate_edge_args(then_edge, &param_counts);
-                truncate_edge_args(else_edge, &param_counts);
+        .copied()
+        .filter(|operation_id| {
+            (options.keep_monoidal_operations || !is_monoidal_operation(graph, *operation_id))
+                && (options.keep_control_flow_operations
+                    || !is_control_flow_operation(graph, *operation_id))
+        })
+        .map(|operation_id| BlockInstruction {
+            operation_id,
+            operation: operation_name(graph, operation_id).to_string(),
+            args: operation_inputs(graph, operation_id)
+                .map(|wire| {
+                    if options.keep_monoidal_operations {
+                        wire.0
+                    } else {
+                        value_equivalences.resolve_wire(&region.path, wire.0)
+                    }
+                })
+                .collect(),
+            results: operation_outputs(graph, operation_id)
+                .map(|wire| {
+                    if options.keep_monoidal_operations {
+                        wire.0
+                    } else {
+                        value_equivalences.resolve_wire(&region.path, wire.0)
+                    }
+                })
+                .collect(),
+        })
+        .collect()
+}
+
+fn is_monoidal_operation(graph: &Graph, operation_id: usize) -> bool {
+    actual_operation_kind(operation_name(graph, operation_id)) == OperationKind::MonoidalStructure
+}
+
+fn is_control_flow_operation(graph: &Graph, operation_id: usize) -> bool {
+    actual_operation_kind(operation_name(graph, operation_id)) == OperationKind::ControlFlow
+}
+
+fn region_has_operation(region: &RegionGraphRegion, operation: &str) -> bool {
+    region
+        .region
+        .operations
+        .iter()
+        .copied()
+        .any(|operation_id| {
+            actual_operation_name(operation_name(&region.graph, operation_id)) == operation
+        })
+}
+
+struct RegionGraphConnectivity {
+    sources_by_operation: Vec<Vec<usize>>,
+    targets_by_operation: Vec<Vec<usize>>,
+    consumers_by_wire: HashMap<usize, Vec<usize>>,
+    producer_by_wire: HashMap<usize, usize>,
+}
+
+impl RegionGraphConnectivity {
+    fn new(graph: &Graph) -> Self {
+        let mut sources_by_operation = Vec::new();
+        let mut targets_by_operation = Vec::new();
+        let mut consumers_by_wire = HashMap::<usize, Vec<usize>>::new();
+        let mut producer_by_wire = HashMap::<usize, usize>::new();
+
+        for operation_id in 0..graph.h.x.0.len() {
+            let sources = operation_inputs(graph, operation_id)
+                .map(|wire| wire.0)
+                .collect::<Vec<_>>();
+            for source in &sources {
+                consumers_by_wire
+                    .entry(*source)
+                    .or_default()
+                    .push(operation_id);
             }
-            super::model::Transfer::Return(_) => {}
+
+            let targets = operation_outputs(graph, operation_id)
+                .map(|wire| wire.0)
+                .collect::<Vec<_>>();
+            for target in &targets {
+                let previous = producer_by_wire.insert(*target, operation_id);
+                assert!(
+                    previous.is_none(),
+                    "region graph wire w{target} has multiple producers"
+                );
+            }
+
+            sources_by_operation.push(sources);
+            targets_by_operation.push(targets);
+        }
+
+        Self {
+            sources_by_operation,
+            targets_by_operation,
+            consumers_by_wire,
+            producer_by_wire,
         }
     }
-}
 
-fn truncate_edge_args(edge: &mut CfgEdge, param_counts: &HashMap<CfgNodeId, usize>) {
-    if let Some(param_count) = param_counts.get(&edge.target) {
-        edge.args.truncate(*param_count);
+    fn operation_sources(&self, operation_id: usize) -> Vec<usize> {
+        self.sources_by_operation[operation_id].clone()
+    }
+
+    fn operation_targets(&self, operation_id: usize) -> Vec<usize> {
+        self.targets_by_operation[operation_id].clone()
+    }
+
+    fn consumers(&self, wire: usize) -> &[usize] {
+        self.consumers_by_wire
+            .get(&wire)
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
+    }
+
+    fn entry_node(&self) -> Option<usize> {
+        self.sources_by_operation
+            .iter()
+            .enumerate()
+            .find(|(_, sources)| {
+                sources
+                    .iter()
+                    .any(|source| !self.producer_by_wire.contains_key(source))
+            })
+            .map(|(operation_id, _)| operation_id)
     }
 }
 
-// CFG construction state
-
-#[derive(Debug, Default)]
-pub(super) struct CfgNodeIdAllocator {
-    next: CfgNodeId,
-}
-
-#[derive(Debug)]
-pub(super) struct OperationIdAllocator {
-    next: OperationId,
-}
-
-impl OperationIdAllocator {
-    pub(super) fn new(next: OperationId) -> Self {
-        Self { next }
+fn predecessors(nodes: &[CfgNode]) -> Vec<Vec<usize>> {
+    let mut predecessors = vec![Vec::new(); nodes.len()];
+    for node in nodes {
+        for successor in successors(&node.transfer) {
+            predecessors[successor].push(node.id);
+        }
     }
+    predecessors
+}
 
-    pub(super) fn allocate(&mut self) -> OperationId {
-        let id = self.next;
-        self.next += 1;
-        id
+fn successors(transfer: &Transfer) -> Vec<usize> {
+    match transfer {
+        Transfer::Goto(edge) => vec![edge.target],
+        Transfer::If {
+            then_edge,
+            else_edge,
+            ..
+        } => vec![then_edge.target, else_edge.target],
+        Transfer::Return(_) => Vec::new(),
     }
 }
 
-#[derive(Debug)]
-pub(super) struct VariableIdAllocator {
-    next: VariableId,
+fn region_graph_block_annotations(region_graph: &RegionGraph) -> HashMap<usize, String> {
+    region_graph
+        .regions
+        .iter()
+        .enumerate()
+        .map(|(node_id, region)| (node_id, region_path_annotation(&region.path, region.kind)))
+        .collect()
 }
 
-impl VariableIdAllocator {
-    pub(super) fn new(next: VariableId) -> Self {
-        Self { next }
+fn region_path_annotation(
+    path: &[usize],
+    kind: crate::compile::cfg::partition::RegionKind,
+) -> String {
+    let path = path
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(".");
+    format!("region.{path}.{}", region_kind_name(kind))
+}
+
+fn region_kind_name(kind: crate::compile::cfg::partition::RegionKind) -> &'static str {
+    match kind {
+        crate::compile::cfg::partition::RegionKind::Data => "data",
+        crate::compile::cfg::partition::RegionKind::Control => "control",
+        crate::compile::cfg::partition::RegionKind::InterleavedControl => {
+            "interleaved-control"
+        }
+        crate::compile::cfg::partition::RegionKind::InterleavedData => "interleaved-data",
     }
+}
 
-    pub(super) fn allocate(&mut self) -> VariableId {
-        let id = self.next;
-        self.next += 1;
-        id
+fn assert_dense_unique_block_ids(nodes: &[CfgNode]) {
+    let mut ids = nodes.iter().map(|node| node.id).collect::<Vec<_>>();
+    ids.sort_unstable();
+    ids.dedup();
+    assert_eq!(ids.len(), nodes.len(), "cfg block ids must be unique");
+
+    for (expected, id) in ids.into_iter().enumerate() {
+        assert_eq!(id, expected, "cfg block ids must be dense after sorting");
     }
-}
-
-impl CfgNodeIdAllocator {
-    pub(super) fn allocate(&mut self) -> CfgNodeId {
-        let id = self.next;
-        self.next += 1;
-        id
-    }
-}
-
-#[derive(Debug, Clone)]
-pub(super) struct DataCfgFragment {
-    nodes: Vec<CfgNodeDraft>,
-    wiring: CfgWiring,
-    node_by_entry_wire: HashMap<VariableId, CfgNodeId>,
-}
-
-#[derive(Debug, Clone)]
-pub(super) struct ControlCfgFragment {
-    nodes: Vec<CfgNodeDraft>,
-    nested_data_nodes: Vec<CfgNode>,
-    node_by_control_operation: HashMap<OperationId, CfgNodeId>,
-    control_operation_by_node: HashMap<CfgNodeId, OperationInstance>,
-    node_by_entry_wire: HashMap<VariableId, CfgNodeId>,
-    nested_data_node_by_entry_wire: HashMap<VariableId, CfgNodeId>,
-    branch_data_successors: HashMap<OperationId, Vec<CfgEdge>>,
 }

@@ -5,7 +5,7 @@ use open_hypergraphs_dot::{Options, svg::to_svg_with};
 use crate::{
     compile::{
         CompileGraph,
-        analysis::partition::{OperationRegion, RegionKind},
+        cfg::partition::{OperationRegion, RegionKind},
         graph_ops::Graph,
         graph_render::object_label,
     },

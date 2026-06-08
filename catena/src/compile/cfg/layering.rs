@@ -9,7 +9,7 @@ use open_hypergraphs::{
 
 use crate::{
     compile::{
-        analysis::partition::{OperationId, RegionKind},
+        cfg::partition::{OperationId, RegionKind},
         graph_ops::{Graph, operation_inputs, operation_outputs},
     },
     lang::Obj,

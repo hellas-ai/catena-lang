@@ -6,8 +6,8 @@ use thiserror::Error;
 use crate::{
     check::{CheckError, check as check_elaborated_theory},
     compile::{
-        CompileConfig, CompileGraph, CompileGraphError, analysis,
-        cfg::{CfgError, CfgOptions},
+        CompileConfig, CompileGraph, CompileGraphError,
+        cfg::{self, CfgError, CfgOptions},
         check_render, compile_graph,
         cuda::CudaOptions,
         cuda::{CudaAbiError, render_cuda_source},
@@ -153,7 +153,7 @@ impl CompilePipeline {
                 let compile_graph =
                     Self::compile_graph(checked_elaborated_theory, compile_graph_request)?;
                 let graph = normalize_graph(&compile_graph)?;
-                Ok(analysis::render_analysis(&graph)?)
+                Ok(cfg::render_analysis(&graph)?)
             }
             Emit::Cfg | Emit::Cuda | Emit::StructuredIr => {
                 self.require_format(OutputFormat::Text)?;
@@ -170,7 +170,7 @@ impl CompilePipeline {
                     .map(|certificates| certificates.verify_graph_properties(&graph))
                     .transpose()?;
                 if emit == Emit::Cfg {
-                    return Ok(analysis::render_cfg(&graph, self.request.cfg_options)?);
+                    return Ok(cfg::render_cfg(&graph, self.request.cfg_options)?);
                 }
                 let program = compile_program_from_graph(&graph)?;
                 let structured = compile_structured_program(&program)?;

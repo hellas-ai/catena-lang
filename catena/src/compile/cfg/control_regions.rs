@@ -8,89 +8,91 @@ use open_hypergraphs::{
 use crate::{
     compile::{
         CompileGraph, CompileTheory,
-        analysis::{
-            control_regions::ControlRegionGraph,
+        cfg::{
+            data_regions::DataRegionGraph,
             layering::{
                 BoundaryRelation, NestedGraph, coproduct_over_parent, quotient_over_parent,
             },
             partition::{OperationId, OperationRegion, RegionKind},
-            wires::is_interleaved_data_operation,
+            wires::is_interleaved_control_operation,
         },
         graph_ops::{Graph, operation_inputs, operation_name, operation_outputs},
     },
     pass::inline::Inline,
-    stdlib::operations::actual_operation_name,
 };
 
 #[derive(Debug, Clone)]
-pub(super) struct DataRegionGraph {
+pub(super) struct ControlRegionGraph {
     pub(super) region_index: usize,
     pub(super) nested_graph: NestedGraph,
     pub(super) regions: Vec<OperationRegion>,
-    pub(super) control_region_graphs: Vec<ControlRegionGraph>,
+    pub(super) data_region_graphs: Vec<DataRegionGraph>,
 }
 
-pub(super) fn process_data_regions(
+pub(super) fn process_control_regions(
     definition_context: &CompileGraph,
     parent_graph: &Graph,
     regions: &[OperationRegion],
-) -> Vec<DataRegionGraph> {
+) -> Vec<ControlRegionGraph> {
     regions
         .iter()
         .enumerate()
-        .filter(|(_, region)| matches!(region.kind, RegionKind::InterleavedData))
+        .filter(|(_, region)| matches!(region.kind, RegionKind::InterleavedControl))
         .map(|(region_index, region)| {
-            expand_data_region(definition_context, parent_graph, region_index, region)
+            expand_control_region(definition_context, parent_graph, region_index, region)
         })
         .collect()
 }
 
-// Expand one interleaved data region from a control graph into a native data
-// graph. Definitions are inlined recursively; primitive cross-theory children
-// are already represented as one-operation compile graphs by graph building.
-fn expand_data_region(
+// Expand one interleaved control region from a data graph into a native control graph, preserving a non-injective morphism back to the original region.
+fn expand_control_region(
     definition_context: &CompileGraph,
     parent_graph: &Graph,
     region_index: usize,
     region: &OperationRegion,
-) -> DataRegionGraph {
+) -> ControlRegionGraph {
     let nested_graph = coproduct_over_parent(
         region
             .operations
             .iter()
             .copied()
             .map(|operation_id| {
-                expand_interleaved_data_call(definition_context, parent_graph, operation_id)
+                expand_interleaved_control_call(definition_context, parent_graph, operation_id)
             })
             .collect::<Vec<_>>(),
     );
     let resolved = quotient_over_parent(parent_graph, nested_graph);
 
-    DataRegionGraph {
+    ControlRegionGraph {
         region_index,
         nested_graph: resolved,
         regions: Vec::new(),
-        control_region_graphs: Vec::new(),
+        data_region_graphs: Vec::new(),
     }
 }
 
-fn expand_interleaved_data_call(
+// Expand a `control.foo` operation from a data graph. The native control child
+// may have many boundary wires, but the interleaved call site can expose them
+// through packed unary wires. Only child boundary projections are remapped to
+// the call site; internal wires stay unmapped.
+fn expand_interleaved_control_call(
     definition_context: &CompileGraph,
     parent_graph: &Graph,
     operation_id: OperationId,
 ) -> NestedGraph {
-    debug_assert!(is_interleaved_data_operation(parent_graph, operation_id));
+    debug_assert!(is_interleaved_control_operation(parent_graph, operation_id));
     let operation = operation_name(parent_graph, operation_id);
-    let expanded_data_graph = if let Some(native_data_child) =
-        data_definition_for_operation(definition_context, operation)
-    {
-        inline_data_definitions(native_data_child)
-    } else {
-        primitive_data_graph(parent_graph, operation_id)
-    };
+    let native_control_child = control_definition_for_operation(definition_context, operation)
+        .unwrap_or_else(|| {
+            panic!(
+                "interleaved control operation `{operation}` must resolve to a native control graph"
+            )
+        });
 
-    let expanded_source_wires = boundary_table(&expanded_data_graph.s);
-    let expanded_target_wires = boundary_table(&expanded_data_graph.t);
+    let expanded_control_graph = inline_control_definitions(native_control_child);
+
+    let expanded_source_wires = boundary_table(&expanded_control_graph.s);
+    let expanded_target_wires = boundary_table(&expanded_control_graph.t);
     let call_inputs = operation_inputs(parent_graph, operation_id).collect::<Vec<_>>();
     let call_outputs = operation_outputs(parent_graph, operation_id).collect::<Vec<_>>();
     let boundary_relation = BoundaryRelation::from_boundaries(
@@ -99,22 +101,25 @@ fn expand_interleaved_data_call(
         (&expanded_target_wires, &call_outputs),
     );
 
-    NestedGraph::under_parent_operation(operation_id, expanded_data_graph, boundary_relation)
+    NestedGraph::under_parent_operation(operation_id, expanded_control_graph, boundary_relation)
 }
 
-fn inline_data_definitions(graph: &CompileGraph) -> Graph {
-    debug_assert!(matches!(graph.theory, CompileTheory::Data));
+// Expand a native control graph by inlining non-primitive control operations
+// inside it. Mapping the expanded boundary to an interleaved call site is handled
+// by `expand_interleaved_control_call`.
+fn inline_control_definitions(graph: &CompileGraph) -> Graph {
+    debug_assert!(matches!(graph.theory, CompileTheory::Control));
     let definitions = graph
         .children
         .iter()
-        .filter(|child| matches!(child.graph.theory, CompileTheory::Data))
+        .filter(|child| matches!(child.graph.theory, CompileTheory::Control))
         .map(|child| {
             (
                 child
                     .operation
                     .parse()
-                    .expect("data child operation name must be valid"),
-                LaxOpenHypergraph::from_strict(inline_data_definitions(&child.graph)),
+                    .expect("control child operation name must be valid"),
+                LaxOpenHypergraph::from_strict(inline_control_definitions(&child.graph)),
             )
         })
         .collect::<HashMap<_, _>>();
@@ -139,37 +144,23 @@ fn inline_data_definitions(graph: &CompileGraph) -> Graph {
     }
 
     panic!(
-        "too many data-definition inline iterations while expanding `{}`",
+        "too many control-definition inline iterations while expanding `{}`",
         graph.definition_name
     )
 }
 
-fn data_definition_for_operation<'a>(
+// Look up the child graph that gives the native control definition for an operation. Operations without such a child are treated as primitives.
+fn control_definition_for_operation<'a>(
     graph: &'a CompileGraph,
     operation: &str,
 ) -> Option<&'a CompileGraph> {
     graph.children.iter().find_map(|child| {
-        if child.operation == operation && matches!(child.graph.theory, CompileTheory::Data) {
+        if child.operation == operation && matches!(child.graph.theory, CompileTheory::Control) {
             Some(&child.graph)
         } else {
-            data_definition_for_operation(&child.graph, operation)
+            control_definition_for_operation(&child.graph, operation)
         }
     })
-}
-
-fn primitive_data_graph(parent_graph: &Graph, operation_id: OperationId) -> Graph {
-    let operation = operation_name(parent_graph, operation_id);
-    let native_operation = actual_operation_name(operation)
-        .parse()
-        .expect("interleaved data operation name must strip to a valid operation");
-    let source_type = operation_inputs(parent_graph, operation_id)
-        .map(|wire| parent_graph.h.w.0.0[wire.0].clone())
-        .collect::<Vec<_>>();
-    let target_type = operation_outputs(parent_graph, operation_id)
-        .map(|wire| parent_graph.h.w.0.0[wire.0].clone())
-        .collect::<Vec<_>>();
-
-    LaxOpenHypergraph::singleton(native_operation, source_type, target_type).to_strict()
 }
 
 fn boundary_table(boundary: &FiniteFunction) -> Vec<NodeId> {

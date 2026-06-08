@@ -1,4 +1,4 @@
-use crate::compile::{CompileGraph, CompileTheory, cfg::build::CfgBuilder};
+use crate::compile::{CompileGraph, CompileTheory};
 
 pub type CfgNodeId = usize;
 pub type OperationId = usize;
@@ -10,13 +10,6 @@ pub type VariableName = String;
 pub enum CfgError {
     #[error("cfg only accepts data regions; got {0}")]
     UnsupportedTheory(CompileTheory),
-    #[error("monoidal-structure wire `{wire}` produced by `{operation}` cannot resolve to an atom")]
-    UnresolvedMonoidalStructureAtom {
-        wire: VariableId,
-        operation: OperationName,
-    },
-    #[error("cycle while resolving monoidal-structure wire `{0}`")]
-    MonoidalStructureCycle(VariableId),
 }
 
 #[derive(Debug, Clone)]
@@ -66,40 +59,6 @@ pub struct CfgEdge {
     pub args: Vec<VariableId>,
 }
 
-#[derive(Debug, Clone)]
-pub(super) struct CfgNodeDraft {
-    pub(super) id: CfgNodeId,
-    pub(super) params: Vec<VariableId>,
-    pub(super) block: Vec<BlockInstruction>,
-}
-
-#[derive(Debug, Clone)]
-pub struct CfgWiring {
-    pub node_boundaries: Vec<CfgNodeBoundaries>,
-}
-
-#[derive(Debug, Clone)]
-pub struct CfgNodeBoundaries {
-    pub node: CfgNodeId,
-    pub entries: Vec<BoundaryPoint>,
-    pub exits: Vec<BoundaryPoint>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct BoundaryPoint {
-    pub wire: VariableId,
-    pub name: Option<VariableName>,
-    pub kind: BoundaryKind,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum BoundaryKind {
-    RegionEntry,
-    RegionExit,
-    FromControl(OperationId),
-    ToControl(OperationId),
-}
-
 impl Cfg {
     pub fn from_compile_graph(compile_graph: &CompileGraph) -> Result<Self, CfgError> {
         Self::from_compile_graph_with_options(compile_graph, CfgOptions::default())
@@ -109,7 +68,7 @@ impl Cfg {
         compile_graph: &CompileGraph,
         options: CfgOptions,
     ) -> Result<Self, CfgError> {
-        CfgBuilder::new(compile_graph).with_options(options).build()
+        crate::compile::cfg::build_cfg(compile_graph, options)
     }
 
     pub(crate) fn label(&self, node: CfgNodeId) -> String {

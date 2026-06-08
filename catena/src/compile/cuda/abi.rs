@@ -971,10 +971,7 @@ impl SourceParameterAbiState {
         let memory = SharedMemory::from_gpu_shared(
             shared,
             &self.device_extent_names,
-            &self
-                .source_parameter_abi
-                .kernel_interface
-                .extent_cuda_names,
+            &self.source_parameter_abi.kernel_interface.extent_cuda_names,
             &self
                 .source_parameter_abi
                 .kernel_interface

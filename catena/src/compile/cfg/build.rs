@@ -8,8 +8,8 @@ use crate::compile::{
 use crate::stdlib::operations::{OperationKind, actual_operation_kind, actual_operation_name};
 
 use super::{
-    render::render_analysis_cfg,
     region_graph::{RegionGraph, RegionGraphRegion, region_graph_with_regions},
+    render::render_analysis_cfg,
     value_equivalence::{ValueEquivalences, ValueProjection, value_equivalences},
 };
 
@@ -616,9 +616,7 @@ fn region_kind_name(kind: crate::compile::cfg::partition::RegionKind) -> &'stati
     match kind {
         crate::compile::cfg::partition::RegionKind::Data => "data",
         crate::compile::cfg::partition::RegionKind::Control => "control",
-        crate::compile::cfg::partition::RegionKind::InterleavedControl => {
-            "interleaved-control"
-        }
+        crate::compile::cfg::partition::RegionKind::InterleavedControl => "interleaved-control",
         crate::compile::cfg::partition::RegionKind::InterleavedData => "interleaved-data",
     }
 }

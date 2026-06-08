@@ -141,7 +141,9 @@ fn render_cuda_stmts(
             }
             Stmt::Break(label) => out.push_str(&format!("{pad}goto {label}_after;\n")),
             Stmt::Continue(label) => out.push_str(&format!("{pad}goto {label}_continue;\n")),
-            Stmt::Return => out.push_str(&format!("{pad}return;\n")),
+            Stmt::Return(values) => {
+                out.push_str(&format!("{pad}return;{}\n", return_comment(values, abi)));
+            }
             Stmt::Barrier => out.push_str(&format!("{pad}__syncthreads();\n")),
             Stmt::Assign { lhs, rhs } => out.push_str(&format!(
                 "{pad}{} = {};\n",
@@ -212,6 +214,20 @@ fn primitive_line_comment(primitive: &Primitive, abi: &CudaKernelAbi) -> String 
     } else {
         format!(" /* {} */", annotations.join(", "))
     }
+}
+
+fn return_comment(values: &[String], abi: &CudaKernelAbi) -> String {
+    if values.is_empty() {
+        return String::new();
+    }
+    let values = values
+        .iter()
+        .map(|value| match abi.source_name_annotation(value) {
+            Some(annotation) => format!("{value}: {}", sanitize_comment(annotation)),
+            None => value.clone(),
+        })
+        .collect::<Vec<_>>();
+    format!(" /* returns {} */", values.join(", "))
 }
 
 fn sanitize_comment(comment: &str) -> String {

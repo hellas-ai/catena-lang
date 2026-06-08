@@ -44,7 +44,7 @@ pub enum Stmt {
     },
     Break(String),
     Continue(String),
-    Return,
+    Return(Vec<String>),
     Barrier,
     Assign {
         lhs: String,
@@ -128,7 +128,13 @@ fn render_ir_stmts(out: &mut String, stmts: &[Stmt], indent: usize) {
             }
             Stmt::Break(label) => out.push_str(&format!("{pad}break {label}\n")),
             Stmt::Continue(label) => out.push_str(&format!("{pad}continue {label}\n")),
-            Stmt::Return => out.push_str(&format!("{pad}return\n")),
+            Stmt::Return(values) => {
+                if values.is_empty() {
+                    out.push_str(&format!("{pad}return\n"));
+                } else {
+                    out.push_str(&format!("{pad}return {}\n", values.join(", ")));
+                }
+            }
             Stmt::Barrier => out.push_str(&format!("{pad}barrier\n")),
             Stmt::Assign { lhs, rhs } => out.push_str(&format!("{pad}{lhs} = {rhs}\n")),
             Stmt::Call {

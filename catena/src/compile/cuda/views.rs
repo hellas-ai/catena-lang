@@ -114,7 +114,7 @@ fn collect_shared_aliases(
             Stmt::Primitive(_)
             | Stmt::Break(_)
             | Stmt::Continue(_)
-            | Stmt::Return
+            | Stmt::Return(_)
             | Stmt::Barrier
             | Stmt::Assign { .. }
             | Stmt::Call { .. }
@@ -164,7 +164,7 @@ fn collect_static_shared_views(
             Stmt::Primitive(_)
             | Stmt::Break(_)
             | Stmt::Continue(_)
-            | Stmt::Return
+            | Stmt::Return(_)
             | Stmt::Barrier
             | Stmt::Assign { .. }
             | Stmt::Call { .. }
@@ -197,7 +197,7 @@ fn collect_extents_required_by_device_code(stmts: &[Stmt], names: &mut HashSet<S
             }
             Stmt::Break(_)
             | Stmt::Continue(_)
-            | Stmt::Return
+            | Stmt::Return(_)
             | Stmt::Barrier
             | Stmt::Assign { .. }
             | Stmt::Call { .. }

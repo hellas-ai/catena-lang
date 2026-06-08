@@ -141,8 +141,12 @@ impl Structurer {
         let mut code = self.block_statements(&cfg_node.block);
         match cfg_node.transfer {
             Transfer::Return(values) => {
-                let _return_arity = values.len();
-                code.push(Stmt::Return);
+                code.push(Stmt::Return(
+                    values
+                        .into_iter()
+                        .map(|id| (self.variable_name)(id))
+                        .collect(),
+                ));
             }
             Transfer::Goto(edge) => code.extend(self.do_edge(node, &edge, context)?),
             Transfer::If {
@@ -407,7 +411,7 @@ fn simplify_stmt(stmt: &mut Stmt) {
         }
         Stmt::Break(_)
         | Stmt::Continue(_)
-        | Stmt::Return
+        | Stmt::Return(_)
         | Stmt::Barrier
         | Stmt::Assign { .. }
         | Stmt::Call { .. }
@@ -443,7 +447,7 @@ fn remove_fallthrough_breaks_to(stmts: &mut Vec<Stmt>, label: &str) {
             }
             Stmt::Break(_)
             | Stmt::Continue(_)
-            | Stmt::Return
+            | Stmt::Return(_)
             | Stmt::Barrier
             | Stmt::Assign { .. }
             | Stmt::Call { .. }
@@ -472,7 +476,7 @@ fn contains_break_to(stmts: &[Stmt], label: &str) -> bool {
         Stmt::Switch { cases, .. } => cases.iter().any(|body| contains_break_to(body, label)),
         Stmt::Break(break_label) => break_label == label,
         Stmt::Continue(_)
-        | Stmt::Return
+        | Stmt::Return(_)
         | Stmt::Barrier
         | Stmt::Assign { .. }
         | Stmt::Call { .. }
@@ -514,7 +518,7 @@ mod tests {
             label: "n7".to_string(),
             body: vec![Stmt::If {
                 condition: "c".to_string(),
-                then_body: vec![Stmt::Break("n7".to_string()), Stmt::Return],
+                then_body: vec![Stmt::Break("n7".to_string()), Stmt::Return(Vec::new())],
                 else_body: vec![Stmt::Break("n7".to_string())],
             }],
         }];

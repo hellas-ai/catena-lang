@@ -299,7 +299,7 @@ fn stmts_use_tiled_view(stmts: &[Stmt]) -> bool {
         Stmt::Primitive(primitive) => primitive.name == "gpu.view.group-by-tile",
         Stmt::Break(_)
         | Stmt::Continue(_)
-        | Stmt::Return
+        | Stmt::Return(_)
         | Stmt::Barrier
         | Stmt::Assign { .. }
         | Stmt::Call { .. }
@@ -340,7 +340,7 @@ fn stmts_collect_grid_views(stmts: &[Stmt], grid_views: &mut HashSet<String>) {
             Stmt::Primitive(_)
             | Stmt::Break(_)
             | Stmt::Continue(_)
-            | Stmt::Return
+            | Stmt::Return(_)
             | Stmt::Barrier
             | Stmt::Assign { .. }
             | Stmt::Call { .. }
@@ -376,7 +376,7 @@ fn stmts_use_grid_view_global_access(stmts: &[Stmt], grid_views: &HashSet<String
         Stmt::Primitive(_)
         | Stmt::Break(_)
         | Stmt::Continue(_)
-        | Stmt::Return
+        | Stmt::Return(_)
         | Stmt::Barrier
         | Stmt::Assign { .. }
         | Stmt::Call { .. }
@@ -480,7 +480,7 @@ fn collect_view_metadata_inputs(
             }
             Stmt::Break(_)
             | Stmt::Continue(_)
-            | Stmt::Return
+            | Stmt::Return(_)
             | Stmt::Barrier
             | Stmt::Assign { .. }
             | Stmt::Call { .. }
@@ -693,7 +693,7 @@ fn collect_access_certificates_from_stmts(
             }
             Stmt::Break(_)
             | Stmt::Continue(_)
-            | Stmt::Return
+            | Stmt::Return(_)
             | Stmt::Barrier
             | Stmt::Assign { .. }
             | Stmt::Call { .. }

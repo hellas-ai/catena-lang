@@ -70,17 +70,11 @@ enum Command {
         proof: Vec<PathBuf>,
 
         /// Keep monoidal-structure operations in CFG output for debugging.
-        #[arg(
-            long = "cfg-keep-monoidal-operations",
-            visible_alias = "analysis-cfg-show-monoidal-operations"
-        )]
+        #[arg(long = "cfg-keep-monoidal-operations")]
         cfg_keep_monoidal_operations: bool,
 
         /// Keep control-flow-only operations in CFG output for debugging.
-        #[arg(
-            long = "cfg-keep-control-flow-operations",
-            visible_alias = "analysis-cfg-show-control-flow-operations"
-        )]
+        #[arg(long = "cfg-keep-control-flow-operations")]
         cfg_keep_control_flow_operations: bool,
     },
 }

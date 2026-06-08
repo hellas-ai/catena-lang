@@ -781,6 +781,7 @@ struct SourceParameterAbi {
 struct SourceParameterAbiState {
     source_parameter_abi: SourceParameterAbi,
     used_device_names: HashSet<String>,
+    device_extent_names: HashMap<usize, String>,
     extents_required_by_device_code: HashSet<String>,
     emitted_extent_params: HashSet<usize>,
 }
@@ -805,6 +806,7 @@ fn collect_source_parameter_abi(
             shared_indexing: HashMap::new(),
         },
         used_device_names: HashSet::new(),
+        device_extent_names: HashMap::new(),
         extents_required_by_device_code,
         emitted_extent_params: HashSet::new(),
     };
@@ -882,6 +884,8 @@ impl SourceParameterAbiState {
             .compile_time_extent_leaves
             .contains(&leaf)
         {
+            self.device_extent_names
+                .insert(leaf, host_or_static_name.clone());
             return Ok(());
         }
 
@@ -904,6 +908,7 @@ impl SourceParameterAbiState {
                 &mut self.used_device_names,
             );
             self.record_name_mapping(source_param, &device_name);
+            self.device_extent_names.insert(leaf, device_name.clone());
             self.source_parameter_abi.device_params.push(Param {
                 ty: "uint64_t".to_string(),
                 name: device_name,
@@ -911,6 +916,8 @@ impl SourceParameterAbiState {
             self.source_parameter_abi
                 .device_call_args
                 .push(host_or_static_name);
+        } else {
+            self.device_extent_names.insert(leaf, host_or_static_name);
         }
 
         Ok(())
@@ -925,7 +932,7 @@ impl SourceParameterAbiState {
             source_param,
             global,
             &self.device_name_for_source_parameter(source_param),
-            &self.source_parameter_abi.kernel_interface.extent_cuda_names,
+            &self.device_extent_names,
             &mut self.used_device_names,
             &mut self
                 .source_parameter_abi
@@ -963,7 +970,11 @@ impl SourceParameterAbiState {
         );
         let memory = SharedMemory::from_gpu_shared(
             shared,
-            &self.source_parameter_abi.kernel_interface.extent_cuda_names,
+            &self.device_extent_names,
+            &self
+                .source_parameter_abi
+                .kernel_interface
+                .extent_cuda_names,
             &self
                 .source_parameter_abi
                 .kernel_interface
@@ -990,6 +1001,14 @@ impl SourceParameterAbiState {
         self.source_parameter_abi
             .shared_indexing
             .insert(binding.device_name.clone(), binding.indexing);
+        for param in &binding.device_params {
+            let annotation = format!("{}_size", source_param.name);
+            if param.name != annotation {
+                self.source_parameter_abi
+                    .source_name_annotations
+                    .insert(param.name.clone(), annotation);
+            }
+        }
         self.source_parameter_abi
             .device_params
             .extend(binding.device_params);

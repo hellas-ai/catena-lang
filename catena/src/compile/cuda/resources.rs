@@ -89,13 +89,14 @@ pub(super) struct DynamicSharedMemory {
 impl SharedMemory {
     pub(super) fn from_gpu_shared(
         shared: &GpuShared<'_>,
-        extent_names: &HashMap<usize, String>,
+        device_extent_names: &HashMap<usize, String>,
+        host_extent_names: &HashMap<usize, String>,
         static_extent_leaves: &HashSet<usize>,
     ) -> Result<Self, CudaAbiError> {
         let element_ty = cuda_shared_element_type(shared)?;
         let shape = shape_expr(
             &shared.dimensions,
-            extent_names,
+            device_extent_names,
             static_extent_leaves,
             CudaAbiError::MissingSharedExtent,
             || CudaAbiError::InvalidSharedShape,
@@ -104,9 +105,16 @@ impl SharedMemory {
         if shape.is_static() {
             Ok(Self::Static(StaticSharedMemory { element_ty, shape }))
         } else {
+            let host_shape = shape_expr(
+                &shared.dimensions,
+                host_extent_names,
+                static_extent_leaves,
+                CudaAbiError::MissingSharedExtent,
+                || CudaAbiError::InvalidSharedShape,
+            )?;
             Ok(Self::Dynamic(DynamicSharedMemory {
                 element_ty,
-                size_expr: shape.product_expr(),
+                size_expr: host_shape.product_expr(),
             }))
         }
     }

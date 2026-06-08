@@ -1,4 +1,6 @@
-use crate::compile::CompileTheory;
+use std::collections::HashMap;
+
+use crate::compile::{CompileGraph, CompileTheory, cfg::layering::Layer};
 
 pub(crate) type CfgNodeId = usize;
 pub(crate) type OperationId = usize;
@@ -21,6 +23,31 @@ pub struct Cfg {
 pub struct CfgOptions {
     pub keep_monoidal_operations: bool,
     pub keep_control_flow_operations: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct CfgBuild {
+    pub artifacts: CfgArtifacts,
+    pub(crate) cfg: Cfg,
+    pub(crate) globals: Vec<VariableId>,
+    pub(crate) wire_names: HashMap<VariableId, String>,
+    pub(crate) block_svg_paths: HashMap<CfgNodeId, String>,
+}
+
+impl CfgBuild {
+    pub fn cfg(&self) -> &Cfg {
+        &self.cfg
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CfgArtifacts {
+    pub(super) graph: CompileGraph,
+    pub(super) layer: Layer,
+    pub(super) cfg: Cfg,
+    pub(super) globals: Vec<VariableId>,
+    pub(super) wire_names: HashMap<VariableId, String>,
+    pub(super) block_svg_paths: HashMap<CfgNodeId, String>,
 }
 
 #[derive(Debug, Clone)]

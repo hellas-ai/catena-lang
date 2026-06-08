@@ -159,7 +159,8 @@ impl CompilePipeline {
                     .map(|certificates| certificates.verify_graph_properties(&graph))
                     .transpose()?;
                 if emit == Emit::Cfg {
-                    return Ok(cfg::render_cfg(&graph, self.request.cfg_options)?);
+                    let cfg_build = cfg::build_cfg(&graph, self.request.cfg_options)?;
+                    return Ok(cfg::render_cfg(&cfg_build));
                 }
                 let program = compile_program_from_graph(&graph)?;
                 let structured = compile_structured_program(&program)?;

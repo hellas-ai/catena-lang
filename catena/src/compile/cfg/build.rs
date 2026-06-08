@@ -1,7 +1,8 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 use crate::compile::{
-    cfg::{BlockInstruction, Cfg, CfgEdge, CfgNode, CfgOptions, Transfer},
+    CompileGraph,
+    cfg::{BlockInstruction, Cfg, CfgArtifacts, CfgBuild, CfgEdge, CfgNode, CfgOptions, Transfer},
     graph_ops::{Graph, operation_inputs, operation_name, operation_outputs},
 };
 use crate::stdlib::operations::{OperationKind, actual_operation_kind, actual_operation_name};
@@ -10,27 +11,11 @@ use super::{
     layering::Layer,
     partition::RegionKind,
     region_graph::{RegionGraph, RegionGraphRegion, region_graph_with_regions},
-    render::render_cfg_build,
     value_equivalence::{ValueEquivalences, ValueProjection, value_equivalences},
 };
 
-pub(super) struct CfgBuild {
-    pub(super) cfg: Cfg,
-    pub(super) globals: Vec<usize>,
-    pub(super) wire_names: HashMap<usize, String>,
-    pub(super) block_svg_paths: HashMap<usize, String>,
-}
-
-pub(super) fn render_cfg(
-    root_layer: &Layer,
-    wire_names: HashMap<usize, String>,
-    options: CfgOptions,
-) -> Vec<u8> {
-    let cfg_build = build_cfg(root_layer, wire_names, options);
-    render_cfg_build(&root_layer.graph, cfg_build)
-}
-
-pub(super) fn build_cfg(
+pub(super) fn build_cfg_from_layer(
+    graph: &CompileGraph,
     root_layer: &Layer,
     wire_names: HashMap<usize, String>,
     options: CfgOptions,
@@ -55,12 +40,21 @@ pub(super) fn build_cfg(
 
     assert_dense_unique_block_ids(&nodes);
     let globals = cfg_globals(root_layer, &nodes);
+    let cfg = Cfg {
+        entry,
+        predecessors: predecessors(&nodes),
+        nodes,
+    };
     CfgBuild {
-        cfg: Cfg {
-            entry,
-            predecessors: predecessors(&nodes),
-            nodes,
+        artifacts: CfgArtifacts {
+            graph: graph.clone(),
+            layer: root_layer.clone(),
+            cfg: cfg.clone(),
+            globals: globals.clone(),
+            wire_names: wire_names.clone(),
+            block_svg_paths: block_svg_paths.clone(),
         },
+        cfg,
         globals,
         wire_names,
         block_svg_paths,

@@ -6,11 +6,11 @@ use crate::{
     compile::{
         CompileGraph,
         cfg::{
-            CfgOptions,
-            build::render_cfg as render_layer_cfg,
+            CfgArtifacts,
             layering::{Layer, Region},
             partition::{OperationRegion, RegionKind},
             region_graph::{region_graph, region_graph_trace},
+            render::render_cfg_parts,
             value_equivalence::value_equivalence_trace,
         },
         graph_ops::{Graph, operation_name},
@@ -20,18 +20,22 @@ use crate::{
     lang::Obj,
 };
 
-pub(super) fn render_cfg_artifacts(
-    graph: &CompileGraph,
-    layer: &Layer,
-    cfg_options: CfgOptions,
-) -> io::Result<Vec<CfgArtifact>> {
+pub(super) fn render_cfg_artifacts(cfg_artifacts: &CfgArtifacts) -> io::Result<Vec<CfgArtifact>> {
+    let graph = &cfg_artifacts.graph;
+    let layer = &cfg_artifacts.layer;
     let regions = operation_regions(&layer.regions);
     let region_svgs = render_region_svgs(graph, &regions)?;
     let source = graph_svg(&graph.graph)?;
     let region_graph = graph_svg(&region_graph(layer))?;
     let region_graph_trace = region_graph_trace(layer);
     let value_equivalence_trace = value_equivalence_trace(layer);
-    let cfg = render_layer_cfg(layer, graph.source_variable_names.clone(), cfg_options);
+    let cfg = render_cfg_parts(
+        &cfg_artifacts.graph.graph,
+        &cfg_artifacts.cfg,
+        &cfg_artifacts.globals,
+        &cfg_artifacts.wire_names,
+        &cfg_artifacts.block_svg_paths,
+    );
     let mut artifacts = vec![
         cfg_index_artifact(graph, layer),
         CfgArtifact {

@@ -103,7 +103,7 @@ fn build_definition(
     *next_id += 1;
 
     let context = context_for_graph(compile_graph);
-    let body = cfg::build_cfg(compile_graph, options.cfg)?;
+    let body = cfg::build_cfg(compile_graph, options.cfg)?.cfg().clone();
 
     definitions.insert(
         id,

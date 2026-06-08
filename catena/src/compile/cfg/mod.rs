@@ -15,64 +15,40 @@ mod wires;
 use crate::compile::{CompileGraph, CompileTheory};
 
 pub use artifact_render::CfgArtifact;
-pub use model::{Cfg, CfgError, CfgOptions};
 pub(crate) use model::{
     BlockInstruction, CfgEdge, CfgNode, CfgNodeId, Transfer, VariableId, variable_name,
 };
+pub use model::{Cfg, CfgArtifacts, CfgBuild, CfgError, CfgOptions};
 
 use self::{
     artifact_render::render_cfg_artifacts as render_cfg_artifacts_for_layer,
-    build::{build_cfg as build_layer_cfg, render_cfg as render_layer_cfg},
-    layering::Layer,
-    layers::root_layer,
-    nested_regions::build_control_region_graphs,
-    partition::partition_data_regions,
+    build::build_cfg_from_layer, layers::root_layer, nested_regions::build_control_region_graphs,
+    partition::partition_data_regions, render::render_cfg_build,
     wires::assert_interleaved_control_operations_are_unary,
 };
 
-fn layer(graph: &CompileGraph) -> Layer {
-    assert!(
-        matches!(graph.theory, CompileTheory::Data),
-        "cfg construction expects a data graph"
-    );
+pub fn build_cfg(graph: &CompileGraph, cfg_options: CfgOptions) -> Result<CfgBuild, CfgError> {
+    if !matches!(graph.theory, CompileTheory::Data) {
+        return Err(CfgError::UnsupportedTheory(graph.theory.clone()));
+    }
+
     assert_interleaved_control_operations_are_unary(&graph.graph);
-    let regions = partition_data_regions(&graph.graph);
-    let control_region_graphs = build_control_region_graphs(graph, &graph.graph, &regions);
-    root_layer(graph.graph.clone(), &regions, &control_region_graphs)
-}
 
-pub fn build_cfg(graph: &CompileGraph, cfg_options: CfgOptions) -> Result<Cfg, CfgError> {
-    if !matches!(graph.theory, CompileTheory::Data) {
-        return Err(CfgError::UnsupportedTheory(graph.theory.clone()));
-    }
-
-    let layer = layer(graph);
-    Ok(build_layer_cfg(&layer, graph.source_variable_names.clone(), cfg_options).cfg)
-}
-
-pub fn render_cfg(graph: &CompileGraph, cfg_options: CfgOptions) -> Result<Vec<u8>, CfgError> {
-    if !matches!(graph.theory, CompileTheory::Data) {
-        return Err(CfgError::UnsupportedTheory(graph.theory.clone()));
-    }
-
-    let layer = layer(graph);
-    Ok(render_layer_cfg(
-        &layer,
+    let data_regions = partition_data_regions(&graph.graph);
+    let nested_control_regions = build_control_region_graphs(graph, &graph.graph, &data_regions);
+    let root_layer = root_layer(graph.graph.clone(), &data_regions, &nested_control_regions);
+    Ok(build_cfg_from_layer(
+        graph,
+        &root_layer,
         graph.source_variable_names.clone(),
         cfg_options,
     ))
 }
 
-pub fn render_cfg_artifacts(
-    graph: &CompileGraph,
-    cfg_options: CfgOptions,
-) -> std::io::Result<Vec<CfgArtifact>> {
-    if !matches!(graph.theory, CompileTheory::Data) {
-        return Err(std::io::Error::other(CfgError::UnsupportedTheory(
-            graph.theory.clone(),
-        )));
-    }
+pub fn render_cfg(cfg_build: &CfgBuild) -> Vec<u8> {
+    render_cfg_build(cfg_build)
+}
 
-    let layer = layer(graph);
-    render_cfg_artifacts_for_layer(graph, &layer, cfg_options)
+pub fn render_cfg_artifacts(cfg_artifacts: &CfgArtifacts) -> std::io::Result<Vec<CfgArtifact>> {
+    render_cfg_artifacts_for_layer(cfg_artifacts)
 }

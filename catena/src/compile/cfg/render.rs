@@ -1,23 +1,31 @@
 use std::{collections::HashMap, fmt::Write};
 
 use crate::compile::{
-    cfg::{BlockInstruction, Cfg, CfgEdge, Transfer},
+    cfg::{BlockInstruction, Cfg, CfgBuild, CfgEdge, CfgNodeId, Transfer, VariableId},
     graph_ops::Graph,
     program::{
         Context, Definition, DefinitionId, Program, Variable, VariableId as ProgramVariableId,
     },
 };
 
-use super::build::CfgBuild;
+pub(super) fn render_cfg_build(cfg_build: &CfgBuild) -> Vec<u8> {
+    render_cfg_parts(
+        &cfg_build.artifacts.graph.graph,
+        &cfg_build.cfg,
+        &cfg_build.globals,
+        &cfg_build.wire_names,
+        &cfg_build.block_svg_paths,
+    )
+}
 
-pub(super) fn render_cfg_build(graph: &Graph, cfg_build: CfgBuild) -> Vec<u8> {
-    let CfgBuild {
-        cfg,
-        globals,
-        wire_names,
-        block_svg_paths,
-    } = cfg_build;
-    let program = cfg_program(graph, cfg);
+pub(super) fn render_cfg_parts(
+    graph: &Graph,
+    cfg: &Cfg,
+    globals: &[VariableId],
+    wire_names: &HashMap<VariableId, String>,
+    block_svg_paths: &HashMap<CfgNodeId, String>,
+) -> Vec<u8> {
+    let program = cfg_program(graph, cfg.clone());
     let definition = program.entry_definition();
     let mut out = String::new();
 
@@ -27,7 +35,7 @@ pub(super) fn render_cfg_build(graph: &Graph, cfg_build: CfgBuild) -> Vec<u8> {
         writeln!(
             &mut out,
             "    {}",
-            render_variable(definition, &wire_names, *parameter)
+            render_variable(definition, wire_names, *parameter)
         )
         .expect("write to string cannot fail");
     }
@@ -37,7 +45,7 @@ pub(super) fn render_cfg_build(graph: &Graph, cfg_build: CfgBuild) -> Vec<u8> {
         writeln!(
             &mut out,
             "    {}",
-            render_variable(definition, &wire_names, ProgramVariableId(global))
+            render_variable(definition, wire_names, ProgramVariableId(*global))
         )
         .expect("write to string cannot fail");
     }
@@ -59,13 +67,13 @@ pub(super) fn render_cfg_build(graph: &Graph, cfg_build: CfgBuild) -> Vec<u8> {
         writeln!(
             &mut out,
             "({})",
-            render_wire_ids(definition, &wire_names, &node.params).join(", ")
+            render_wire_ids(definition, wire_names, &node.params).join(", ")
         )
         .expect("write to string cannot fail");
         for instruction in &node.block {
-            render_instruction(&mut out, definition, &wire_names, instruction);
+            render_instruction(&mut out, definition, wire_names, instruction);
         }
-        render_transfer(&mut out, definition, &wire_names, &node.transfer);
+        render_transfer(&mut out, definition, wire_names, &node.transfer);
     }
 
     out.into_bytes()

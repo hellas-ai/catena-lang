@@ -41,10 +41,9 @@ use crate::{
 // 5. Verify any requested proof certificates against the normalized graph.
 //    Proofs are checked after normalization because backend requirements are
 //    stated over the graph shape the backend will actually consume.
-// 6. Optionally emit analysis/debug reports for the normalized graph.
-// 7. Compile the graph into a Program/CFG representation. This is where data
+// 6. Compile the graph into a Program/CFG representation. This is where data
 //    dependency scheduling and control CFG construction happen.
-// 8. Structure the Program into structured IR with statements, blocks, and
+// 7. Structure the Program into structured IR with statements, blocks, and
 //    control flow. CUDA lowering consumes this structured IR plus ABI/proof
 //    metadata to render target source.
 
@@ -56,7 +55,6 @@ pub enum Emit {
     Elaborated,
     Checked,
     StructuredIr,
-    Analysis,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -145,15 +143,6 @@ impl CompilePipeline {
                 let checked_elaborated_theory = self.checked_elaborated_theory()?;
                 let graph = Self::compile_graph(checked_elaborated_theory, compile_graph_request)?;
                 Ok(graph_render::nested_svg(&graph)?)
-            }
-            Emit::Analysis => {
-                self.require_format(OutputFormat::Svg)?;
-                let compile_graph_request = self.compile_graph_request()?;
-                let checked_elaborated_theory = self.checked_elaborated_theory()?;
-                let compile_graph =
-                    Self::compile_graph(checked_elaborated_theory, compile_graph_request)?;
-                let graph = normalize_graph(&compile_graph)?;
-                Ok(cfg::render_analysis(&graph)?)
             }
             Emit::Cfg | Emit::Cuda | Emit::StructuredIr => {
                 self.require_format(OutputFormat::Text)?;

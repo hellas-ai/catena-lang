@@ -33,14 +33,6 @@ use self::{
     wires::assert_interleaved_control_operations_are_unary,
 };
 
-pub fn render_analysis(graph: &CompileGraph) -> std::io::Result<Vec<u8>> {
-    Ok(render_analysis_artifacts(graph, CfgOptions::default())?
-        .into_iter()
-        .find(|artifact| artifact.path == PathBuf::from("source.svg"))
-        .expect("analysis artifacts include source graph")
-        .contents)
-}
-
 #[derive(Debug, Clone)]
 pub struct AnalysisArtifact {
     pub path: PathBuf,

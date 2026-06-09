@@ -41,6 +41,12 @@ pub(crate) fn compile(cpp_path: &Path) -> Result<Artifact, ArtifactError> {
         .arg("-fPIC")
         .arg("-O2")
         .arg("--std=c++17")
+        // Keep multiply/add as separately rounded operations. This prevents a
+        // future generated `a * b + c` expression from being contracted to FMA.
+        .arg("-ffp-contract=off")
+        // This is the default, but keep it explicit because reproducibility
+        // depends on avoiding reassociation and other fast-math transforms.
+        .arg("-fno-fast-math")
         .arg(&module_path)
         .arg("-o")
         .arg(&so_path)

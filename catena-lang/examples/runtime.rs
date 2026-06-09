@@ -17,11 +17,11 @@ fn main() -> anyhow::Result<()> {
         root.join("example.hex"),
     ])?;
 
-    // Execute the `program_not` symbol in the runtime with input value `false`
-    let [result] = runtime.exec("program_not", [false.into()])?;
-    println!("program_not(false): {result:?}");
+    // Execute `not` from the source program with input value `false`
+    let [result] = runtime.exec("not", [false.into()])?;
+    println!("not(false): {result:?}");
 
-    // Input values for `program_array_head_u64`
+    // Input values for `array-head-u64`
     let values = [0x123456789abcdef0_u64, 7, 11];
     println!(
         "array-head input: [{}]",
@@ -34,15 +34,12 @@ fn main() -> anyhow::Result<()> {
 
     // Execute array-head-u64 with values above
     let input = runtime.mem_u64(&values)?;
-    let [head] = runtime.exec("program_array_head_u64", [input])?;
+    let [head] = runtime.exec("array-head-u64", [input])?;
     let Value::U64(head) = head else {
-        anyhow::bail!("program_array_head_u64 returned non-u64 value: {head:?}");
+        anyhow::bail!("array-head-u64 returned non-u64 value: {head:?}");
     };
 
-    println!(
-        "program_array_head_u64: 0x{head:x} (expected 0x{:x})",
-        values[0]
-    );
+    println!("array-head-u64: 0x{head:x} (expected 0x{:x})", values[0]);
     anyhow::ensure!(
         head == values[0],
         "array head mismatch: got 0x{head:x}, expected 0x{:x}",

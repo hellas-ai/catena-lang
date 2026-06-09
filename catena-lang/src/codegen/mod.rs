@@ -38,7 +38,11 @@ const PROGRAM_THEORY: &str = "program";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GpuModule {
+    /// generated code symbol
     pub name: String,
+    /// Corresponding source name (if applicable)
+    pub source_name: Option<Operation>,
+    /// Definition
     pub entry: GpuFunction,
 }
 
@@ -102,6 +106,7 @@ pub fn codegen(terms: &TheoryTermMap) -> Result<GpuModuleMap, CodegenError> {
         let Some(key) = entrypoint_key(term)? else {
             continue;
         };
+        let source_name = definition_name.clone();
         let name = sanitize_ident(&format!("{theory_id}.{definition_name}"));
         state
             .instances
@@ -109,6 +114,7 @@ pub fn codegen(terms: &TheoryTermMap) -> Result<GpuModuleMap, CodegenError> {
         state.queue.push_back(PendingInstance {
             op: definition_name.clone(),
             name,
+            source_name: Some(source_name),
             overrides: BTreeMap::new(),
         });
     }
@@ -217,6 +223,7 @@ impl CodegenState<'_> {
 
         Ok(GpuModule {
             name: instance.name.clone(),
+            source_name: instance.source_name.clone(),
             entry: GpuFunction {
                 name: instance.name.clone(),
                 sources,
@@ -255,6 +262,7 @@ impl CodegenState<'_> {
         self.queue.push_back(PendingInstance {
             op: op.clone(),
             name: name.clone(),
+            source_name: None,
             overrides,
         });
         Ok(name)

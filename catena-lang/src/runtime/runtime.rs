@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use std::{collections::HashMap, path::PathBuf, sync::Arc};
+use std::{path::PathBuf, sync::Arc};
 
 use libloading::Library;
 
@@ -8,7 +8,7 @@ use super::artifact::{Artifact, ArtifactError};
 use super::executor::{CallFrame, ExecutorError};
 use super::mem::{Hip, Mem, MemError};
 use super::{
-    signature::{FunctionSignature, signatures},
+    signature::{SignatureTable, signatures},
     value::{Value, ValueKind},
 };
 use crate::compile::CompileFailure;
@@ -23,7 +23,7 @@ pub struct Runtime {
     /// A handle to the loaded hip .so file, which we call for allocating memory
     hip: Arc<Hip>,
     /// Function signatures (runtime Rust ↔ C typechecking)
-    signatures: HashMap<String, FunctionSignature>,
+    signatures: SignatureTable,
 }
 
 #[derive(Debug, Error)]
@@ -48,6 +48,8 @@ pub enum InitError {
 pub enum ExecError {
     #[error("Unknown function '{0}'")]
     UnknownFunction(String),
+    #[error("Unknown source function '{0}'")]
+    UnknownSourceFunction(String),
     #[error("Argument {index} expected {expected:?}, got {actual:?}")]
     TypeMismatch {
         index: usize,
@@ -82,7 +84,7 @@ impl Runtime {
             .gpu_modules
             .as_ref()
             .ok_or(InitError::MissingGpuModules)?;
-        let signatures = signatures(modules);
+        let signature_table = signatures(modules);
 
         let report_dir = tempfile::Builder::new()
             .prefix("catena-report-")
@@ -97,36 +99,54 @@ impl Runtime {
             _artifact: artifact,
             library,
             hip,
-            signatures,
+            signatures: signature_table,
         })
+    }
+
+    /// Look up the generated C symbol for a source-level `program` definition name.
+    pub fn symbol(&self, name: &str) -> Option<&str> {
+        self.signatures.source_symbols.get(name).map(String::as_str)
     }
 
     pub fn mem_u64(&self, values: &[u64]) -> Result<Value, MemError> {
         Mem::from_u64_slice(self.hip.clone(), values).map(Value::Mem)
     }
 
-    /// Run 'fn_name', which must have M arguments, and return its N arguments.
+    /// Run a source-level `program` definition, which must have M arguments, and return its N arguments.
     pub fn exec<const M: usize, const N: usize>(
         &self,
-        fn_name: &str,
+        name: &str,
+        args: [Value; M],
+    ) -> Result<[Value; N], ExecError> {
+        let symbol = self
+            .symbol(name)
+            .ok_or_else(|| ExecError::UnknownSourceFunction(name.to_string()))?;
+        self.exec_symbol(symbol, args)
+    }
+
+    /// Run the generated C symbol, which must have M arguments, and return its N arguments.
+    pub fn exec_symbol<const M: usize, const N: usize>(
+        &self,
+        symbol: &str,
         args: [Value; M],
     ) -> Result<[Value; N], ExecError> {
         let signature = self
             .signatures
-            .get(fn_name)
-            .ok_or_else(|| ExecError::UnknownFunction(fn_name.to_string()))?;
+            .functions
+            .get(symbol)
+            .ok_or_else(|| ExecError::UnknownFunction(symbol.to_string()))?;
 
         // Check arity/coarity lines up with what's in the function signature.
         if signature.inputs.len() != M {
             return Err(ExecError::InputArityMismatch {
-                name: fn_name.to_string(),
+                name: symbol.to_string(),
                 expected: signature.inputs.len(),
                 actual: M,
             });
         }
         if signature.outputs.len() != N {
             return Err(ExecError::OutputArityMismatch {
-                name: fn_name.to_string(),
+                name: symbol.to_string(),
                 expected: signature.outputs.len(),
                 actual: N,
             });
@@ -161,7 +181,7 @@ impl Runtime {
 
         super::executor::exec(
             &self.library,
-            &signature.symbol,
+            symbol,
             CallFrame {
                 args: &mut frame_args,
             },

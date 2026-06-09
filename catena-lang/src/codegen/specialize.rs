@@ -11,6 +11,7 @@ use crate::{
     report::AnnotatedTerm,
 };
 
+/// A concrete, lowered type
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct SpecializationKey {
     pub sources: Vec<CType>,
@@ -18,9 +19,12 @@ pub struct SpecializationKey {
     pub static_inputs: Vec<FnPtrSymbol>,
 }
 
+/// Helper struct to record, for each definition op, the number of specialisations at
+/// each `LoweredType`.
 pub struct PendingInstance {
     pub op: Operation,
     pub name: String,
+    pub source_name: Option<Operation>,
     pub overrides: BTreeMap<usize, LoweredType>,
 }
 
@@ -47,6 +51,8 @@ pub fn entrypoint_key(term: &AnnotatedTerm) -> Result<Option<SpecializationKey>,
     }))
 }
 
+/// Compute a specialisation key for a given concrete lowered type
+/// NOTE: [`GpuValue`] inputs because we 'lift' function symbols to type level.
 pub fn specialization_key(inputs: &[GpuValue], outputs: &[GpuVar]) -> Option<SpecializationKey> {
     let mut sources = Vec::new();
     let mut static_inputs = Vec::new();

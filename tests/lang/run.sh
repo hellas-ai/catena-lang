@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
 MODE="${1:-check}"
@@ -13,8 +13,8 @@ case "$MODE" in
     ;;
 esac
 
-CASES="$ROOT/catena-lang/tests/lang/cases"
-EXPECTED="$ROOT/catena-lang/tests/lang/expected"
+CASES="$ROOT/tests/lang/cases"
+EXPECTED="$ROOT/tests/lang/expected"
 ACTUAL="$ROOT/target/catena-lang-tests/lang/actual"
 REPORTS="$ROOT/target/catena-lang-tests/lang/reports"
 
@@ -58,10 +58,10 @@ if [[ "$MODE" == "update" ]]; then
   rm -rf "$EXPECTED"
   mkdir -p "$(dirname "$EXPECTED")"
   cp -R "$ACTUAL" "$EXPECTED"
-  echo "Updated catena-lang expected outputs in catena-lang/tests/lang/expected"
+  echo "Updated catena-lang expected outputs in tests/lang/expected"
 else
   if [[ ! -d "$EXPECTED" ]]; then
-    echo "Missing expected outputs. Run \`catena-lang/tests/lang/run.sh update\`." >&2
+    echo "Missing expected outputs. Run \`tests/lang/run.sh update\`." >&2
     exit 1
   fi
 

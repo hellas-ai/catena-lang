@@ -12,6 +12,7 @@ use super::{
     value::{Value, ValueKind},
 };
 use crate::compile::CompileFailure;
+use metacat::theory::RawTheorySet;
 
 /// Run catena programs with the C backend
 #[derive(Debug)]
@@ -79,6 +80,19 @@ impl Runtime {
         I: IntoIterator<Item = PathBuf>,
     {
         let raw_theories = metacat::theory::RawTheorySet::from_files(paths)?;
+        Self::from_raw_theories(raw_theories)
+    }
+
+    /// Construct a new runtime from in-memory Catena source strings.
+    pub fn from_sources<'a, I>(sources: I) -> Result<Runtime, InitError>
+    where
+        I: IntoIterator<Item = &'a str>,
+    {
+        let raw_theories = RawTheorySet::from_texts(sources)?;
+        Self::from_raw_theories(raw_theories)
+    }
+
+    fn from_raw_theories(raw_theories: RawTheorySet) -> Result<Runtime, InitError> {
         let report = crate::compile::compile(raw_theories)?;
         let modules = report
             .gpu_modules

@@ -16,3 +16,12 @@ thiserror = "2.0.18"
 tempfile = "3.23.0"
 libffi = "5.1.0"
 libloading = "0.9.0"
+
+[features]
+default = []
+runtime-tests = []
+
+[[test]]
+name = "runtime"
+path = "tests/runtime.rs"
+required-features = ["runtime-tests"]

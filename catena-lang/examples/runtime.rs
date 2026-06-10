@@ -3,53 +3,18 @@ use std::path::PathBuf;
 use catena_lang::runtime::{Runtime, Value};
 
 fn main() -> anyhow::Result<()> {
-    // Load standard library
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let runtime = Runtime::new([
         root.join("stdlib/cmc.hex"),
         root.join("stdlib/value.hex"),
         root.join("stdlib/buf.hex"),
         root.join("stdlib/index.hex"),
-        root.join("stdlib/base/data.hex"),
-        root.join("stdlib/base/fn.hex"),
-        root.join("stdlib/base/product.hex"),
+        root.join("stdlib/data.hex"),
+        root.join("stdlib/fn.hex"),
+        root.join("stdlib/product.hex"),
         root.join("stdlib/gpu.hex"),
         root.join("example.hex"),
     ])?;
-
-    // Execute `not` from the source program with input value `false`
-    let [result] = runtime.exec("not", [false.into()])?;
-    println!("not(false): {result:?}");
-
-    let [two_times_two] = runtime.exec("two-times-two", [])?;
-    let Value::U64(two_times_two) = two_times_two else {
-        anyhow::bail!("two-times-two returned non-u64 value: {two_times_two:?}");
-    };
-    println!("two-times-two: {two_times_two}");
-    anyhow::ensure!(
-        two_times_two == 4,
-        "two-times-two mismatch: got {two_times_two}, expected 4"
-    );
-
-    let [deadbeef] = runtime.exec("deadbeef", [])?;
-    let Value::U64(deadbeef) = deadbeef else {
-        anyhow::bail!("deadbeef returned non-u64 value: {deadbeef:?}");
-    };
-    println!("deadbeef: 0x{deadbeef:x}");
-    anyhow::ensure!(
-        deadbeef == 0xDEADBEEFDEADBEEF_u64,
-        "deadbeef mismatch: got 0x{deadbeef:x}, expected 0xDEADBEEFDEADBEEF"
-    );
-
-    let [deadbeef32] = runtime.exec("deadbeef32", [])?;
-    let Value::U32(deadbeef32) = deadbeef32 else {
-        anyhow::bail!("deadbeef32 returned non-u32 value: {deadbeef32:?}");
-    };
-    println!("deadbeef32: 0x{deadbeef32:x}");
-    anyhow::ensure!(
-        deadbeef32 == 0xDEADBEEF_u32,
-        "deadbeef32 mismatch: got 0x{deadbeef32:x}, expected 0xDEADBEEF"
-    );
 
     // Input values for `array-head-u64`
     let values = [0x123456789abcdef0_u64, 7, 11];

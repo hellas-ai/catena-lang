@@ -16,6 +16,7 @@ esac
 CASES="$ROOT/catena-lang/tests/lang/cases"
 EXPECTED="$ROOT/catena-lang/tests/lang/expected"
 ACTUAL="$ROOT/target/catena-lang-tests/lang/actual"
+REPORTS="$ROOT/target/catena-lang-tests/lang/reports"
 
 COMMON=(
   catena-lang/stdlib/cmc.hex
@@ -28,15 +29,15 @@ COMMON=(
   catena-lang/stdlib/gpu.hex
 )
 
-rm -rf "$ACTUAL"
-mkdir -p "$ACTUAL"
+rm -rf "$ACTUAL" "$REPORTS"
+mkdir -p "$ACTUAL" "$REPORTS"
 
 for case_file in "$CASES"/*.hex; do
   name="$(basename "$case_file" .hex)"
   out="$ACTUAL/$name"
-  report="$out/report"
+  report="$REPORTS/$name"
 
-  mkdir -p "$report"
+  mkdir -p "$out" "$report"
   echo "case: $name"
 
   set +e
@@ -46,6 +47,11 @@ for case_file in "$CASES"/*.hex; do
   set -e
 
   printf '%s\n' "$status" >"$out/status.txt"
+
+  if [[ -d "$report/gpu" ]]; then
+    mkdir -p "$out/generated"
+    cp -R "$report/gpu/." "$out/generated/"
+  fi
 done
 
 if [[ "$MODE" == "update" ]]; then

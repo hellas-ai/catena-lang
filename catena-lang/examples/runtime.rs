@@ -21,6 +21,7 @@ fn main() -> anyhow::Result<()> {
     let [result] = runtime.exec("not", [false.into()])?;
     println!("not(false): {result:?}");
 
+    // U64 arithmetic
     let [two_times_two] = runtime.exec("two-times-two", [])?;
     let Value::U64(two_times_two) = two_times_two else {
         anyhow::bail!("two-times-two returned non-u64 value: {two_times_two:?}");
@@ -29,6 +30,17 @@ fn main() -> anyhow::Result<()> {
     anyhow::ensure!(
         two_times_two == 4,
         "two-times-two mismatch: got {two_times_two}, expected 4"
+    );
+
+    // F32 arithmetic
+    let [arith_f32] = runtime.exec("arith-f32", [])?;
+    let Value::F32(arith_f32) = arith_f32 else {
+        anyhow::bail!("arith_f32 returned non-f32 value: {arith_f32:?}");
+    };
+    println!("arith_f32: {arith_f32}");
+    anyhow::ensure!(
+        arith_f32 == 4.0,
+        "arith_f32 mismatch: got {arith_f32}, expected 4.0"
     );
 
     let [deadbeef] = runtime.exec("deadbeef", [])?;

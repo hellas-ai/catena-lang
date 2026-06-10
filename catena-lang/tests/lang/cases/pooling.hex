@@ -1,0 +1,226 @@
+# Catena-lang analogue of examples/puzzles/pooling.hex.
+#
+# This file declares the extra arithmetic/index primitives it needs locally,
+# instead of extending catena-lang/stdlib/*.hex.
+#
+# It models the per-index pooling behavior:
+#
+#   output[0] = input[0]
+#   output[1] = input[1] + input[0]
+#   output[i] = input[i] + input[i - 1] + input[i - 2], for i >= 2
+#
+# Unlike the core example, this does not use gpu.global or gpu views. It uses a
+# simple input/output buffers plus an index. The nested branch program computes
+# the pooled value at that index; the store wrapper writes it to the output.
+#
+# NOTE: this is a language-level example. The current catena-lang HIP renderer
+# does not yet lower these locally declared f32/index primitives.
+
+(theory type nat {
+  (arr f32 : 0 -> 1)
+})
+
+(theory program type {
+  # Local arithmetic and index primitives for this example.
+  (arr unit.drop : 1 -> [])
+
+  # These predicates consume a copied index and return only the flag.
+  (arr ix.is-zero : (u64 ix val) -> (bool val))
+  (arr ix.is-one  : (u64 ix val) -> (bool val))
+  (arr ix.copy : (u64 ix val) -> {(u64 ix val) (u64 ix val)})
+  (arr ix.sub : {(u64 ix val) (u64 val)} -> (u64 ix val))
+  (arr u64.one : [] -> (u64 val))
+  (arr u64.two : [] -> (u64 val))
+  (arr f32.add : {(f32 val) (f32 val)} -> (f32 val))
+  (arr f32.pool.payload.intro :
+    {
+      ({cap.own u64 f32} buf val)
+      (u64 ix val)
+    }
+    ->
+    ({
+      ({cap.own u64 f32} buf val)
+      (u64 ix val)
+    } *))
+  (arr f32.pool.payload.elim :
+    ({
+      ({cap.own u64 f32} buf val)
+      (u64 ix val)
+    } *)
+    ->
+    {
+      ({cap.own u64 f32} buf val)
+      (u64 ix val)
+    })
+  (arr f32.buf.load :
+    {
+      ({cap.own u64 f32} buf val)
+      (u64 ix val)
+    }
+    ->
+    {
+      ({cap.own u64 f32} buf val)
+      (f32 val)
+    })
+  (arr f32.buf.drop : ({cap.own u64 f32} buf val) -> [])
+  (arr f32.buf.store :
+    {
+      ({cap.own u64 f32} buf val)
+      (u64 ix val)
+      (f32 val)
+    }
+    ->
+    ({cap.own u64 f32} buf val))
+
+  (def f32.pool-at-zero :
+    {
+      1
+      ({
+        ({cap.own u64 f32} buf val)
+        (u64 ix val)
+      } *)
+    }
+    ->
+    (f32 val)
+    =
+    ([env payload.]
+      [.env] unit.drop [.]
+      [.payload] f32.pool.payload.elim [input index.]
+      [.input index] f32.buf.load [input_after_current current.]
+      [.input_after_current] f32.buf.drop [.]
+      [.current]
+    ))
+
+  (def f32.pool-at-one :
+    {
+      1
+      ({
+        ({cap.own u64 f32} buf val)
+        (u64 ix val)
+      } *)
+    }
+    ->
+    (f32 val)
+    =
+    ([env payload.]
+      [.env] unit.drop [.]
+      [.payload] f32.pool.payload.elim [input index.]
+      [.index] ix.copy [index_current index_prev_base.]
+      ([.] u64.one [one.])
+      [.index_prev_base one] ix.sub [index_prev.]
+      [.input index_current] f32.buf.load [input_after_current current.]
+      [.input_after_current index_prev] f32.buf.load [input_after_previous previous.]
+      [.input_after_previous] f32.buf.drop [.]
+      [.current previous] f32.add [sum.]
+      [.sum]
+    ))
+
+  (def f32.pool-at-many :
+    {
+      1
+      ({
+        ({cap.own u64 f32} buf val)
+        (u64 ix val)
+      } *)
+    }
+    ->
+    (f32 val)
+    =
+    ([env payload.]
+      [.env] unit.drop [.]
+      [.payload] f32.pool.payload.elim [input index.]
+      [.index] ix.copy [index_current index_rest.]
+      [.index_rest] ix.copy [index_prev_base index_prev2_base.]
+      ([.] u64.one [one.])
+      ([.] u64.two [two.])
+      [.index_prev_base one] ix.sub [index_prev.]
+      [.index_prev2_base two] ix.sub [index_prev2.]
+      [.input index_current] f32.buf.load [input_after_current current.]
+      [.input_after_current index_prev] f32.buf.load [input_after_previous previous.]
+      [.input_after_previous index_prev2] f32.buf.load [input_after_previous2 previous2.]
+      [.input_after_previous2] f32.buf.drop [.]
+      [.current previous] f32.add [partial.]
+      [.partial previous2] f32.add [sum.]
+      [.sum]
+    ))
+
+})
+
+(def program f32.pool-nonzero :
+  {
+    (bool val)
+    ({
+      ({cap.own u64 f32} buf val)
+      (u64 ix val)
+    } *)
+  }
+  ->
+  (f32 val)
+  =
+  ([is_one payload.]
+    {
+      unit.intro
+      name.f32.pool-at-one
+      unit.intro
+      name.f32.pool-at-many
+      [. is_one payload]
+    }
+    bool.ifc
+  )
+)
+
+(def program f32.pooling-last-three-at :
+  {
+    (bool val)
+    (bool val)
+    ({
+      ({cap.own u64 f32} buf val)
+      (u64 ix val)
+    } *)
+  }
+  ->
+  (f32 val)
+  =
+  ([is_zero is_one payload.]
+    # Outer if:
+    #   if index == 0:
+    #     input[index]
+    #   else:
+    #     run the nested non-zero decision above
+    {
+      unit.intro
+      name.f32.pool-at-zero
+      [.is_one]
+      name.f32.pool-nonzero
+      [. is_zero payload]
+    }
+    bool.ifc
+  )
+)
+
+(def program f32.pooling-last-three-store :
+  {
+    ({cap.own u64 f32} buf val)
+    ({cap.own u64 f32} buf val)
+    (u64 ix val)
+  }
+  ->
+  ({cap.own u64 f32} buf val)
+  =
+  ([input output index.]
+    [.index] ix.copy [index_payload_source index_store.]
+    [.index_payload_source] ix.copy [index_payload index_pred.]
+    [.index_pred] ix.copy [index_zero index_one.]
+
+    [.index_zero] ix.is-zero [is_zero.]
+    [.index_one] ix.is-one [is_one.]
+
+    [.input index_payload] f32.pool.payload.intro [payload.]
+
+    [.is_zero is_one payload] f32.pooling-last-three-at [pooled.]
+
+    [.output index_store pooled] f32.buf.store [output_pooled.]
+
+    [.output_pooled]
+  )
+)

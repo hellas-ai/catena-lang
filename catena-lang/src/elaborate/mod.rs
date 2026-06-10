@@ -1,4 +1,8 @@
+/// Add name.{f} for each arrow f
 mod name_symbols;
+
+/// Add a const.u64.{c} for each constant c required
+mod u64_constants;
 
 use hexpr::{Hexpr, interpret::Error as HexprInterpretError};
 use metacat::theory::model::SignatureError;
@@ -6,6 +10,7 @@ use metacat::theory::{GraphError, RawTheorySet, ast::ExtensionsError};
 use thiserror::Error;
 
 const NAT_THEORY: &str = "nat";
+const RESERVED_OPERATION_PREFIXES: &[&str] = &["name.", "const."];
 
 #[derive(Debug, Error)]
 pub enum ElaborateError {
@@ -23,6 +28,12 @@ pub enum ElaborateError {
     InvalidGeneratedOperation(String),
     #[error("generated variable name `{0}` is invalid")]
     InvalidGeneratedVariable(String),
+    #[error("operation `{theory}.{arrow}` uses reserved prefix `{prefix}`")]
+    ReservedOperationPrefix {
+        theory: String,
+        arrow: String,
+        prefix: &'static str,
+    },
     #[error(
         "failed to interpret source type map for `name.{theory}.{arrow}` from `{map}`: {error}"
     )]
@@ -45,6 +56,8 @@ pub enum ElaborateError {
 
 pub fn elaborate(mut raw: RawTheorySet) -> Result<RawTheorySet, ElaborateError> {
     raw = raw.with_extensions()?;
+    check_reserved_operation_prefixes(&raw)?;
+    u64_constants::elaborate(&mut raw)?;
 
     let theory_names: Vec<_> = raw
         .theories
@@ -58,4 +71,23 @@ pub fn elaborate(mut raw: RawTheorySet) -> Result<RawTheorySet, ElaborateError> 
     }
 
     Ok(raw)
+}
+
+fn check_reserved_operation_prefixes(raw: &RawTheorySet) -> Result<(), ElaborateError> {
+    for (theory_name, theory) in &raw.theories {
+        for arrow_name in theory.arrows.keys() {
+            if let Some(prefix) = RESERVED_OPERATION_PREFIXES
+                .iter()
+                .copied()
+                .find(|prefix| arrow_name.as_str().starts_with(prefix))
+            {
+                return Err(ElaborateError::ReservedOperationPrefix {
+                    theory: theory_name.to_string(),
+                    arrow: arrow_name.to_string(),
+                    prefix,
+                });
+            }
+        }
+    }
+    Ok(())
 }

@@ -48,6 +48,9 @@
   u64.mul
 ))
 
+# generate the constant 0xDEADBEEFDEADBEEF
+(def program deadbeef : [] -> (u64 val) = const.u64.0xDEADBEEFDEADBEEF)
+
 # Cast owned memory to a u64 buffer, assert it is non-empty, then read element 0.
 (def program array-head-u64 : ([n.] (cap.own mem)) -> ([n.] (u64 val)) = (
   mem.cast.u64

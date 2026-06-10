@@ -32,6 +32,8 @@ pub enum GpuRenderError {
     MissingMaterializeLaunchParams,
     #[error("gpu.materialize is missing function input")]
     MissingMaterializeFunction,
+    #[error("invalid u64 constant operation `{op}`")]
+    InvalidU64Constant { op: Operation },
 }
 
 /// Render a single GPU dataflow module as standalone HIP/C++ source.
@@ -198,6 +200,7 @@ fn render_assignment(
         "ix" => render_ix(out, assignment)?,
         "eval" => render_eval(out, assignment)?,
         "gpu.materialize" => render_materialize_call(out, function, assignment)?,
+        op if op.starts_with("const.u64.") => render_u64_const(out, assignment)?,
         op => {
             return Err(GpuRenderError::UnsupportedOp(
                 op.parse().unwrap_or_else(|_| assignment.op.clone()),
@@ -238,6 +241,34 @@ fn render_u64_one(out: &mut String, assignment: &GpuAssign) -> Result<(), GpuRen
     };
     out.push_str(&format!("    {} = 1;\n", output.name));
     Ok(())
+}
+
+fn render_u64_const(out: &mut String, assignment: &GpuAssign) -> Result<(), GpuRenderError> {
+    let [] = assignment.inputs.as_slice() else {
+        return Err(invalid_inputs(assignment, 0));
+    };
+    let [output] = assignment.outputs.as_slice() else {
+        return Err(invalid_outputs(assignment, 1));
+    };
+    let value =
+        parse_u64_const(&assignment.op).ok_or_else(|| GpuRenderError::InvalidU64Constant {
+            op: assignment.op.clone(),
+        })?;
+    out.push_str(&format!("    {} = {value}ULL;\n", output.name));
+    Ok(())
+}
+
+fn parse_u64_const(op: &Operation) -> Option<u64> {
+    let literal = op.as_str().strip_prefix("const.u64.")?;
+    let literal = literal.replace('_', "");
+    if let Some(hex) = literal
+        .strip_prefix("0x")
+        .or_else(|| literal.strip_prefix("0X"))
+    {
+        u64::from_str_radix(hex, 16).ok()
+    } else {
+        literal.parse().ok()
+    }
 }
 
 fn render_binary_u64(

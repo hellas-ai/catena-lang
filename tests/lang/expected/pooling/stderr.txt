@@ -1,1 +1,1 @@
-Error: failed to render GPU code: unsupported GPU operation `unit.drop`
+Error: failed to render GPU code: unsupported GPU operation `pool.payload.elim`

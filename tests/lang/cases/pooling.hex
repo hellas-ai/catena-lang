@@ -22,8 +22,6 @@
 
 (theory program type {
   # Local arithmetic and index primitives for this example.
-  (arr unit.drop : 1 -> [])
-
   # Compare an index with a u64 value.
   (arr ix.eq : {(u64 ix val) (u64 val)} -> (bool val))
   (arr ix.copy : (u64 ix val) -> {(u64 ix val) (u64 ix val)})
@@ -62,7 +60,6 @@
       ({cap.own u64 f32} buf val)
       (f32 val)
     })
-  (arr f32.buf.drop : ({cap.own u64 f32} buf val) -> [])
   (arr f32.buf.store :
     {
       ({cap.own u64 f32} buf val)
@@ -94,10 +91,8 @@
     (f32 val)
     =
     ([env payload.]
-      [.env] unit.drop [.]
       [.payload] pool.payload.elim [input index.]
       [.input index] f32.buf.load [input_after_current current.]
-      [.input_after_current] f32.buf.drop [.]
       [.current]
     ))
 
@@ -113,14 +108,12 @@
     (f32 val)
     =
     ([env payload.]
-      [.env] unit.drop [.]
       [.payload] pool.payload.elim [input index.]
       [.index] ix.copy [index_current index_prev_base.]
       ([.] u64.one [one.])
       [.index_prev_base one] ix.sub [index_prev.]
       [.input index_current] f32.buf.load [input_after_current current.]
       [.input_after_current index_prev] f32.buf.load [input_after_previous previous.]
-      [.input_after_previous] f32.buf.drop [.]
       [.current previous] f32.add [sum.]
       [.sum]
     ))
@@ -137,7 +130,6 @@
     (f32 val)
     =
     ([env payload.]
-      [.env] unit.drop [.]
       [.payload] pool.payload.elim [input index.]
       [.index] ix.copy [index_current index_rest.]
       [.index_rest] ix.copy [index_prev_base index_prev2_base.]
@@ -148,7 +140,6 @@
       [.input index_current] f32.buf.load [input_after_current current.]
       [.input_after_current index_prev] f32.buf.load [input_after_previous previous.]
       [.input_after_previous index_prev2] f32.buf.load [input_after_previous2 previous2.]
-      [.input_after_previous2] f32.buf.drop [.]
       [.current previous] f32.add [partial.]
       [.partial previous2] f32.add [sum.]
       [.sum]

@@ -1,8 +1,12 @@
 use thiserror::Error;
 
-use std::{path::PathBuf, sync::Arc};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use libloading::Library;
+use libloading::os::unix::{Library as UnixLibrary, RTLD_LAZY, RTLD_LOCAL};
 
 use super::artifact::{Artifact, ArtifactError};
 use super::executor::{CallFrame, ExecutorError};
@@ -12,6 +16,7 @@ use super::{
     value::{Value, ValueKind},
 };
 use crate::compile::CompileFailure;
+use metacat::theory::RawTheorySet;
 
 /// Run catena programs with the C backend
 #[derive(Debug)]
@@ -79,6 +84,19 @@ impl Runtime {
         I: IntoIterator<Item = PathBuf>,
     {
         let raw_theories = metacat::theory::RawTheorySet::from_files(paths)?;
+        Self::from_raw_theories(raw_theories)
+    }
+
+    /// Construct a new runtime from in-memory Catena source strings.
+    pub fn from_sources<'a, I>(sources: I) -> Result<Runtime, InitError>
+    where
+        I: IntoIterator<Item = &'a str>,
+    {
+        let raw_theories = RawTheorySet::from_texts(sources)?;
+        Self::from_raw_theories(raw_theories)
+    }
+
+    fn from_raw_theories(raw_theories: RawTheorySet) -> Result<Runtime, InitError> {
         let report = crate::compile::compile(raw_theories)?;
         let modules = report
             .gpu_modules
@@ -92,7 +110,8 @@ impl Runtime {
         report.dump_to_dir(report_dir.path())?;
         let cpp_path = report_dir.path().join("gpu/program.cpp");
         let artifact = super::artifact::compile(&cpp_path)?;
-        let library = unsafe { Library::new(artifact.path()) }.map_err(InitError::LoadLibrary)?;
+
+        let library = load_generated_library(artifact.path()).map_err(InitError::LoadLibrary)?;
         let hip = Arc::new(Hip::load()?);
 
         Ok(Self {
@@ -195,8 +214,21 @@ impl Runtime {
     fn zeroed_value(&self, kind: ValueKind) -> Value {
         match kind {
             ValueKind::Bool => Value::Bool(0),
+            ValueKind::U32 => Value::U32(0),
             ValueKind::U64 => Value::U64(0),
+            ValueKind::F32 => Value::F32(0.0),
             ValueKind::Mem => Value::Mem(Mem::null(self.hip.clone())),
         }
     }
+}
+
+fn load_generated_library(path: &Path) -> Result<Library, libloading::Error> {
+    // Generated HIP shared objects must remain resident for the process lifetime.
+    // If one is unloaded and a generated HIP object is loaded again later, ROCm/LLVM
+    // initialization can re-register process-global LLVM command-line options and
+    // abort with "Option 'ubsan-guard-checks' registered more than once".
+    // RTLD_NODELETE lets the Rust handle be dropped while preventing that unload.
+    let flags = RTLD_LAZY | RTLD_LOCAL | libc::RTLD_NODELETE;
+    let library = unsafe { UnixLibrary::open(Some(path), flags) }?;
+    Ok(library.into())
 }

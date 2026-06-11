@@ -112,6 +112,7 @@ dependencies = [
  "anyhow",
  "clap",
  "hexpr",
+ "libc",
  "libffi",
  "libloading",
  "metacat",

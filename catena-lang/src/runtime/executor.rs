@@ -17,7 +17,9 @@ pub(crate) struct CatenaMem {
 #[derive(Debug)]
 pub enum AbiValue<'a> {
     U8(&'a u8),
+    U32(&'a u32),
     U64(&'a u64),
+    F32(&'a f32),
     Mem(&'a CatenaMem),
 }
 
@@ -110,7 +112,9 @@ impl AbiValue<'_> {
     fn ffi_type(&self) -> Type {
         match self {
             AbiValue::U8(_) => Type::u8(),
+            AbiValue::U32(_) => Type::u32(),
             AbiValue::U64(_) => Type::u64(),
+            AbiValue::F32(_) => Type::f32(),
             AbiValue::Mem(_) => Type::structure([Type::pointer(), Type::u64()]),
         }
     }
@@ -118,7 +122,9 @@ impl AbiValue<'_> {
     fn as_arg(&self) -> Arg<'_> {
         match self {
             AbiValue::U8(value) => Arg::new(*value),
+            AbiValue::U32(value) => Arg::new(*value),
             AbiValue::U64(value) => Arg::new(*value),
+            AbiValue::F32(value) => Arg::new(*value),
             AbiValue::Mem(value) => Arg::new(*value),
         }
     }
@@ -126,7 +132,9 @@ impl AbiValue<'_> {
     fn as_pointer_arg(&self) -> *const c_void {
         match self {
             AbiValue::U8(slot) => (*slot as *const u8).cast::<c_void>(),
+            AbiValue::U32(slot) => (*slot as *const u32).cast::<c_void>(),
             AbiValue::U64(slot) => (*slot as *const u64).cast::<c_void>(),
+            AbiValue::F32(slot) => (*slot as *const f32).cast::<c_void>(),
             AbiValue::Mem(slot) => (*slot as *const CatenaMem).cast::<c_void>(),
         }
     }

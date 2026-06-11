@@ -3,23 +3,18 @@ use std::path::PathBuf;
 use catena_lang::runtime::{Runtime, Value};
 
 fn main() -> anyhow::Result<()> {
-    // Load standard library
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let runtime = Runtime::new([
         root.join("stdlib/cmc.hex"),
         root.join("stdlib/value.hex"),
         root.join("stdlib/buf.hex"),
         root.join("stdlib/index.hex"),
-        root.join("stdlib/base/data.hex"),
-        root.join("stdlib/base/fn.hex"),
-        root.join("stdlib/base/product.hex"),
+        root.join("stdlib/data.hex"),
+        root.join("stdlib/fn.hex"),
+        root.join("stdlib/product.hex"),
         root.join("stdlib/gpu.hex"),
         root.join("example.hex"),
     ])?;
-
-    // Execute `not` from the source program with input value `false`
-    let [result] = runtime.exec("not", [false.into()])?;
-    println!("not(false): {result:?}");
 
     // Input values for `array-head-u64`
     let values = [0x123456789abcdef0_u64, 7, 11];

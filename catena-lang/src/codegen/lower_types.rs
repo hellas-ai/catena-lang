@@ -14,6 +14,7 @@ pub enum LoweredType {
 pub enum CType {
     Unit,
     Bool,
+    U32,
     U64,
     F32,
     Pointer(Box<CType>),
@@ -100,6 +101,9 @@ pub fn lower_runtime_type(ty: &Tree<(), Operation>) -> Result<CType, LowerTypeEr
         }
         Tree::Node(op, 0, children) if op.as_str() == "u64" && children.is_empty() => {
             Ok(CType::U64)
+        }
+        Tree::Node(op, 0, children) if op.as_str() == "u32" && children.is_empty() => {
+            Ok(CType::U32)
         }
         Tree::Node(op, 0, children) if op.as_str() == "f32" && children.is_empty() => {
             Ok(CType::F32)

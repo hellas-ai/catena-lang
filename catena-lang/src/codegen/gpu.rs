@@ -32,6 +32,8 @@ pub enum GpuRenderError {
     MissingMaterializeLaunchParams,
     #[error("gpu.materialize is missing function input")]
     MissingMaterializeFunction,
+    #[error("invalid integer constant operation `{op}`")]
+    InvalidIntegerConstant { op: Operation },
 }
 
 /// Render a single GPU dataflow module as standalone HIP/C++ source.
@@ -189,12 +191,25 @@ fn render_assignment(
         "ax-mp" | "assert-then" | ":.forget" => {}
         "assert" => render_assert(out, assignment)?,
         "u64.zero" => render_u64_zero(out, assignment)?,
+        "u64.one" => render_u64_one(out, assignment)?,
+        "u64.add" => render_binary(out, assignment, "+")?,
+        "u64.mul" => render_binary(out, assignment, "*")?,
+        "u32.one" => render_u64_one(out, assignment)?,
+        "u32.add" => render_binary(out, assignment, "+")?,
+        "u32.mul" => render_binary(out, assignment, "*")?,
         "u64.gt" => render_u64_gt(out, assignment)?,
         "mem.cast.u64" => render_mem_cast_u64(out, assignment)?,
+        "f32.one" => render_f32_one(out, assignment)?,
+        "f32.add" => render_binary(out, assignment, "+")?,
+        "f32.mul" => render_binary(out, assignment, "*")?,
         "ix.zero" => render_ix_zero(out, assignment)?,
         "ix" => render_ix(out, assignment)?,
         "eval" => render_eval(out, assignment)?,
         "gpu.materialize" => render_materialize_call(out, function, assignment)?,
+        op if op.starts_with("const.u64.") => {
+            render_int_const(out, assignment, "const.u64.", "ULL")?
+        }
+        op if op.starts_with("const.u32.") => render_int_const(out, assignment, "const.u32.", "U")?,
         op => {
             return Err(GpuRenderError::UnsupportedOp(
                 op.parse().unwrap_or_else(|_| assignment.op.clone()),
@@ -223,6 +238,76 @@ fn render_u64_zero(out: &mut String, assignment: &GpuAssign) -> Result<(), GpuRe
         return Err(invalid_outputs(assignment, 1));
     };
     out.push_str(&format!("    {} = 0;\n", output.name));
+    Ok(())
+}
+
+fn render_u64_one(out: &mut String, assignment: &GpuAssign) -> Result<(), GpuRenderError> {
+    let [] = assignment.inputs.as_slice() else {
+        return Err(invalid_inputs(assignment, 0));
+    };
+    let [output] = assignment.outputs.as_slice() else {
+        return Err(invalid_outputs(assignment, 1));
+    };
+    out.push_str(&format!("    {} = 1;\n", output.name));
+    Ok(())
+}
+
+fn render_f32_one(out: &mut String, assignment: &GpuAssign) -> Result<(), GpuRenderError> {
+    let [] = assignment.inputs.as_slice() else {
+        return Err(invalid_inputs(assignment, 0));
+    };
+    let [output] = assignment.outputs.as_slice() else {
+        return Err(invalid_outputs(assignment, 1));
+    };
+    out.push_str(&format!("    {} = 1.0;\n", output.name));
+    Ok(())
+}
+
+fn render_int_const(
+    out: &mut String,
+    assignment: &GpuAssign,
+    prefix: &str,
+    suffix: &str,
+) -> Result<(), GpuRenderError> {
+    let [] = assignment.inputs.as_slice() else {
+        return Err(invalid_inputs(assignment, 0));
+    };
+    let [output] = assignment.outputs.as_slice() else {
+        return Err(invalid_outputs(assignment, 1));
+    };
+    let value = parse_int_const(&assignment.op, prefix).ok_or_else(|| {
+        GpuRenderError::InvalidIntegerConstant {
+            op: assignment.op.clone(),
+        }
+    })?;
+    out.push_str(&format!("    {} = {value}{suffix};\n", output.name));
+    Ok(())
+}
+
+fn parse_int_const(op: &Operation, prefix: &str) -> Option<u64> {
+    let literal = op.as_str().strip_prefix(prefix)?;
+    let literal = literal.replace('_', "");
+    let hex = literal.strip_prefix("0x")?;
+    u64::from_str_radix(hex, 16).ok()
+}
+
+fn render_binary(
+    out: &mut String,
+    assignment: &GpuAssign,
+    operator: &str,
+) -> Result<(), GpuRenderError> {
+    let [lhs, rhs] = assignment.inputs.as_slice() else {
+        return Err(invalid_inputs(assignment, 2));
+    };
+    let [output] = assignment.outputs.as_slice() else {
+        return Err(invalid_outputs(assignment, 1));
+    };
+    out.push_str(&format!(
+        "    {} = {} {operator} {};\n",
+        output.name,
+        value_expr(lhs),
+        value_expr(rhs)
+    ));
     Ok(())
 }
 
@@ -530,6 +615,7 @@ fn c_type(ty: &CType) -> String {
     match ty {
         CType::Unit => "catena_unit_t".to_string(),
         CType::Bool => "uint8_t".to_string(),
+        CType::U32 => "uint32_t".to_string(),
         CType::U64 => "uint64_t".to_string(),
         CType::F32 => "float".to_string(),
         CType::Pointer(inner) => format!("{} *", c_type(inner)),

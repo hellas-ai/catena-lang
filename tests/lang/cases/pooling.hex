@@ -23,10 +23,9 @@
 (theory program type {
   # Local arithmetic and index primitives for this example.
   # Compare an index with a u64 value.
-  (arr ix.eq : {(u64 ix val) (u64 val)} -> (bool val))
+  (arr ix.eq : {[rhs.] (u64 ix val) ([.rhs])} -> {[rhs.] (bool val)})
   (arr ix.sub : {(u64 ix val) (u64 val)} -> (u64 ix val))
   (arr u64.one : [] -> (u64 val))
-  (arr zero : [] -> (u64 val))
   (arr u64.add : {(u64 val) (u64 val)} -> (u64 val))
   (arr f32.add : {(f32 val) (f32 val)} -> (f32 val))
   (arr product.intro :
@@ -225,7 +224,7 @@
   ({cap.own u64 f32} buf val)
   =
   ([input output index.]
-    ([.] zero [zero.])
+    ([.] u64.zero [zero.])
     ([.] u64.one [one.])
     [.index zero] ix.eq [is_zero.]
     [.index one] ix.eq [is_one.]

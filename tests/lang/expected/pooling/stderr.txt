@@ -1,1 +1,5 @@
-Error: failed to render GPU code: unsupported GPU operation `ix.pred`
+Error: Failed to interpret definition for theory program, arrow f32.pool-nonzero: Failed to compose [payload_checked . ] ; {unit.intro name.f32.pool-at-one unit.intro name.f32.pool-at-many [ . is_one payload_checked]}
+
+Caused by:
+    0: Failed to interpret definition for theory program, arrow f32.pool-nonzero: Failed to compose [payload_checked . ] ; {unit.intro name.f32.pool-at-one unit.intro name.f32.pool-at-many [ . is_one payload_checked]}
+    1: Failed to compose [payload_checked . ] ; {unit.intro name.f32.pool-at-one unit.intro name.f32.pool-at-many [ . is_one payload_checked]}

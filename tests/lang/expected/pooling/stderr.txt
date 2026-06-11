@@ -1,1 +1,1 @@
-Error: failed to render GPU code: unsupported GPU operation `u64.one.gt-zero`
+Error: failed to render GPU code: unsupported GPU operation `u64.gt-one.gt-zero`

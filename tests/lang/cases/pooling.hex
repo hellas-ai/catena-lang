@@ -77,6 +77,11 @@
   } -> {[x.]
     ({[.x] 1} > |-)
   })
+  (arr u64.gt-one.gt-zero : {[x.]
+    ({[.x] 1} > |-)
+  } -> {[x.]
+    ({[.x] 0} > |-)
+  })
   (arr u64.eq-one.lt-n.n-gt-zero : {[n position.]
     ({[.position] 1} = |-)
     ([.n position] > |-)
@@ -94,6 +99,12 @@
     ({[.pred] u64} :)
   } -> {[x pred.]
     ([.pred 0] > |-)
+  })
+  (arr u64.pred.gt-zero2 : {[x pred.]
+    ({[.x] 1} > |-)
+    ({[.pred] u64} :)
+  } -> {[x pred.]
+    ({[.pred] 0} > |-)
   })
   (arr u64.pred2 : {[x pred2.]
     ({[.x] u64} :)
@@ -156,6 +167,12 @@
   (arr ix.zero-index : {[n.]
     ({[.n] 0} > |-) 
   } -> {[n.]
+    ([.n] ix val)
+  })
+  (arr ix.from-u64-lt-n : {[n position.]
+    ({[.position] u64} :)
+    ([.n position] > |-) 
+  } -> {[n position.]
     ([.n] ix val)
   })
   (arr product.intro : {[a b.]
@@ -319,7 +336,7 @@
       [.pooled]
     })
 
-  (arr f32.pool-at-many :
+  (def f32.pool-at-many :
     {[n position.]
       ({[.position] 1} > |-)
       ({
@@ -334,7 +351,22 @@
       } *)
     }
     -> {[n position.] (f32 val)}
-  )
+    =
+    {[position_gt_one payload.]
+      ([.payload] pool.payload.elim [input index u64_position position_lt_n.])
+      ([.position_gt_one] u64.gt-one.gt-zero [position_gt_zero.])
+      ([.u64_position position_gt_zero position_lt_n] ix.from-u64 [current_index.])
+      ([.u64_position position_lt_n position_gt_one] u64.pred2.in-range [minus_one minus_one_lt_n minus_two minus_two_lt_n.])
+      ([.position_gt_one minus_one] u64.pred.gt-zero2 [minus_one_gt_zero.])
+      ([.minus_one minus_one_gt_zero minus_one_lt_n] ix.from-u64 [minus_one_index.])
+      ([.minus_two minus_two_lt_n] ix.from-u64-lt-n [minus_two_index.])
+      ([.current_index input] ix [current.])
+      ([.minus_one_index input] ix [previous.])
+      ([.minus_two_index input] ix [previous2.])
+      ([.current previous] f32.add [partial.])
+      ([.partial previous2] f32.add [pooled.])
+      [.pooled]
+    })
 
 })
 

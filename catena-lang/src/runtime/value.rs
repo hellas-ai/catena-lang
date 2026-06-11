@@ -9,6 +9,7 @@ pub enum Value {
     Bool(u8),
     U32(u32),
     U64(u64),
+    F32(f32),
     Mem(Mem),
 }
 
@@ -18,6 +19,7 @@ pub enum ValueKind {
     Bool,
     U32,
     U64,
+    F32,
     Mem,
 }
 
@@ -34,11 +36,16 @@ impl Value {
         Value::U32(value)
     }
 
+    pub fn f32(value: f32) -> Self {
+        Value::F32(value)
+    }
+
     pub(crate) fn kind(&self) -> ValueKind {
         match self {
             Value::Bool(_) => ValueKind::Bool,
             Value::U32(_) => ValueKind::U32,
             Value::U64(_) => ValueKind::U64,
+            Value::F32(_) => ValueKind::F32,
             Value::Mem(_) => ValueKind::Mem,
         }
     }
@@ -50,6 +57,7 @@ impl Value {
             Value::Bool(value) => ArgValue::Val(AbiValue::U8(value)),
             Value::U32(value) => ArgValue::Val(AbiValue::U32(value)),
             Value::U64(value) => ArgValue::Val(AbiValue::U64(value)),
+            Value::F32(value) => ArgValue::Val(AbiValue::F32(value)),
             Value::Mem(value) => ArgValue::Val(AbiValue::Mem(&value.abi)),
         }
     }
@@ -59,6 +67,7 @@ impl Value {
             Value::Bool(value) => ArgValue::Out(AbiValue::U8(value)),
             Value::U32(value) => ArgValue::Out(AbiValue::U32(value)),
             Value::U64(value) => ArgValue::Out(AbiValue::U64(value)),
+            Value::F32(value) => ArgValue::Out(AbiValue::F32(value)),
             Value::Mem(value) => ArgValue::Out(AbiValue::Mem(&mut value.abi)),
         }
     }
@@ -79,5 +88,11 @@ impl From<u64> for Value {
 impl From<u32> for Value {
     fn from(value: u32) -> Self {
         Value::u32(value)
+    }
+}
+
+impl From<f32> for Value {
+    fn from(value: f32) -> Self {
+        Value::f32(value)
     }
 }

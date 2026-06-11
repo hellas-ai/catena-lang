@@ -10,6 +10,7 @@
 
   (arr u64 : 0 -> 1)
   (arr u32 : 0 -> 1)
+  (arr f32 : 0 -> 1)
 })
 
 (theory program type {
@@ -62,6 +63,13 @@
   (def bool.li : (bool val) -> {1 (bool val)} = {unit.intro [a]})
 
   ##############################################################################
+  # f32 methods
+  #
+  (arr f32.zero : [] -> ({0 f32} :))
+  (arr f32.one  : [] -> (f32 val))
+  (arr f32.add  : {(f32 val) (f32 val)} -> (f32 val))
+  (arr f32.mul  : {(f32 val) (f32 val)} -> (f32 val))
+  ##############################################################################
   # u64 methods
   #
   # TODO: built in size of u64 bool, etc.
@@ -70,6 +78,11 @@
   (arr u64.one  : [] -> (u64 val))
   (arr u64.add  : {(u64 val) (u64 val)} -> (u64 val))
   (arr u64.mul  : {(u64 val) (u64 val)} -> (u64 val))
+
+  (arr u32.zero : [] -> ({0 u32} :))
+  (arr u32.one  : [] ->  (u32 val))
+  (arr u32.add  : {(u32 val) (u32 val)} ->  (u32 val))
+  (arr u32.mul  : {(u32 val) (u32 val)} ->  (u32 val))
 
   # Indices & dependent types
   # assert-nz : (n : u64) -> |- (n > 0)

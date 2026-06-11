@@ -192,10 +192,16 @@ fn render_assignment(
         "assert" => render_assert(out, assignment)?,
         "u64.zero" => render_u64_zero(out, assignment)?,
         "u64.one" => render_u64_one(out, assignment)?,
-        "u64.add" => render_binary_u64(out, assignment, "+")?,
-        "u64.mul" => render_binary_u64(out, assignment, "*")?,
+        "u64.add" => render_binary(out, assignment, "+")?,
+        "u64.mul" => render_binary(out, assignment, "*")?,
+        "u32.one" => render_u64_one(out, assignment)?,
+        "u32.add" => render_binary(out, assignment, "+")?,
+        "u32.mul" => render_binary(out, assignment, "*")?,
         "u64.gt" => render_u64_gt(out, assignment)?,
         "mem.cast.u64" => render_mem_cast_u64(out, assignment)?,
+        "f32.one" => render_f32_one(out, assignment)?,
+        "f32.add" => render_binary(out, assignment, "+")?,
+        "f32.mul" => render_binary(out, assignment, "*")?,
         "ix.zero" => render_ix_zero(out, assignment)?,
         "ix" => render_ix(out, assignment)?,
         "eval" => render_eval(out, assignment)?,
@@ -246,6 +252,17 @@ fn render_u64_one(out: &mut String, assignment: &GpuAssign) -> Result<(), GpuRen
     Ok(())
 }
 
+fn render_f32_one(out: &mut String, assignment: &GpuAssign) -> Result<(), GpuRenderError> {
+    let [] = assignment.inputs.as_slice() else {
+        return Err(invalid_inputs(assignment, 0));
+    };
+    let [output] = assignment.outputs.as_slice() else {
+        return Err(invalid_outputs(assignment, 1));
+    };
+    out.push_str(&format!("    {} = 1.0;\n", output.name));
+    Ok(())
+}
+
 fn render_int_const(
     out: &mut String,
     assignment: &GpuAssign,
@@ -274,7 +291,7 @@ fn parse_int_const(op: &Operation, prefix: &str) -> Option<u64> {
     u64::from_str_radix(hex, 16).ok()
 }
 
-fn render_binary_u64(
+fn render_binary(
     out: &mut String,
     assignment: &GpuAssign,
     operator: &str,

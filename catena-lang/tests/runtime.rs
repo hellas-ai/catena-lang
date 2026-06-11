@@ -55,6 +55,48 @@ fn two_times_two() -> anyhow::Result<()> {
 }
 
 #[test]
+fn two_times_two_u32() -> anyhow::Result<()> {
+    let runtime = runtime_with(
+        r#"
+        (def program two-times-two : [] -> (u32 val) = (
+          ({u32.one u32.one} u32.add)
+          {[x . x x]}
+          u32.mul
+        ))
+        "#,
+    )?;
+
+    let [result] = runtime.exec("two-times-two", [])?;
+    let Value::U32(result) = result else {
+        anyhow::bail!("two-times-two returned non-u32 value: {result:?}");
+    };
+
+    assert_eq!(result, 4);
+    Ok(())
+}
+
+#[test]
+fn two_times_two_float() -> anyhow::Result<()> {
+    let runtime = runtime_with(
+        r#"
+        (def program two-times-two : [] -> (f32 val) = (
+          ({f32.one f32.one} f32.add)
+          {[x . x x]}
+          f32.mul
+        ))
+        "#,
+    )?;
+
+    let [result] = runtime.exec("two-times-two", [])?;
+    let Value::F32(result) = result else {
+        anyhow::bail!("two-times-two returned non-f32 value: {result:?}");
+    };
+
+    assert_eq!(result, 4.0);
+    Ok(())
+}
+
+#[test]
 fn deadbeef_u64() -> anyhow::Result<()> {
     let runtime = runtime_with(
         r#"

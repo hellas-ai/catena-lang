@@ -21,24 +21,6 @@
   # Compare an index with a u64 value.
   (arr ix.eq : {[n rhs.] ([.n] ix val) ([.rhs])} -> {[n rhs.] (bool val)})
   (arr ix.pred : {[n.] ([.n] ix val)} -> {[n.] ([.n] ix val)})
-  (arr product.intro : {[n.]
-    ({cap.ref [.n] f32} buf val)
-    ([.n] ix val)
-  } -> {[n.]
-    ({
-      ({cap.ref [.n] f32} buf val)
-      ([.n] ix val)
-    } *)
-  })
-  (arr product.elim : {[n.]
-    ({
-      ({cap.ref [.n] f32} buf val)
-      ([.n] ix val)
-    } *)
-  } -> {[n.]
-    ({cap.ref [.n] f32} buf val)
-    ([.n] ix val)
-  })
   (def pool.payload.intro :
     {[n.]
       ({cap.ref [.n] f32} buf val)
@@ -53,7 +35,7 @@
     }
     =
     ([input index.]
-      [.input index] product.intro [payload.]
+      [.input index] * [payload.]
       [.payload]
     ))
   (def pool.payload.elim :
@@ -70,7 +52,7 @@
     }
     =
     ([payload.]
-      [.payload] product.elim [input index.]
+      [.payload] * [input index.]
       [.input index]
     ))
   (arr f32.buf.store :

@@ -251,41 +251,7 @@
     {[n.]
       ({cap.own [.n] f32} buf val)
     })
-  (arr f32.buf.load-zero :
-    {[n position.]
-      ({cap.ref [.n] f32} buf val)
-      ([.n] ix val)
-      ({[.position] 0} = |-)
-    }
-    ->
-    {[n position.]
-      (f32 val)
-    })
-  (arr f32.buf.load3 :
-    {[n.]
-      ({cap.ref [.n] f32} buf val)
-      ([.n] ix val)
-      ([.n] ix val)
-      ([.n] ix val)
-    }
-    ->
-    {[n.]
-      (f32 val)
-      (f32 val)
-      (f32 val)
-    })
-  (arr f32.buf.pool-many :
-    {[n position.]
-      ({cap.ref [.n] f32} buf val)
-      ([.n] ix val)
-      ({[.position] u64} :)
-      ([.n position] > |-) 
-      ([.position 1] > |-)
-    }
-    ->
-    {[n position.]
-      (f32 val)
-    })
+
   (def f32.pool-at-zero :
     {[n position.]
       ({[.position] 0} = |-)

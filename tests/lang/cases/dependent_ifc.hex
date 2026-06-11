@@ -1,0 +1,52 @@
+# Minimal reproducer for dependent branch functions passed to bool.ifc.
+#
+# The non-dependent version works in catena-lang/example.hex as test-ifc.
+# Here the branch functions are indexed by n through the argument type Ix n.
+# Passing their names through bool.ifc currently fails during elaboration/type
+# checking, which is the limitation this case is meant to surface.
+
+(theory program type {
+  (arr dep.then :
+    {[n.]
+      1
+      ([.n] ix val)
+    }
+    ->
+    {[n.]
+      (bool val)
+    })
+
+  (arr dep.else :
+    {[n.]
+      1
+      ([.n] ix val)
+    }
+    ->
+    {[n.]
+      (bool val)
+    })
+})
+
+(def program dep.ifc :
+  {[n.]
+    (bool val)
+    ([.n] ix val)
+  }
+  ->
+  {[n.]
+    (bool val)
+  }
+  =
+  {[flag index.]
+    ([] unit.intro [then_env.])
+    ([] unit.intro [else_env.])
+    ({
+      ([.then_env])
+      name.dep.then
+      ([.else_env])
+      name.dep.else
+      ([.flag])
+      ([.index])
+    } bool.ifc [out.])
+    [.out]
+  })

@@ -1,0 +1,51 @@
+# Minimal bool.ifc case where only the payload is dependent.
+#
+# The branch environments are ordinary booleans, like plain_ifc.hex. The branch
+# payload is Ix n, so the branch function names still have to carry the
+# dependent parameter n.
+
+(theory program type {
+  (arr dep.payload.then :
+    {[n.]
+      (bool val)
+      ([.n] ix val)
+    }
+    ->
+    {[n.]
+      (bool val)
+    })
+
+  (arr dep.payload.else :
+    {[n.]
+      (bool val)
+      ([.n] ix val)
+    }
+    ->
+    {[n.]
+      (bool val)
+    })
+})
+
+(def program dep.payload.ifc :
+  {[n.]
+    (bool val)
+    ([.n] ix val)
+  }
+  ->
+  {[n.]
+    (bool val)
+  }
+  =
+  {[flag index.]
+    ([] bool.t [then_env.])
+    ([] bool.f [else_env.])
+    ({
+      ([.then_env])
+      name.dep.payload.then
+      ([.else_env])
+      name.dep.payload.else
+      ([.flag])
+      ([.index])
+    } bool.ifc [out.])
+    [.out]
+  })

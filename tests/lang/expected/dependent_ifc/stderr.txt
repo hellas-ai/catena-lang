@@ -1,0 +1,4 @@
+Error: definition check failed in theory `program`, definition `dep.ifc`: InvalidTypeMaps
+
+Caused by:
+    definition check failed in theory `program`, definition `dep.ifc`: InvalidTypeMaps

@@ -29,7 +29,7 @@
   (arr ix.copy : (u64 ix val) -> {(u64 ix val) (u64 ix val)})
   (arr ix.sub : {(u64 ix val) (u64 val)} -> (u64 ix val))
   (arr u64.one : [] -> (u64 val))
-  (arr u64.val-zero : [] -> (u64 val))
+  (arr zero : [] -> (u64 val))
   (arr u64.add : {(u64 val) (u64 val)} -> (u64 val))
   (arr f32.add : {(f32 val) (f32 val)} -> (f32 val))
   (arr pool.payload.intro :
@@ -222,7 +222,7 @@
     [.index_payload_source] ix.copy [index_payload index_pred.]
     [.index_pred] ix.copy [index_zero index_one.]
 
-    ([.] u64.val-zero [zero.])
+    ([.] zero [zero.])
     ([.] u64.one [one.])
     [.index_zero zero] ix.eq [is_zero.]
     [.index_one one] ix.eq [is_one.]

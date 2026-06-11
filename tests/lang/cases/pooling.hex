@@ -33,6 +33,7 @@
     ([.x y] != |-) # non-selected branch: x != y
   })
   (arr u64.as-type : {[x.] (u64 val)} -> ({[x] u64} :))
+  (arr u64.one.judgement : [] -> ({1 u64} :))
   (arr :.unpack : {[x t.]
     ({[.x] [.t]} :)
   } -> {[x t.]
@@ -265,8 +266,8 @@
     })
 
   (arr f32.pool-at-one :
-    {[n position y.]
-      ([.position y] = |-)
+    {[n position.]
+      ({[.position] 1} = |-)
       ({
         ({cap.ref [.n] f32} buf val)
         ({
@@ -278,7 +279,7 @@
         } *)
       } *)
     }
-    -> {[n position y.] (f32 val)}
+    -> {[n position.] (f32 val)}
   )
 
   (arr f32.pool-at-many :
@@ -320,9 +321,8 @@
   {[env payload.]
     ([.payload] pool.payload.elim [input index u64_position position_lt_n.])
     ([.index] ix.extent [extent.])
-    ([] const.u64.0x0000000000000001 u64.as-type [one.])
-    ([.one] :.unpack [one_param one_type one_cmp.])
-    ([.u64_position one_cmp] u64.eq [is_one one_case many_case.])
+    ([] u64.one.judgement :.unpack [one one_type u64_one.])
+    ([.u64_position u64_one] u64.eq [is_one one_case many_case.])
     ([.u64_position] :.unpack [position_param position_type unused_position_judgement.])
     ([.input index u64_position position_lt_n] pool.payload.intro [payload_inner.])
 
@@ -333,9 +333,9 @@
     #     input[index] + input[index - 1] + input[index - 2]
     ({
       ([.one_case])
-      ([.extent position_param one_param] name.f32.pool-at-one)
+      ([.extent position_param] name.f32.pool-at-one)
       ([.many_case])
-      ([.extent position_param one_param] name.f32.pool-at-many)
+      ([.extent position_param one] name.f32.pool-at-many)
       ([.is_one])
       ([.payload_inner])
     } bool.ifc [pooled.])

@@ -33,11 +33,12 @@
     ([.x y] != |-) # non-selected branch: x != y
   })
   (arr u64.as-type : {[x.] (u64 val)} -> ({[x] u64} :))
-  (arr u64.extent : {[x.]
-    ({[.x] u64} :)
-  } -> {[x.]
+  (arr :.unpack : {[x t.]
+    ({[.x] [.t]} :)
+  } -> {[x t.]
     [.x]
-    ({[.x] u64} :)
+    [.t]
+    ({[.x] [.t]} :)
   })
   (arr u64.one.gt-zero : {[x.]
     ([.x 1] = |-) 
@@ -80,7 +81,6 @@
     ([.n] ix val)
   } -> {[n.]
     [.n]
-    ([.n] ix val)
   })
   (arr u64.pred.lt-n : {[n x y pred.]
     ([.n x] > |-) 
@@ -211,7 +211,7 @@
     {[n position.]
       ({cap.ref [.n] f32} buf val)
       ([.n] ix val)
-      ([.position 0] = |-)
+      ({[.position] 0} = |-)
     }
     ->
     {[n position.]
@@ -243,8 +243,8 @@
       (f32 val)
     })
   (def f32.pool-at-zero :
-    {[n position z.]
-      ([.position z] = |-)
+    {[n position.]
+      ({[.position] 0} = |-)
       ({
         ({cap.ref [.n] f32} buf val)
         ({
@@ -256,7 +256,7 @@
         } *)
       } *)
     }
-    -> {[n position z.] (f32 val)}
+    -> {[n position.] (f32 val)}
     =
     {[env payload.]
       ([.payload] pool.payload.elim [input index position position_lt_n.])
@@ -318,13 +318,13 @@
   {[n position z.] (f32 val)}
   =
   {[env payload.]
-    ([.payload] pool.payload.elim [input index position position_lt_n.])
-    ([.index] ix.extent [extent index_payload.])
+    ([.payload] pool.payload.elim [input index u64_position position_lt_n.])
+    ([.index] ix.extent [extent.])
     ([] const.u64.0x0000000000000001 u64.as-type [one.])
-    ([.one] u64.extent [one_param one_cmp.])
-    ([.position one_cmp] u64.eq [is_one one_case many_case.])
-    ([.position] u64.extent [position_param position_payload.])
-    ([.input index_payload position_payload position_lt_n] pool.payload.intro [payload_inner.])
+    ([.one] :.unpack [one_param one_type one_cmp.])
+    ([.u64_position one_cmp] u64.eq [is_one one_case many_case.])
+    ([.u64_position] :.unpack [position_param position_type unused_position_judgement.])
+    ([.input index u64_position position_lt_n] pool.payload.intro [payload_inner.])
 
     # Inner if:
     #   if index == 1:
@@ -355,13 +355,12 @@
   }
   =
   {[input output index.]
-    ([.index] ix.extent [extent index_payload.])
-    ([.index_payload] ix.index [position position_lt_n.])
-    ([] const.u64.0x0000000000000000 u64.as-type [zero.])
-    ([.zero] u64.extent [zero_param zero_cmp.])
-    ([.position zero_cmp] u64.eq [is_zero zero_case nonzero_case.])
-    ([.position] u64.extent [position_param position_payload.])
-    ([.input index_payload position_payload position_lt_n] pool.payload.intro [payload.])
+    ([.index] ix.extent [extent.])
+    ([.index] ix.index [u64_position position_lt_n.])
+    ([] u64.zero :.unpack [zero zero_type u64_zero.])
+    ([.u64_position u64_zero] u64.eq [is_zero zero_case nonzero_case.])
+    ([.u64_position] :.unpack [position_param position_type unused_position_judgement.])
+    ([.input index u64_position position_lt_n] pool.payload.intro [payload.])
 
     # Outer if:
     #   if index == 0:
@@ -370,9 +369,9 @@
     #     run the nested non-zero decision above
     ({
       ([.zero_case])
-      ([.extent position_param zero_param] name.f32.pool-at-zero)
+      ([.extent position_param] name.f32.pool-at-zero)
       ([.nonzero_case])
-      ([.extent position_param zero_param] name.f32.pool-nonzero)
+      ([.extent position_param zero] name.f32.pool-nonzero)
       ([.is_zero])
       ([.payload])
     } bool.ifc [pooled.])

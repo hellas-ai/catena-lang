@@ -168,36 +168,7 @@
   )
 )
 
-(def program f32.pooling-last-three-at :
-  {
-    (bool val)
-    (bool val)
-    ({
-      ({cap.ref u64 f32} buf val)
-      (u64 ix val)
-    } *)
-  }
-  ->
-  (f32 val)
-  =
-  ([is_zero is_one payload.]
-    # Outer if:
-    #   if index == 0:
-    #     input[index]
-    #   else:
-    #     run the nested non-zero decision above
-    {
-      unit.intro
-      name.f32.pool-at-zero
-      [.is_one]
-      name.f32.pool-nonzero
-      [. is_zero payload]
-    }
-    bool.ifc
-  )
-)
-
-(def program f32.pooling-last-three-store :
+(def program f32.pooling-last-three :
   {
     ({cap.ref u64 f32} buf val)
     ({cap.own u64 f32} buf val)
@@ -214,7 +185,19 @@
 
     [.input index] pool.payload.intro [payload.]
 
-    [.is_zero is_one payload] f32.pooling-last-three-at [pooled.]
+    # Outer if:
+    #   if index == 0:
+    #     input[index]
+    #   else:
+    #     run the nested non-zero decision above
+    {
+      unit.intro
+      name.f32.pool-at-zero
+      [.is_one]
+      name.f32.pool-nonzero
+      [. is_zero payload]
+    }
+    bool.ifc [pooled.]
 
     [.output index pooled] f32.buf.store [output_pooled.]
 

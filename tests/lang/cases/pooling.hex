@@ -16,40 +16,45 @@
 # NOTE: this is a language-level example. The current catena-lang HIP renderer
 # does not yet lower these locally declared f32/index primitives.
 
+(theory type nat {
+  (arr n : 0 -> 1)
+})
+
 (theory program type {
   # Local index primitives for this example.
   # Compare an index with a u64 value.
-  (arr ix.eq : {[rhs.] (u64 ix val) ([.rhs])} -> {[rhs.] (bool val)})
-  (arr ix.sub : {(u64 ix val) (u64 val)} -> (u64 ix val))
+  (arr ix.eq : {[rhs.] (n ix val) ([.rhs])} -> {[rhs.] (bool val)})
+  (arr ix.pred : (n ix val) -> (n ix val))
   (arr product.intro :
     {
-      ({cap.ref u64 f32} buf val)
-      (u64 ix val)
+      ({cap.ref n f32} buf val)
+      (n ix val)
     }
     ->
     ({
-      ({cap.ref u64 f32} buf val)
-      (u64 ix val)
-    } *))
+      ({cap.ref n f32} buf val)
+      (n ix val)
+    } *)
+  )
   (arr product.elim :
     ({
-      ({cap.ref u64 f32} buf val)
-      (u64 ix val)
+      ({cap.ref n f32} buf val)
+      (n ix val)
     } *)
     ->
     {
-      ({cap.ref u64 f32} buf val)
-      (u64 ix val)
+      ({cap.ref n f32} buf val)
+      (n ix val)
     })
   (def pool.payload.intro :
     {
-      ({cap.ref u64 f32} buf val)
-      (u64 ix val)
+      ({cap.ref n f32} buf val)
+      (n ix val)
     }
     ->
     ({
-      ({cap.ref u64 f32} buf val)
-      (u64 ix val)
+      ({cap.ref n f32} buf val)
+      (n ix val)
     } *)
     =
     ([input index.]
@@ -58,13 +63,13 @@
     ))
   (def pool.payload.elim :
     ({
-      ({cap.ref u64 f32} buf val)
-      (u64 ix val)
+      ({cap.ref n f32} buf val)
+      (n ix val)
     } *)
     ->
     {
-      ({cap.ref u64 f32} buf val)
-      (u64 ix val)
+      ({cap.ref n f32} buf val)
+      (n ix val)
     }
     =
     ([payload.]
@@ -73,19 +78,19 @@
     ))
   (arr f32.buf.store :
     {
-      ({cap.own u64 f32} buf val)
-      (u64 ix val)
+      ({cap.own n f32} buf val)
+      (n ix val)
       (f32 val)
     }
     ->
-    ({cap.own u64 f32} buf val))
+    ({cap.own n f32} buf val))
 
   (def f32.pool-at-zero :
     {
       1
       ({
-        ({cap.ref u64 f32} buf val)
-        (u64 ix val)
+        ({cap.ref n f32} buf val)
+        (n ix val)
       } *)
     }
     ->
@@ -101,8 +106,8 @@
     {
       1
       ({
-        ({cap.ref u64 f32} buf val)
-        (u64 ix val)
+        ({cap.ref n f32} buf val)
+        (n ix val)
       } *)
     }
     ->
@@ -110,8 +115,7 @@
     =
     ([env payload.]
       [.payload] pool.payload.elim [input index.]
-      ([.] u64.one [one.])
-      [.index one] ix.sub [index_prev.]
+      [.index] ix.pred [index_prev.]
       [.index input] ix [current.]
       [.index_prev input] ix [previous.]
       [.current previous] f32.add [sum.]
@@ -122,8 +126,8 @@
     {
       1
       ({
-        ({cap.ref u64 f32} buf val)
-        (u64 ix val)
+        ({cap.ref n f32} buf val)
+        (n ix val)
       } *)
     }
     ->
@@ -131,10 +135,8 @@
     =
     ([env payload.]
       [.payload] pool.payload.elim [input index.]
-      ([.] u64.one [one.])
-      ([.] const.u64.0x0000000000000002 [two.])
-      [.index one] ix.sub [index_prev.]
-      [.index two] ix.sub [index_prev2.]
+      [.index] ix.pred [index_prev.]
+      [.index_prev] ix.pred [index_prev2.]
       [.index input] ix [current.]
       [.index_prev input] ix [previous.]
       [.index_prev2 input] ix [previous2.]
@@ -147,22 +149,27 @@
 
 (def program f32.pool-nonzero :
   {
-    (bool val)
+    1
     ({
-      ({cap.ref u64 f32} buf val)
-      (u64 ix val)
+      ({cap.ref n f32} buf val)
+      (n ix val)
     } *)
   }
   ->
   (f32 val)
   =
-  ([is_one payload.]
+  ([env payload.]
+    ([.] u64.one [one.])
+    [.payload] pool.payload.elim [input index.]
+    [.index one] ix.eq [is_one.]
+    [.input index] pool.payload.intro [payload_checked.]
+
     {
       unit.intro
       name.f32.pool-at-one
       unit.intro
       name.f32.pool-at-many
-      [. is_one payload]
+      [. is_one payload_checked]
     }
     bool.ifc
   )
@@ -170,18 +177,16 @@
 
 (def program f32.pooling-last-three :
   {
-    ({cap.ref u64 f32} buf val)
-    ({cap.own u64 f32} buf val)
-    (u64 ix val)
+    ({cap.ref n f32} buf val)
+    ({cap.own n f32} buf val)
+    (n ix val)
   }
   ->
-  ({cap.own u64 f32} buf val)
+  ({cap.own n f32} buf val)
   =
   ([input output index.]
     ([.] u64.zero [zero.])
-    ([.] u64.one [one.])
     [.index zero] ix.eq [is_zero.]
-    [.index one] ix.eq [is_one.]
 
     [.input index] pool.payload.intro [payload.]
 
@@ -193,7 +198,7 @@
     {
       unit.intro
       name.f32.pool-at-zero
-      [.is_one]
+      unit.intro
       name.f32.pool-nonzero
       [. is_zero payload]
     }

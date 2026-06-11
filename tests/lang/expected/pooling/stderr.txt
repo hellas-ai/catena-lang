@@ -1,1 +1,1 @@
-Error: failed to render GPU code: unsupported GPU operation `ix.sub`
+Error: failed to render GPU code: unsupported GPU operation `ix.pred`

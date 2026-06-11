@@ -1,4 +1,1 @@
-Error: definition check failed in theory `program`, definition `dep.payload.ifc`: InvalidTypeMaps
-
-Caused by:
-    definition check failed in theory `program`, definition `dep.payload.ifc`: InvalidTypeMaps
+Error: failed to render GPU code: unsupported GPU operation `ix.extent`

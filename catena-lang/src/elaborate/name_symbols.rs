@@ -15,6 +15,23 @@ const UNIT_TYPE: &str = "1";
 const VALUE_TYPE: &str = "val";
 const NAME_PREFIX: &str = "name.";
 
+#[derive(Default)]
+struct FreshVars {
+    next: usize,
+}
+
+impl FreshVars {
+    fn var(&mut self, prefix: &str) -> Result<Variable, ElaborateError> {
+        let name = format!("{prefix}{}", self.next);
+        self.next += 1;
+        parse_variable(&name)
+    }
+
+    fn vars(&mut self, prefix: &str, arity: usize) -> Result<Vec<Variable>, ElaborateError> {
+        (0..arity).map(|_| self.var(prefix)).collect()
+    }
+}
+
 pub fn elaborate_theory(
     raw: &mut RawTheorySet,
     theory_name: &Operation,
@@ -86,7 +103,8 @@ fn source_type_map(
                 error,
             }
         })?;
-    let metavars = vars("x", interpreted_source.sources.len())?;
+    let mut fresh = FreshVars::default();
+    let metavars = fresh.vars("p", interpreted_source.sources.len())?;
 
     Ok(Hexpr::Frobenius {
         sources: metavars.clone(),
@@ -118,7 +136,8 @@ fn target_type_map(
             }
         })?;
 
-    let metavars = vars("x", interpreted_source.sources.len())?;
+    let mut fresh = FreshVars::default();
+    let metavars = fresh.vars("p", interpreted_source.sources.len())?;
     let mut copied_metavars = metavars.clone();
     copied_metavars.extend(metavars.clone());
     let copy = Hexpr::Frobenius {
@@ -128,11 +147,11 @@ fn target_type_map(
 
     let pack_s = Hexpr::Composition(vec![
         raw.type_maps.0.clone(),
-        pack_object(interpreted_source.targets.len())?,
+        pack_object(&mut fresh, "s", interpreted_source.targets.len())?,
     ]);
     let pack_t = Hexpr::Composition(vec![
         raw.type_maps.1.clone(),
-        pack_object(interpreted_target.targets.len())?,
+        pack_object(&mut fresh, "t", interpreted_target.targets.len())?,
     ]);
 
     Ok(Hexpr::Composition(vec![
@@ -143,25 +162,23 @@ fn target_type_map(
     ]))
 }
 
-fn pack_object(object_size: usize) -> Result<Hexpr, ElaborateError> {
+fn pack_object(
+    fresh: &mut FreshVars,
+    prefix: &str,
+    object_size: usize,
+) -> Result<Hexpr, ElaborateError> {
     match object_size {
         0 => parse_operation_hexpr(UNIT_TYPE),
-        1 => identity_var("x0"),
+        1 => Ok(identity_var(fresh.var(prefix)?)),
         2 => parse_operation_hexpr(PRODUCT_TYPE),
         n => Ok(Hexpr::Composition(vec![
             Hexpr::Tensor(vec![
-                pack_object(n - 1)?,
-                identity_var(&format!("x{}", n - 1))?,
+                pack_object(fresh, prefix, n - 1)?,
+                identity_var(fresh.var(prefix)?),
             ]),
             parse_operation_hexpr(PRODUCT_TYPE)?,
         ])),
     }
-}
-
-fn vars(prefix: &str, arity: usize) -> Result<Vec<Variable>, ElaborateError> {
-    (0..arity)
-        .map(|i| parse_variable(&format!("{prefix}{i}")))
-        .collect()
 }
 
 fn parse_variable(name: &str) -> Result<Variable, ElaborateError> {
@@ -169,12 +186,11 @@ fn parse_variable(name: &str) -> Result<Variable, ElaborateError> {
         .map_err(|_| ElaborateError::InvalidGeneratedVariable(name.to_string()))
 }
 
-fn identity_var(name: &str) -> Result<Hexpr, ElaborateError> {
-    let var = parse_variable(name)?;
-    Ok(Hexpr::Frobenius {
+fn identity_var(var: Variable) -> Hexpr {
+    Hexpr::Frobenius {
         sources: vec![var.clone()],
         targets: vec![var],
-    })
+    }
 }
 
 fn parse_operation(name: &str) -> Result<Operation, ElaborateError> {

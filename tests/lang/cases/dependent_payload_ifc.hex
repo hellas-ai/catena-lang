@@ -5,6 +5,16 @@
 # dependent parameter n.
 
 (theory program type {
+  (arr ix.extent :
+    {[n.]
+      ([.n] ix val)
+    }
+    ->
+    {[n.]
+      [.n]
+      ([.n] ix val)
+    })
+
   (arr dep.payload.then :
     {[n.]
       (bool val)
@@ -39,13 +49,16 @@
   {[flag index.]
     ([] bool.t [then_env.])
     ([] bool.f [else_env.])
+    ([.index] ix.extent [extent index_payload.])
+    ([.extent] name.dep.payload.then [then_fn.])
+    ([.extent] name.dep.payload.else [else_fn.])
     ({
       ([.then_env])
-      name.dep.payload.then
+      ([.then_fn])
       ([.else_env])
-      name.dep.payload.else
+      ([.else_fn])
       ([.flag])
-      ([.index])
+      ([.index_payload])
     } bool.ifc [out.])
     [.out]
   })

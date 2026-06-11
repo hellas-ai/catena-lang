@@ -1,5 +1,4 @@
-Error: Failed to interpret definition for theory program, arrow f32.pooling-last-three: Failed to compose {([ . input index position position_lt_n] pool.payload.intro [payload . ]) ([ . is_zero]) ([ . zero_case]) ([ . nonzero_case])} ; {[ . zero_case] name.f32.pool-at-zero [ . nonzero_case] name.f32.pool-nonzero [ . is_zero payload]}
+Error: definition check failed in theory `program`, definition `f32.pool-nonzero`: InvalidTypeMaps
 
 Caused by:
-    0: Failed to interpret definition for theory program, arrow f32.pooling-last-three: Failed to compose {([ . input index position position_lt_n] pool.payload.intro [payload . ]) ([ . is_zero]) ([ . zero_case]) ([ . nonzero_case])} ; {[ . zero_case] name.f32.pool-at-zero [ . nonzero_case] name.f32.pool-nonzero [ . is_zero payload]}
-    1: Failed to compose {([ . input index position position_lt_n] pool.payload.intro [payload . ]) ([ . is_zero]) ([ . zero_case]) ([ . nonzero_case])} ; {[ . zero_case] name.f32.pool-at-zero [ . nonzero_case] name.f32.pool-nonzero [ . is_zero payload]}
+    definition check failed in theory `program`, definition `f32.pool-nonzero`: InvalidTypeMaps

@@ -30,7 +30,7 @@
   (arr zero : [] -> (u64 val))
   (arr u64.add : {(u64 val) (u64 val)} -> (u64 val))
   (arr f32.add : {(f32 val) (f32 val)} -> (f32 val))
-  (arr pool.payload.intro :
+  (arr product.intro :
     {
       ({cap.own u64 f32} buf val)
       (u64 ix val)
@@ -40,7 +40,7 @@
       ({cap.own u64 f32} buf val)
       (u64 ix val)
     } *))
-  (arr pool.payload.elim :
+  (arr product.elim :
     ({
       ({cap.own u64 f32} buf val)
       (u64 ix val)
@@ -50,6 +50,36 @@
       ({cap.own u64 f32} buf val)
       (u64 ix val)
     })
+  (def pool.payload.intro :
+    {
+      ({cap.own u64 f32} buf val)
+      (u64 ix val)
+    }
+    ->
+    ({
+      ({cap.own u64 f32} buf val)
+      (u64 ix val)
+    } *)
+    =
+    ([input index.]
+      [.input index] product.intro [payload.]
+      [.payload]
+    ))
+  (def pool.payload.elim :
+    ({
+      ({cap.own u64 f32} buf val)
+      (u64 ix val)
+    } *)
+    ->
+    {
+      ({cap.own u64 f32} buf val)
+      (u64 ix val)
+    }
+    =
+    ([payload.]
+      [.payload] product.elim [input index.]
+      [.input index]
+    ))
   (arr f32.buf.load :
     {
       ({cap.own u64 f32} buf val)

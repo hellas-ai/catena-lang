@@ -1,4 +1,1 @@
-Error: definition check failed in theory `program`, definition `f32.pool-nonzero`: InvalidTypeMaps
-
-Caused by:
-    definition check failed in theory `program`, definition `f32.pool-nonzero`: InvalidTypeMaps
+Error: failed to render GPU code: unsupported GPU operation `f32.buf.load-zero`

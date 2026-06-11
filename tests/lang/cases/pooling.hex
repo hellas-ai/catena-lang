@@ -80,16 +80,6 @@
       [.payload] product.elim [input index.]
       [.input index]
     ))
-  (arr f32.buf.load :
-    {
-      ({cap.own u64 f32} buf val)
-      (u64 ix val)
-    }
-    ->
-    {
-      ({cap.own u64 f32} buf val)
-      (f32 val)
-    })
   (arr f32.buf.store :
     {
       ({cap.own u64 f32} buf val)
@@ -122,7 +112,7 @@
     =
     ([env payload.]
       [.payload] pool.payload.elim [input index.]
-      [.input index] f32.buf.load [input_after_current current.]
+      [.index input] ix [current.]
       [.current]
     ))
 
@@ -142,8 +132,8 @@
       [.index] ix.copy [index_current index_prev_base.]
       ([.] u64.one [one.])
       [.index_prev_base one] ix.sub [index_prev.]
-      [.input index_current] f32.buf.load [input_after_current current.]
-      [.input_after_current index_prev] f32.buf.load [input_after_previous previous.]
+      [.index_current input] ix [current.]
+      [.index_prev input] ix [previous.]
       [.current previous] f32.add [sum.]
       [.sum]
     ))
@@ -167,9 +157,9 @@
       ([.] u64.two [two.])
       [.index_prev_base one] ix.sub [index_prev.]
       [.index_prev2_base two] ix.sub [index_prev2.]
-      [.input index_current] f32.buf.load [input_after_current current.]
-      [.input_after_current index_prev] f32.buf.load [input_after_previous previous.]
-      [.input_after_previous index_prev2] f32.buf.load [input_after_previous2 previous2.]
+      [.index_current input] ix [current.]
+      [.index_prev input] ix [previous.]
+      [.index_prev2 input] ix [previous2.]
       [.current previous] f32.add [partial.]
       [.partial previous2] f32.add [sum.]
       [.sum]

@@ -1,1 +1,1 @@
-Error: failed to render GPU code: unsupported GPU operation `f32.buf.load-zero`
+Error: failed to render GPU code: unsupported GPU operation `u64.one.gt-zero`

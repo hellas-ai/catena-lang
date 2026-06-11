@@ -85,38 +85,58 @@
     ([.n] ix val)
   })
   (def pool.payload.intro :
-    {[n.]
+    {[n x.]
       ({cap.ref [.n] f32} buf val)
       ([.n] ix val)
+      ({[.x] u64} :)
+      ([.n x] > |-) 
     }
     ->
-    {[n.]
+    {[n x.]
       ({
         ({cap.ref [.n] f32} buf val)
-        ([.n] ix val)
+        ({
+          ([.n] ix val)
+          ({
+            ({[.x] u64} :)
+            ([.n x] > |-) 
+          } *)
+        } *)
       } *)
     }
     =
-    ([input index.]
-      [.input index] * [payload.]
+    ([input index position position_lt_n.]
+      [.position position_lt_n] * [position_range.]
+      [.index position_range] * [index_position_range.]
+      [.input index_position_range] * [payload.]
       [.payload]
     ))
   (def pool.payload.elim :
-    {[n.]
+    {[n x.]
       ({
         ({cap.ref [.n] f32} buf val)
-        ([.n] ix val)
+        ({
+          ([.n] ix val)
+          ({
+            ({[.x] u64} :)
+            ([.n x] > |-) 
+          } *)
+        } *)
       } *)
     }
     ->
-    {[n.]
+    {[n x.]
       ({cap.ref [.n] f32} buf val)
       ([.n] ix val)
+      ({[.x] u64} :)
+      ([.n x] > |-) 
     }
     =
     ([payload.]
-      [.payload] * [input index.]
-      [.input index]
+      [.payload] * [input index_position_range.]
+      [.index_position_range] * [index position_range.]
+      [.position_range] * [position position_lt_n.]
+      [.input index position position_lt_n]
     ))
   (arr f32.buf.store :
     {[n.]
@@ -134,13 +154,19 @@
       ([.x 0] = |-)
       ({
         ({cap.ref [.n] f32} buf val)
-        ([.n] ix val)
+        ({
+          ([.n] ix val)
+          ({
+            ({[.x] u64} :)
+            ([.n x] > |-) 
+          } *)
+        } *)
       } *)
     }
     -> {[n x.] (f32 val)}
     =
     ([env payload.]
-      [.payload] pool.payload.elim [input index.]
+      [.payload] pool.payload.elim [input index position position_lt_n.]
       [.index input] ix [current.]
       [.current]
     ))
@@ -150,14 +176,19 @@
       ([.x 0] > |-)
       ({
         ({cap.ref [.n] f32} buf val)
-        ([.n] ix val)
+        ({
+          ([.n] ix val)
+          ({
+            ({[.x] u64} :)
+            ([.n x] > |-) 
+          } *)
+        } *)
       } *)
     }
     -> {[n x.] (f32 val)}
     =
     ([env payload.]
-      [.payload] pool.payload.elim [input index.]
-      [.index] ix.index [position position_lt_n.]
+      [.payload] pool.payload.elim [input index position position_lt_n.]
       [.position env] u64.pred [prev_position.]
       [.position_lt_n env prev_position] u64.pred.lt-n [prev_lt_n.]
       [.prev_position prev_lt_n] ix.from-u64 [index_prev.]
@@ -172,14 +203,19 @@
       ([.x 1] > |-)
       ({
         ({cap.ref [.n] f32} buf val)
-        ([.n] ix val)
+        ({
+          ([.n] ix val)
+          ({
+            ({[.x] u64} :)
+            ([.n x] > |-) 
+          } *)
+        } *)
       } *)
     }
     -> {[n x.] (f32 val)}
     =
     ([env payload.]
-      [.payload] pool.payload.elim [input index.]
-      [.index] ix.index [position position_lt_n.]
+      [.payload] pool.payload.elim [input index position position_lt_n.]
       [.position env] u64.pred [prev_position.]
       [.env prev_position] u64.pred.gt-zero [prev_gt_zero.]
       [.position_lt_n env prev_position] u64.pred.lt-n [prev_lt_n.]
@@ -202,24 +238,29 @@
     ([.x 0] != |-)
     ({
       ({cap.ref [.n] f32} buf val)
-      ([.n] ix val)
+      ({
+        ([.n] ix val)
+        ({
+          ({[.x] u64} :)
+          ([.n x] > |-) 
+        } *)
+      } *)
     } *)
   }
   ->
   {[n x.] (f32 val)}
   =
   ([env payload.]
-    [.payload] pool.payload.elim [input index.]
-    [.index] ix.index [position position_lt_n.]
+    [.payload] pool.payload.elim [input index position position_lt_n.]
     [] const.u64.0x0000000000000001 u64.as-type [one.]
     [.position one] u64.eq [is_one one_case many_case.]
     [.one_case] u64.one.gt-zero [one_gt_zero.]
     [.env many_case] u64.neq-zero-neq-one.gt-one [many_gt_one.]
     {
-      ([.input index] pool.payload.intro [payload_checked.])
       ([.is_one])
       ([.one_gt_zero])
       ([.many_gt_one])
+      ([.payload])
     }
 
     {
@@ -227,7 +268,7 @@
       name.f32.pool-at-one
       [.many_gt_one]
       name.f32.pool-at-many
-      [. is_one payload_checked]
+      [. is_one payload]
     }
     bool.ifc
   )
@@ -250,7 +291,7 @@
     [.position zero] u64.eq [is_zero zero_case nonzero_case.]
 
     {
-      ([.input index] pool.payload.intro [payload.])
+      ([.input index position position_lt_n] pool.payload.intro [payload.])
       ([.is_zero])
       ([.zero_case])
       ([.nonzero_case])

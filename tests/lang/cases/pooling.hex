@@ -16,11 +16,38 @@
 # NOTE: this is a language-level example. The current catena-lang HIP renderer
 # does not yet lower these locally declared f32/index primitives.
 
+(theory type nat {
+  (arr ix.proof.zero : 1 -> 1)
+  (arr ix.proof.nonzero : 1 -> 1)
+  (arr ix.proof.one : 1 -> 1)
+  (arr ix.proof.many : 1 -> 1)
+})
+
 (theory program type {
   # Local index primitives for this example.
-  # Compare an index with a u64 value.
-  (arr ix.eq : {[n rhs.] ([.n] ix val) ([.rhs])} -> {[n rhs.] (bool val)})
-  (arr ix.pred : {[n.] ([.n] ix val)} -> {[n.] ([.n] ix val)})
+  # Branch-producing predicates: the boolean controls `bool.ifc`, while the
+  # proof tokens are threaded as branch environments.
+  (arr ix.is-zero : {[n.]
+    ([.n] ix val)
+  } -> {[n.]
+    (bool val)
+    ([.n] ix.proof.zero)
+    ([.n] ix.proof.nonzero)
+  })
+  (arr ix.is-one : {[n.]
+    ([.n] ix val)
+    ([.n] ix.proof.nonzero)
+  } -> {[n.]
+    (bool val)
+    ([.n] ix.proof.one)
+    ([.n] ix.proof.many)
+  })
+  (arr ix.pred : {[n proof.]
+    ([.n] ix val)
+    ([.proof])
+  } -> {[n proof.]
+    ([.n] ix val)
+  })
   (def pool.payload.intro :
     {[n.]
       ({cap.ref [.n] f32} buf val)
@@ -68,7 +95,7 @@
 
   (def f32.pool-at-zero :
     {[n.]
-      1
+      ([.n] ix.proof.zero)
       ({
         ({cap.ref [.n] f32} buf val)
         ([.n] ix val)
@@ -85,7 +112,7 @@
 
   (def f32.pool-at-one :
     {[n.]
-      1
+      ([.n] ix.proof.one)
       ({
         ({cap.ref [.n] f32} buf val)
         ([.n] ix val)
@@ -96,7 +123,7 @@
     =
     ([env payload.]
       [.payload] pool.payload.elim [input index.]
-      [.index] ix.pred [index_prev.]
+      [.index env] ix.pred [index_prev.]
       [.index input] ix [current.]
       [.index_prev input] ix [previous.]
       [.current previous] f32.add [sum.]
@@ -105,7 +132,7 @@
 
   (def f32.pool-at-many :
     {[n.]
-      1
+      ([.n] ix.proof.many)
       ({
         ({cap.ref [.n] f32} buf val)
         ([.n] ix val)
@@ -116,8 +143,8 @@
     =
     ([env payload.]
       [.payload] pool.payload.elim [input index.]
-      [.index] ix.pred [index_prev.]
-      [.index_prev] ix.pred [index_prev2.]
+      [.index env] ix.pred [index_prev.]
+      [.index_prev env] ix.pred [index_prev2.]
       [.index input] ix [current.]
       [.index_prev input] ix [previous.]
       [.index_prev2 input] ix [previous2.]
@@ -130,7 +157,7 @@
 
 (def program f32.pool-nonzero :
   {[n.]
-    1
+    ([.n] ix.proof.nonzero)
     ({
       ({cap.ref [.n] f32} buf val)
       ([.n] ix val)
@@ -140,15 +167,19 @@
   {[n.] (f32 val)}
   =
   ([env payload.]
-    ([.] u64.one [one.])
     [.payload] pool.payload.elim [input index.]
-    [.index one] ix.eq [is_one.]
-    [.input index] pool.payload.intro [payload_checked.]
+    [.index env] ix.is-one [is_one one_case many_case.]
+    {
+      ([.input index] pool.payload.intro [payload_checked.])
+      ([.is_one])
+      ([.one_case])
+      ([.many_case])
+    }
 
     {
-      unit.intro
+      [.one_case]
       name.f32.pool-at-one
-      unit.intro
+      [.many_case]
       name.f32.pool-at-many
       [. is_one payload_checked]
     }
@@ -168,10 +199,14 @@
   }
   =
   ([input output index.]
-    ([.] u64.zero [zero.])
-    [.index zero] ix.eq [is_zero.]
+    [.index] ix.is-zero [is_zero zero_case nonzero_case.]
 
-    [.input index] pool.payload.intro [payload.]
+    {
+      ([.input index] pool.payload.intro [payload.])
+      ([.is_zero])
+      ([.zero_case])
+      ([.nonzero_case])
+    }
 
     # Outer if:
     #   if index == 0:
@@ -179,9 +214,9 @@
     #   else:
     #     run the nested non-zero decision above
     {
-      unit.intro
+      [.zero_case]
       name.f32.pool-at-zero
-      unit.intro
+      [.nonzero_case]
       name.f32.pool-nonzero
       [. is_zero payload]
     }

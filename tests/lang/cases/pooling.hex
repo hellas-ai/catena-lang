@@ -32,13 +32,24 @@
     ([.x y] = |-)  # selected branch: x = y
     ([.x y] != |-) # non-selected branch: x != y
   })
-  (arr u64.eq-zero : {[x b.]
+  (arr u64.nonzero.gt-zero : {[x.]
+    ([.x 0] != |-)
+  } -> {[x.]
+    ({[.x] 0} > |-)
+  })
+  (def u64.is-zero : {[x.]
     ({[.x] u64} :)
-    ({0 u64} :)
-  } -> {[x b.]
+  } -> {[x.]
     (bool val)
     ({[.x] 0} = |-) # selected branch: x = 0
     ({[.x] 0} > |-) # non-selected branch: x > 0
+  }
+  =
+  {[x.]
+    ([] u64.zero [zero.])
+    ([.x zero] u64.eq [is_zero zero_case nonzero_case.])
+    ([.nonzero_case] u64.nonzero.gt-zero [gt_zero.])
+    [.is_zero zero_case gt_zero]
   })
   (arr u64.as-type : {[x.] (u64 val)} -> ({[x] u64} :))
   (arr u64.one.judgement : [] -> ({1 u64} :))
@@ -365,9 +376,8 @@
   {[input output index.]
     ([.index] ix.extent [extent.])
     ([.index] ix.index [u64_position position_lt_n.])
-    ([] u64.zero :.unpack [zero zero_type u64_zero.])
-    ([.u64_position u64_zero] u64.eq-zero [is_zero zero_case nonzero_case.])
-    ([.u64_position] :.unpack [position_param position_type unused_position_judgement.])
+    ([.u64_position] u64.is-zero [is_zero zero_case nonzero_case.])
+    ([.u64_position] :.unpack [position_param position_type _u64_position.])
     ([.input index u64_position position_lt_n] pool.payload.intro [payload.])
 
     # Outer if:

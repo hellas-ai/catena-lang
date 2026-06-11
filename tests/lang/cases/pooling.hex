@@ -51,7 +51,6 @@
     ([.nonzero_case] u64.nonzero.gt-zero [gt_zero.])
     [.is_zero zero_case gt_zero]
   })
-  (arr u64.as-type : {[x.] (u64 val)} -> ({[x] u64} :))
   (arr u64.one.judgement : [] -> ({1 u64} :))
   (arr :.unpack : {[x t.]
     ({[.x] [.t]} :)

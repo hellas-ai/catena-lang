@@ -24,22 +24,22 @@
   # Local numeric/index primitives for this example.
   # Branch-producing predicates: the boolean controls `bool.ifc`, while the
   # propositions are threaded as branch environments.
-  (arr u64.eq-zero : {[x.]
+  (arr u64.eq : {[x y b.]
     ({[.x] u64} :)
-    (u64 val)
-  } -> {[x.]
-    (bool val)
-    ([.x 0] = |-) # selected branch: x = 0
-    ([.x 0] != |-) # non-selected branch: x != 0
+    ({[.y] u64} :)
+  } -> {[x y b.]
+    # helper defs
+    ({[.b] bool.t} = [b_true .]) # b = true
+    ({[.b] bool.f} = [b_false.]) # b = false
+    ([.x y] = [x_eq_y.])         # x = y
+    ([.x y] != [x_neq_y.])       # x != y
+
+    # outputs
+    ({[.b] bool} :)             # (b : bool)
+    ([.b_true  x_eq_y] ==> |-)  # |- b = true  ==> (x = y)
+    ([.b_false x_neq_y] ==> |-) # |- b = false ==> (x != y)
   })
-  (arr u64.eq-one : {[x.]
-    ({[.x] u64} :)
-    (u64 val)
-  } -> {[x.]
-    (bool val)
-    ([.x 1] = |-) # selected branch: x = 1
-    ([.x 1] != |-) # non-selected branch: x != 1
-  })
+  (arr u64.as-type : {[x.] (u64 val)} -> ({[x] u64} :))
   (arr u64.one.gt-zero : {[x.]
     ([.x 1] = |-) 
   } -> {[x.]
@@ -211,8 +211,8 @@
   ([env payload.]
     [.payload] pool.payload.elim [input index.]
     [.index] ix.index [position position_lt_n.]
-    [] const.u64.0x0000000000000001 [one.]
-    [.position one] u64.eq-one [is_one one_case many_case.]
+    [] const.u64.0x0000000000000001 u64.as-type [one.]
+    [.position one] u64.eq [is_one one_case many_case.]
     [.one_case] u64.one.gt-zero [one_gt_zero.]
     [.env many_case] u64.neq-zero-neq-one.gt-one [many_gt_one.]
     {
@@ -246,8 +246,8 @@
   =
   ([input output index.]
     [.index] ix.index [position position_lt_n.]
-    [] const.u64.0x0000000000000000 [zero.]
-    [.position zero] u64.eq-zero [is_zero zero_case nonzero_case.]
+    [] const.u64.0x0000000000000000 u64.as-type [zero.]
+    [.position zero] u64.eq [is_zero zero_case nonzero_case.]
 
     {
       ([.input index] pool.payload.intro [payload.])

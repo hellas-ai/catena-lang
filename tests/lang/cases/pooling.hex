@@ -1,6 +1,6 @@
 # Catena-lang analogue of examples/puzzles/pooling.hex.
 #
-# This file declares the extra arithmetic/index primitives it needs locally,
+# This file declares the extra index/product/buffer primitives it needs locally,
 # instead of extending catena-lang/stdlib/*.hex.
 #
 # It models the per-index pooling behavior:
@@ -16,18 +16,11 @@
 # NOTE: this is a language-level example. The current catena-lang HIP renderer
 # does not yet lower these locally declared f32/index primitives.
 
-(theory type nat {
-  (arr f32 : 0 -> 1)
-})
-
 (theory program type {
-  # Local arithmetic and index primitives for this example.
+  # Local index primitives for this example.
   # Compare an index with a u64 value.
   (arr ix.eq : {[rhs.] (u64 ix val) ([.rhs])} -> {[rhs.] (bool val)})
   (arr ix.sub : {(u64 ix val) (u64 val)} -> (u64 ix val))
-  (arr u64.one : [] -> (u64 val))
-  (arr u64.add : {(u64 val) (u64 val)} -> (u64 val))
-  (arr f32.add : {(f32 val) (f32 val)} -> (f32 val))
   (arr product.intro :
     {
       ({cap.ref u64 f32} buf val)
@@ -87,16 +80,6 @@
     ->
     ({cap.own u64 f32} buf val))
 
-  (def u64.two :
-    []
-    ->
-    (u64 val)
-    =
-    (([.] u64.one [one_l.])
-     ([.] u64.one [one_r.])
-     [.one_l one_r] u64.add [two.]
-     [.two]))
-
   (def f32.pool-at-zero :
     {
       1
@@ -149,7 +132,7 @@
     ([env payload.]
       [.payload] pool.payload.elim [input index.]
       ([.] u64.one [one.])
-      ([.] u64.two [two.])
+      ([.] const.u64.0x0000000000000002 [two.])
       [.index one] ix.sub [index_prev.]
       [.index two] ix.sub [index_prev2.]
       [.index input] ix [current.]

@@ -201,3 +201,65 @@ fn parse_operation(name: &str) -> Result<Operation, ElaborateError> {
 fn parse_operation_hexpr(name: &str) -> Result<Hexpr, ElaborateError> {
     Ok(Hexpr::Operation(parse_operation(name)?))
 }
+
+#[cfg(test)]
+mod tests {
+    use metacat::theory::RawTheorySet;
+
+    use crate::elaborate::elaborate;
+
+    #[test]
+    fn name_target_type_map_uses_globally_fresh_generated_vars() {
+        let raw = RawTheorySet::from_text(
+            r#"
+            (theory type nat {
+              (arr 1 : 0 -> 1)
+              (arr * : 2 -> 1)
+              (arr -> : 2 -> 1)
+              (arr val : 1 -> 1)
+              (arr bool : 0 -> 1)
+              (arr ix : 1 -> 1)
+            })
+
+            (theory program type {
+              (arr dep : {[n.] ([.n] ix val)} -> {[n.] (bool val)})
+            })
+            "#,
+        )
+        .expect("test theory should parse");
+
+        let elaborated = elaborate(raw).expect("test theory should elaborate");
+        let expected = RawTheorySet::from_text(
+            r#"
+            (theory program type {
+              (arr name.dep :
+                [p0 . p0]
+                ->
+                ([p0 . p0 p0]
+                  {
+                    ({[n.] ([.n] ix val)} [s1 . s1])
+                    ({[n.] (bool val)} [t2 . t2])
+                  }
+                  ->
+                  val))
+            })
+            "#,
+        )
+        .expect("expected theory should parse");
+
+        let program: super::Operation = "program".parse().unwrap();
+        let name_dep: super::Operation = "name.dep".parse().unwrap();
+        let actual_arrow = elaborated
+            .theories
+            .get(&program)
+            .and_then(|theory| theory.arrows.get(&name_dep))
+            .expect("name.dep should be generated");
+        let expected_arrow = expected
+            .theories
+            .get(&program)
+            .and_then(|theory| theory.arrows.get(&name_dep))
+            .expect("expected name.dep should exist");
+
+        assert_eq!(actual_arrow.type_maps, expected_arrow.type_maps);
+    }
+}

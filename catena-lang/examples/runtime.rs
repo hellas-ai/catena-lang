@@ -14,6 +14,7 @@ fn main() -> anyhow::Result<()> {
         root.join("stdlib/product.hex"),
         root.join("stdlib/gpu.hex"),
         root.join("examples/example.hex"),
+        root.join("examples/sincos.hex"),
     ])?;
 
     // Input values for `array-head-u64`
@@ -39,6 +40,32 @@ fn main() -> anyhow::Result<()> {
         head == values[0],
         "array head mismatch: got 0x{head:x}, expected 0x{:x}",
         values[0]
+    );
+
+    let input = 1.0_f32;
+    let [sin_approx_output] = runtime.exec("sin-approx", [input.into()])?;
+    let Value::F32(sin_approx_output) = sin_approx_output else {
+        anyhow::bail!("sin-approx returned non-f32 value: {sin_approx_output:?}");
+    };
+
+    let expected = input.sin();
+    println!("sin-approx (x = 1.0): {sin_approx_output} (expected {expected})");
+    anyhow::ensure!(
+        (sin_approx_output - expected).abs() < 1e-4,
+        "sin-approx output mismatch: got {sin_approx_output}, expected {expected}"
+    );
+
+    let input = 4.0_f32;
+    let [full_output] = runtime.exec("sin-approx-full", [input.into()])?;
+    let Value::F32(full_output) = full_output else {
+        anyhow::bail!("sin-approx-full returned non-f32 value: {full_output:?}");
+    };
+
+    let expected = input.sin();
+    println!("sin-approx-full (x = {input}): {full_output} (sin {expected})");
+    anyhow::ensure!(
+        (full_output - expected).abs() < 1e-5,
+        "sin-approx-full output mismatch for x={input}: got {full_output}, expected {expected}"
     );
 
     Ok(())

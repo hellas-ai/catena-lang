@@ -68,7 +68,12 @@
   (arr f32.zero : [] -> ({0 f32} :))
   (arr f32.one  : [] -> (f32 val))
   (arr f32.add  : {(f32 val) (f32 val)} -> (f32 val))
+  (arr f32.sub  : {(f32 val) (f32 val)} -> (f32 val))
+  (arr f32.neg  : (f32 val) -> (f32 val))
   (arr f32.mul  : {(f32 val) (f32 val)} -> (f32 val))
+  (arr f32.div  : {(f32 val) (f32 val)} -> (f32 val))
+  (arr f32.select : {(bool val) (f32 val) (f32 val)} -> (f32 val))
+  (arr f32.round-to-u32 : (f32 val) -> (u32 val))
   ##############################################################################
   # u64 methods
   #
@@ -82,7 +87,11 @@
   (arr u32.zero : [] -> ({0 u32} :))
   (arr u32.one  : [] ->  (u32 val))
   (arr u32.add  : {(u32 val) (u32 val)} ->  (u32 val))
+  (arr u32.and  : {(u32 val) (u32 val)} ->  (u32 val))
+  (arr u32.eq   : {(u32 val) (u32 val)} ->  (bool val))
   (arr u32.mul  : {(u32 val) (u32 val)} ->  (u32 val))
+  (arr u32.to-f32 : (u32 val) -> (f32 val))
+  (arr u32.bitcast-f32 : (u32 val) -> (f32 val))
 
   # Indices & dependent types
   # assert-nz : (n : u64) -> |- (n > 0)

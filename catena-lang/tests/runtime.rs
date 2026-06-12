@@ -10,6 +10,7 @@ const STDLIB: &[&str] = &[
     include_str!("../stdlib/product.hex"),
     include_str!("../stdlib/gpu.hex"),
 ];
+const SIN_EXAMPLES: &str = include_str!("../examples/sincos.hex");
 
 /// Create a runtime with a provided user source file
 fn runtime_with(source: &'static str) -> anyhow::Result<Runtime> {
@@ -93,6 +94,67 @@ fn two_times_two_float() -> anyhow::Result<()> {
     };
 
     assert_eq!(result, 4.0);
+    Ok(())
+}
+
+#[test]
+fn sin_approx_test() -> anyhow::Result<()> {
+    let runtime = runtime_with(SIN_EXAMPLES)?;
+
+    // Input range where the Taylor expansion is good enough
+    for input in [0.0_f32, 0.5, 1.0, -0.5, -1.0] {
+        let [result] = runtime.exec("sin-approx", [input.into()])?;
+        let Value::F32(result) = result else {
+            anyhow::bail!("sin-approx returned non-f32 value: {result:?}");
+        };
+
+        let expected = input.sin();
+        assert!(
+            (result - expected).abs() < 1e-4,
+            "sin-approx({input}) = {result}, expected {expected}"
+        );
+    }
+
+    Ok(())
+}
+
+#[test]
+fn sin_approx_full_test() -> anyhow::Result<()> {
+    let runtime = runtime_with(SIN_EXAMPLES)?;
+
+    for input in [3.0_f32, 6.0, 10.0, 100.0, 200.0] {
+        let [result] = runtime.exec("sin-approx-full", [input.into()])?;
+        let Value::F32(result) = result else {
+            anyhow::bail!("sin-approx-full returned non-f32 value: {result:?}");
+        };
+
+        let expected = input.sin();
+        assert!(
+            (result - expected).abs() < 1e-4,
+            "sin-approx-full({input}) = {result}, expected {expected}"
+        );
+    }
+
+    Ok(())
+}
+
+#[test]
+fn u32_bitcast_f32_test() -> anyhow::Result<()> {
+    let runtime = runtime_with(
+        r#"
+        (def program bitcast-one : [] -> (f32 val) = (
+          const.u32.0x3F800000
+          u32.bitcast-f32
+        ))
+        "#,
+    )?;
+
+    let [result] = runtime.exec("bitcast-one", [])?;
+    let Value::F32(result) = result else {
+        anyhow::bail!("bitcast-one returned non-f32 value: {result:?}");
+    };
+
+    assert_eq!(result, 1.0);
     Ok(())
 }
 

@@ -108,7 +108,7 @@ impl Runtime {
             .prefix("catena-report-")
             .tempdir()?;
         report.dump_to_dir(report_dir.path())?;
-        let cpp_path = report_dir.path().join("gpu/program.cpp");
+        let cpp_path = report_dir.path().join("gpu/hip.cpp");
         let artifact = super::artifact::compile(&cpp_path)?;
 
         let library = load_generated_library(artifact.path()).map_err(InitError::LoadLibrary)?;

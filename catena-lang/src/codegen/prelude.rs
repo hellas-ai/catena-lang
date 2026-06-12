@@ -1,4 +1,5 @@
 pub const GPU_PRELUDE: &str = r#"#include <hip/hip_runtime.h>
+#include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 
@@ -80,4 +81,14 @@ __host__ __device__ static inline void bool_copy(uint8_t arg0, uint8_t *out1, ui
 __host__ __device__ static inline void bool_li(uint8_t arg0, uint8_t *out1) {
     *out1 = arg0;
 }
+
+__host__ __device__ static inline float catena_u32_bitcast_f32(uint32_t bits) {
+    union {
+        uint32_t u;
+        float f;
+    } value;
+    value.u = bits;
+    return value.f;
+}
+
 "#;

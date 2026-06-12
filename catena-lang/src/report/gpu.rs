@@ -1,6 +1,9 @@
 use std::{fs, io, path::Path};
 
-use crate::{codegen::gpu::render_modules, report::CompileReport};
+use crate::{
+    codegen::{GpuDialect, gpu::render_modules},
+    report::CompileReport,
+};
 
 pub fn dump_gpu(report: &CompileReport, dir: &Path) -> io::Result<()> {
     let Some(gpu_modules) = &report.gpu_modules else {
@@ -15,13 +18,15 @@ pub fn dump_gpu(report: &CompileReport, dir: &Path) -> io::Result<()> {
         }
     }
 
-    let rendered = render_modules(gpu_modules).map_err(|error| {
-        io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!("failed to render GPU code: {error}"),
-        )
-    })?;
-    fs::write(dir.join("program.cpp"), rendered)?;
+    for (dialect, filename) in [(GpuDialect::Hip, "hip.cpp"), (GpuDialect::Cuda, "cuda.cpp")] {
+        let rendered = render_modules(gpu_modules, dialect).map_err(|error| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("failed to render GPU code for {filename}: {error}"),
+            )
+        })?;
+        fs::write(dir.join(filename), rendered)?;
+    }
 
     Ok(())
 }

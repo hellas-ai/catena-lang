@@ -36,6 +36,56 @@ pub type GpuModuleMap = BTreeMap<Operation, GpuModule>;
 
 const PROGRAM_THEORY: &str = "program";
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GpuDialect {
+    Hip,
+    Cuda,
+}
+
+impl GpuDialect {
+    pub fn runtime_header(self) -> &'static str {
+        match self {
+            Self::Hip => "hip/hip_runtime.h",
+            Self::Cuda => "cuda_runtime.h",
+        }
+    }
+
+    pub fn error_type(self) -> &'static str {
+        match self {
+            Self::Hip => "hipError_t",
+            Self::Cuda => "cudaError_t",
+        }
+    }
+
+    pub fn success_value(self) -> &'static str {
+        match self {
+            Self::Hip => "hipSuccess",
+            Self::Cuda => "cudaSuccess",
+        }
+    }
+
+    pub fn error_string_fn(self) -> &'static str {
+        match self {
+            Self::Hip => "hipGetErrorString",
+            Self::Cuda => "cudaGetErrorString",
+        }
+    }
+
+    pub fn managed_alloc_fn(self) -> &'static str {
+        match self {
+            Self::Hip => "hipMallocManaged",
+            Self::Cuda => "cudaMallocManaged",
+        }
+    }
+
+    pub fn device_compile_guard(self) -> &'static str {
+        match self {
+            Self::Hip => "__HIP_DEVICE_COMPILE__",
+            Self::Cuda => "__CUDA_ARCH__",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GpuModule {
     /// generated code symbol

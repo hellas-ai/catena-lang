@@ -4,8 +4,8 @@ use hexpr::Operation;
 use thiserror::Error;
 
 use crate::codegen::{
-    GpuAssign, GpuFunction, GpuModule, GpuModuleMap, GpuValue, GpuVar, lower_types::CType,
-    prelude::GPU_PRELUDE, runtime_type,
+    GpuAssign, GpuDialect, GpuFunction, GpuModule, GpuModuleMap, GpuValue, GpuVar,
+    lower_types::CType, prelude::render_gpu_prelude, runtime_type,
 };
 
 #[derive(Debug, Error)]
@@ -36,23 +36,26 @@ pub enum GpuRenderError {
     InvalidIntegerConstant { op: Operation },
 }
 
-/// Render a single GPU dataflow module as standalone HIP/C++ source.
+/// Render a single GPU dataflow module as standalone GPU-flavored C++ source.
 ///
 /// Codegen has already produced the semantic `GpuModule`; this renderer is responsible only for
 /// turning that artifact into text. It still contains primitive-specific lowering for the current
 /// small backend surface, but it should not inspect the original Catena graph or report state.
-pub fn render_module(module: &GpuModule) -> Result<String, GpuRenderError> {
+pub fn render_module(module: &GpuModule, dialect: GpuDialect) -> Result<String, GpuRenderError> {
     let mut out = String::new();
-    out.push_str(GPU_PRELUDE);
+    out.push_str(&render_gpu_prelude(dialect));
     out.push('\n');
-    render_module_body(&mut out, module)?;
+    render_module_body(&mut out, module, dialect)?;
     Ok(out)
 }
 
-/// Render all generated GPU modules into one HIP/C++ translation unit.
-pub fn render_modules(modules: &GpuModuleMap) -> Result<String, GpuRenderError> {
+/// Render all generated GPU modules into one GPU-flavored C++ translation unit.
+pub fn render_modules(
+    modules: &GpuModuleMap,
+    dialect: GpuDialect,
+) -> Result<String, GpuRenderError> {
     let mut out = String::new();
-    out.push_str(GPU_PRELUDE);
+    out.push_str(&render_gpu_prelude(dialect));
     out.push('\n');
 
     for module in modules.values() {
@@ -63,15 +66,19 @@ pub fn render_modules(modules: &GpuModuleMap) -> Result<String, GpuRenderError> 
     }
 
     for module in modules.values() {
-        render_module_body(&mut out, module)?;
+        render_module_body(&mut out, module, dialect)?;
         out.push('\n');
     }
 
     Ok(out)
 }
 
-fn render_module_body(out: &mut String, module: &GpuModule) -> Result<(), GpuRenderError> {
-    // Materialization is represented in the dataflow body as one assignment, but HIP needs an
+fn render_module_body(
+    out: &mut String,
+    module: &GpuModule,
+    dialect: GpuDialect,
+) -> Result<(), GpuRenderError> {
+    // Materialization is represented in the dataflow body as one assignment, but GPU codegen needs an
     // auxiliary `__global__` kernel in addition to the host wrapper function.
     for assignment in &module.entry.assignments {
         if assignment.op.as_str() == "gpu.materialize" {
@@ -85,7 +92,7 @@ fn render_module_body(out: &mut String, module: &GpuModule) -> Result<(), GpuRen
     }
 
     // The entry function is the ordinary host-callable wrapper for this definition.
-    render_function(out, &module.entry)?;
+    render_function(out, &module.entry, dialect)?;
     Ok(())
 }
 
@@ -95,7 +102,11 @@ fn render_function_decl(out: &mut String, function: &GpuFunction) -> Result<(), 
     Ok(())
 }
 
-fn render_function(out: &mut String, function: &GpuFunction) -> Result<(), GpuRenderError> {
+fn render_function(
+    out: &mut String,
+    function: &GpuFunction,
+    dialect: GpuDialect,
+) -> Result<(), GpuRenderError> {
     out.push_str(&function_signature(function)?);
     out.push_str(" {\n");
     let mut declared = function
@@ -110,7 +121,7 @@ fn render_function(out: &mut String, function: &GpuFunction) -> Result<(), GpuRe
                 out.push_str(&format!("    {};\n", local_decl(output)?));
             }
         }
-        render_assignment(out, function, assignment)?;
+        render_assignment(out, function, assignment, dialect)?;
     }
 
     // Multiple outputs are returned by writing computed target wires into pointer parameters.
@@ -151,6 +162,7 @@ fn render_assignment(
     out: &mut String,
     function: &GpuFunction,
     assignment: &GpuAssign,
+    dialect: GpuDialect,
 ) -> Result<(), GpuRenderError> {
     if let Some(symbol) = &assignment.call_symbol {
         return render_call(out, symbol, assignment);
@@ -215,7 +227,7 @@ fn render_assignment(
         "ix.zero" => render_ix_zero(out, assignment)?,
         "ix" => render_ix(out, assignment)?,
         "eval" => render_eval(out, assignment)?,
-        "gpu.materialize" => render_materialize_call(out, function, assignment)?,
+        "gpu.materialize" => render_materialize_call(out, function, assignment, dialect)?,
         op if op.starts_with("const.u64.") => {
             render_int_const(out, assignment, "const.u64.", "ULL")?
         }
@@ -594,6 +606,7 @@ fn render_materialize_call(
     out: &mut String,
     function: &GpuFunction,
     assignment: &GpuAssign,
+    dialect: GpuDialect,
 ) -> Result<(), GpuRenderError> {
     let [output] = assignment.outputs.as_slice() else {
         return Err(invalid_outputs(assignment, 1));
@@ -619,9 +632,10 @@ fn render_materialize_call(
         name = output.name
     ));
     out.push_str(&format!(
-        "    catena_hip_check(hipMallocManaged((void **)&{name}_data, {name}_len * sizeof({element})));\n",
+        "    catena_gpu_check({managed_alloc_fn}((void **)&{name}_data, {name}_len * sizeof({element})));\n",
         name = output.name,
-        element = c_type(element)
+        element = c_type(element),
+        managed_alloc_fn = dialect.managed_alloc_fn(),
     ));
     out.push_str(&format!(
         "    {kernel_name}<<<dim3({launch}.grid_dim.x, {launch}.grid_dim.y, {launch}.grid_dim.z), dim3({launch}.block_dim.x, {launch}.block_dim.y, {launch}.block_dim.z)>>>\n"

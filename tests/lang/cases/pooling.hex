@@ -18,6 +18,7 @@
 
 (theory type nat {
   (arr != : 2 -> 1)
+  (arr succ : 1 -> 1)
 })
 
 (theory program type {
@@ -64,17 +65,24 @@
   } -> {[x.]
     ({[.x] 0} > |-) 
   })
-  (arr u64.neq-zero-neq-one.gt-one : {[x.]
-    ([.x 0] != |-) 
-    ([.x 1] != |-) 
-  } -> {[x.]
-    ([.x 1] > |-) 
+  (arr u64.is-succ : {[x y.]
+    ({[.x] u64} :)
+    ({[.y] u64} :)
+    ({[.y] [.x]} > |-) # x < y
+  } -> {[x y.]
+    (bool val)
+    ({([.x] succ) [.y]} = |-) # selected branch: x + 1 = y
+    ({[.y] ([.x] succ)} > |-) # non-selected branch: x + 1 < y
   })
-  (arr u64.gt-one-from-nonzero-and-ne-one : {[x.]
-    ({[.x] 0} > |-)
-    ([.x 1] != |-)
-  } -> {[x.]
-    ({[.x] 1} > |-)
+  (arr u64.succ-zero.eq-position : {[position.]
+    ({(0 succ) [.position]} = |-)
+  } -> {[position.]
+    ({[.position] 1} = |-)
+  })
+  (arr u64.gt-succ-zero.gt-one : {[position.]
+    ({[.position] (0 succ)} > |-)
+  } -> {[position.]
+    ({[.position] 1} > |-)
   })
   (arr u64.gt-one.gt-zero : {[x.]
     ({[.x] 1} > |-)
@@ -355,10 +363,11 @@
   {[position_gt_zero payload.]
     ([.payload] pool.payload.elim [input index u64_position position_lt_n.])
     ([.index] ix.extent [extent.])
-    ([] u64.one.judgement :.unpack [one one_type u64_one.])
-    ([.u64_position u64_one] u64.eq [is_one one_case position_not_one.])
     ([.u64_position] :.unpack [position_param position_type _u64_position.])
-    ([.position_gt_zero position_not_one] u64.gt-one-from-nonzero-and-ne-one [many_case.])
+    ([] u64.zero [u64_zero.])
+    ([.u64_zero u64_position position_gt_zero] u64.is-succ [is_one succ_zero_eq_position succ_zero_lt_position.])
+    ([.succ_zero_eq_position] u64.succ-zero.eq-position [one_case.])
+    ([.succ_zero_lt_position] u64.gt-succ-zero.gt-one [many_case.])
     ([.input index u64_position position_lt_n] pool.payload.intro [payload_inner.])
 
     # Inner if:

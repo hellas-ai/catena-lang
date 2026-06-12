@@ -79,6 +79,17 @@
   } -> {[x y z.]
     ({[.z] [.x]} > |-)
   })
+  (arr u64.succ.gt-base : {[x.]
+    ({[.x] u64} :)
+  } -> {[x.]
+    ({([.x] succ) [.x]} > |-)
+  })
+  (arr u64.succ-eq.reflect-gt : {[x pred base.]
+    ({([.pred] succ) [.x]} = |-)
+    ({[.x] ([.base] succ)} > |-)
+  } -> {[x pred base.]
+    ({[.pred] [.base]} > |-)
+  })
   # Extract the numeric value of a valid index together with its range proof.
   (arr ix.index : {[n position.]
     ([.n] ix val)
@@ -92,15 +103,35 @@
     [.n]
   })
 
-  (arr u64.pred2.in-range : {[n x pred pred2.]
+  (arr u64.pred : {[x pred.]
     ({[.x] u64} :)
-    ([.n x] > |-) 
-    ({[.x] (0 succ)} > |-)
-  } -> {[n x pred pred2.]
+    ({[.x] 0} > |-)
+  } -> {[x pred.]
     ({[.pred] u64} :)
+    ({([.pred] succ) [.x]} = |-)
+  })
+  (def u64.pred.lt-n : {[n x pred.]
+    ({([.pred] succ) [.x]} = |-)
+    ([.n x] > |-)
+  } -> {[n x pred.]
     ([.n pred] > |-) 
-    ({[.pred2] u64} :)
-    ([.n pred2] > |-) 
+  }
+  =
+  {[pred_succ_x x_lt_n.]
+    ([.pred_succ_x] u64.succ-eq.gt-base [x_gt_pred.])
+    ([.x_gt_pred x_lt_n] u64.gt.trans [pred_lt_n.])
+    [.pred_lt_n]
+  })
+  (def u64.pred.gt-zero : {[x pred.]
+    ({[.x] (0 succ)} > |-)
+    ({([.pred] succ) [.x]} = |-)
+  } -> {[x pred.]
+    ({[.pred] 0} > |-)
+  }
+  =
+  {[x_gt_succ_zero pred_succ_x.]
+    ([.pred_succ_x x_gt_succ_zero] u64.succ-eq.reflect-gt [pred_gt_zero.])
+    [.pred_gt_zero]
   })
   (arr ix.from-u64 : {[n position.]
     ({[.position] u64} :)
@@ -255,7 +286,14 @@
     {[succ_zero_lt_position payload.]
       ([.payload] pool.payload.elim [input index u64_position position_lt_n.])
       ([.u64_position position_lt_n] ix.from-u64 [current_index.])
-      ([.u64_position position_lt_n succ_zero_lt_position] u64.pred2.in-range [minus_one minus_one_lt_n minus_two minus_two_lt_n.])
+      ([] u64.zero [u64_zero.])
+      ([.u64_zero] u64.succ.gt-base [succ_zero_gt_zero.])
+      ([.succ_zero_gt_zero succ_zero_lt_position] u64.gt.trans [position_gt_zero.])
+      ([.u64_position position_gt_zero] u64.pred [minus_one minus_one_succ_position.])
+      ([.minus_one_succ_position position_lt_n] u64.pred.lt-n [minus_one_lt_n.])
+      ([.succ_zero_lt_position minus_one_succ_position] u64.pred.gt-zero [minus_one_gt_zero.])
+      ([.minus_one minus_one_gt_zero] u64.pred [minus_two minus_two_succ_minus_one.])
+      ([.minus_two_succ_minus_one minus_one_lt_n] u64.pred.lt-n [minus_two_lt_n.])
       ([.minus_one minus_one_lt_n] ix.from-u64 [minus_one_index.])
       ([.minus_two minus_two_lt_n] ix.from-u64 [minus_two_index.])
       ([.current_index input] ix [current.])

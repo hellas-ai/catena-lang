@@ -13,7 +13,7 @@ fn main() -> anyhow::Result<()> {
         root.join("stdlib/fn.hex"),
         root.join("stdlib/product.hex"),
         root.join("stdlib/gpu.hex"),
-        root.join("example.hex"),
+        root.join("examples/example.hex"),
     ])?;
 
     // Input values for `array-head-u64`

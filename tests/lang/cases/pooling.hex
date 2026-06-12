@@ -18,7 +18,7 @@
 
 (theory type nat {
   (arr != : 2 -> 1)
-  (arr succ : 1 -> 1)
+  (arr succ : 1 -> 1) 
 })
 
 (theory program type {
@@ -84,29 +84,12 @@
   } -> {[x.]
     ({[.x] 0} > |-)
   })
-  (arr u64.pred : {[x y pred.]
-    ({[.x] u64} :)
-    ([.x y] > |-)
-  } -> {[x y pred.]
-    ({[.pred] u64} :)
-  })
-  (arr u64.pred.gt-zero : {[x pred.]
-    ([.x 1] > |-)
-    ({[.pred] u64} :)
-  } -> {[x pred.]
-    ([.pred 0] > |-)
-  })
+  
   (arr u64.pred.gt-zero2 : {[x pred.]
     ({[.x] (0 succ)} > |-)
     ({[.pred] u64} :)
   } -> {[x pred.]
     ({[.pred] 0} > |-)
-  })
-  (arr u64.pred2 : {[x pred2.]
-    ({[.x] u64} :)
-    ([.x 1] > |-)
-  } -> {[x pred2.]
-    ({[.pred2] u64} :)
   })
 
   # Extract the numeric value of a valid index together with its range proof.
@@ -121,28 +104,7 @@
   } -> {[n.]
     [.n]
   })
-  (arr u64.pred.lt-n : {[n x y pred.]
-    ([.n x] > |-) 
-    ([.x y] > |-)
-    ({[.pred] u64} :)
-  } -> {[n x y pred.]
-    ([.n pred] > |-) 
-  })
-  (arr u64.pred2.lt-n : {[n x pred2.]
-    ([.n x] > |-) 
-    ([.x 1] > |-)
-    ({[.pred2] u64} :)
-  } -> {[n x pred2.]
-    ([.n pred2] > |-) 
-  })
-  (arr u64.pred.in-range : {[n x pred.]
-    ({[.x] u64} :)
-    ([.n x] > |-) 
-    ([.x 0] > |-)
-  } -> {[n x pred.]
-    ({[.pred] u64} :)
-    ([.n pred] > |-) 
-  })
+
   (arr u64.pred2.in-range : {[n x pred pred2.]
     ({[.x] u64} :)
     ([.n x] > |-) 

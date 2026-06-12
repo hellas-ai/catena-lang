@@ -5,10 +5,7 @@ use std::{fs, io, path::Path};
 
 use hexpr::Operation;
 use metacat::{
-    theory::{
-        RawTheorySet, TheoryId, TheorySet,
-        ast::RawTheory,
-    },
+    theory::{RawTheorySet, TheoryId, TheorySet, ast::RawTheory},
     tree::Tree,
 };
 use open_hypergraphs::lax::OpenHypergraph;
@@ -71,7 +68,10 @@ impl CompileReport {
             self.raw_theories.to_hexpr_text(),
         )?;
         if let Some(elaborated) = &self.elaborated {
-            fs::write(elaboration_dir.join("output.hex"), elaborated.to_hexpr_text())?;
+            fs::write(
+                elaboration_dir.join("output.hex"),
+                elaborated.to_hexpr_text(),
+            )?;
             fs::write(
                 elaboration_dir.join("generated.hex"),
                 elaboration_delta(&self.raw_theories, elaborated)?.to_hexpr_text(),
@@ -93,8 +93,8 @@ fn elaboration_delta(raw: &RawTheorySet, elaborated: &RawTheorySet) -> io::Resul
         let mut arrows = BTreeMap::new();
 
         for (arrow_name, arrow) in &elaborated_theory.arrows {
-            let existed_before = baseline_theory
-                .is_some_and(|theory| theory.arrows.contains_key(arrow_name));
+            let existed_before =
+                baseline_theory.is_some_and(|theory| theory.arrows.contains_key(arrow_name));
             if !existed_before {
                 arrows.insert(arrow_name.clone(), arrow.clone());
             }

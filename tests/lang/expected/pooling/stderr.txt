@@ -1,1 +1,4 @@
-Error: failed to render GPU code: unsupported GPU operation `u64.gt-one.gt-zero`
+Error: definition `u64.pred.lt-n` is used with non-monomorphic runtime interface
+
+Caused by:
+    definition `u64.pred.lt-n` is used with non-monomorphic runtime interface

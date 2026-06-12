@@ -208,9 +208,31 @@ mod tests {
 
     use crate::elaborate::elaborate;
 
+    fn assert_generated_arrow_type_maps(raw_text: &str, expected_text: &str, arrow_name: &str) {
+        let raw = RawTheorySet::from_text(raw_text).expect("test theory should parse");
+        let elaborated = elaborate(raw).expect("test theory should elaborate");
+        let expected =
+            RawTheorySet::from_text(expected_text).expect("expected theory should parse");
+
+        let program: super::Operation = "program".parse().unwrap();
+        let arrow_name: super::Operation = arrow_name.parse().unwrap();
+        let actual_arrow = elaborated
+            .theories
+            .get(&program)
+            .and_then(|theory| theory.arrows.get(&arrow_name))
+            .expect("generated arrow should exist");
+        let expected_arrow = expected
+            .theories
+            .get(&program)
+            .and_then(|theory| theory.arrows.get(&arrow_name))
+            .expect("expected arrow should exist");
+
+        assert_eq!(actual_arrow.type_maps, expected_arrow.type_maps);
+    }
+
     #[test]
     fn name_target_type_map_uses_globally_fresh_generated_vars() {
-        let raw = RawTheorySet::from_text(
+        assert_generated_arrow_type_maps(
             r#"
             (theory type nat {
               (arr 1 : 0 -> 1)
@@ -225,11 +247,6 @@ mod tests {
               (arr dep : {[n.] ([.n] ix val)} -> {[n.] (bool val)})
             })
             "#,
-        )
-        .expect("test theory should parse");
-
-        let elaborated = elaborate(raw).expect("test theory should elaborate");
-        let expected = RawTheorySet::from_text(
             r#"
             (theory program type {
               (arr name.dep :
@@ -244,22 +261,50 @@ mod tests {
                   val))
             })
             "#,
-        )
-        .expect("expected theory should parse");
+            "name.dep",
+        );
+    }
 
-        let program: super::Operation = "program".parse().unwrap();
-        let name_dep: super::Operation = "name.dep".parse().unwrap();
-        let actual_arrow = elaborated
-            .theories
-            .get(&program)
-            .and_then(|theory| theory.arrows.get(&name_dep))
-            .expect("name.dep should be generated");
-        let expected_arrow = expected
-            .theories
-            .get(&program)
-            .and_then(|theory| theory.arrows.get(&name_dep))
-            .expect("expected name.dep should exist");
+    #[test]
+    fn name_payload_target_type_map_uses_globally_fresh_generated_vars() {
+        assert_generated_arrow_type_maps(
+            r#"
+            (theory type nat {
+              (arr 1 : 0 -> 1)
+              (arr * : 2 -> 1)
+              (arr -> : 2 -> 1)
+              (arr val : 1 -> 1)
+              (arr bool : 0 -> 1)
+              (arr ix : 1 -> 1)
+            })
 
-        assert_eq!(actual_arrow.type_maps, expected_arrow.type_maps);
+            (theory program type {
+              (arr dep.payload.then :
+                {[n.]
+                  (bool val)
+                  ([.n] ix val)
+                }
+                ->
+                {[n.]
+                  (bool val)
+                })
+            })
+            "#,
+            r#"
+            (theory program type {
+              (arr name.dep.payload.then :
+                [p0 . p0]
+                ->
+                ([p0 . p0 p0]
+                  {
+                    ({[n.] (bool val) ([.n] ix val)} *)
+                    ({[n.] (bool val)} [t1 . t1])
+                  }
+                  ->
+                  val))
+            })
+            "#,
+            "name.dep.payload.then",
+        );
     }
 }

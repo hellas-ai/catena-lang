@@ -52,18 +52,12 @@
     ([.nonzero_case] u64.nonzero.gt-zero [gt_zero.])
     [.is_zero zero_case gt_zero]
   })
-  (arr u64.one.judgement : [] -> ({1 u64} :))
   (arr :.unpack : {[x t.]
     ({[.x] [.t]} :)
   } -> {[x t.]
     [.x]
     [.t]
     ({[.x] [.t]} :)
-  })
-  (arr u64.one.gt-zero : {[x.]
-    ({[.x] 1} = |-) 
-  } -> {[x.]
-    ({[.x] 0} > |-) 
   })
   (arr u64.is-succ : {[x y.]
     ({[.x] u64} :)
@@ -74,26 +68,21 @@
     ({([.x] succ) [.y]} = |-) # selected branch: x + 1 = y
     ({[.y] ([.x] succ)} > |-) # non-selected branch: x + 1 < y
   })
-  (arr u64.succ-zero.eq-position : {[position.]
+  (arr u64.succ-zero.eq-position.gt-zero : {[position.]
     ({(0 succ) [.position]} = |-)
   } -> {[position.]
-    ({[.position] 1} = |-)
+    ({[.position] 0} > |-)
   })
-  (arr u64.gt-succ-zero.gt-one : {[position.]
-    ({[.position] (0 succ)} > |-)
-  } -> {[position.]
-    ({[.position] 1} > |-)
-  })
-  (arr u64.gt-one.gt-zero : {[x.]
-    ({[.x] 1} > |-)
-  } -> {[x.]
-    ({[.x] 0} > |-)
-  })
-  (arr u64.eq-one.lt-n.n-gt-zero : {[n position.]
-    ({[.position] 1} = |-)
+  (arr u64.succ-zero.eq-position.lt-n.n-gt-zero : {[n position.]
+    ({(0 succ) [.position]} = |-)
     ([.n position] > |-)
   } -> {[n position.]
     ({[.n] 0} > |-)
+  })
+  (arr u64.gt-succ-zero.gt-zero : {[x.]
+    ({[.x] (0 succ)} > |-)
+  } -> {[x.]
+    ({[.x] 0} > |-)
   })
   (arr u64.pred : {[x y pred.]
     ({[.x] u64} :)
@@ -108,7 +97,7 @@
     ([.pred 0] > |-)
   })
   (arr u64.pred.gt-zero2 : {[x pred.]
-    ({[.x] 1} > |-)
+    ({[.x] (0 succ)} > |-)
     ({[.pred] u64} :)
   } -> {[x pred.]
     ({[.pred] 0} > |-)
@@ -157,7 +146,7 @@
   (arr u64.pred2.in-range : {[n x pred pred2.]
     ({[.x] u64} :)
     ([.n x] > |-) 
-    ([.x 1] > |-)
+    ({[.x] (0 succ)} > |-)
   } -> {[n x pred pred2.]
     ({[.pred] u64} :)
     ([.n pred] > |-) 
@@ -283,7 +272,7 @@
 
   (def f32.pool-at-one :
     {[n position.]
-      ({[.position] 1} = |-)
+      ({(0 succ) [.position]} = |-)
       ({
         ({cap.ref [.n] f32} buf val)
         ({
@@ -297,11 +286,11 @@
     }
     -> {[n position.] (f32 val)}
     =
-    {[position_eq_one payload.]
+    {[succ_zero_eq_position payload.]
       ([.payload] pool.payload.elim [input index u64_position position_lt_n.])
-      ([.position_eq_one] u64.one.gt-zero [position_gt_zero.])
+      ([.succ_zero_eq_position] u64.succ-zero.eq-position.gt-zero [position_gt_zero.])
       ([.u64_position position_gt_zero position_lt_n] ix.from-u64 [current_index.])
-      ([.position_eq_one position_lt_n] u64.eq-one.lt-n.n-gt-zero [n_gt_zero.])
+      ([.succ_zero_eq_position position_lt_n] u64.succ-zero.eq-position.lt-n.n-gt-zero [n_gt_zero.])
       ([.n_gt_zero] ix.zero-index [zero_index.])
       ([.current_index input] ix [current.])
       ([.zero_index input] ix [previous.])
@@ -311,7 +300,7 @@
 
   (def f32.pool-at-many :
     {[n position.]
-      ({[.position] 1} > |-)
+      ({[.position] (0 succ)} > |-)
       ({
         ({cap.ref [.n] f32} buf val)
         ({
@@ -325,12 +314,12 @@
     }
     -> {[n position.] (f32 val)}
     =
-    {[position_gt_one payload.]
+    {[succ_zero_lt_position payload.]
       ([.payload] pool.payload.elim [input index u64_position position_lt_n.])
-      ([.position_gt_one] u64.gt-one.gt-zero [position_gt_zero.])
+      ([.succ_zero_lt_position] u64.gt-succ-zero.gt-zero [position_gt_zero.])
       ([.u64_position position_gt_zero position_lt_n] ix.from-u64 [current_index.])
-      ([.u64_position position_lt_n position_gt_one] u64.pred2.in-range [minus_one minus_one_lt_n minus_two minus_two_lt_n.])
-      ([.position_gt_one minus_one] u64.pred.gt-zero2 [minus_one_gt_zero.])
+      ([.u64_position position_lt_n succ_zero_lt_position] u64.pred2.in-range [minus_one minus_one_lt_n minus_two minus_two_lt_n.])
+      ([.succ_zero_lt_position minus_one] u64.pred.gt-zero2 [minus_one_gt_zero.])
       ([.minus_one minus_one_gt_zero minus_one_lt_n] ix.from-u64 [minus_one_index.])
       ([.minus_two minus_two_lt_n] ix.from-u64-lt-n [minus_two_index.])
       ([.current_index input] ix [current.])
@@ -365,20 +354,18 @@
     ([.index] ix.extent [extent.])
     ([.u64_position] :.unpack [position_param position_type _u64_position.])
     ([] u64.zero [u64_zero.])
-    ([.u64_zero u64_position position_gt_zero] u64.is-succ [is_one succ_zero_eq_position succ_zero_lt_position.])
-    ([.succ_zero_eq_position] u64.succ-zero.eq-position [one_case.])
-    ([.succ_zero_lt_position] u64.gt-succ-zero.gt-one [many_case.])
+    ([.u64_zero u64_position position_gt_zero] u64.is-succ [is_one one-case many-case.])
     ([.input index u64_position position_lt_n] pool.payload.intro [payload_inner.])
 
     # Inner if:
     #   if index == 1:
-    #     input[index] + input[index - 1]
+    #     input[index] + input[indesucc_zero_lt_positionx - 1]
     #   else:
     #     input[index] + input[index - 1] + input[index - 2]
     ({
-      ([.one_case])
+      ([.one-case])
       ([.extent position_param] name.f32.pool-at-one)
-      ([.many_case])
+      ([.many-case])
       ([.extent position_param] name.f32.pool-at-many)
       ([.is_one])
       ([.payload_inner])

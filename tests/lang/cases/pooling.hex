@@ -269,7 +269,7 @@
     =
     {[env payload.]
       ([.payload] pool.payload.elim [input index u64_position position_lt_n.])
-      ([.input index env] f32.buf.load-zero [current.])
+      ([.index input] ix [current.])
       [.current]
     })
 

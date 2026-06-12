@@ -209,6 +209,7 @@ fn render_assignment(
         "f32.neg" => render_f32_neg(out, assignment)?,
         "f32.mul" => render_binary(out, assignment, "*")?,
         "f32.div" => render_binary(out, assignment, "/")?,
+        "f32.lt" => render_binary_bool(out, assignment, "<")?,
         "f32.select" => render_f32_select(out, assignment)?,
         "f32.round-to-u32" => render_f32_round_to_u32(out, assignment)?,
         "ix.zero" => render_ix_zero(out, assignment)?,

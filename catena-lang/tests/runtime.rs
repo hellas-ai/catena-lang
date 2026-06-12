@@ -122,7 +122,9 @@ fn sin_approx_test() -> anyhow::Result<()> {
 fn sin_approx_full_test() -> anyhow::Result<()> {
     let runtime = runtime_with(SIN_EXAMPLES)?;
 
-    for input in [3.0_f32, 6.0, 10.0, 100.0, 200.0] {
+    for input in [
+        -200.0_f32, -100.0, -10.0, -6.0, -3.0, -1.9, -0.5, 0.0, 0.5, 3.0, 6.0, 10.0, 100.0, 200.0,
+    ] {
         let [result] = runtime.exec("sin-approx-full", [input.into()])?;
         let Value::F32(result) = result else {
             anyhow::bail!("sin-approx-full returned non-f32 value: {result:?}");

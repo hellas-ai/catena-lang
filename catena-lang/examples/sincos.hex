@@ -58,7 +58,7 @@
 # Cody-Waite style range reduction for non-negative inputs:
 # n = round(x * 2/pi), r = x - n * pio2_hi - n * pio2_lo
 # then choose sin/cos and sign from quadrant n mod 4.
-(def program sin-approx-full : (f32 val) -> (f32 val) =
+(def program sin-approx-full-nonneg : (f32 val) -> (f32 val) =
   {[x.]
     ([.] const.u32.0x3F22F983 [inv_pio2_bits.])
     ([.] const.u32.0x3FC90FDA [pio2_hi_bits.])
@@ -95,6 +95,23 @@
     ([.is_q2 neg_sin_r neg_cos_r] f32.select [q23.])
     ([.is_q1 cos_r q23] f32.select [q123.])
     ([.is_q0 sin_r q123] f32.select [result.])
+    [.result]
+  }
+)
+
+# Extend the non-negative implementation using odd symmetry:
+# compute on |x|, then apply a final negate when x < 0.
+(def program sin-approx-full : (f32 val) -> (f32 val) =
+  {[x.]
+    ([.] const.u32.0x00000000 [zero_u32.])
+    ([.zero_u32] u32.to-f32 [zero.])
+    ([.x] f32.neg [neg_x.])
+    ([.x zero] f32.lt [is_negative.])
+    ([.is_negative neg_x x] f32.select [magnitude.])
+
+    ([.magnitude] sin-approx-full-nonneg [base_result.])
+    ([.base_result] f32.neg [negated_result.])
+    ([.is_negative negated_result base_result] f32.select [result.])
     [.result]
   }
 )

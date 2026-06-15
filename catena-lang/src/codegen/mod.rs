@@ -1,4 +1,4 @@
-//! HIP codegen.
+//! GPU codegen.
 //!
 //! This module lowers closure-converted, typed hypergraphs into a small dataflow
 //! GPU artifact. Report generation should render this artifact, not make codegen

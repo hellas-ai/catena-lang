@@ -1,4 +1,4 @@
-//! Catena Hip Runtime
+//! Catena GPU Runtime
 
 /// Public API for creating values to pass into generated catena code
 pub mod value;
@@ -6,7 +6,7 @@ pub mod value;
 /// Helpers for creating and freeing Catena memory values on program boundaries
 pub mod mem;
 
-/// Compile generated HIP/C++ to a shared object.
+/// Compile generated GPU C++ to a shared object.
 pub mod artifact;
 
 /// Marshal catena values into the C ABI and invoke compiled symbols

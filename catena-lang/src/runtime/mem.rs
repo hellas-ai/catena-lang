@@ -1,41 +1,51 @@
 use std::{
-    ffi::{c_int, c_void},
-    path::{Path, PathBuf},
+    env,
+    ffi::{CString, c_int, c_void},
+    path::PathBuf,
     sync::Arc,
 };
 
 use libloading::Library;
 use thiserror::Error;
 
-use crate::runtime::executor::CatenaMem;
+use crate::{codegen::GpuDialect, runtime::executor::CatenaMem};
 
 #[derive(Debug, Error)]
 pub enum MemError {
-    #[error("failed to load HIP runtime library: {0}")]
-    LoadLibrary(#[source] libloading::Error),
-    #[error("failed to resolve HIP runtime symbol `{symbol}`: {source}")]
+    #[error(
+        "failed to load {dialect:?} runtime library (tried: {tried}): {source}",
+        tried = display_paths(tried)
+    )]
+    LoadLibrary {
+        dialect: GpuDialect,
+        tried: Vec<PathBuf>,
+        #[source]
+        source: libloading::Error,
+    },
+    #[error("failed to resolve {dialect:?} runtime symbol `{symbol}`: {source}")]
     LoadSymbol {
+        dialect: GpuDialect,
         symbol: &'static str,
         #[source]
         source: libloading::Error,
     },
-    #[error("HIP call failed with status {0}")]
-    HipStatus(c_int),
+    #[error("{dialect:?} runtime call failed with status {status}")]
+    GpuStatus { dialect: GpuDialect, status: c_int },
 }
 
 /// Mem values represent a fat pointer (ptr + len) which can be passed into a catena program.
 #[derive(Debug)]
 pub struct Mem {
     pub(crate) abi: CatenaMem,
-    hip: Arc<Hip>,
+    gpu: Arc<GpuRuntime>,
 }
 
 impl Mem {
-    pub(crate) fn from_u64_slice(hip: Arc<Hip>, values: &[u64]) -> Result<Self, MemError> {
+    pub(crate) fn from_u64_slice(gpu: Arc<GpuRuntime>, values: &[u64]) -> Result<Self, MemError> {
         let bytes = std::mem::size_of_val(values);
         let mut ptr = std::ptr::null_mut();
         if bytes != 0 {
-            hip.malloc_managed(&mut ptr, bytes)?;
+            gpu.malloc_managed(&mut ptr, bytes)?;
             unsafe {
                 std::ptr::copy_nonoverlapping(values.as_ptr(), ptr.cast::<u64>(), values.len());
             }
@@ -45,17 +55,17 @@ impl Mem {
                 data: ptr,
                 len: bytes as u64,
             },
-            hip,
+            gpu,
         })
     }
 
-    pub(crate) fn null(hip: Arc<Hip>) -> Self {
+    pub(crate) fn null(gpu: Arc<GpuRuntime>) -> Self {
         Self {
             abi: CatenaMem {
                 data: std::ptr::null_mut(),
                 len: 0,
             },
-            hip,
+            gpu,
         }
     }
 }
@@ -63,66 +73,114 @@ impl Mem {
 impl Drop for Mem {
     fn drop(&mut self) {
         if !self.abi.data.is_null() {
-            let _ = self.hip.free(self.abi.data);
+            let _ = self.gpu.free(self.abi.data);
         }
     }
 }
 
 #[derive(Debug)]
-pub(crate) struct Hip {
+pub(crate) struct GpuRuntime {
+    dialect: GpuDialect,
     library: Library,
 }
 
-impl Hip {
-    pub(crate) fn load() -> Result<Self, MemError> {
-        if let Ok(library) = unsafe { Library::new("libamdhip64.so") } {
-            return Ok(Self { library });
-        }
-        for env_var in ["ROCM_PATH", "HIP_PATH"] {
-            let Ok(root) = std::env::var(env_var) else {
-                continue;
-            };
-            let path = PathBuf::from(root).join("lib/libamdhip64.so");
-            if let Ok(library) = unsafe { Library::new(path) } {
-                return Ok(Self { library });
+impl GpuRuntime {
+    pub(crate) fn load(dialect: GpuDialect) -> Result<Self, MemError> {
+        let candidates = candidate_runtime_library_paths(dialect);
+        let mut last_error = None;
+
+        for path in &candidates {
+            match unsafe { Library::new(path) } {
+                Ok(library) => return Ok(Self { dialect, library }),
+                Err(error) => last_error = Some(error),
             }
         }
-        unsafe { Library::new(Path::new("libamdhip64.so")) }
-            .map(|library| Self { library })
-            .map_err(MemError::LoadLibrary)
+
+        Err(MemError::LoadLibrary {
+            dialect,
+            tried: candidates,
+            source: last_error.expect("runtime library candidate list should not be empty"),
+        })
     }
 
     fn malloc_managed(&self, ptr: &mut *mut c_void, bytes: usize) -> Result<(), MemError> {
+        let symbol = match self.dialect {
+            GpuDialect::Hip => "hipMallocManaged",
+            GpuDialect::Cuda => "cudaMallocManaged",
+        };
+        let symbol_cstr =
+            CString::new(symbol).expect("runtime symbol names should not contain NUL");
         let malloc = unsafe {
             self.library
                 .get::<unsafe extern "C" fn(*mut *mut c_void, usize, u32) -> c_int>(
-                    b"hipMallocManaged\0",
+                    symbol_cstr.as_bytes_with_nul(),
                 )
                 .map_err(|source| MemError::LoadSymbol {
-                    symbol: "hipMallocManaged",
+                    dialect: self.dialect,
+                    symbol,
                     source,
                 })?
         };
-        hip_check(unsafe { malloc(ptr, bytes, 1) })
+        gpu_check(self.dialect, unsafe { malloc(ptr, bytes, 1) })
     }
 
     fn free(&self, ptr: *mut c_void) -> Result<(), MemError> {
+        let symbol = match self.dialect {
+            GpuDialect::Hip => "hipFree",
+            GpuDialect::Cuda => "cudaFree",
+        };
+        let symbol_cstr =
+            CString::new(symbol).expect("runtime symbol names should not contain NUL");
         let free = unsafe {
             self.library
-                .get::<unsafe extern "C" fn(*mut c_void) -> c_int>(b"hipFree\0")
+                .get::<unsafe extern "C" fn(*mut c_void) -> c_int>(symbol_cstr.as_bytes_with_nul())
                 .map_err(|source| MemError::LoadSymbol {
-                    symbol: "hipFree",
+                    dialect: self.dialect,
+                    symbol,
                     source,
                 })?
         };
-        hip_check(unsafe { free(ptr) })
+        gpu_check(self.dialect, unsafe { free(ptr) })
     }
 }
 
-fn hip_check(status: c_int) -> Result<(), MemError> {
+fn gpu_check(dialect: GpuDialect, status: c_int) -> Result<(), MemError> {
     if status == 0 {
         Ok(())
     } else {
-        Err(MemError::HipStatus(status))
+        Err(MemError::GpuStatus { dialect, status })
     }
+}
+
+fn candidate_runtime_library_paths(dialect: GpuDialect) -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+    match dialect {
+        GpuDialect::Hip => {
+            candidates.push(PathBuf::from("libamdhip64.so"));
+            for env_var in ["ROCM_PATH", "HIP_PATH"] {
+                if let Some(root) = env::var_os(env_var) {
+                    candidates.push(PathBuf::from(&root).join("lib/libamdhip64.so"));
+                }
+            }
+        }
+        GpuDialect::Cuda => {
+            candidates.push(PathBuf::from("libcudart.so"));
+            for env_var in ["CUDA_PATH", "CUDA_HOME"] {
+                if let Some(root) = env::var_os(env_var) {
+                    let root = PathBuf::from(root);
+                    candidates.push(root.join("lib64/libcudart.so"));
+                    candidates.push(root.join("lib/libcudart.so"));
+                }
+            }
+        }
+    }
+    candidates
+}
+
+fn display_paths(paths: &[PathBuf]) -> String {
+    paths
+        .iter()
+        .map(|path| path.display().to_string())
+        .collect::<Vec<_>>()
+        .join(", ")
 }

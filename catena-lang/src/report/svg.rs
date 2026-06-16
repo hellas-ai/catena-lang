@@ -25,8 +25,6 @@ pub fn dump_svgs(report: &CompileReport, dir: &Path) -> io::Result<()> {
             .ok_or_else(|| invalid_data(format!("missing syntax theory `{syntax}`")))?;
 
         for (definition_name, arrow) in arrows {
-            dump_arrow_type_svgs(dir, theory_id, definition_name, arrow)?;
-
             let Some(term) = &arrow.definition else {
                 continue;
             };
@@ -125,48 +123,6 @@ pub fn dump_svgs(report: &CompileReport, dir: &Path) -> io::Result<()> {
             }
         }
     }
-
-    Ok(())
-}
-
-fn dump_arrow_type_svgs(
-    dir: &Path,
-    theory_id: &TheoryId,
-    arrow_name: &Operation,
-    arrow: &metacat::theory::TheoryArrow,
-) -> io::Result<()> {
-    let arrow_dir = dir
-        .join("arrow_types")
-        .join(qualified_definition_dir(theory_id, arrow_name));
-    fs::create_dir_all(&arrow_dir)?;
-
-    let source_svg = render_untyped_svg(&arrow.type_maps.0).map_err(|error| {
-        io::Error::new(
-            error.kind(),
-            format!("failed to render source type map for `{theory_id}.{arrow_name}`: {error}"),
-        )
-    })?;
-    let source_path = arrow_dir.join("source.svg");
-    fs::write(&source_path, source_svg).map_err(|error| {
-        io::Error::new(
-            error.kind(),
-            format!("failed to write {}: {error}", source_path.display()),
-        )
-    })?;
-
-    let target_svg = render_untyped_svg(&arrow.type_maps.1).map_err(|error| {
-        io::Error::new(
-            error.kind(),
-            format!("failed to render target type map for `{theory_id}.{arrow_name}`: {error}"),
-        )
-    })?;
-    let target_path = arrow_dir.join("target.svg");
-    fs::write(&target_path, target_svg).map_err(|error| {
-        io::Error::new(
-            error.kind(),
-            format!("failed to write {}: {error}", target_path.display()),
-        )
-    })?;
 
     Ok(())
 }

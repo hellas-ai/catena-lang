@@ -1,13 +1,6 @@
 {
   "files": [],
   "include": [
-    // Uncommment and point to elaboration for using vscode ext
-    // {
-    //   "folder": "/tmp/catena-lang-report/elaboration",
-    //   "files": [
-    //     "generated.hex"
-    //   ]
-    // },
     {
       "folder": "../../catena-lang/stdlib",
       "files": [

@@ -34,6 +34,7 @@
   (arr bool.not : (bool val) -> (bool val))
   (arr bool.or  : {(bool val) (bool val)} -> (bool val))
   (arr bool.and : {(bool val) (bool val)} -> (bool val))
+  (arr bool.select : {(bool val) (bool val) (bool val)} -> (bool val))
 
   # execute one of two *closures* depending on a boolean flag
   #
@@ -84,6 +85,7 @@
   (arr u64.one  : [] -> (u64 val))
   (arr u64.add  : {(u64 val) (u64 val)} -> (u64 val))
   (arr u64.mul  : {(u64 val) (u64 val)} -> (u64 val))
+  (arr u64.select : {(bool val) (u64 val) (u64 val)} -> (u64 val))
 
   (arr u32.zero : [] -> ({0 u32} :))
   (arr u32.one  : [] ->  (u32 val))
@@ -91,6 +93,7 @@
   (arr u32.and  : {(u32 val) (u32 val)} ->  (u32 val))
   (arr u32.eq   : {(u32 val) (u32 val)} ->  (bool val))
   (arr u32.mul  : {(u32 val) (u32 val)} ->  (u32 val))
+  (arr u32.select : {(bool val) (u32 val) (u32 val)} -> (u32 val))
   (arr u32.to-f32 : (u32 val) -> (f32 val))
   (arr u32.bitcast-f32 : (u32 val) -> (f32 val))
 

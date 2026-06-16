@@ -222,7 +222,9 @@ fn render_assignment(
         "f32.mul" => render_binary(out, assignment, "*")?,
         "f32.div" => render_binary(out, assignment, "/")?,
         "f32.lt" => render_binary_bool(out, assignment, "<")?,
-        "f32.select" => render_f32_select(out, assignment)?,
+        "f32.select" | "u32.select" | "u64.select" | "bool.select" => {
+            render_select(out, assignment)?
+        }
         "f32.round-to-u32" => render_f32_round_to_u32(out, assignment)?,
         "ix.zero" => render_ix_zero(out, assignment)?,
         "ix" => render_ix(out, assignment)?,
@@ -326,7 +328,7 @@ fn render_f32_neg(out: &mut String, assignment: &GpuAssign) -> Result<(), GpuRen
     Ok(())
 }
 
-fn render_f32_select(out: &mut String, assignment: &GpuAssign) -> Result<(), GpuRenderError> {
+fn render_select(out: &mut String, assignment: &GpuAssign) -> Result<(), GpuRenderError> {
     let [flag, when_true, when_false] = assignment.inputs.as_slice() else {
         return Err(invalid_inputs(assignment, 3));
     };

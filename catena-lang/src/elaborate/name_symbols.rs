@@ -7,14 +7,13 @@ use metacat::theory::{
     transitive_dependency_subset,
 };
 
-use crate::elaborate::ElaborateError;
+use crate::elaborate::{ElaborateError, GENERATED_VARIABLE_PREFIX};
 
 const FN_TYPE: &str = "->";
 const PRODUCT_TYPE: &str = "*";
 const UNIT_TYPE: &str = "1";
 const VALUE_TYPE: &str = "val";
 const NAME_PREFIX: &str = "name.";
-const GENERATED_VARIABLE_PREFIX: &str = "__catena_";
 
 #[derive(Default)]
 struct GeneratedVars {

@@ -11,7 +11,8 @@ use thiserror::Error;
 
 const NAT_THEORY: &str = "nat";
 const RESERVED_OPERATION_PREFIXES: &[&str] = &["name.", "const."];
-const RESERVED_VARIABLE_PREFIXES: &[&str] = &["__catena"];
+pub(crate) const GENERATED_VARIABLE_PREFIX: &str = "__catena_";
+const RESERVED_VARIABLE_PREFIXES: &[&str] = &[GENERATED_VARIABLE_PREFIX];
 
 #[derive(Debug, Error)]
 pub enum ElaborateError {
@@ -136,7 +137,7 @@ fn check_reserved_variables_in_hexpr(
 mod tests {
     use metacat::theory::RawTheorySet;
 
-    use super::{ElaborateError, elaborate};
+    use super::{ElaborateError, GENERATED_VARIABLE_PREFIX, elaborate};
 
     #[test]
     fn user_variables_cannot_use_catena_generated_prefix() {
@@ -162,8 +163,11 @@ mod tests {
                 theory,
                 arrow,
                 variable,
-                prefix: "__catena",
-            } if theory == "program" && arrow == "bad" && variable == "__catena_p0"
+                prefix,
+            } if theory == "program"
+                && arrow == "bad"
+                && variable == "__catena_p0"
+                && prefix == GENERATED_VARIABLE_PREFIX
         ));
     }
 }

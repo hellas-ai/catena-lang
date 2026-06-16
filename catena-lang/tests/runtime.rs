@@ -1,4 +1,9 @@
-use catena_lang::runtime::{Runtime, Value};
+use catena_lang::{
+    codegen::GpuDialect,
+    runtime::{Runtime, Value},
+};
+
+const GPU_DIALECT_ENV: &str = "CATENA_GPU_DIALECT";
 
 const STDLIB: &[&str] = &[
     include_str!("../stdlib/cmc.hex"),
@@ -14,7 +19,25 @@ const SIN_EXAMPLES: &str = include_str!("../examples/sincos.hex");
 
 /// Create a runtime with a provided user source file
 fn runtime_with(source: &'static str) -> anyhow::Result<Runtime> {
-    Runtime::from_sources(STDLIB.iter().copied().chain([source])).map_err(Into::into)
+    Runtime::from_sources(
+        STDLIB.iter().copied().chain([source]),
+        configured_gpu_dialect()?,
+    )
+    .map_err(Into::into)
+}
+
+fn configured_gpu_dialect() -> anyhow::Result<GpuDialect> {
+    match std::env::var(GPU_DIALECT_ENV).as_deref() {
+        Ok("hip") | Err(std::env::VarError::NotPresent) => Ok(GpuDialect::Hip),
+        Ok("cuda") => Ok(GpuDialect::Cuda),
+        Ok(value) => anyhow::bail!(
+            "invalid GPU dialect `{value}` in {GPU_DIALECT_ENV}; expected `hip` or `cuda`"
+        ),
+        Err(std::env::VarError::NotUnicode(value)) => anyhow::bail!(
+            "invalid GPU dialect in {GPU_DIALECT_ENV}: non-Unicode value {:?}",
+            value
+        ),
+    }
 }
 
 #[test]

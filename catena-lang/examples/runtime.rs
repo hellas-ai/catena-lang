@@ -1,20 +1,30 @@
+use std::env;
 use std::path::PathBuf;
 
-use catena_lang::runtime::{Runtime, Value};
+use catena_lang::{
+    codegen::GpuDialect,
+    runtime::{Runtime, Value},
+};
+
+const GPU_DIALECT_ENV: &str = "CATENA_GPU_DIALECT";
 
 fn main() -> anyhow::Result<()> {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let runtime = Runtime::new([
-        root.join("stdlib/cmc.hex"),
-        root.join("stdlib/value.hex"),
-        root.join("stdlib/buf.hex"),
-        root.join("stdlib/index.hex"),
-        root.join("stdlib/data.hex"),
-        root.join("stdlib/fn.hex"),
-        root.join("stdlib/product.hex"),
-        root.join("stdlib/gpu.hex"),
-        root.join("examples/example.hex"),
-    ])?;
+    let dialect = configured_gpu_dialect()?;
+    let runtime = Runtime::new(
+        [
+            root.join("stdlib/cmc.hex"),
+            root.join("stdlib/value.hex"),
+            root.join("stdlib/buf.hex"),
+            root.join("stdlib/index.hex"),
+            root.join("stdlib/data.hex"),
+            root.join("stdlib/fn.hex"),
+            root.join("stdlib/product.hex"),
+            root.join("stdlib/gpu.hex"),
+            root.join("examples/example.hex"),
+        ],
+        dialect,
+    )?;
 
     // Input values for `array-head-u64`
     let values = [0x123456789abcdef0_u64, 7, 11];
@@ -42,4 +52,18 @@ fn main() -> anyhow::Result<()> {
     );
 
     Ok(())
+}
+
+fn configured_gpu_dialect() -> anyhow::Result<GpuDialect> {
+    match env::var(GPU_DIALECT_ENV).as_deref() {
+        Ok("hip") | Err(env::VarError::NotPresent) => Ok(GpuDialect::Hip),
+        Ok("cuda") => Ok(GpuDialect::Cuda),
+        Ok(value) => anyhow::bail!(
+            "invalid GPU dialect `{value}` in {GPU_DIALECT_ENV}; expected `hip` or `cuda`"
+        ),
+        Err(env::VarError::NotUnicode(value)) => anyhow::bail!(
+            "invalid GPU dialect in {GPU_DIALECT_ENV}: non-Unicode value {:?}",
+            value
+        ),
+    }
 }

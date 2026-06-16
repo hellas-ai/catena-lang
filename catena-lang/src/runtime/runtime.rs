@@ -1,7 +1,7 @@
 use thiserror::Error;
 
 use std::{
-    env, fs,
+    fs,
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -19,8 +19,6 @@ use super::{
 use crate::codegen::{GpuDialect, gpu::GpuRenderError, gpu::render_modules};
 use crate::compile::CompileFailure;
 use metacat::theory::RawTheorySet;
-
-const GPU_DIALECT_ENV: &str = "CATENA_GPU_DIALECT";
 
 /// Run catena programs with the C backend
 #[derive(Debug)]
@@ -43,11 +41,6 @@ pub enum InitError {
     Compile(#[from] CompileFailure),
     #[error("compile report did not contain GPU modules")]
     MissingGpuModules,
-    #[error("invalid GPU dialect `{value}` in {env_var}; expected `hip` or `cuda`")]
-    InvalidDialectEnv {
-        env_var: &'static str,
-        value: String,
-    },
     #[error("failed to render generated {dialect:?} source: {source}")]
     RenderGpu {
         dialect: GpuDialect,
@@ -108,14 +101,7 @@ pub enum ExecError {
 
 impl Runtime {
     /// Construct a new runtime from a list of paths, interpreted as catena programs (&stdlib)
-    pub fn new<I>(paths: I) -> Result<Runtime, InitError>
-    where
-        I: IntoIterator<Item = PathBuf>,
-    {
-        Self::new_with_dialect(paths, configured_gpu_dialect()?)
-    }
-
-    pub fn new_with_dialect<I>(paths: I, dialect: GpuDialect) -> Result<Runtime, InitError>
+    pub fn new<I>(paths: I, dialect: GpuDialect) -> Result<Runtime, InitError>
     where
         I: IntoIterator<Item = PathBuf>,
     {
@@ -124,17 +110,7 @@ impl Runtime {
     }
 
     /// Construct a new runtime from in-memory Catena source strings.
-    pub fn from_sources<'a, I>(sources: I) -> Result<Runtime, InitError>
-    where
-        I: IntoIterator<Item = &'a str>,
-    {
-        Self::from_sources_with_dialect(sources, configured_gpu_dialect()?)
-    }
-
-    pub fn from_sources_with_dialect<'a, I>(
-        sources: I,
-        dialect: GpuDialect,
-    ) -> Result<Runtime, InitError>
+    pub fn from_sources<'a, I>(sources: I, dialect: GpuDialect) -> Result<Runtime, InitError>
     where
         I: IntoIterator<Item = &'a str>,
     {
@@ -277,21 +253,6 @@ impl Runtime {
             ValueKind::F32 => Value::F32(0.0),
             ValueKind::Mem => Value::Mem(Mem::null(self.gpu.clone())),
         }
-    }
-}
-
-fn configured_gpu_dialect() -> Result<GpuDialect, InitError> {
-    let Some(value) = env::var_os(GPU_DIALECT_ENV) else {
-        return Ok(GpuDialect::Hip);
-    };
-    let value = value.to_string_lossy();
-    match value.as_ref() {
-        "hip" => Ok(GpuDialect::Hip),
-        "cuda" => Ok(GpuDialect::Cuda),
-        _ => Err(InitError::InvalidDialectEnv {
-            env_var: GPU_DIALECT_ENV,
-            value: value.into_owned(),
-        }),
     }
 }
 

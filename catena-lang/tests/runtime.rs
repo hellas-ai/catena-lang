@@ -11,6 +11,7 @@ const STDLIB: &[&str] = &[
     include_str!("../stdlib/gpu.hex"),
 ];
 const SIN_EXAMPLES: &str = include_str!("../examples/sincos.hex");
+const SOFTMAX_EXAMPLES: &str = include_str!("../examples/softmax.hex");
 
 /// Create a runtime with a provided user source file
 fn runtime_with(source: &'static str) -> anyhow::Result<Runtime> {
@@ -217,5 +218,26 @@ fn array_head_u64() -> anyhow::Result<()> {
     };
 
     assert_eq!(head, values[0]);
+    Ok(())
+}
+
+#[test]
+fn exp_approx_test() -> anyhow::Result<()> {
+    let runtime = runtime_with(SOFTMAX_EXAMPLES)?;
+
+    for input in [-3.0_f32, -1.0, -0.5, 0.0, 0.5, 1.0, 3.0] {
+        let [result] = runtime.exec("exp-approx", [input.into()])?;
+        let Value::F32(result) = result else {
+            anyhow::bail!("exp-approx returned non-f32 value: {result:?}");
+        };
+
+        let expected = input.exp();
+        let error = (result - expected).abs() / expected.max(1.0);
+        assert!(
+            error < 4e-3,
+            "exp-approx({input}) = {result}, expected {expected}, rel-ish error {error}"
+        );
+    }
+
     Ok(())
 }

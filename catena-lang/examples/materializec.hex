@@ -1,0 +1,22 @@
+# Exercise materialization with a pure indexed producer.
+#
+# The producer receives unit plus a flat index and returns a constant boolean:
+#
+#   \(_, i). true
+#
+# It materializes a boolean buffer by running the producer once per index.
+
+(def program materialize-index-producer :
+  ([n.] {1 ([.n] ix val)})
+  ->
+  ([n.] (bool val))
+= ([env i.] bool.t))
+
+(def program materialize-indexes :
+  ({[n] u64} :)
+  ->
+  ([n.] ({cap.own [.n] bool} buf val))
+= ([len.]
+  {unit.intro (([.len] :.param) name.materialize-index-producer) [.len]}
+  materializec
+))

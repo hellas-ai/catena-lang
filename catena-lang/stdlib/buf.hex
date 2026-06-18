@@ -40,18 +40,18 @@
 
   # Materialize an owned buffer from an indexed producer.
   #
-  #   materialize : (n : u64) ● (val(ix n) => val(t)) -> val(buf cap.own n t)
+  #   materialize : (n : u64) ● val(val(ix n) => val(t)) -> val(buf cap.own n t)
   (arr materialize : {[n t.]
     ({[.n] u64} :)
-    ({([.n] ix val) ([.t] val)} =>)
+    ({([.n] ix val) ([.t] val)} => val)
   } -> {[n t.] ({cap.own [.n t]} buf val)})
 
   # Materialize an owned buffer from a converted indexed producer.
   #
-  #   materializec : X ● (X * val(ix n) -> val(t)) ● (n : u64) -> val(buf cap.own n t)
+  #   materializec : X ● val(X * val(ix n) -> val(t)) ● (n : u64) -> val(buf cap.own n t)
   (arr materializec : {[x n t.]
     ([.x])
-    ({({[.x] ([.n] ix val)} *) ([.t] val)} ->)
+    ({({[.x] ([.n] ix val)} *) ([.t] val)} -> val)
     ({[.n] u64} :)
   } -> {[x n t.] ({cap.own [.n t]} buf val)})
 

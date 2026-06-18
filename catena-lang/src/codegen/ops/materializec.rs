@@ -172,7 +172,7 @@ fn c_type(ty: &CType) -> String {
 fn value_expr(value: &GpuValue) -> String {
     match value {
         GpuValue::Var(var) => var.name.clone(),
-        GpuValue::FnSymbol(symbol) => sanitize_ident(symbol.target.as_str()),
+        GpuValue::FnSymbol(symbol) => sanitize_ident(&format!("program.{}", symbol.target)),
     }
 }
 

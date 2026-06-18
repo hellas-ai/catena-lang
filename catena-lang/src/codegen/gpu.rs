@@ -210,6 +210,8 @@ fn render_assignment(
         "u32.add" => render_binary(out, assignment, "+")?,
         "u32.sub" => render_binary(out, assignment, "-")?,
         "u32.and" => render_binary(out, assignment, "&")?,
+        "u32.or" => render_binary(out, assignment, "|")?,
+        "u32.xor" => render_binary(out, assignment, "^")?,
         "u32.eq" => render_binary_bool(out, assignment, "==")?,
         "u32.ne" => render_binary_bool(out, assignment, "!=")?,
         "u32.lt" => render_binary_bool(out, assignment, "<")?,
@@ -219,6 +221,7 @@ fn render_assignment(
         "u32.mul" => render_binary(out, assignment, "*")?,
         "u32.shl" => render_binary(out, assignment, "<<")?,
         "u32.shr" => render_binary(out, assignment, ">>")?,
+        "u32.not" => render_unary_prefix(out, assignment, "~")?,
         "u32.to-f32" => render_u32_cast_to_f32(out, assignment)?,
         "u32.bitcast-f32" => render_u32_bitcast_f32(out, assignment)?,
         "u64.gt" => render_u64_gt(out, assignment)?,
@@ -339,6 +342,25 @@ fn render_f32_neg(out: &mut String, assignment: &GpuAssign) -> Result<(), GpuRen
         return Err(invalid_outputs(assignment, 1));
     };
     out.push_str(&format!("    {} = -{};\n", output.name, value_expr(input)));
+    Ok(())
+}
+
+fn render_unary_prefix(
+    out: &mut String,
+    assignment: &GpuAssign,
+    operator: &str,
+) -> Result<(), GpuRenderError> {
+    let [input] = assignment.inputs.as_slice() else {
+        return Err(invalid_inputs(assignment, 1));
+    };
+    let [output] = assignment.outputs.as_slice() else {
+        return Err(invalid_outputs(assignment, 1));
+    };
+    out.push_str(&format!(
+        "    {} = {operator}{};\n",
+        output.name,
+        value_expr(input)
+    ));
     Ok(())
 }
 

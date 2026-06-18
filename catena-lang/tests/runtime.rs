@@ -233,6 +233,63 @@ fn u32_shift_and_sub_test() -> anyhow::Result<()> {
 }
 
 #[test]
+fn u32_bitwise_ops_test() -> anyhow::Result<()> {
+    let runtime = runtime_with(
+        r#"
+        (def program u32-and-test : [] -> (u32 val) = (
+          {[.]
+            ([.] const.u32.0x00FF00FF [lhs.])
+            ([.] const.u32.0x0F0F0F0F [rhs.])
+            ([.lhs rhs] u32.and [result.])
+            [.result]
+          }
+        ))
+        (def program u32-or-test : [] -> (u32 val) = (
+          {[.]
+            ([.] const.u32.0x00FF00FF [lhs.])
+            ([.] const.u32.0x0F0F0F0F [rhs.])
+            ([.lhs rhs] u32.or [result.])
+            [.result]
+          }
+        ))
+        (def program u32-xor-test : [] -> (u32 val) = (
+          {[.]
+            ([.] const.u32.0x00FF00FF [lhs.])
+            ([.] const.u32.0x0F0F0F0F [rhs.])
+            ([.lhs rhs] u32.xor [result.])
+            [.result]
+          }
+        ))
+        (def program u32-not-test : [] -> (u32 val) = (
+          {[.]
+            ([.] const.u32.0x00FF00FF [value.])
+            ([.value] u32.not [result.])
+            [.result]
+          }
+        ))
+        "#,
+    )?;
+
+    for (name, expected) in [
+        ("u32-and-test", 0x000F000F_u32),
+        ("u32-or-test", 0x0FFF0FFF_u32),
+        ("u32-xor-test", 0x0FF00FF0_u32),
+        ("u32-not-test", 0xFF00FF00_u32),
+    ] {
+        let [result] = runtime.exec(name, [])?;
+        let Value::U32(result) = result else {
+            anyhow::bail!("{name} returned non-u32 value: {result:?}");
+        };
+        assert_eq!(
+            result, expected,
+            "{name} returned {result:#x}, expected {expected:#x}"
+        );
+    }
+
+    Ok(())
+}
+
+#[test]
 fn u32_cmp_ops_test() -> anyhow::Result<()> {
     let runtime = runtime_with(
         r#"

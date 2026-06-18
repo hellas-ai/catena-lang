@@ -20,3 +20,25 @@
   {unit.intro (([.len] :.param) name.materialize-index-producer) [.len]}
   materializec
 ))
+
+# Copy a boolean buffer by using the input buffer as the converted closure
+# environment.
+(def program materialize-copy-bool-producer :
+  ([n.] {({cap.ref [.n] bool} buf val) ([.n] ix val)})
+  ->
+  ([n.] (bool val))
+= ([input i.]
+  {[.i input]} ix
+))
+
+(def program materialize-copy-bool :
+  {[n.]
+    ({[.n] u64} :)
+    ({cap.ref [.n] bool} buf val)
+  }
+  ->
+  ([n.] ({cap.own [.n] bool} buf val))
+= ([len input.]
+  {[.input] (([.len] :.param) name.materialize-copy-bool-producer) [.len]}
+  materializec
+))

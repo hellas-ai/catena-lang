@@ -153,6 +153,13 @@ pub(in crate::codegen) fn kernel_name(
 }
 
 fn parts(assignment: &GpuAssign) -> Result<(&GpuValue, &GpuValue, Vec<&GpuValue>), GpuRenderError> {
+    // The lowered inputs follow the closure-converted call shape:
+    //
+    //     env..., producer_fn, erased_witnesses..., len
+    //
+    // Values before the function symbol are the producer environment. After the function symbol,
+    // `materializec` may still carry erased parameter-level inputs, so the length is recovered as
+    // the single runtime value in that suffix.
     let func_index = assignment
         .inputs
         .iter()

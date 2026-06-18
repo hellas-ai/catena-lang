@@ -1,3 +1,27 @@
+//! `materializec` builds an owned buffer by evaluating a array-as-a-function producer at every index `0 <= i < len`.
+//! It is lowered as allocation plus a kernel launch, not as a
+//! device-callable expression. The host wrapper emits roughly:
+//!
+//! ```cpp
+//! T *buf_data = nullptr;
+//! catena_gpu_check(cudaMallocManaged((void **)&buf_data, len * sizeof(T)));
+//! materialize_kernel<<<dim3((len + 255) / 256), dim3(256)>>>(buf_data, len, env...);
+//! catena_gpu_check(cudaDeviceSynchronize());
+//! buf = buf_data;
+//! ```
+//!
+//! The generated kernel is device code and assumes the producer is already device-callable and
+//! allocation-free:
+//!
+//! ```cpp
+//! uint64_t i = (uint64_t)blockIdx.x * blockDim.x + threadIdx.x;
+//! if (i >= len) { return; }
+//! T value;
+//! program_producer(env..., i, &value);
+//! out[i] = value;
+//! ```
+//!
+
 use crate::codegen::{
     GpuAssign, GpuDialect, GpuFunction, GpuValue,
     gpu::GpuRenderError,

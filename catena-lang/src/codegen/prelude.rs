@@ -95,6 +95,15 @@ __host__ __device__ static inline float catena_u32_bitcast_f32(uint32_t bits) {{
     return value.f;
 }}
 
+__host__ __device__ static inline uint32_t catena_f32_bitcast_u32(float value) {{
+    union {{
+        uint32_t u;
+        float f;
+    }} bits;
+    bits.f = value;
+    return bits.u;
+}}
+
 "#,
         runtime_header = dialect.runtime_header(),
         device_compile_guard = dialect.device_compile_guard(),

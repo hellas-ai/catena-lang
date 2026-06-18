@@ -185,6 +185,53 @@ fn u32_bitcast_f32_test() -> anyhow::Result<()> {
 }
 
 #[test]
+fn f32_bitcast_u32_test() -> anyhow::Result<()> {
+    let runtime = runtime_with(
+        r#"
+        (def program bitcast-one-bits : [] -> (u32 val) = (
+          f32.one
+          f32.bitcast-u32
+        ))
+        "#,
+    )?;
+
+    let [result] = runtime.exec("bitcast-one-bits", [])?;
+    let Value::U32(result) = result else {
+        anyhow::bail!("bitcast-one-bits returned non-u32 value: {result:?}");
+    };
+
+    assert_eq!(result, 0x3F800000);
+    Ok(())
+}
+
+#[test]
+fn u32_shift_and_sub_test() -> anyhow::Result<()> {
+    let runtime = runtime_with(
+        r#"
+        (def program shift-and-sub : [] -> (u32 val) = (
+          {[.]
+            ([.] const.u32.0x00000020 [lhs.])
+            ([.] const.u32.0x00000003 [shift.])
+            ([.] const.u32.0x00000001 [one.])
+            ([.lhs shift] u32.shr [shr.])
+            ([.one shift] u32.shl [shl.])
+            ([.shr shl] u32.sub [result.])
+            [.result]
+          }
+        ))
+        "#,
+    )?;
+
+    let [result] = runtime.exec("shift-and-sub", [])?;
+    let Value::U32(result) = result else {
+        anyhow::bail!("shift-and-sub returned non-u32 value: {result:?}");
+    };
+
+    assert_eq!(result, 0xFFFF_FFFC);
+    Ok(())
+}
+
+#[test]
 fn deadbeef_u64() -> anyhow::Result<()> {
     let runtime = runtime_with(
         r#"

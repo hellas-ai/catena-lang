@@ -76,6 +76,7 @@
   (arr f32.lt   : {(f32 val) (f32 val)} -> (bool val))
   (arr f32.select : {(bool val) (f32 val) (f32 val)} -> (f32 val))
   (arr f32.round-to-u32 : (f32 val) -> (u32 val))
+  (arr f32.bitcast-u32 : (f32 val) -> (u32 val))
   ##############################################################################
   # u64 methods
   #
@@ -90,9 +91,12 @@
   (arr u32.zero : [] -> ({0 u32} :))
   (arr u32.one  : [] ->  (u32 val))
   (arr u32.add  : {(u32 val) (u32 val)} ->  (u32 val))
+  (arr u32.sub  : {(u32 val) (u32 val)} ->  (u32 val))
   (arr u32.and  : {(u32 val) (u32 val)} ->  (u32 val))
   (arr u32.eq   : {(u32 val) (u32 val)} ->  (bool val))
   (arr u32.mul  : {(u32 val) (u32 val)} ->  (u32 val))
+  (arr u32.shl  : {(u32 val) (u32 val)} ->  (u32 val))
+  (arr u32.shr  : {(u32 val) (u32 val)} ->  (u32 val))
   (arr u32.select : {(bool val) (u32 val) (u32 val)} -> (u32 val))
   (arr u32.to-f32 : (u32 val) -> (f32 val))
   (arr u32.bitcast-f32 : (u32 val) -> (f32 val))

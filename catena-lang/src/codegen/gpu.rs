@@ -208,9 +208,12 @@ fn render_assignment(
         "u64.mul" => render_binary(out, assignment, "*")?,
         "u32.one" => render_u64_one(out, assignment)?,
         "u32.add" => render_binary(out, assignment, "+")?,
+        "u32.sub" => render_binary(out, assignment, "-")?,
         "u32.and" => render_binary(out, assignment, "&")?,
         "u32.eq" => render_binary_bool(out, assignment, "==")?,
         "u32.mul" => render_binary(out, assignment, "*")?,
+        "u32.shl" => render_binary(out, assignment, "<<")?,
+        "u32.shr" => render_binary(out, assignment, ">>")?,
         "u32.to-f32" => render_u32_cast_to_f32(out, assignment)?,
         "u32.bitcast-f32" => render_u32_bitcast_f32(out, assignment)?,
         "u64.gt" => render_u64_gt(out, assignment)?,
@@ -226,6 +229,7 @@ fn render_assignment(
             render_select(out, assignment)?
         }
         "f32.round-to-u32" => render_f32_round_to_u32(out, assignment)?,
+        "f32.bitcast-u32" => render_f32_bitcast_u32(out, assignment)?,
         "ix.zero" => render_ix_zero(out, assignment)?,
         "ix" => render_ix(out, assignment)?,
         "eval" => render_eval(out, assignment)?,
@@ -354,6 +358,21 @@ fn render_f32_round_to_u32(out: &mut String, assignment: &GpuAssign) -> Result<(
     };
     out.push_str(&format!(
         "    {} = (uint32_t)nearbyintf({});\n",
+        output.name,
+        value_expr(input)
+    ));
+    Ok(())
+}
+
+fn render_f32_bitcast_u32(out: &mut String, assignment: &GpuAssign) -> Result<(), GpuRenderError> {
+    let [input] = assignment.inputs.as_slice() else {
+        return Err(invalid_inputs(assignment, 1));
+    };
+    let [output] = assignment.outputs.as_slice() else {
+        return Err(invalid_outputs(assignment, 1));
+    };
+    out.push_str(&format!(
+        "    {} = catena_f32_bitcast_u32({});\n",
         output.name,
         value_expr(input)
     ));

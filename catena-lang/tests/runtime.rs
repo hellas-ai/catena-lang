@@ -16,6 +16,7 @@ const STDLIB: &[&str] = &[
     include_str!("../stdlib/gpu.hex"),
 ];
 const SIN_EXAMPLES: &str = include_str!("../examples/sincos.hex");
+const LOG_EXAMPLES: &str = include_str!("../examples/log.hex");
 const SOFTMAX_EXAMPLES: &str = include_str!("../examples/softmax.hex");
 
 /// Create a runtime with a provided user source file
@@ -468,6 +469,27 @@ fn exp_approx_test() -> anyhow::Result<()> {
         assert!(
             error < 4e-3,
             "exp-approx({input}) = {result}, expected {expected}, rel-ish error {error}"
+        );
+    }
+
+    Ok(())
+}
+
+#[test]
+fn log_approx_test() -> anyhow::Result<()> {
+    let runtime = runtime_with(LOG_EXAMPLES)?;
+
+    for input in [0.1_f32, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 8.0, 10.0] {
+        let [result] = runtime.exec("log-approx", [input.into()])?;
+        let Value::F32(result) = result else {
+            anyhow::bail!("log-approx returned non-f32 value: {result:?}");
+        };
+
+        let expected = input.ln();
+        let error = (result - expected).abs();
+        assert!(
+            error < 6e-4,
+            "log-approx({input}) = {result}, expected {expected}, abs error {error}"
         );
     }
 

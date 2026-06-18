@@ -211,6 +211,11 @@ fn render_assignment(
         "u32.sub" => render_binary(out, assignment, "-")?,
         "u32.and" => render_binary(out, assignment, "&")?,
         "u32.eq" => render_binary_bool(out, assignment, "==")?,
+        "u32.ne" => render_binary_bool(out, assignment, "!=")?,
+        "u32.lt" => render_binary_bool(out, assignment, "<")?,
+        "u32.gt" => render_binary_bool(out, assignment, ">")?,
+        "u32.lte" => render_binary_bool(out, assignment, "<=")?,
+        "u32.gte" => render_binary_bool(out, assignment, ">=")?,
         "u32.mul" => render_binary(out, assignment, "*")?,
         "u32.shl" => render_binary(out, assignment, "<<")?,
         "u32.shr" => render_binary(out, assignment, ">>")?,
@@ -224,7 +229,12 @@ fn render_assignment(
         "f32.neg" => render_f32_neg(out, assignment)?,
         "f32.mul" => render_binary(out, assignment, "*")?,
         "f32.div" => render_binary(out, assignment, "/")?,
+        "f32.eq" => render_binary_bool(out, assignment, "==")?,
+        "f32.ne" => render_binary_bool(out, assignment, "!=")?,
         "f32.lt" => render_binary_bool(out, assignment, "<")?,
+        "f32.gt" => render_binary_bool(out, assignment, ">")?,
+        "f32.lte" => render_binary_bool(out, assignment, "<=")?,
+        "f32.gte" => render_binary_bool(out, assignment, ">=")?,
         "f32.select" | "u32.select" | "u64.select" | "bool.select" => {
             render_select(out, assignment)?
         }

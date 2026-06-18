@@ -232,6 +232,168 @@ fn u32_shift_and_sub_test() -> anyhow::Result<()> {
 }
 
 #[test]
+fn u32_cmp_ops_test() -> anyhow::Result<()> {
+    let runtime = runtime_with(
+        r#"
+        (def program u32-eq-test : [] -> (bool val) = (
+          {[.]
+            ([.] const.u32.0x00000002 [lhs.])
+            ([.] const.u32.0x00000003 [rhs.])
+            ([.lhs rhs] u32.eq [result.])
+            [.result]
+          }
+        ))
+        (def program u32-ne-test : [] -> (bool val) = (
+          {[.]
+            ([.] const.u32.0x00000002 [lhs.])
+            ([.] const.u32.0x00000003 [rhs.])
+            ([.lhs rhs] u32.ne [result.])
+            [.result]
+          }
+        ))
+        (def program u32-lt-test : [] -> (bool val) = (
+          {[.]
+            ([.] const.u32.0x00000002 [lhs.])
+            ([.] const.u32.0x00000003 [rhs.])
+            ([.lhs rhs] u32.lt [result.])
+            [.result]
+          }
+        ))
+        (def program u32-gt-test : [] -> (bool val) = (
+          {[.]
+            ([.] const.u32.0x00000002 [lhs.])
+            ([.] const.u32.0x00000003 [rhs.])
+            ([.lhs rhs] u32.gt [result.])
+            [.result]
+          }
+        ))
+        (def program u32-lte-test : [] -> (bool val) = (
+          {[.]
+            ([.] const.u32.0x00000002 [lhs.])
+            ([.] const.u32.0x00000003 [rhs.])
+            ([.lhs rhs] u32.lte [result.])
+            [.result]
+          }
+        ))
+        (def program u32-gte-test : [] -> (bool val) = (
+          {[.]
+            ([.] const.u32.0x00000002 [lhs.])
+            ([.] const.u32.0x00000003 [rhs.])
+            ([.lhs rhs] u32.gte [result.])
+            [.result]
+          }
+        ))
+        "#,
+    )?;
+
+    for (name, expected) in [
+        ("u32-eq-test", 0_u8),
+        ("u32-ne-test", 1_u8),
+        ("u32-lt-test", 1_u8),
+        ("u32-gt-test", 0_u8),
+        ("u32-lte-test", 1_u8),
+        ("u32-gte-test", 0_u8),
+    ] {
+        let [result] = runtime.exec(name, [])?;
+        let Value::Bool(result) = result else {
+            anyhow::bail!("{name} returned non-bool value: {result:?}");
+        };
+        assert_eq!(
+            result, expected,
+            "{name} returned {result}, expected {expected}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn f32_cmp_ops_test() -> anyhow::Result<()> {
+    let runtime = runtime_with(
+        r#"
+        (def program f32-lt-test : [] -> (bool val) = (
+          {[.]
+            ([.] const.u32.0x3FC00000 [lhs_bits.])
+            ([.] const.u32.0x40200000 [rhs_bits.])
+            ([.lhs_bits] u32.bitcast-f32 [lhs.])
+            ([.rhs_bits] u32.bitcast-f32 [rhs.])
+            ([.lhs rhs] f32.lt [result.])
+            [.result]
+          }
+        ))
+        (def program f32-eq-test : [] -> (bool val) = (
+          {[.]
+            ([.] const.u32.0x3FC00000 [lhs_bits.])
+            ([.] const.u32.0x40200000 [rhs_bits.])
+            ([.lhs_bits] u32.bitcast-f32 [lhs.])
+            ([.rhs_bits] u32.bitcast-f32 [rhs.])
+            ([.lhs rhs] f32.eq [result.])
+            [.result]
+          }
+        ))
+        (def program f32-ne-test : [] -> (bool val) = (
+          {[.]
+            ([.] const.u32.0x3FC00000 [lhs_bits.])
+            ([.] const.u32.0x40200000 [rhs_bits.])
+            ([.lhs_bits] u32.bitcast-f32 [lhs.])
+            ([.rhs_bits] u32.bitcast-f32 [rhs.])
+            ([.lhs rhs] f32.ne [result.])
+            [.result]
+          }
+        ))
+        (def program f32-gt-test : [] -> (bool val) = (
+          {[.]
+            ([.] const.u32.0x3FC00000 [lhs_bits.])
+            ([.] const.u32.0x40200000 [rhs_bits.])
+            ([.lhs_bits] u32.bitcast-f32 [lhs.])
+            ([.rhs_bits] u32.bitcast-f32 [rhs.])
+            ([.lhs rhs] f32.gt [result.])
+            [.result]
+          }
+        ))
+        (def program f32-lte-test : [] -> (bool val) = (
+          {[.]
+            ([.] const.u32.0x3FC00000 [lhs_bits.])
+            ([.] const.u32.0x40200000 [rhs_bits.])
+            ([.lhs_bits] u32.bitcast-f32 [lhs.])
+            ([.rhs_bits] u32.bitcast-f32 [rhs.])
+            ([.lhs rhs] f32.lte [result.])
+            [.result]
+          }
+        ))
+        (def program f32-gte-test : [] -> (bool val) = (
+          {[.]
+            ([.] const.u32.0x3FC00000 [lhs_bits.])
+            ([.] const.u32.0x40200000 [rhs_bits.])
+            ([.lhs_bits] u32.bitcast-f32 [lhs.])
+            ([.rhs_bits] u32.bitcast-f32 [rhs.])
+            ([.lhs rhs] f32.gte [result.])
+            [.result]
+          }
+        ))
+        "#,
+    )?;
+
+    for (name, expected) in [
+        ("f32-lt-test", 1_u8),
+        ("f32-eq-test", 0_u8),
+        ("f32-ne-test", 1_u8),
+        ("f32-gt-test", 0_u8),
+        ("f32-lte-test", 1_u8),
+        ("f32-gte-test", 0_u8),
+    ] {
+        let [result] = runtime.exec(name, [])?;
+        let Value::Bool(result) = result else {
+            anyhow::bail!("{name} returned non-bool value: {result:?}");
+        };
+        assert_eq!(
+            result, expected,
+            "{name} returned {result}, expected {expected}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn deadbeef_u64() -> anyhow::Result<()> {
     let runtime = runtime_with(
         r#"

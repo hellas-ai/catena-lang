@@ -255,7 +255,7 @@ impl CodegenState<'_> {
 
         let mut assignments = Vec::new();
         for assignment in ssa(term.clone().to_strict())? {
-            if assignment.op.as_str().starts_with("name.") || assignment.op.as_str() == ":.param" {
+            if assignment.op.as_str().starts_with("name.") {
                 continue;
             }
 

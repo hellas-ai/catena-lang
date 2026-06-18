@@ -5,7 +5,7 @@ use thiserror::Error;
 
 use crate::codegen::{
     GpuAssign, GpuDialect, GpuFunction, GpuModule, GpuModuleMap, GpuValue, GpuVar,
-    lower_types::CType, prelude::render_gpu_prelude, runtime_type,
+    lower_types::CType, ops::materializec, prelude::render_gpu_prelude, runtime_type,
 };
 
 #[derive(Debug, Error)]
@@ -32,6 +32,12 @@ pub enum GpuRenderError {
     MissingMaterializeLaunchParams,
     #[error("gpu.materialize is missing function input")]
     MissingMaterializeFunction,
+    #[error("materializec is missing function input")]
+    MissingMaterializecFunction,
+    #[error("materializec is missing length input")]
+    MissingMaterializecLength,
+    #[error("materializec expected one length input after the function, found {actual}")]
+    InvalidMaterializecLength { actual: usize },
     #[error("invalid integer constant operation `{op}`")]
     InvalidIntegerConstant { op: Operation },
 }
@@ -88,6 +94,13 @@ fn render_module_body(
                 assignment,
             )?;
             out.push('\n');
+        } else if assignment.op.as_str() == "materializec" {
+            materializec::render_kernel(
+                out,
+                &materializec::kernel_name(&module.entry.name, assignment)?,
+                assignment,
+            )?;
+            out.push('\n');
         }
     }
 
@@ -137,7 +150,7 @@ fn function_signature(function: &GpuFunction) -> Result<String, GpuRenderError> 
     let qualifier = if function
         .assignments
         .iter()
-        .any(|assignment| assignment.op.as_str() == "gpu.materialize")
+        .any(|assignment| matches!(assignment.op.as_str(), "gpu.materialize" | "materializec"))
     {
         ""
     } else {
@@ -230,6 +243,7 @@ fn render_assignment(
         "ix" => render_ix(out, assignment)?,
         "eval" => render_eval(out, assignment)?,
         "gpu.materialize" => render_materialize_call(out, function, assignment, dialect)?,
+        "materializec" => materializec::render_call(out, function, assignment, dialect)?,
         op if op.starts_with("const.u64.") => {
             render_int_const(out, assignment, "const.u64.", "ULL")?
         }

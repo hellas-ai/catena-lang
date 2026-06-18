@@ -7,6 +7,7 @@
 pub mod fn_ptrs;
 pub mod gpu;
 pub mod lower_types;
+mod ops;
 mod prelude;
 mod specialize;
 
@@ -75,6 +76,13 @@ impl GpuDialect {
         match self {
             Self::Hip => "hipMallocManaged",
             Self::Cuda => "cudaMallocManaged",
+        }
+    }
+
+    pub fn synchronize_fn(self) -> &'static str {
+        match self {
+            Self::Hip => "hipDeviceSynchronize",
+            Self::Cuda => "cudaDeviceSynchronize",
         }
     }
 

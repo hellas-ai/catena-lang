@@ -1,0 +1,6 @@
+{
+  "files": [
+    "stdlib/**/*.hex",
+    "examples/**/*.hex"
+  ]
+}

@@ -9,6 +9,7 @@ pub mod gpu;
 pub mod lower_types;
 mod ops;
 mod prelude;
+mod render_utils;
 mod specialize;
 mod validate;
 

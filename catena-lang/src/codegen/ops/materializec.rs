@@ -1,5 +1,8 @@
 use crate::codegen::{
-    GpuAssign, GpuDialect, GpuFunction, GpuValue, GpuVar, gpu::GpuRenderError, lower_types::CType,
+    GpuAssign, GpuDialect, GpuFunction, GpuValue,
+    gpu::GpuRenderError,
+    lower_types::CType,
+    render_utils::{c_type, invalid_outputs, param_decl, sanitize_ident},
     runtime_type,
 };
 
@@ -148,49 +151,9 @@ fn parts(assignment: &GpuAssign) -> Result<(&GpuValue, &GpuValue, Vec<&GpuValue>
     Ok((func, len, env))
 }
 
-fn param_decl(var: &GpuVar, by_pointer: bool) -> Result<String, GpuRenderError> {
-    let ty = runtime_type(var).ok_or_else(|| GpuRenderError::ErasedType(var.clone()))?;
-    if by_pointer {
-        Ok(format!("{} *out_{}", c_type(ty), var.name))
-    } else {
-        Ok(format!("{} {}", c_type(ty), var.name))
-    }
-}
-
-fn c_type(ty: &CType) -> String {
-    match ty {
-        CType::Unit => "catena_unit_t".to_string(),
-        CType::Bool => "uint8_t".to_string(),
-        CType::U32 => "uint32_t".to_string(),
-        CType::U64 => "uint64_t".to_string(),
-        CType::F32 => "float".to_string(),
-        CType::Pointer(inner) => format!("{} *", c_type(inner)),
-        CType::Named(name) => name.clone(),
-    }
-}
-
 fn value_expr(value: &GpuValue) -> String {
     match value {
         GpuValue::Var(var) => var.name.clone(),
         GpuValue::FnSymbol(symbol) => sanitize_ident(&format!("program.{}", symbol.target)),
     }
-}
-
-fn invalid_outputs(assignment: &GpuAssign, expected: usize) -> GpuRenderError {
-    GpuRenderError::InvalidOutputCount {
-        op: assignment.op.clone(),
-        expected,
-        actual: assignment.outputs.len(),
-    }
-}
-
-fn sanitize_ident(name: &str) -> String {
-    let mut ident = name
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
-        .collect::<String>();
-    if ident.chars().next().is_some_and(|c| c.is_ascii_digit()) {
-        ident.insert(0, '_');
-    }
-    ident
 }

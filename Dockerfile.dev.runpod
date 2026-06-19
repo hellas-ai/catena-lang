@@ -16,6 +16,7 @@ RUN apt-get update \
         git \
         git-lfs \
         gpg \
+        jq \
         libffi-dev \
         lld \
         make \

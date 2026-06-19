@@ -1,0 +1,24 @@
+{
+  "name": "catena-dev",
+  "cloudType": "SECURE",
+  "computeType": "GPU",
+  "imageName": "ghcr.io/hellas-ai/catena-lang/runpod-dev:sha-045e017",
+  "containerRegistryAuthId": "REPLACE_WITH_RUNPOD_REGISTRY_AUTH_ID",
+  "gpuCount": 1,
+  "gpuTypeIds": [
+    "NVIDIA GeForce RTX 4090"
+  ],
+  "gpuTypePriority": "availability",
+  "allowedCudaVersions": [
+    "12.6"
+  ],
+  "containerDiskInGb": 50,
+  "volumeInGb": 50,
+  "volumeMountPath": "/workspace",
+  "ports": [
+    "22/tcp"
+  ],
+  "dockerEntrypoint": [],
+  "dockerStartCmd": [],
+  "env": {}
+}

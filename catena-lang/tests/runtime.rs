@@ -17,7 +17,7 @@ const STDLIB: &[&str] = &[
 ];
 const SIN_EXAMPLES: &str = include_str!("../examples/sincos.hex");
 const LOG_EXAMPLES: &str = include_str!("../examples/log.hex");
-const SOFTMAX_EXAMPLES: &str = include_str!("../examples/softmax.hex");
+const SOFTMAX_EXAMPLES: &str = include_str!("../examples/nn.hex");
 
 /// Create a runtime with a provided user source file
 fn runtime_with(source: &'static str) -> anyhow::Result<Runtime> {

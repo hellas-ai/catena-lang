@@ -264,3 +264,6 @@ fn exp_approx_test() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+#[path = "cases/materializec.rs"]
+mod materializec;

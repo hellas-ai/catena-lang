@@ -1,0 +1,41 @@
+# Log approximation for positive, normalized f32 inputs.
+# Decompose x by bit manipulation into
+#   x = m * 2^e
+# with m in [0.5, 1), then approximate:
+#   log(x) ~= poly(m) + e * ln(2)
+
+(def program log-approx : (f32 val) -> (f32 val) =
+  {[x.]
+    (const.u32.0x007FFFFF [frac_mask.])
+    (const.u32.0x00000017 [exp_shift.])
+    (const.u32.0x3F000000 [half_bits.])
+    (const.u32.0x0000007E [mantissa_bias.])
+    (const.u32.0x3F317218 u32.bitcast-f32 [ln2.])
+    (const.u32.0xC00BE629 u32.bitcast-f32 [c0.])
+    (const.u32.0x4087355A u32.bitcast-f32 [c1.])
+    (const.u32.0xC03AA687 u32.bitcast-f32 [c2.])
+    (const.u32.0x3F60A4E1 u32.bitcast-f32 [c3.])
+
+    ([.x] f32.bitcast-u32 [x_bits.])
+    ([.x_bits exp_shift] u32.shr [exp_bits.])
+    ([.x_bits frac_mask] u32.and [frac_bits.])
+
+    ([.frac_bits half_bits] u32.add [m_bits.])
+    ([.m_bits] u32.bitcast-f32 [m.])
+
+    ([.exp_bits] u32.to-f32 [biased_exp_f.])
+    ([.mantissa_bias] u32.to-f32 [mantissa_bias_f.])
+    ([.biased_exp_f mantissa_bias_f] f32.sub [e.])
+
+    ([.m c3] f32.mul [p3.])
+    ([.c2 p3] f32.add [p2.])
+    ([.m p2] f32.mul [m_p2.])
+    ([.c1 m_p2] f32.add [p1.])
+    ([.m p1] f32.mul [m_p1.])
+    ([.c0 m_p1] f32.add [poly.])
+
+    ([.e ln2] f32.mul [elog2.])
+    ([.poly elog2] f32.add [result.])
+    [.result]
+  }
+)

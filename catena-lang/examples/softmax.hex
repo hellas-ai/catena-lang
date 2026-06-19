@@ -2,21 +2,13 @@
 # a degree-3 minimax polynomial on the reduced interval.
 (def program exp-approx-nonneg : (f32 val) -> (f32 val) =
   {[x.]
-    ([.] const.u32.0x3FB8AA3B [inv_ln2_bits.])
-    ([.] const.u32.0x3F317200 [ln2_hi_bits.])
-    ([.] const.u32.0x35BFBE8E [ln2_lo_bits.])
-    ([.] const.u32.0x3F7FF8FC [c0_bits.])
-    ([.] const.u32.0x3F809C7E [c1_bits.])
-    ([.] const.u32.0x3EEF1187 [c2_bits.])
-    ([.] const.u32.0x3E738A8B [c3_bits.])
-
-    ([.inv_ln2_bits] u32.bitcast-f32 [inv_ln2.])
-    ([.ln2_hi_bits] u32.bitcast-f32 [ln2_hi.])
-    ([.ln2_lo_bits] u32.bitcast-f32 [ln2_lo.])
-    ([.c0_bits] u32.bitcast-f32 [c0.])
-    ([.c1_bits] u32.bitcast-f32 [c1.])
-    ([.c2_bits] u32.bitcast-f32 [c2.])
-    ([.c3_bits] u32.bitcast-f32 [c3.])
+    (const.u32.0x3FB8AA3B u32.bitcast-f32 [inv_ln2.])
+    (const.u32.0x3F317200 u32.bitcast-f32 [ln2_hi.])
+    (const.u32.0x35BFBE8E u32.bitcast-f32 [ln2_lo.])
+    (const.u32.0x3F7FF8FC u32.bitcast-f32 [c0.])
+    (const.u32.0x3F809C7E u32.bitcast-f32 [c1.])
+    (const.u32.0x3EEF1187 u32.bitcast-f32 [c2.])
+    (const.u32.0x3E738A8B u32.bitcast-f32 [c3.])
 
     ([.x inv_ln2] f32.mul [scaled.])
     ([.scaled] f32.round-to-u32 [k_u32.])
@@ -34,8 +26,8 @@
     ([.xr p1] f32.mul [xr_p1.])
     ([.c0 xr_p1] f32.add [poly.])
 
-    ([.] const.u32.0x0000007F [bias_u32.])
-    ([.] const.u32.0x00800000 [exp_step_u32.])
+    (const.u32.0x0000007F [bias_u32.])
+    (const.u32.0x00800000 [exp_step_u32.])
     ([.k_u32 bias_u32] u32.add [biased_exp.])
     ([.biased_exp exp_step_u32] u32.mul [pow2_bits.])
     ([.pow2_bits] u32.bitcast-f32 [pow2k.])
@@ -47,10 +39,8 @@
 
 (def program exp-approx : (f32 val) -> (f32 val) =
   {[x.]
-    ([.] const.u32.0x00000000 [zero_u32.])
-    ([.zero_u32] u32.to-f32 [zero.])
-    ([.] const.u32.0x3F800000 [one_bits.])
-    ([.one_bits] u32.bitcast-f32 [one.])
+    (const.u32.0x00000000 u32.to-f32 [zero.])
+    (const.u32.0x3F800000 u32.bitcast-f32 [one.])
 
     ([.x] f32.neg [neg_x.])
     ([.x zero] f32.lt [is_negative.])

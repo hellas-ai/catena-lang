@@ -7,13 +7,9 @@
     ([.x3 x2] f32.mul [x5.])
     ([.x5 x2] f32.mul [x7.])
 
-    ([.] const.u32.0x00000006 [fact_3_u32.])
-    ([.] const.u32.0x00000078 [fact_5_u32.])
-    ([.] const.u32.0x000013B0 [fact_7_u32.])
-
-    ([.fact_3_u32] u32.to-f32 [fact_3.])
-    ([.fact_5_u32] u32.to-f32 [fact_5.])
-    ([.fact_7_u32] u32.to-f32 [fact_7.])
+    (const.u32.0x00000006 u32.to-f32 [fact_3.])
+    (const.u32.0x00000078 u32.to-f32 [fact_5.])
+    (const.u32.0x000013B0 u32.to-f32 [fact_7.])
 
     ([.x3 fact_3] f32.div [x3_over_6.])
     ([.x5 fact_5] f32.div [x5_over_120.])
@@ -34,15 +30,10 @@
     ([.x2 x2] f32.mul [x4.])
     ([.x4 x2] f32.mul [x6.])
 
-    ([.] const.u32.0x00000002 [fact_2_u32.])
-    ([.] const.u32.0x00000018 [fact_4_u32.])
-    ([.] const.u32.0x000002D0 [fact_6_u32.])
-
-    ([.fact_2_u32] u32.to-f32 [fact_2.])
-    ([.fact_4_u32] u32.to-f32 [fact_4.])
-    ([.fact_6_u32] u32.to-f32 [fact_6.])
-    ([.] const.u32.0x00000001 [one_u32.])
-    ([.one_u32] u32.to-f32 [one.])
+    (const.u32.0x00000002 u32.to-f32 [fact_2.])
+    (const.u32.0x00000018 u32.to-f32 [fact_4.])
+    (const.u32.0x000002D0 u32.to-f32 [fact_6.])
+    (const.u32.0x00000001 u32.to-f32 [one.])
 
     ([.x2 fact_2] f32.div [x2_over_2.])
     ([.x4 fact_4] f32.div [x4_over_24.])
@@ -60,13 +51,9 @@
 # then choose sin/cos and sign from quadrant n mod 4.
 (def program sin-approx-full-nonneg : (f32 val) -> (f32 val) =
   {[x.]
-    ([.] const.u32.0x3F22F983 [inv_pio2_bits.])
-    ([.] const.u32.0x3FC90FDA [pio2_hi_bits.])
-    ([.] const.u32.0x33A22168 [pio2_lo_bits.])
-
-    ([.inv_pio2_bits] u32.bitcast-f32 [inv_pio2.])
-    ([.pio2_hi_bits] u32.bitcast-f32 [pio2_hi.])
-    ([.pio2_lo_bits] u32.bitcast-f32 [pio2_lo.])
+    (const.u32.0x3F22F983 u32.bitcast-f32 [inv_pio2.])
+    (const.u32.0x3FC90FDA u32.bitcast-f32 [pio2_hi.])
+    (const.u32.0x33A22168 u32.bitcast-f32 [pio2_lo.])
 
     ([.x inv_pio2] f32.mul [scaled.])
     ([.scaled] f32.round-to-u32 [n_u32.])
@@ -82,10 +69,10 @@
     ([.sin_r] f32.neg [neg_sin_r.])
     ([.cos_r] f32.neg [neg_cos_r.])
 
-    ([.] const.u32.0x00000003 [mask3.])
-    ([.] const.u32.0x00000000 [q0_u32.])
-    ([.] const.u32.0x00000001 [q1_u32.])
-    ([.] const.u32.0x00000002 [q2_u32.])
+    (const.u32.0x00000003 [mask3.])
+    (const.u32.0x00000000 [q0_u32.])
+    (const.u32.0x00000001 [q1_u32.])
+    (const.u32.0x00000002 [q2_u32.])
 
     ([.n_u32 mask3] u32.and [quadrant.])
     ([.quadrant q0_u32] u32.eq [is_q0.])
@@ -103,8 +90,7 @@
 # compute on |x|, then apply a final negate when x < 0.
 (def program sin-approx-full : (f32 val) -> (f32 val) =
   {[x.]
-    ([.] const.u32.0x00000000 [zero_u32.])
-    ([.zero_u32] u32.to-f32 [zero.])
+    (const.u32.0x00000000 u32.to-f32 [zero.])
     ([.x] f32.neg [neg_x.])
     ([.x zero] f32.lt [is_negative.])
     ([.is_negative neg_x x] f32.select [magnitude.])

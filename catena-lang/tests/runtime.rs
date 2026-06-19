@@ -211,9 +211,9 @@ fn u32_shift_and_sub_test() -> anyhow::Result<()> {
         r#"
         (def program shift-and-sub : [] -> (u32 val) = (
           {[.]
-            ([.] const.u32.0x00000020 [lhs.])
-            ([.] const.u32.0x00000003 [shift.])
-            ([.] const.u32.0x00000001 [one.])
+            (const.u32.0x00000020 [lhs.])
+            (const.u32.0x00000003 [shift.])
+            (const.u32.0x00000001 [one.])
             ([.lhs shift] u32.shr [shr.])
             ([.one shift] u32.shl [shl.])
             ([.shr shl] u32.sub [result.])
@@ -238,31 +238,31 @@ fn u32_bitwise_ops_test() -> anyhow::Result<()> {
         r#"
         (def program u32-and-test : [] -> (u32 val) = (
           {[.]
-            ([.] const.u32.0x00FF00FF [lhs.])
-            ([.] const.u32.0x0F0F0F0F [rhs.])
+            (const.u32.0x00FF00FF [lhs.])
+            (const.u32.0x0F0F0F0F [rhs.])
             ([.lhs rhs] u32.and [result.])
             [.result]
           }
         ))
         (def program u32-or-test : [] -> (u32 val) = (
           {[.]
-            ([.] const.u32.0x00FF00FF [lhs.])
-            ([.] const.u32.0x0F0F0F0F [rhs.])
+            (const.u32.0x00FF00FF [lhs.])
+            (const.u32.0x0F0F0F0F [rhs.])
             ([.lhs rhs] u32.or [result.])
             [.result]
           }
         ))
         (def program u32-xor-test : [] -> (u32 val) = (
           {[.]
-            ([.] const.u32.0x00FF00FF [lhs.])
-            ([.] const.u32.0x0F0F0F0F [rhs.])
+            (const.u32.0x00FF00FF [lhs.])
+            (const.u32.0x0F0F0F0F [rhs.])
             ([.lhs rhs] u32.xor [result.])
             [.result]
           }
         ))
         (def program u32-not-test : [] -> (u32 val) = (
           {[.]
-            ([.] const.u32.0x00FF00FF [value.])
+            (const.u32.0x00FF00FF [value.])
             ([.value] u32.not [result.])
             [.result]
           }
@@ -295,48 +295,48 @@ fn u32_cmp_ops_test() -> anyhow::Result<()> {
         r#"
         (def program u32-eq-test : [] -> (bool val) = (
           {[.]
-            ([.] const.u32.0x00000002 [lhs.])
-            ([.] const.u32.0x00000003 [rhs.])
+            (const.u32.0x00000002 [lhs.])
+            (const.u32.0x00000003 [rhs.])
             ([.lhs rhs] u32.eq [result.])
             [.result]
           }
         ))
         (def program u32-ne-test : [] -> (bool val) = (
           {[.]
-            ([.] const.u32.0x00000002 [lhs.])
-            ([.] const.u32.0x00000003 [rhs.])
+            (const.u32.0x00000002 [lhs.])
+            (const.u32.0x00000003 [rhs.])
             ([.lhs rhs] u32.ne [result.])
             [.result]
           }
         ))
         (def program u32-lt-test : [] -> (bool val) = (
           {[.]
-            ([.] const.u32.0x00000002 [lhs.])
-            ([.] const.u32.0x00000003 [rhs.])
+            (const.u32.0x00000002 [lhs.])
+            (const.u32.0x00000003 [rhs.])
             ([.lhs rhs] u32.lt [result.])
             [.result]
           }
         ))
         (def program u32-gt-test : [] -> (bool val) = (
           {[.]
-            ([.] const.u32.0x00000002 [lhs.])
-            ([.] const.u32.0x00000003 [rhs.])
+            (const.u32.0x00000002 [lhs.])
+            (const.u32.0x00000003 [rhs.])
             ([.lhs rhs] u32.gt [result.])
             [.result]
           }
         ))
         (def program u32-lte-test : [] -> (bool val) = (
           {[.]
-            ([.] const.u32.0x00000002 [lhs.])
-            ([.] const.u32.0x00000003 [rhs.])
+            (const.u32.0x00000002 [lhs.])
+            (const.u32.0x00000003 [rhs.])
             ([.lhs rhs] u32.lte [result.])
             [.result]
           }
         ))
         (def program u32-gte-test : [] -> (bool val) = (
           {[.]
-            ([.] const.u32.0x00000002 [lhs.])
-            ([.] const.u32.0x00000003 [rhs.])
+            (const.u32.0x00000002 [lhs.])
+            (const.u32.0x00000003 [rhs.])
             ([.lhs rhs] u32.gte [result.])
             [.result]
           }
@@ -370,60 +370,48 @@ fn f32_cmp_ops_test() -> anyhow::Result<()> {
         r#"
         (def program f32-lt-test : [] -> (bool val) = (
           {[.]
-            ([.] const.u32.0x3FC00000 [lhs_bits.])
-            ([.] const.u32.0x40200000 [rhs_bits.])
-            ([.lhs_bits] u32.bitcast-f32 [lhs.])
-            ([.rhs_bits] u32.bitcast-f32 [rhs.])
+            (const.u32.0x3FC00000 u32.bitcast-f32 [lhs.])
+            (const.u32.0x40200000 u32.bitcast-f32 [rhs.])
             ([.lhs rhs] f32.lt [result.])
             [.result]
           }
         ))
         (def program f32-eq-test : [] -> (bool val) = (
           {[.]
-            ([.] const.u32.0x3FC00000 [lhs_bits.])
-            ([.] const.u32.0x40200000 [rhs_bits.])
-            ([.lhs_bits] u32.bitcast-f32 [lhs.])
-            ([.rhs_bits] u32.bitcast-f32 [rhs.])
+            (const.u32.0x3FC00000 u32.bitcast-f32 [lhs.])
+            (const.u32.0x40200000 u32.bitcast-f32 [rhs.])
             ([.lhs rhs] f32.eq [result.])
             [.result]
           }
         ))
         (def program f32-ne-test : [] -> (bool val) = (
           {[.]
-            ([.] const.u32.0x3FC00000 [lhs_bits.])
-            ([.] const.u32.0x40200000 [rhs_bits.])
-            ([.lhs_bits] u32.bitcast-f32 [lhs.])
-            ([.rhs_bits] u32.bitcast-f32 [rhs.])
+            (const.u32.0x3FC00000 u32.bitcast-f32 [lhs.])
+            (const.u32.0x40200000 u32.bitcast-f32 [rhs.])
             ([.lhs rhs] f32.ne [result.])
             [.result]
           }
         ))
         (def program f32-gt-test : [] -> (bool val) = (
           {[.]
-            ([.] const.u32.0x3FC00000 [lhs_bits.])
-            ([.] const.u32.0x40200000 [rhs_bits.])
-            ([.lhs_bits] u32.bitcast-f32 [lhs.])
-            ([.rhs_bits] u32.bitcast-f32 [rhs.])
+            (const.u32.0x3FC00000 u32.bitcast-f32 [lhs.])
+            (const.u32.0x40200000 u32.bitcast-f32 [rhs.])
             ([.lhs rhs] f32.gt [result.])
             [.result]
           }
         ))
         (def program f32-lte-test : [] -> (bool val) = (
           {[.]
-            ([.] const.u32.0x3FC00000 [lhs_bits.])
-            ([.] const.u32.0x40200000 [rhs_bits.])
-            ([.lhs_bits] u32.bitcast-f32 [lhs.])
-            ([.rhs_bits] u32.bitcast-f32 [rhs.])
+            (const.u32.0x3FC00000 u32.bitcast-f32 [lhs.])
+            (const.u32.0x40200000 u32.bitcast-f32 [rhs.])
             ([.lhs rhs] f32.lte [result.])
             [.result]
           }
         ))
         (def program f32-gte-test : [] -> (bool val) = (
           {[.]
-            ([.] const.u32.0x3FC00000 [lhs_bits.])
-            ([.] const.u32.0x40200000 [rhs_bits.])
-            ([.lhs_bits] u32.bitcast-f32 [lhs.])
-            ([.rhs_bits] u32.bitcast-f32 [rhs.])
+            (const.u32.0x3FC00000 u32.bitcast-f32 [lhs.])
+            (const.u32.0x40200000 u32.bitcast-f32 [rhs.])
             ([.lhs rhs] f32.gte [result.])
             [.result]
           }

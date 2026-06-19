@@ -123,6 +123,7 @@ fn parts(assignment: &GpuAssign) -> Result<ReducecParts<'_>, GpuRenderError> {
     // rendering time.
     let add_env = assignment.inputs[1..*add_index].iter().collect::<Vec<_>>();
     let add_fn = &assignment.inputs[*add_index];
+
     // Everything between the add function and producer function is the
     // producer closure's environment.
     let get_env = assignment.inputs[*add_index + 1..*get_index]

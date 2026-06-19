@@ -592,3 +592,6 @@ fn log_approx_test() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+#[path = "cases/reducec.rs"]
+mod reducec;

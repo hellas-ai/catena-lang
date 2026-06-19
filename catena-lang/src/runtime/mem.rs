@@ -41,6 +41,20 @@ pub struct Mem {
 }
 
 impl Mem {
+    pub fn to_u64_vec(&self) -> Vec<u64> {
+        let bytes = self.abi.len as usize;
+        assert_eq!(
+            bytes % std::mem::size_of::<u64>(),
+            0,
+            "mem length is not a whole number of u64 values"
+        );
+        if bytes == 0 {
+            return Vec::new();
+        }
+        let len = bytes / std::mem::size_of::<u64>();
+        unsafe { std::slice::from_raw_parts(self.abi.data.cast::<u64>(), len).to_vec() }
+    }
+
     pub(crate) fn from_u64_slice(gpu: Arc<GpuRuntime>, values: &[u64]) -> Result<Self, MemError> {
         let bytes = std::mem::size_of_val(values);
         let mut ptr = std::ptr::null_mut();

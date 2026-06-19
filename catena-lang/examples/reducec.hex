@@ -1,65 +1,108 @@
-# Dot product of two u64 buffers using reducec.
-#
-# This example follows the materializec examples from marco/materializec:
-# input memory is cast to typed buffers, the scalar result is materialized as a
-# same-length owned u64 buffer, and then returned as owned memory.
+# Examples using reducec.
 
-# product-at : buf n u64 * buf n u64 * ix n -> u64
-(def program dot-u64-product-at :
+# Adapter from the environmentful reducec accumulator convention to direct u64.add.
+(def program u64.add-env :
+  {1 (u64 val) (u64 val)}
+  ->
+  (u64 val)
+= ([env acc value.]
+  {[.acc value]} u64.add
+))
+
+# Read one u64 element from a converted buffer at an index.
+(def program sum-u64-at :
   ([n.] {
-    ({cap.ref [.n] u64} buf val)
     ({cap.ref [.n] u64} buf val)
     ([.n] ix val)
   })
   ->
   ([n.] (u64 val))
-= ([lhs rhs i.]
-  {
-    {[.i lhs]} ix
-    {[.i rhs]} ix
-  }
-  u64.mul
+= ([input i.]
+  {[.i input]} ix
 ))
 
-# Constant producer used to materialize the scalar dot product back into owned
-# memory. The output uses the same length index as the left input because this
-# stdlib does not yet expose a type-level u64 literal for a one-element buffer.
-(def program dot-u64-result-at :
-  ([n.] {(u64 val) ([.n] ix val)})
+# Sum all u64 elements in a memory buffer.
+(def program sum-u64 :
+  (cap.ref mem)
   ->
-  ([n.] (u64 val))
-= ([value i.] [.value]))
-
-(def program dot-u64 :
-  {(cap.ref mem) (cap.ref mem)}
-  ->
-  (cap.own mem)
+  (u64 val)
 = (
-  {mem.cast.u64 mem.cast.u64}
-  [lhs-len lhs rhs-len rhs.]
+  mem.cast.u64
+  [len input.]
     {
-      # output length for the materialized scalar result
-      [.lhs-len]
+      # zero
+      (u64.zero :.forget)
 
-      {
-        # zero
-        u64.zero
+      # accumulator closure: unit environment plus adapter function pointer
+      unit.intro
+      name.u64.add-env
 
-        # accumulator closure: no runtime environment, direct function pointer
-        name.u64.add
+      # producer closure: buffer as environment plus function pointer
+      ({[.input] (([.len] :.param) name.sum-u64-at)})
 
-        # producer closure: both input buffers as environment plus function pointer
-        [.lhs rhs]
-        (([.lhs-len] :.param) name.dot-u64-product-at)
-
-        # reduction length
-        [.lhs-len]
-      }
-      reducec
-
-      # materialize the scalar as an owned buffer
-      ({[dot.] [.dot] (([.lhs-len] :.param) name.dot-u64-result-at) [.lhs-len]}
-        materializec)
+      # reduction length
+      [.len]
     }
-    buf.to-mem
+    reducec
 ))
+
+# Dot product of two u64 buffers using reducec.
+#
+# This block needs `materializec` from marco/materializec to turn the scalar dot
+# product back into owned memory, so keep it disabled on this branch.
+#(def program dot-u64-product-at :
+#  ([n.] {
+#    ({cap.ref [.n] u64} buf val)
+#    ({cap.ref [.n] u64} buf val)
+#    ([.n] ix val)
+#  })
+#  ->
+#  ([n.] (u64 val))
+#= ([lhs rhs i.]
+#  {
+#    {[.i lhs]} ix
+#    {[.i rhs]} ix
+#  }
+#  u64.mul
+#))
+#
+#(def program dot-u64-result-at :
+#  ([n.] {(u64 val) ([.n] ix val)})
+#  ->
+#  ([n.] (u64 val))
+#= ([value i.] [.value]))
+#
+#(def program dot-u64 :
+#  {(cap.ref mem) (cap.ref mem)}
+#  ->
+#  (cap.own mem)
+#= (
+#  {mem.cast.u64 mem.cast.u64}
+#  [lhs-len lhs rhs-len rhs.]
+#    {
+#      # output length for the materialized scalar result
+#      [.lhs-len]
+#
+#      {
+#        # zero
+#        (u64.zero :.forget)
+#
+#        # accumulator closure: unit environment plus adapter function pointer
+#        unit.intro
+#        name.u64.add-env
+#
+#        # producer closure: both input buffers as environment plus function pointer
+#        [.lhs rhs]
+#        (([.lhs-len] :.param) name.dot-u64-product-at)
+#
+#        # reduction length
+#        [.lhs-len]
+#      }
+#      reducec
+#
+#      # materialize the scalar as an owned buffer
+#      ({[dot.] [.dot] (([.lhs-len] :.param) name.dot-u64-result-at) [.lhs-len]}
+#        materializec)
+#    }
+#    buf.to-mem
+#))

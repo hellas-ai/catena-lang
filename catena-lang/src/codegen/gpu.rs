@@ -232,6 +232,7 @@ fn render_assignment(
         "u32.bitcast-f32" => render_u32_bitcast_f32(out, assignment)?,
         "u64.gt" => render_u64_gt(out, assignment)?,
         "mem.cast.u64" => render_mem_cast_u64(out, assignment)?,
+        "buf.to-mem" => render_buf_to_mem(out, assignment)?,
         "f32.one" => render_f32_one(out, assignment)?,
         "f32.add" => render_binary(out, assignment, "+")?,
         "f32.sub" => render_binary(out, assignment, "-")?,
@@ -454,6 +455,33 @@ fn render_mem_cast_u64(out: &mut String, assignment: &GpuAssign) -> Result<(), G
         len = len.name,
         buf = buffer.name,
         mem = value_expr(input)
+    ));
+    Ok(())
+}
+
+fn render_buf_to_mem(out: &mut String, assignment: &GpuAssign) -> Result<(), GpuRenderError> {
+    let [len, buffer] = assignment.inputs.as_slice() else {
+        return Err(invalid_inputs(assignment, 2));
+    };
+    let [output] = assignment.outputs.as_slice() else {
+        return Err(invalid_outputs(assignment, 1));
+    };
+    let GpuValue::Var(buffer) = buffer else {
+        return Err(GpuRenderError::UnsupportedOp(assignment.op.clone()));
+    };
+    let CType::Pointer(element) =
+        runtime_type(buffer).ok_or_else(|| GpuRenderError::ErasedType(buffer.clone()))?
+    else {
+        return Err(GpuRenderError::UnsupportedType(
+            runtime_type(buffer).unwrap().clone(),
+        ));
+    };
+    out.push_str(&format!(
+        "    {mem}.data = (void *){buf};\n    {mem}.len = {len} * sizeof({element});\n",
+        mem = output.name,
+        buf = buffer.name,
+        len = value_expr(len),
+        element = c_type(element),
     ));
     Ok(())
 }

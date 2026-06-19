@@ -1,44 +1,43 @@
-# Exercise materialization with a pure indexed producer.
-#
-# The producer receives unit plus a flat index and returns a constant boolean:
-#
-#   \(_, i). true
-#
-# It materializes a boolean buffer by running the producer once per index.
-
+# create a buffer from an index function
 (def program materialize-index-producer :
   ([n.] {1 ([.n] ix val)})
   ->
-  ([n.] (bool val))
-= ([env i.] bool.t))
+  ([n.] (u64 val))
+= ([env i.] u64.one))
 
 (def program materialize-indexes :
   ({[n] u64} :)
   ->
-  ([n.] ({cap.own [.n] bool} buf val))
+  ([n.] (cap.own mem))
 = ([len.]
-  {unit.intro (([.len] :.param) name.materialize-index-producer) [.len]}
-  materializec
+  {
+    [.len]
+    ({unit.intro (([.len] :.param) name.materialize-index-producer) [.len]}
+      materializec)
+  }
+  buf.to-mem
 ))
 
-# Copy a boolean buffer by using the input buffer as the converted closure
-# environment.
-(def program materialize-copy-bool-producer :
-  ([n.] {({cap.ref [.n] bool} buf val) ([.n] ix val)})
+# Copy a u64 buffer 
+(def program materialize-copy-u64-producer :
+  ([n.] {({cap.ref [.n] u64} buf val) ([.n] ix val)})
   ->
-  ([n.] (bool val))
+  ([n.] (u64 val))
 = ([input i.]
   {[.i input]} ix
 ))
 
-(def program materialize-copy-bool :
-  {[n.]
-    ({[.n] u64} :)
-    ({cap.ref [.n] bool} buf val)
-  }
+(def program materialize-copy-u64 :
+  (cap.ref mem)
   ->
-  ([n.] ({cap.own [.n] bool} buf val))
-= ([len input.]
-  {[.input] (([.len] :.param) name.materialize-copy-bool-producer) [.len]}
-  materializec
+  (cap.own mem)
+= (
+  mem.cast.u64
+  [len input.]
+    {
+      [.len]
+      ({[.input] (([.len] :.param) name.materialize-copy-u64-producer) [.len]}
+        materializec)
+    }
+    buf.to-mem
 ))

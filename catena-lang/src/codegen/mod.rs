@@ -7,7 +7,9 @@
 pub mod fn_ptrs;
 pub mod gpu;
 pub mod lower_types;
+mod ops;
 mod prelude;
+mod render_utils;
 mod specialize;
 
 use std::collections::{BTreeMap, VecDeque};

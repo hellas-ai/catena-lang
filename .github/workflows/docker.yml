@@ -1,6 +1,9 @@
 name: Runpod Dev Image
 
 on:
+  push:
+    branches:
+      - marco/runpod
   workflow_dispatch:
 
 env:

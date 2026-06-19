@@ -123,6 +123,58 @@ fn two_times_two_float() -> anyhow::Result<()> {
 }
 
 #[test]
+fn f32_fma_basic_test() -> anyhow::Result<()> {
+    let runtime = runtime_with(
+        r#"
+        (def program fma-basic : [] -> (f32 val) = (
+          {f32.one f32.one f32.one}
+          f32.fma
+        ))
+        "#,
+    )?;
+
+    let [result] = runtime.exec("fma-basic", [])?;
+    let Value::F32(result) = result else {
+        anyhow::bail!("fma-basic returned non-f32 value: {result:?}");
+    };
+
+    assert_eq!(result, 2.0);
+    Ok(())
+}
+
+#[test]
+fn f32_fma_is_fused_test() -> anyhow::Result<()> {
+    let a = f32::from_bits(0x3F800001);
+    let b = f32::from_bits(0x3F800001);
+    let c = f32::from_bits(0x33800000);
+    let fused_bits = a.mul_add(b, c).to_bits();
+    let separate_bits = ((a * b) + c).to_bits();
+
+    assert_eq!(fused_bits, 0x3F800003);
+    assert_eq!(separate_bits, 0x3F800002);
+
+    let runtime = runtime_with(
+        r#"
+        (def program fma-fused-bits : {(f32 val) (f32 val) (f32 val)} -> (u32 val) = (
+          {[a b c.]
+            ([.a b c] f32.fma [result.])
+            ([.result] f32.bitcast-u32 [bits.])
+            [.bits]
+          }
+        ))
+        "#,
+    )?;
+
+    let [result] = runtime.exec("fma-fused-bits", [a.into(), b.into(), c.into()])?;
+    let Value::U32(result) = result else {
+        anyhow::bail!("fma-fused-bits returned non-u32 value: {result:?}");
+    };
+
+    assert_eq!(result, fused_bits);
+    Ok(())
+}
+
+#[test]
 fn sin_approx_test() -> anyhow::Result<()> {
     let runtime = runtime_with(SIN_EXAMPLES)?;
 

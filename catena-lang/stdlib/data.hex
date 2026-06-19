@@ -72,6 +72,7 @@
   (arr f32.sub  : {(f32 val) (f32 val)} -> (f32 val))
   (arr f32.neg  : (f32 val) -> (f32 val))
   (arr f32.mul  : {(f32 val) (f32 val)} -> (f32 val))
+  (arr f32.fma  : {(f32 val) (f32 val) (f32 val)} -> (f32 val))
   (arr f32.div  : {(f32 val) (f32 val)} -> (f32 val))
   (arr f32.lt   : {(f32 val) (f32 val)} -> (bool val))
   (arr f32.eq   : {(f32 val) (f32 val)} -> (bool val))

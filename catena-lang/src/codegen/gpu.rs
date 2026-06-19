@@ -231,6 +231,7 @@ fn render_assignment(
         "f32.sub" => render_binary(out, assignment, "-")?,
         "f32.neg" => render_f32_neg(out, assignment)?,
         "f32.mul" => render_binary(out, assignment, "*")?,
+        "f32.fma" => render_f32_fma(out, assignment)?,
         "f32.div" => render_binary(out, assignment, "/")?,
         "f32.eq" => render_binary_bool(out, assignment, "==")?,
         "f32.ne" => render_binary_bool(out, assignment, "!=")?,
@@ -342,6 +343,23 @@ fn render_f32_neg(out: &mut String, assignment: &GpuAssign) -> Result<(), GpuRen
         return Err(invalid_outputs(assignment, 1));
     };
     out.push_str(&format!("    {} = -{};\n", output.name, value_expr(input)));
+    Ok(())
+}
+
+fn render_f32_fma(out: &mut String, assignment: &GpuAssign) -> Result<(), GpuRenderError> {
+    let [multiplicand, multiplier, addend] = assignment.inputs.as_slice() else {
+        return Err(invalid_inputs(assignment, 3));
+    };
+    let [output] = assignment.outputs.as_slice() else {
+        return Err(invalid_outputs(assignment, 1));
+    };
+    out.push_str(&format!(
+        "    {} = fmaf({}, {}, {});\n",
+        output.name,
+        value_expr(multiplicand),
+        value_expr(multiplier),
+        value_expr(addend)
+    ));
     Ok(())
 }
 

@@ -17,7 +17,7 @@ const STDLIB: &[&str] = &[
 ];
 const SIN_EXAMPLES: &str = include_str!("../examples/sincos.hex");
 const LOG_EXAMPLES: &str = include_str!("../examples/log.hex");
-const SOFTMAX_EXAMPLES: &str = include_str!("../examples/softmax.hex");
+const NN_EXAMPLES: &str = include_str!("../examples/nn.hex");
 
 /// Create a runtime with a provided user source file
 fn runtime_with(source: &'static str) -> anyhow::Result<Runtime> {
@@ -553,7 +553,7 @@ fn array_head_u64() -> anyhow::Result<()> {
 
 #[test]
 fn exp_approx_test() -> anyhow::Result<()> {
-    let runtime = runtime_with(SOFTMAX_EXAMPLES)?;
+    let runtime = runtime_with(NN_EXAMPLES)?;
 
     for input in [-3.0_f32, -1.0, -0.5, 0.0, 0.5, 1.0, 3.0] {
         let [result] = runtime.exec("exp-approx", [input.into()])?;
@@ -566,6 +566,93 @@ fn exp_approx_test() -> anyhow::Result<()> {
         assert!(
             error < 4e-3,
             "exp-approx({input}) = {result}, expected {expected}, rel-ish error {error}"
+        );
+    }
+
+    Ok(())
+}
+
+#[test]
+fn sigmoid_test() -> anyhow::Result<()> {
+    let runtime = runtime_with(NN_EXAMPLES)?;
+
+    for input in [-6.0_f32, -1.0, 0.0, 1.0, 6.0] {
+        let [result] = runtime.exec("sigmoid", [input.into()])?;
+        let Value::F32(result) = result else {
+            anyhow::bail!("sigmoid returned non-f32 value: {result:?}");
+        };
+
+        let expected = 1.0 / (1.0 + (-input).exp());
+        let error = (result - expected).abs();
+        assert!(
+            error < 4e-3,
+            "sigmoid({input}) = {result}, expected {expected}, abs error {error}"
+        );
+    }
+
+    Ok(())
+}
+
+#[test]
+fn silu_test() -> anyhow::Result<()> {
+    let runtime = runtime_with(NN_EXAMPLES)?;
+
+    for input in [-3.0_f32, -1.0, 0.0, 1.0, 3.0] {
+        let [result] = runtime.exec("silu", [input.into()])?;
+        let Value::F32(result) = result else {
+            anyhow::bail!("silu returned non-f32 value: {result:?}");
+        };
+
+        let sigmoid = 1.0 / (1.0 + (-input).exp());
+        let expected = input * sigmoid;
+        let error = (result - expected).abs();
+        assert!(
+            error < 2e-2,
+            "silu({input}) = {result}, expected {expected}, abs error {error}"
+        );
+    }
+
+    Ok(())
+}
+
+#[test]
+fn tanh_test() -> anyhow::Result<()> {
+    let runtime = runtime_with(NN_EXAMPLES)?;
+
+    for input in [-3.0_f32, -1.0, 0.0, 1.0, 3.0] {
+        let [result] = runtime.exec("tanh", [input.into()])?;
+        let Value::F32(result) = result else {
+            anyhow::bail!("tanh returned non-f32 value: {result:?}");
+        };
+
+        let expected = input.tanh();
+        let error = (result - expected).abs();
+        assert!(
+            error < 8e-3,
+            "tanh({input}) = {result}, expected {expected}, abs error {error}"
+        );
+    }
+
+    Ok(())
+}
+
+#[test]
+fn gelu_approx_test() -> anyhow::Result<()> {
+    let runtime = runtime_with(NN_EXAMPLES)?;
+
+    for input in [-3.0_f32, -1.0, 0.0, 1.0, 3.0] {
+        let [result] = runtime.exec("gelu-approx", [input.into()])?;
+        let Value::F32(result) = result else {
+            anyhow::bail!("gelu-approx returned non-f32 value: {result:?}");
+        };
+
+        let sqrt_2_over_pi = (2.0_f32 / std::f32::consts::PI).sqrt();
+        let expected =
+            0.5 * input * (1.0 + (sqrt_2_over_pi * (input + 0.044_715 * input.powi(3))).tanh());
+        let error = (result - expected).abs();
+        assert!(
+            error < 2e-2,
+            "gelu-approx({input}) = {result}, expected {expected}, abs error {error}"
         );
     }
 

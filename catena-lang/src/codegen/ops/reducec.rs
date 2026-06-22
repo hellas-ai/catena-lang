@@ -161,13 +161,6 @@ fn is_runtime_value(value: &GpuValue) -> bool {
 fn value_expr(value: &GpuValue) -> String {
     match value {
         GpuValue::Var(var) => var.name.clone(),
-        GpuValue::FnSymbol(symbol) => {
-            let target = symbol.target.as_str();
-            if target.contains('.') {
-                sanitize_ident(target)
-            } else {
-                sanitize_ident(&format!("program.{target}"))
-            }
-        }
+        GpuValue::FnSymbol(symbol) => sanitize_ident(&format!("program.{}", symbol.target)),
     }
 }

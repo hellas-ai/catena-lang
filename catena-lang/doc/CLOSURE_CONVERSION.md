@@ -41,3 +41,62 @@ The *type* of the replaced closure is figured as follows.
     - `lift : (A -> B) -> (A => B)`
 - Then...
 - Order these (somewhat arbitrarily) by edge ID, combined sources define interface of `closure.i`
+
+# Conversion for *definitions* and *primitives on closures*.
+
+We propose the following additional primitives involving closures:
+
+    reduce (zero : A) (add : A * A => A) (Ix n => A) (n : u64) -> A
+
+    materialize : (Ix n => A) (n : u64) -> buf cap.own A
+
+    if (A => B) ● (A => B) ● Bool ● A -> B
+
+In addition, we want *user code* to be able to use closures
+(this is important for lowering catgrad programs, since we use `Ix n => Dtype`
+as the lowered type of a tensor with type `(Shape, Dtype)`.)
+
+How should closure conversion work for these? We'll start with the 3 primitives above,
+and consider user definitions later.
+
+## Primitives `reduce`, `materialize` and `if`
+
+Each of the primitives goes to its "closure converted" variant,
+currently with the same name + `c` suffix.
+So, ...
+
+
+    # if
+    if (A => B) ● (A => B) ● Bool ● A -> B
+
+    # ... lowers to 'ifc'
+    ifc (X, X ● A => B) ● (Y, Y ● A => B) ● Bool ● A -> B
+
+    materialize : (Ix n => A) (n : u64) -> buf cap.own A
+    materializec : (X, X ● Ix n -> A) (n : u64) -> buf cap.own A
+
+    reduce (zero : A) (add : A ● A => A) (Ix n => A) (n : u64) -> A
+    reducec (zero : A) (X, add : X ● A ● A -> A) (Y, Y ● Ix n => A) (n : u64) -> A
+
+## User definitions
+
+# A note on conditionals
+
+Normally, when `(A => B)` lowers to `(X, X ● A -> B)`, we lower `if` to
+
+    ifc (X, X ● A => B) ● (Y, Y ● A => B) ● Bool ● A -> B
+
+However, if we take instead `select` on closures
+
+    closure.select Bool ● (A => B) ● (A => B) -> (A => B)
+
+And then `(A => B)` lowers to closures `(X, X ● A -> B)`, we get
+
+    if Bool ● (X, X ● A => B) ● (Y, Y ● A => B) -> (???, ??? ● A -> B)
+
+The problem above is that we need a dependent type:
+
+    if (b : Bool) ● (X, X ● A => B) ● (Y, Y ● A => B) -> (b ? X : Y, (b ? X : Y) ● A -> B)
+
+Meaning we need a *type level dependent sum* - the returned closure env still
+depends on b.

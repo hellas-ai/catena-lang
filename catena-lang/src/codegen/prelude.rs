@@ -46,7 +46,7 @@ __host__ __device__ static inline void catena_assert(uint8_t condition) {{
 }}
 
 #ifndef {device_compile_guard}
-static inline void catena_gpu_check({error_type} err) {{
+__host__ static inline void catena_host_gpu_check({error_type} err) {{
     if (err != {success_value}) {{
         fprintf(stderr, "catena GPU error: %s\n", {error_string_fn}(err));
         fflush(stderr);
@@ -111,4 +111,22 @@ __host__ __device__ static inline uint32_t catena_f32_bitcast_u32(float value) {
         success_value = dialect.success_value(),
         error_string_fn = dialect.error_string_fn(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn host_gpu_check_is_host_only() {
+        let prelude = render_gpu_prelude(GpuDialect::Hip);
+
+        assert!(
+            prelude.contains(
+                "#ifndef __HIP_DEVICE_COMPILE__\n__host__ static inline void catena_host_gpu_check(hipError_t err)"
+            )
+        );
+        assert!(!prelude.contains("catena_gpu_check"));
+        assert!(!prelude.contains("__device__ static inline void catena_host_gpu_check"));
+    }
 }

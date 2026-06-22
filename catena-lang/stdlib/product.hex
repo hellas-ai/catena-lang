@@ -7,4 +7,12 @@
 (theory program type {
   (arr unit.intro : [] -> 1)
   (arr unit.elim : [] -> 1)
+  (arr prod.intro : {[a b.]
+    ([.a])
+    ([.b])
+  } -> ([a b.] ({[.a] [.b]} *)))
+  (arr prod.elim : ([a b.] ({[.a] [.b]} *)) -> {[a b.]
+    ([.a])
+    ([.b])
+  })
 })

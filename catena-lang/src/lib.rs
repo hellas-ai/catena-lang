@@ -1,4 +1,5 @@
 pub mod check;
+pub mod closure;
 pub mod codegen;
 pub mod compile;
 pub mod elaborate;

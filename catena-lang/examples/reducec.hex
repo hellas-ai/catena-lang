@@ -31,7 +31,7 @@
   [len input.]
     {
       # zero
-      (u64.zero :.forget)
+      const.u64.0x0000000000000000
 
       # accumulator closure: unit environment plus adapter function pointer
       unit.intro

@@ -12,6 +12,7 @@ const STDLIB: &[&str] = &[
     include_str!("../stdlib/index.hex"),
     include_str!("../stdlib/data.hex"),
     include_str!("../stdlib/fn.hex"),
+    include_str!("../stdlib/combinators.hex"),
     include_str!("../stdlib/product.hex"),
     include_str!("../stdlib/gpu.hex"),
 ];

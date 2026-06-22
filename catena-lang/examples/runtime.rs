@@ -19,6 +19,7 @@ fn main() -> anyhow::Result<()> {
             root.join("stdlib/index.hex"),
             root.join("stdlib/data.hex"),
             root.join("stdlib/fn.hex"),
+            root.join("stdlib/combinators.hex"),
             root.join("stdlib/product.hex"),
             root.join("stdlib/gpu.hex"),
             root.join("examples/example.hex"),

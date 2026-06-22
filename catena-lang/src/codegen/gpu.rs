@@ -271,6 +271,7 @@ fn render_assignment(
         "u32.not" => render_unary_prefix(out, assignment, "~")?,
         "u32.to-f32" => render_u32_cast_to_f32(out, assignment)?,
         "u32.bitcast-f32" => render_u32_bitcast_f32(out, assignment)?,
+        "u64.eq" => render_u64_eq(out, assignment)?,
         "u64.gt" => render_u64_gt(out, assignment)?,
         "mem.cast.u64" => render_mem_cast_u64(out, assignment)?,
         "buf.to-mem" => render_buf_to_mem(out, assignment)?,
@@ -536,6 +537,22 @@ fn render_u64_gt(out: &mut String, assignment: &GpuAssign) -> Result<(), GpuRend
     };
     out.push_str(&format!(
         "    {} = {} > {};\n",
+        flag.name,
+        value_expr(lhs),
+        value_expr(rhs)
+    ));
+    Ok(())
+}
+
+fn render_u64_eq(out: &mut String, assignment: &GpuAssign) -> Result<(), GpuRenderError> {
+    let [lhs, rhs] = assignment.inputs.as_slice() else {
+        return Err(invalid_inputs(assignment, 2));
+    };
+    let [flag, _true_witness, _false_witness] = assignment.outputs.as_slice() else {
+        return Err(invalid_outputs(assignment, 3));
+    };
+    out.push_str(&format!(
+        "    {} = {} == {};\n",
         flag.name,
         value_expr(lhs),
         value_expr(rhs)

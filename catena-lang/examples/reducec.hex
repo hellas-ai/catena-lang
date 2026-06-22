@@ -47,62 +47,49 @@
 ))
 
 # Dot product of two u64 buffers using reducec.
-#
-# This block needs `materializec` from marco/materializec to turn the scalar dot
-# product back into owned memory, so keep it disabled on this branch.
-#(def program dot-u64-product-at :
-#  ([n.] {
-#    ({cap.ref [.n] u64} buf val)
-#    ({cap.ref [.n] u64} buf val)
-#    ([.n] ix val)
-#  })
-#  ->
-#  ([n.] (u64 val))
-#= ([lhs rhs i.]
-#  {
-#    {[.i lhs]} ix
-#    {[.i rhs]} ix
-#  }
-#  u64.mul
-#))
-#
-#(def program dot-u64-result-at :
-#  ([n.] {(u64 val) ([.n] ix val)})
-#  ->
-#  ([n.] (u64 val))
-#= ([value i.] [.value]))
-#
-#(def program dot-u64 :
-#  {(cap.ref mem) (cap.ref mem)}
-#  ->
-#  (cap.own mem)
-#= (
-#  {mem.cast.u64 mem.cast.u64}
-#  [lhs-len lhs rhs-len rhs.]
-#    {
-#      # output length for the materialized scalar result
-#      [.lhs-len]
-#
-#      {
-#        # zero
-#        (u64.zero :.forget)
-#
-#        # accumulator closure: unit environment plus adapter function pointer
-#        unit.intro
-#        name.u64.add-env
-#
-#        # producer closure: both input buffers as environment plus function pointer
-#        [.lhs rhs]
-#        (([.lhs-len] :.param) name.dot-u64-product-at)
-#
-#        # reduction length
-#        [.lhs-len]
-#      }
-#      reducec
-#
-#      # materialize the scalar as an owned buffer
-#      ({[dot.] [.dot] (([.lhs-len] :.param) name.dot-u64-result-at) [.lhs-len]}
-#        materializec)
-#    }
-#    buf.to-mem
-#))
+(def program dot-u64-product-at :
+  ([n.] {
+    ({({cap.ref [.n] u64} buf val) ({cap.ref [.n] u64} buf val)} *)
+    ([.n] ix val)
+  })
+  ->
+  ([n.] (u64 val))
+= ([lhs rhs i.]
+  {
+    {[.i lhs]} ix
+    {[.i rhs]} ix
+  }
+  u64.mul
+))
+
+(def program dot-u64 :
+  {(cap.ref mem) (cap.ref mem)}
+  ->
+  (u64 val)
+= (
+  {mem.cast.u64 mem.cast.u64}
+  [lhs-len lhs rhs-len rhs.]
+    {
+      ([.lhs-len rhs-len] u64.eq [same same_true same_false. same same_true] assert-then)
+      [.lhs-len]
+      [.lhs]
+      [.rhs-len]
+      [.rhs]
+    }
+  [same-len lhs-len lhs rhs-len rhs.]
+    {
+      # zero
+      const.u64.0x0000000000000000
+
+      # accumulator closure: unit environment plus adapter function pointer
+      unit.intro
+      name.u64.add-env
+
+      # producer closure: lhs/rhs environment plus function pointer
+      ({[.lhs rhs] (([.lhs-len] :.param) name.dot-u64-product-at)})
+
+      # reduction length
+      [.lhs-len]
+    }
+    reducec
+))

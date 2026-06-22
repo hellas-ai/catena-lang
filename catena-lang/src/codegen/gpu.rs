@@ -274,6 +274,7 @@ fn render_assignment(
         "u64.eq" => render_u64_eq(out, assignment)?,
         "u64.gt" => render_u64_gt(out, assignment)?,
         "mem.cast.u64" => render_mem_cast_u64(out, assignment)?,
+        "buf.u64.cast-same-length" => render_buf_u64_cast_same_length(out, assignment)?,
         "buf.to-mem" => render_buf_to_mem(out, assignment)?,
         "f32.one" => render_f32_one(out, assignment)?,
         "f32.add" => render_binary(out, assignment, "+")?,
@@ -572,6 +573,24 @@ fn render_mem_cast_u64(out: &mut String, assignment: &GpuAssign) -> Result<(), G
         len = len.name,
         buf = buffer.name,
         mem = value_expr(input)
+    ));
+    Ok(())
+}
+
+fn render_buf_u64_cast_same_length(
+    out: &mut String,
+    assignment: &GpuAssign,
+) -> Result<(), GpuRenderError> {
+    let [buffer, _same_length] = assignment.inputs.as_slice() else {
+        return Err(invalid_inputs(assignment, 2));
+    };
+    let [output] = assignment.outputs.as_slice() else {
+        return Err(invalid_outputs(assignment, 1));
+    };
+    out.push_str(&format!(
+        "    {} = {};\n",
+        output.name,
+        value_expr(buffer)
     ));
     Ok(())
 }

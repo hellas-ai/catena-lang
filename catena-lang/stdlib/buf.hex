@@ -38,6 +38,12 @@
     ({[.m n] u64} buf val) # val(buf m n u64)
   })
 
+  # Transport a u64 buffer across a proven length equality.
+  (arr buf.u64.cast-same-length : {[m n p.]
+    ({[.m p] u64} buf val) # val(buf m p u64)
+    ([.n p] = |-)           # n = p
+  } -> ([m n p.] ({[.m n] u64} buf val)))
+
   # Materialize an owned buffer from an indexed producer.
   #
   #   materialize : (n : u64) ● val(val(ix n) => val(t)) -> val(buf cap.own n t)

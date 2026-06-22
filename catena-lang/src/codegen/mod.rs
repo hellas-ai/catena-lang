@@ -25,6 +25,7 @@ use open_hypergraphs::lax::NodeId;
 use thiserror::Error;
 
 use crate::{
+    check::AnnotatedTerm,
     codegen::{
         fn_ptrs::{FnPtrSymbol, FnPtrSymbolError, direct_fn_ptr_symbols},
         lower_types::{CType, LowerTypeError, LoweredType, lower_type},
@@ -34,7 +35,7 @@ use crate::{
         },
     },
     pass::record_boundary_sizes::OperationWithBoundarySizes,
-    report::{AnnotatedTerm, TheoryTermMap},
+    report::TheoryTermMap,
 };
 
 pub type GpuModuleMap = BTreeMap<Operation, GpuModule>;

@@ -3,13 +3,13 @@ use std::collections::BTreeMap;
 use hexpr::Operation;
 
 use crate::{
+    check::AnnotatedTerm,
     codegen::{
         GpuValue, GpuVar,
         fn_ptrs::FnPtrSymbol,
         lower_types::{CType, LowerTypeError, LoweredType, lower_type},
     },
     pass::record_boundary_sizes::OperationWithBoundarySizes,
-    report::AnnotatedTerm,
 };
 
 /// A concrete, lowered type

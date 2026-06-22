@@ -93,53 +93,69 @@ type ReducecParts<'a> = (
 );
 
 fn parts(assignment: &GpuAssign) -> Result<ReducecParts<'_>, GpuRenderError> {
-    // `reducec` is closure-converted but not a normal function call: the two
-    // function symbols divide the flat SSA input list into zero/add-env,
-    // producer-env, and trailing erased witnesses plus length.
-    let func_indices = assignment
-        .inputs
-        .iter()
-        .enumerate()
-        .filter_map(|(index, input)| matches!(input, GpuValue::FnSymbol(_)).then_some(index))
-        .collect::<Vec<_>>();
-    let [add_index, get_index] = func_indices.as_slice() else {
-        return Err(GpuRenderError::InvalidReducecFunctionCount {
-            actual: func_indices.len(),
+    let [
+        zero_group,
+        add_env_group,
+        add_fn_group,
+        get_env_group,
+        get_fn_group,
+        len_group,
+    ] = assignment.source_groups()
+    else {
+        return Err(GpuRenderError::InvalidReducecSourceGroupCount {
+            actual: assignment.source_groups().len(),
         });
     };
-    if *add_index == 0 {
-        return Err(GpuRenderError::MissingReducecZero);
-    }
+
+    let add_fn_group_len = assignment.group_values(add_fn_group).len();
+    if !matches!(
+        assignment.single_group_value(add_fn_group),
+        Some(GpuValue::FnSymbol(_))
+    ) {
+        return Err(GpuRenderError::InvalidReducecFunctionGroup {
+            source_index: add_fn_group.source_index,
+            actual: add_fn_group_len,
+        });
+    };
+
+    let get_fn_group_len = assignment.group_values(get_fn_group).len();
+    if !matches!(
+        assignment.single_group_value(get_fn_group),
+        Some(GpuValue::FnSymbol(_))
+    ) {
+        return Err(GpuRenderError::InvalidReducecFunctionGroup {
+            source_index: get_fn_group.source_index,
+            actual: get_fn_group_len,
+        });
+    };
 
     // The zero value must be a runtime value because it initializes the emitted
     // accumulator variable directly.
-    let zero = &assignment.inputs[0];
+    let zero = assignment
+        .single_group_value(zero_group)
+        .ok_or(GpuRenderError::MissingReducecZero)?;
     if !is_runtime_value(zero) {
         return Err(GpuRenderError::ErasedReducecZero);
     }
 
-    // Everything between zero and the add function is the add closure's
-    // environment. Erased values can appear here; they are filtered at call
-    // rendering time.
-    let add_env = assignment.inputs[1..*add_index].iter().collect::<Vec<_>>();
-    let add_fn = &assignment.inputs[*add_index];
+    let add_env = assignment.group_values(add_env_group).iter().collect();
+    let add_fn = assignment
+        .single_group_value(add_fn_group)
+        .expect("validated add function group");
 
-    // Everything between the add function and producer function is the
-    // producer closure's environment.
-    let get_env = assignment.inputs[*add_index + 1..*get_index]
-        .iter()
-        .collect::<Vec<_>>();
-    let get_fn = &assignment.inputs[*get_index];
+    let get_env = assignment.group_values(get_env_group).iter().collect();
+    let get_fn = assignment
+        .single_group_value(get_fn_group)
+        .expect("validated get function group");
 
-    // After the producer function, only one runtime value should remain: the
-    // reduction length. Type-level witnesses in this suffix are erased.
-    let trailing_runtime = assignment.inputs[*get_index + 1..]
+    let len_values = assignment.group_values(len_group);
+    let runtime_lengths = len_values
         .iter()
         .filter(|input| is_runtime_value(input))
         .collect::<Vec<_>>();
-    let [n] = trailing_runtime.as_slice() else {
+    let [n] = runtime_lengths.as_slice() else {
         return Err(GpuRenderError::InvalidReducecLengthCount {
-            actual: trailing_runtime.len(),
+            actual: runtime_lengths.len(),
         });
     };
 

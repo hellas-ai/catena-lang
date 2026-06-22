@@ -39,6 +39,12 @@ pub enum GpuRenderError {
     MissingMaterializeFunction,
     #[error("reducec expected exactly two function inputs, found {actual}")]
     InvalidReducecFunctionCount { actual: usize },
+    #[error("reducec expected exactly six source groups, found {actual}")]
+    InvalidReducecSourceGroupCount { actual: usize },
+    #[error(
+        "reducec source group {source_index} should contain exactly one function symbol, found {actual} flat inputs"
+    )]
+    InvalidReducecFunctionGroup { source_index: usize, actual: usize },
     #[error("reducec is missing zero input")]
     MissingReducecZero,
     #[error("reducec zero input is erased")]
@@ -587,11 +593,7 @@ fn render_buf_u64_cast_same_length(
     let [output] = assignment.outputs.as_slice() else {
         return Err(invalid_outputs(assignment, 1));
     };
-    out.push_str(&format!(
-        "    {} = {};\n",
-        output.name,
-        value_expr(buffer)
-    ));
+    out.push_str(&format!("    {} = {};\n", output.name, value_expr(buffer)));
     Ok(())
 }
 
@@ -941,6 +943,7 @@ mod tests {
                         }),
                         GpuValue::Var(len),
                     ],
+                    source_input_groups: vec![],
                     outputs: vec![out],
                 }],
             },
@@ -956,6 +959,7 @@ mod tests {
                     op: op("u64.one"),
                     call_symbol: None,
                     inputs: vec![],
+                    source_input_groups: vec![],
                     outputs: vec![value],
                 }],
             },

@@ -4,9 +4,9 @@
 //!
 //! ```cpp
 //! T *buf_data = nullptr;
-//! catena_gpu_check(cudaMallocManaged((void **)&buf_data, len * sizeof(T)));
+//! catena_host_gpu_check(cudaMallocManaged((void **)&buf_data, len * sizeof(T)));
 //! materialize_kernel<<<dim3((len + 255) / 256), dim3(256)>>>(buf_data, len, env...);
-//! catena_gpu_check(cudaDeviceSynchronize());
+//! catena_host_gpu_check(cudaDeviceSynchronize());
 //! buf = buf_data;
 //! ```
 //!
@@ -112,7 +112,7 @@ pub(in crate::codegen) fn render_call(
         name = output.name
     ));
     out.push_str(&format!(
-        "    catena_gpu_check({managed_alloc_fn}((void **)&{name}_data, {name}_len * sizeof({element})));\n",
+        "    catena_host_gpu_check({managed_alloc_fn}((void **)&{name}_data, {name}_len * sizeof({element})));\n",
         name = output.name,
         element = c_type(element),
         managed_alloc_fn = dialect.managed_alloc_fn(),
@@ -135,7 +135,7 @@ pub(in crate::codegen) fn render_call(
     }
     out.push_str(");\n");
     out.push_str(&format!(
-        "    catena_gpu_check({synchronize_fn}());\n",
+        "    catena_host_gpu_check({synchronize_fn}());\n",
         synchronize_fn = dialect.synchronize_fn()
     ));
     out.push_str(&format!("    {} = {}_data;\n", output.name, output.name));

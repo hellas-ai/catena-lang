@@ -69,7 +69,7 @@ pub fn render_modules(
     out.push('\n');
 
     for module in modules.values() {
-        render_function_decl(&mut out, &module.entry)?;
+        render_function_decl(&mut out, &module.entry, dialect)?;
     }
     if !modules.is_empty() {
         out.push('\n');
@@ -113,9 +113,19 @@ fn render_module_body(
     Ok(())
 }
 
-fn render_function_decl(out: &mut String, function: &GpuFunction) -> Result<(), GpuRenderError> {
+fn render_function_decl(
+    out: &mut String,
+    function: &GpuFunction,
+    dialect: GpuDialect,
+) -> Result<(), GpuRenderError> {
+    if function_is_host_only(function) {
+        out.push_str(&format!("#ifndef {}\n", dialect.device_compile_guard()));
+    }
     out.push_str(&function_signature(function)?);
     out.push_str(";\n");
+    if function_is_host_only(function) {
+        out.push_str("#endif\n");
+    }
     Ok(())
 }
 
@@ -124,6 +134,9 @@ fn render_function(
     function: &GpuFunction,
     dialect: GpuDialect,
 ) -> Result<(), GpuRenderError> {
+    if function_is_host_only(function) {
+        out.push_str(&format!("#ifndef {}\n", dialect.device_compile_guard()));
+    }
     out.push_str(&function_signature(function)?);
     out.push_str(" {\n");
     let mut declared = function
@@ -147,16 +160,22 @@ fn render_function(
     }
     out.push_str("    return;\n");
     out.push_str("}\n");
+    if function_is_host_only(function) {
+        out.push_str("#endif\n");
+    }
     Ok(())
 }
 
-fn function_signature(function: &GpuFunction) -> Result<String, GpuRenderError> {
-    let qualifier = if function
+fn function_is_host_only(function: &GpuFunction) -> bool {
+    function
         .assignments
         .iter()
         .any(|assignment| matches!(assignment.op.as_str(), "gpu.materialize" | "materializec"))
-    {
-        ""
+}
+
+fn function_signature(function: &GpuFunction) -> Result<String, GpuRenderError> {
+    let qualifier = if function_is_host_only(function) {
+        "__host__ "
     } else {
         "__host__ __device__ "
     };
@@ -731,7 +750,7 @@ fn render_materialize_call(
         name = output.name
     ));
     out.push_str(&format!(
-        "    catena_gpu_check({managed_alloc_fn}((void **)&{name}_data, {name}_len * sizeof({element})));\n",
+        "    catena_host_gpu_check({managed_alloc_fn}((void **)&{name}_data, {name}_len * sizeof({element})));\n",
         name = output.name,
         element = c_type(element),
         managed_alloc_fn = dialect.managed_alloc_fn(),
@@ -807,4 +826,87 @@ fn value_expr(value: &GpuValue) -> String {
 
 fn callable_expr(value: &GpuValue) -> String {
     value_expr(value)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use std::collections::BTreeMap;
+
+    use crate::codegen::{
+        fn_ptrs::FnPtrSymbol,
+        lower_types::{CType, LoweredType},
+    };
+    use open_hypergraphs::lax::NodeId;
+
+    fn op(name: &str) -> Operation {
+        name.parse().unwrap()
+    }
+
+    fn var(node: usize, name: &str, ty: CType) -> GpuVar {
+        GpuVar {
+            node: NodeId(node),
+            name: name.to_string(),
+            lowered: LoweredType::Runtime(ty),
+        }
+    }
+
+    #[test]
+    fn materializing_host_wrappers_are_hidden_from_hip_device_parse() {
+        let len = var(0, "len", CType::U64);
+        let out = var(1, "out", CType::Pointer(Box::new(CType::U64)));
+        let value = var(2, "value", CType::U64);
+        let index = var(3, "i", CType::U64);
+
+        let materialize = GpuModule {
+            name: "program_materialize".to_string(),
+            source_name: Some(op("materialize")),
+            entry: GpuFunction {
+                name: "program_materialize".to_string(),
+                sources: vec![len.clone()],
+                targets: vec![out.clone()],
+                assignments: vec![GpuAssign {
+                    op: op("materializec"),
+                    call_symbol: None,
+                    inputs: vec![
+                        GpuValue::FnSymbol(FnPtrSymbol {
+                            target: op("program.producer"),
+                        }),
+                        GpuValue::Var(len),
+                    ],
+                    outputs: vec![out],
+                }],
+            },
+        };
+        let producer = GpuModule {
+            name: "program_producer".to_string(),
+            source_name: Some(op("producer")),
+            entry: GpuFunction {
+                name: "program_producer".to_string(),
+                sources: vec![index],
+                targets: vec![value.clone()],
+                assignments: vec![GpuAssign {
+                    op: op("u64.one"),
+                    call_symbol: None,
+                    inputs: vec![],
+                    outputs: vec![value],
+                }],
+            },
+        };
+
+        let modules =
+            BTreeMap::from([(op("materialize"), materialize), (op("producer"), producer)]);
+        let source = render_modules(&modules, GpuDialect::Hip).unwrap();
+
+        assert!(source.contains(
+            "#ifndef __HIP_DEVICE_COMPILE__\nextern \"C\" __host__ void program_materialize"
+        ));
+        assert!(source.contains(
+            "#ifndef __HIP_DEVICE_COMPILE__\nextern \"C\" __host__ void program_materialize(uint64_t len, uint64_t * *out_out) {"
+        ));
+        assert!(source.contains("catena_host_gpu_check(hipMallocManaged"));
+        assert!(source.contains("catena_host_gpu_check(hipDeviceSynchronize"));
+        assert!(!source.contains("catena_gpu_check"));
+    }
 }

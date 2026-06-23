@@ -9,6 +9,7 @@ use crate::codegen::{
     ops::materializec,
     ops::reducec,
     prelude::render_gpu_prelude,
+    product::{flattened_values, runtime_vars},
     render_utils::{c_type, invalid_inputs, invalid_outputs, param_decl, sanitize_ident},
     runtime_type,
 };
@@ -655,10 +656,8 @@ fn render_call(
     let mut call_args = assignment
         .inputs
         .iter()
-        .filter_map(|input| match input {
-            GpuValue::Var(var) if runtime_type(var).is_some() => Some(var.name.clone()),
-            _ => None,
-        })
+        .flat_map(|input| runtime_vars(std::iter::once(input)))
+        .map(|var| var.name.clone())
         .collect::<Vec<_>>();
     call_args.extend(
         assignment
@@ -715,7 +714,10 @@ fn render_eval(out: &mut String, assignment: &GpuAssign) -> Result<(), GpuRender
     let Some((func, args)) = assignment.inputs.split_last() else {
         return Err(invalid_inputs(assignment, 1));
     };
-    let mut call_args = args.iter().map(value_expr).collect::<Vec<_>>();
+    let mut call_args = flattened_values(args.iter())
+        .into_iter()
+        .map(value_expr)
+        .collect::<Vec<_>>();
     call_args.extend(
         assignment
             .outputs
@@ -752,13 +754,9 @@ fn render_materialize_kernel(
         "__global__ void {kernel_name}({} *out, uint64_t len",
         c_type(element)
     ));
-    for arg in &args {
-        if let GpuValue::Var(var) = arg {
-            if runtime_type(var).is_some() {
-                out.push_str(", ");
-                out.push_str(&param_decl(var, false)?);
-            }
-        }
+    for var in runtime_vars(args.iter().copied()) {
+        out.push_str(", ");
+        out.push_str(&param_decl(var, false)?);
     }
     out.push_str(") {\n");
     out.push_str("    uint64_t thread_id = (uint64_t)blockIdx.x * blockDim.x + threadIdx.x;\n");
@@ -770,13 +768,9 @@ fn render_materialize_kernel(
     out.push_str("    ");
     out.push_str(&callable_expr(func));
     out.push_str("(env, state");
-    for arg in args {
-        if let GpuValue::Var(var) = arg
-            && runtime_type(var).is_some()
-        {
-            out.push_str(", ");
-            out.push_str(&var.name);
-        }
+    for var in runtime_vars(args.iter().copied()) {
+        out.push_str(", ");
+        out.push_str(&var.name);
     }
     out.push_str(", &next_state, &value);\n");
     out.push_str("    out[thread_id] = value;\n");
@@ -826,13 +820,9 @@ fn render_materialize_call(
         "        ({name}_data, {name}_len",
         name = output.name
     ));
-    for arg in args {
-        if let GpuValue::Var(var) = arg
-            && runtime_type(var).is_some()
-        {
-            out.push_str(", ");
-            out.push_str(&var.name);
-        }
+    for var in runtime_vars(args.iter().copied()) {
+        out.push_str(", ");
+        out.push_str(&var.name);
     }
     out.push_str(");\n");
     out.push_str(&format!("    {} = {}_data;\n", output.name, output.name));
@@ -885,6 +875,7 @@ fn value_expr(value: &GpuValue) -> String {
     match value {
         GpuValue::Var(var) => var.name.clone(),
         GpuValue::FnSymbol(symbol) => sanitize_ident(symbol.target.as_str()),
+        GpuValue::Product(_) => panic!("product value cannot be rendered as a scalar expression"),
     }
 }
 

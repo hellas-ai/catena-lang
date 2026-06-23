@@ -17,7 +17,6 @@ fn sum_u64_exec() -> anyhow::Result<()> {
 }
 
 #[test]
-#[ignore = "dot-u64 requires product environment lowering for reducec producers"]
 fn dot_u64_exec() -> anyhow::Result<()> {
     let runtime = runtime_with(SOURCE)?;
 

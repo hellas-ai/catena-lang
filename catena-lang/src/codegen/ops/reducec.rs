@@ -22,6 +22,7 @@
 use crate::codegen::{
     GpuAssign, GpuValue,
     gpu::GpuRenderError,
+    product::runtime_values,
     render_utils::{c_type, invalid_outputs, sanitize_ident},
     runtime_type,
 };
@@ -133,10 +134,7 @@ fn parts(assignment: &GpuAssign) -> Result<ReducecParts<'_>, GpuRenderError> {
 
     // After the producer function, only one runtime value should remain: the
     // reduction length. Type-level witnesses in this suffix are erased.
-    let trailing_runtime = assignment.inputs[*get_index + 1..]
-        .iter()
-        .filter(|input| is_runtime_value(input))
-        .collect::<Vec<_>>();
+    let trailing_runtime = runtime_values(&assignment.inputs[*get_index + 1..]);
     let [n] = trailing_runtime.as_slice() else {
         return Err(GpuRenderError::InvalidReducecLengthCount {
             actual: trailing_runtime.len(),
@@ -149,7 +147,7 @@ fn parts(assignment: &GpuAssign) -> Result<ReducecParts<'_>, GpuRenderError> {
 fn runtime_args(values: Vec<&GpuValue>) -> Vec<String> {
     values
         .into_iter()
-        .filter(|value| is_runtime_value(value))
+        .flat_map(|value| runtime_values(std::iter::once(value)))
         .map(value_expr)
         .collect()
 }
@@ -162,5 +160,6 @@ fn value_expr(value: &GpuValue) -> String {
     match value {
         GpuValue::Var(var) => var.name.clone(),
         GpuValue::FnSymbol(symbol) => sanitize_ident(&format!("program.{}", symbol.target)),
+        GpuValue::Product(_) => panic!("product value cannot be rendered as a scalar expression"),
     }
 }

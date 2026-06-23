@@ -24,10 +24,7 @@ fn materializec_producer(
     caller: &Operation,
     inputs: &[GpuValue],
 ) -> Result<(), CodegenError> {
-    let Some(producer) = inputs.iter().find_map(|input| match input {
-        GpuValue::FnSymbol(symbol) => Some(&symbol.target),
-        GpuValue::Var(_) => None,
-    }) else {
+    let Some(producer) = inputs.iter().find_map(fn_symbol_target) else {
         return Ok(());
     };
     if let Some((containing, nested)) =
@@ -41,6 +38,14 @@ fn materializec_producer(
         });
     }
     Ok(())
+}
+
+fn fn_symbol_target(value: &GpuValue) -> Option<&Operation> {
+    match value {
+        GpuValue::FnSymbol(symbol) => Some(&symbol.target),
+        GpuValue::Product(items) => items.iter().find_map(fn_symbol_target),
+        GpuValue::Var(_) => None,
+    }
 }
 
 fn first_materialize_op_in_call_chain(

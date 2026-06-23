@@ -26,6 +26,7 @@ use crate::codegen::{
     GpuAssign, GpuDialect, GpuFunction, GpuValue,
     gpu::GpuRenderError,
     lower_types::CType,
+    product::{runtime_values, runtime_vars},
     render_utils::{c_type, invalid_outputs, param_decl, sanitize_ident},
     runtime_type,
 };
@@ -51,13 +52,9 @@ pub(in crate::codegen) fn render_kernel(
         "__global__ void {kernel_name}({} *out, uint64_t len",
         c_type(element)
     ));
-    for arg in &env {
-        if let GpuValue::Var(var) = arg
-            && runtime_type(var).is_some()
-        {
-            out.push_str(", ");
-            out.push_str(&param_decl(var, false)?);
-        }
+    for var in runtime_vars(env.iter().copied()) {
+        out.push_str(", ");
+        out.push_str(&param_decl(var, false)?);
     }
     out.push_str(") {\n");
     out.push_str("    uint64_t i = (uint64_t)blockIdx.x * blockDim.x + threadIdx.x;\n");
@@ -66,12 +63,9 @@ pub(in crate::codegen) fn render_kernel(
     out.push_str("    ");
     out.push_str(&value_expr(func));
     out.push('(');
-    let mut call_args = env
-        .iter()
-        .filter_map(|arg| match arg {
-            GpuValue::Var(var) if runtime_type(var).is_some() => Some(var.name.clone()),
-            _ => None,
-        })
+    let mut call_args = runtime_vars(env.iter().copied())
+        .into_iter()
+        .map(|var| var.name.clone())
         .collect::<Vec<_>>();
     call_args.push("i".to_string());
     call_args.push("&value".to_string());
@@ -125,13 +119,9 @@ pub(in crate::codegen) fn render_call(
         "        ({name}_data, {name}_len",
         name = output.name
     ));
-    for arg in env {
-        if let GpuValue::Var(var) = arg
-            && runtime_type(var).is_some()
-        {
-            out.push_str(", ");
-            out.push_str(&var.name);
-        }
+    for var in runtime_vars(env.iter().copied()) {
+        out.push_str(", ");
+        out.push_str(&var.name);
     }
     out.push_str(");\n");
     out.push_str(&format!(
@@ -167,10 +157,7 @@ fn parts(assignment: &GpuAssign) -> Result<(&GpuValue, &GpuValue, Vec<&GpuValue>
         .ok_or(GpuRenderError::MissingMaterializecFunction)?;
     let func = &assignment.inputs[func_index];
     let env = assignment.inputs[..func_index].iter().collect::<Vec<_>>();
-    let trailing_runtime = assignment.inputs[func_index + 1..]
-        .iter()
-        .filter(|input| matches!(input, GpuValue::Var(var) if runtime_type(var).is_some()))
-        .collect::<Vec<_>>();
+    let trailing_runtime = runtime_values(&assignment.inputs[func_index + 1..]);
     let [len] = trailing_runtime.as_slice() else {
         if trailing_runtime.is_empty() {
             return Err(GpuRenderError::MissingMaterializecLength);
@@ -186,5 +173,6 @@ fn value_expr(value: &GpuValue) -> String {
     match value {
         GpuValue::Var(var) => var.name.clone(),
         GpuValue::FnSymbol(symbol) => sanitize_ident(&format!("program.{}", symbol.target)),
+        GpuValue::Product(_) => panic!("product value cannot be rendered as a scalar expression"),
     }
 }

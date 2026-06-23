@@ -7,6 +7,7 @@ use crate::{
         GpuValue, GpuVar,
         fn_ptrs::FnPtrSymbol,
         lower_types::{CType, LowerTypeError, LoweredType, lower_type},
+        product::flattened_values,
     },
     report::AnnotatedTerm,
 };
@@ -26,6 +27,7 @@ pub struct PendingInstance {
     pub name: String,
     pub source_name: Option<Operation>,
     pub overrides: BTreeMap<usize, LoweredType>,
+    pub source_values: BTreeMap<usize, GpuValue>,
 }
 
 pub fn entrypoint_key(term: &AnnotatedTerm) -> Result<Option<SpecializationKey>, LowerTypeError> {
@@ -56,7 +58,7 @@ pub fn entrypoint_key(term: &AnnotatedTerm) -> Result<Option<SpecializationKey>,
 pub fn specialization_key(inputs: &[GpuValue], outputs: &[GpuVar]) -> Option<SpecializationKey> {
     let mut sources = Vec::new();
     let mut static_inputs = Vec::new();
-    for input in inputs {
+    for input in flattened_values(inputs) {
         match input {
             GpuValue::Var(var) => {
                 if let LoweredType::Runtime(ty) = &var.lowered {
@@ -64,6 +66,7 @@ pub fn specialization_key(inputs: &[GpuValue], outputs: &[GpuVar]) -> Option<Spe
                 }
             }
             GpuValue::FnSymbol(symbol) => static_inputs.push(symbol.clone()),
+            GpuValue::Product(_) => unreachable!("flattened_values removes products"),
         }
     }
     let mut targets = Vec::new();
@@ -88,7 +91,11 @@ pub fn specialization_overrides(
     outputs: &[GpuVar],
 ) -> BTreeMap<usize, LoweredType> {
     let mut overrides = BTreeMap::new();
-    for (node, input) in term.sources.iter().zip(inputs.iter()) {
+    for (node, input) in term
+        .sources
+        .iter()
+        .zip(flattened_values(inputs).into_iter())
+    {
         if let GpuValue::Var(var) = input {
             overrides.insert(node.0, var.lowered.clone());
         }
@@ -97,6 +104,19 @@ pub fn specialization_overrides(
         overrides.insert(node.0, output.lowered.clone());
     }
     overrides
+}
+
+pub fn specialization_source_values(
+    term: &AnnotatedTerm,
+    inputs: &[GpuValue],
+) -> BTreeMap<usize, GpuValue> {
+    let mut source_values = BTreeMap::new();
+    for (node, input) in term.sources.iter().zip(inputs.iter()) {
+        if matches!(input, GpuValue::Product(_)) {
+            source_values.insert(node.0, input.clone());
+        }
+    }
+    source_values
 }
 
 #[cfg(test)]

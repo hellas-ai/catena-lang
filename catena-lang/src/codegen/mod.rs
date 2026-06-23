@@ -9,6 +9,7 @@ pub mod gpu;
 pub mod lower_types;
 mod ops;
 mod prelude;
+mod product;
 mod render_utils;
 mod specialize;
 mod validate;
@@ -19,6 +20,7 @@ use hexpr::Operation;
 use metacat::{
     ssa::{SSAError, ssa},
     theory::TheoryId,
+    tree::Tree,
 };
 use open_hypergraphs::lax::NodeId;
 use thiserror::Error;
@@ -27,9 +29,10 @@ use crate::{
     codegen::{
         fn_ptrs::{FnPtrSymbol, FnPtrSymbolError, direct_fn_ptr_symbols},
         lower_types::{CType, LowerTypeError, LoweredType, lower_type},
+        product::{ProductBindings, ProductError},
         specialize::{
             PendingInstance, SpecializationKey, entrypoint_key, specialization_key,
-            specialization_overrides,
+            specialization_overrides, specialization_source_values,
         },
     },
     report::{AnnotatedTerm, TheoryTermMap},
@@ -126,6 +129,7 @@ pub struct GpuAssign {
 pub enum GpuValue {
     Var(GpuVar),
     FnSymbol(FnPtrSymbol),
+    Product(Vec<GpuValue>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -176,6 +180,7 @@ pub fn codegen(terms: &TheoryTermMap) -> Result<GpuModuleMap, CodegenError> {
             name,
             source_name: Some(source_name),
             overrides: BTreeMap::new(),
+            source_values: BTreeMap::new(),
         });
     }
 
@@ -210,6 +215,8 @@ pub enum CodegenError {
     FnPtrSymbol(#[from] FnPtrSymbolError),
     #[error("definition `{0}` is used with non-monomorphic runtime interface")]
     NonMonomorphicUse(Operation),
+    #[error(transparent)]
+    Product(#[from] ProductError),
     #[error(
         "definition `{caller}` uses `{producer}` as a materializec producer, but device-callable producer dependency `{containing}` contains `{nested}`. materializec lowering is host-only: it allocates output memory and launches a GPU kernel. A materializec producer is called from GPU device code, so it and the program definitions it calls must be device-callable and allocation-free. Move the nested materialization out of the producer call chain, or pass a precomputed buffer as the producer environment."
     )]
@@ -238,7 +245,14 @@ impl CodegenState<'_> {
         term.quotient().map_err(CodegenError::Quotient)?;
 
         let mut sources = Vec::new();
+        let mut product_bindings = ProductBindings::default();
         for source in &term.sources {
+            if let Some(value) = instance.source_values.get(&source.0) {
+                let local = localize_source_value(*source, value);
+                sources.extend(runtime_vars_owned(&local));
+                product_bindings.bind_node(*source, local);
+                continue;
+            }
             let var = var(*source, &term, &instance.overrides)?;
             if matches!(var.lowered, LoweredType::Runtime(_)) {
                 sources.push(var);
@@ -265,6 +279,8 @@ impl CodegenState<'_> {
                 .map(|(node, _)| {
                     if let Some(symbol) = fn_symbols.get(node) {
                         Ok(GpuValue::FnSymbol(symbol.clone()))
+                    } else if let Some(value) = product_bindings.get(*node) {
+                        Ok(value)
                     } else {
                         Ok(GpuValue::Var(var(*node, &term, &instance.overrides)?))
                     }
@@ -275,6 +291,22 @@ impl CodegenState<'_> {
                 .iter()
                 .map(|(node, _)| var(*node, &term, &instance.overrides))
                 .collect::<Result<Vec<_>, CodegenError>>()?;
+
+            match assignment.op.as_str() {
+                "prod.intro" => {
+                    if let Some(output) = product_output(&outputs, &term)? {
+                        product_bindings.bind_intro(output, inputs);
+                    } else {
+                        product_bindings.bind_componentwise(&outputs, inputs)?;
+                    }
+                    continue;
+                }
+                "prod.elim" => {
+                    product_bindings.bind_elim(&inputs, &outputs)?;
+                    continue;
+                }
+                _ => {}
+            }
 
             validate::assignment(&self.definitions, &instance.op, &assignment.op, &inputs)?;
 
@@ -328,6 +360,12 @@ impl CodegenState<'_> {
             inputs,
             outputs,
         );
+        let source_values = specialization_source_values(
+            self.definitions
+                .get(op)
+                .expect("specialized operation should have a definition"),
+            inputs,
+        );
         self.instances
             .insert((op.clone(), key.clone()), name.clone());
         self.queue.push_back(PendingInstance {
@@ -335,6 +373,7 @@ impl CodegenState<'_> {
             name: name.clone(),
             source_name: None,
             overrides,
+            source_values,
         });
         Ok(name)
     }
@@ -353,6 +392,85 @@ fn var(
             .cloned()
             .unwrap_or(lower_type(&term.hypergraph.nodes[node.0])?),
     })
+}
+
+fn localize_source_value(source: NodeId, value: &GpuValue) -> GpuValue {
+    let mut next_runtime = 0;
+    localize_source_value_inner(source, value, &mut next_runtime)
+}
+
+fn localize_source_value_inner(
+    source: NodeId,
+    value: &GpuValue,
+    next_runtime: &mut usize,
+) -> GpuValue {
+    match value {
+        GpuValue::Var(var) => {
+            if matches!(var.lowered, LoweredType::Runtime(_)) {
+                let index = *next_runtime;
+                *next_runtime += 1;
+                GpuValue::Var(GpuVar {
+                    node: source,
+                    name: format!("{}_{}", node_var(source), index),
+                    lowered: var.lowered.clone(),
+                })
+            } else {
+                GpuValue::Var(GpuVar {
+                    node: source,
+                    name: node_var(source),
+                    lowered: var.lowered.clone(),
+                })
+            }
+        }
+        GpuValue::FnSymbol(symbol) => GpuValue::FnSymbol(symbol.clone()),
+        GpuValue::Product(items) => GpuValue::Product(
+            items
+                .iter()
+                .map(|item| localize_source_value_inner(source, item, next_runtime))
+                .collect(),
+        ),
+    }
+}
+
+fn runtime_vars_owned(value: &GpuValue) -> Vec<GpuVar> {
+    let mut out = Vec::new();
+    runtime_vars_owned_into(value, &mut out);
+    out
+}
+
+fn runtime_vars_owned_into(value: &GpuValue, out: &mut Vec<GpuVar>) {
+    match value {
+        GpuValue::Var(var) if matches!(var.lowered, LoweredType::Runtime(_)) => {
+            out.push(var.clone());
+        }
+        GpuValue::Product(items) => {
+            for item in items {
+                runtime_vars_owned_into(item, out);
+            }
+        }
+        GpuValue::Var(_) | GpuValue::FnSymbol(_) => {}
+    }
+}
+
+fn product_output<'a>(
+    outputs: &'a [GpuVar],
+    term: &AnnotatedTerm,
+) -> Result<Option<&'a GpuVar>, ProductError> {
+    let product_outputs = outputs
+        .iter()
+        .filter(|output| is_product_type(&term.hypergraph.nodes[output.node.0]))
+        .collect::<Vec<_>>();
+    match product_outputs.as_slice() {
+        [] => Ok(None),
+        [output] => Ok(Some(output)),
+        _ => Err(ProductError::IntroOutputCount {
+            actual: product_outputs.len(),
+        }),
+    }
+}
+
+fn is_product_type(ty: &Tree<(), Operation>) -> bool {
+    matches!(ty, Tree::Node(op, 0, _) if op.as_str() == "*")
 }
 
 fn node_var(node: NodeId) -> String {

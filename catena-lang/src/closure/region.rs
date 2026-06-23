@@ -20,6 +20,7 @@ const NAME_PREFIX: &str = "name.";
 pub struct ClosureRegion {
     pub closure_wire: NodeId,
     pub closure_type: Obj,
+    pub defer_inputs: Vec<NodeId>,
     pub nodes: Vec<NodeId>,
     pub edges: Vec<EdgeId>,
 }
@@ -73,9 +74,11 @@ fn closure_region_with_connectivity(
     }
 
     let Region { nodes, edges } = build_closure_region(definition, &connectivity, closure_wire)?;
+    let defer_inputs = defer_inputs(definition, &edges);
     Ok(ClosureRegion {
         closure_wire,
         closure_type: closure_type.clone(),
+        defer_inputs,
         nodes,
         edges,
     })
@@ -123,6 +126,19 @@ fn build_closure_region(
 
 fn is_region_leaf(operation: &Operation) -> bool {
     operation.as_str() == DEFER || operation.as_str().starts_with(NAME_PREFIX)
+}
+
+fn defer_inputs(definition: &AnnotatedTerm, edges: &[EdgeId]) -> Vec<NodeId> {
+    edges
+        .iter()
+        .filter(|edge| definition.hypergraph.edges[edge.0].as_str() == DEFER)
+        .flat_map(|edge| {
+            definition.hypergraph.adjacency[edge.0]
+                .sources
+                .iter()
+                .copied()
+        })
+        .collect()
 }
 
 fn is_closure_type(object: &Obj) -> bool {

@@ -460,7 +460,7 @@ checksum = "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79"
 [[package]]
 name = "metacat"
 version = "0.2.2"
-source = "git+https://github.com/statusfailed/metacat?branch=rc-0.2.2#63eca21021d3482326627ffd2aa99557b8a237b9"
+source = "git+https://github.com/statusfailed/metacat?branch=act-2026#aae8d84b3c5782ddf88f1f621513d2f30bf9180d"
 dependencies = [
  "hexpr",
  "open-hypergraphs",

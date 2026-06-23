@@ -35,4 +35,8 @@
   # Additional to CMC structure
   # (A -> B) -> (A => B)
   (arr lift : (-> val) -> =>)
+
+  # Feed a value into a closure
+  # A ● (A => B) -> B
+  (def evaluate : ([a b] {[.a] =>}) -> [a b . b] = ({defer [f]} compose))
 })

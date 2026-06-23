@@ -93,9 +93,9 @@ type ReducecParts<'a> = (
 );
 
 fn parts(assignment: &GpuAssign) -> Result<ReducecParts<'_>, GpuRenderError> {
-    // `reducec` is closure-converted but not a normal function call: the two
-    // function symbols divide the flat SSA input list into zero/add-env,
-    // producer-env, and trailing erased witnesses plus length.
+    // assume there are only two function indices for now
+    // we don't allow function pointers in context
+    // a cleaner solution requires a refactoring of lowering that preserves type info
     let func_indices = assignment
         .inputs
         .iter()

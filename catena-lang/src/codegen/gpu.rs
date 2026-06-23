@@ -37,7 +37,9 @@ pub enum GpuRenderError {
     MissingMaterializeLaunchParams,
     #[error("gpu.materialize is missing function input")]
     MissingMaterializeFunction,
-    #[error("reducec expected exactly two function inputs, found {actual}")]
+    #[error(
+        "reducec flat ABI parser expected exactly two function symbol inputs, found {actual}; function-valued reducec environments are not supported yet"
+    )]
     InvalidReducecFunctionCount { actual: usize },
     #[error("reducec is missing zero input")]
     MissingReducecZero,

@@ -14,4 +14,4 @@ pub mod extract;
 
 // From the extracted AnnotatedTerm create `closure.f.n` as `(f × id_A) ; evaluate`,
 // where `evaluate` is the (inlined) body of cmc.hex's evaluate.
-pub mod closure;
+pub mod body;

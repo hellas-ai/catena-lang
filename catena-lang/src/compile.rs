@@ -90,7 +90,7 @@ fn compile_into(report: &mut CompileReport) -> Result<(), CompileError> {
     let forgotten_closures = crate::pass::forget_closures::run(&theory_set, &definition_types)?;
     report.forgotten_closures = Some(forgotten_closures.clone());
 
-    let gpu_modules = crate::codegen::codegen(&forgotten_closures, &theory_set)?;
+    let gpu_modules = crate::codegen::codegen(&forgotten_closures)?;
     report.gpu_modules = Some(gpu_modules);
 
     Ok(())

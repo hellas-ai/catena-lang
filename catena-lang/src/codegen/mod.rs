@@ -118,7 +118,6 @@ pub struct GpuFunction {
 pub struct GpuAssign {
     pub op: Operation,
     pub call_symbol: Option<String>,
-    /// Flattened codegen inputs passed to renderers.
     pub inputs: Vec<GpuValue>,
     pub outputs: Vec<GpuVar>,
 }

@@ -295,6 +295,8 @@ pub enum CodegenError {
         operation: Operation,
         error: MetacatCheckError<Operation>,
     },
+    #[error("missing declared source object types for operation `{0}` during GPU codegen")]
+    MissingSourceObjectTypes(Operation),
     #[error(
         "failed to align source groups for `{operation}`: {declared} declared source objects, {actual} flat inputs, consumed {consumed}"
     )]
@@ -363,8 +365,7 @@ impl CodegenState<'_> {
             let declared_source_types = self
                 .source_object_types
                 .get(&assignment.op)
-                .cloned()
-                .unwrap_or_else(|| actual_source_types.clone());
+                .ok_or_else(|| CodegenError::MissingSourceObjectTypes(assignment.op.clone()))?;
             let source_ranges =
                 source_group_ranges(&assignment.op, &declared_source_types, &actual_source_types)?;
             let mut source_input_groups = Vec::new();

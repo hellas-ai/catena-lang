@@ -230,9 +230,14 @@ mod tests {
 
     #[test]
     fn deferred_input_composed_with_lifted_bool_id_has_closure_regions() {
+        // Create a simple program that consists of one region plus some parts before it
+        // -- the parts before correspond roughly to ¬(x ∧ T)
         let definition = annotated_program_definition(
             r#"
             (def program run-bool-id : (bool val) -> ({1 (bool val)} =>) = (
+              {[x] bool.t}
+              bool.and
+              bool.not
               {defer (name.bool.id lift)}
               compose
             ))

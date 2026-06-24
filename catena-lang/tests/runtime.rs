@@ -664,6 +664,27 @@ fn gelu_approx_test() -> anyhow::Result<()> {
 }
 
 #[test]
+fn sqrt_test() -> anyhow::Result<()> {
+    let runtime = runtime_with(NN_EXAMPLES)?;
+
+    for input in [0.0_f32, 0.25, 1.0, 2.0, 9.0, 100.0] {
+        let [result] = runtime.exec("sqrt", [input.into()])?;
+        let Value::F32(result) = result else {
+            anyhow::bail!("sqrt returned non-f32 value: {result:?}");
+        };
+
+        let expected = input.sqrt();
+        let error = (result - expected).abs();
+        assert!(
+            error < 1e-4,
+            "sqrt({input}) = {result}, expected {expected}, abs error {error}"
+        );
+    }
+
+    Ok(())
+}
+
+#[test]
 fn log_approx_test() -> anyhow::Result<()> {
     let runtime = runtime_with(LOG_EXAMPLES)?;
 

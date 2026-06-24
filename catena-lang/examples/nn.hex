@@ -52,6 +52,48 @@
     [.result]
   }
 )
+
+# sqrt(x) by Newton-Raphson iteration
+# guess{n+1} = 0.5 * (guess{n} + x / guess{n})
+(def program sqrt : (f32 val) -> (f32 val) =
+  {[x.]
+    (const.u32.0x00000000 u32.to-f32 [zero.])
+    (const.u32.0x3F800000 u32.bitcast-f32 [one.])
+    (const.u32.0x3F000000 u32.bitcast-f32 [half.])
+
+    ([.x one] f32.lt [lt_one.])
+    ([.lt_one one x] f32.select [guess0.])
+
+    ([.x guess0] f32.div [ratio0.])
+    ([.guess0 ratio0] f32.add [sum0.])
+    ([.sum0 half] f32.mul [guess1.])
+
+    ([.x guess1] f32.div [ratio1.])
+    ([.guess1 ratio1] f32.add [sum1.])
+    ([.sum1 half] f32.mul [guess2.])
+
+    ([.x guess2] f32.div [ratio2.])
+    ([.guess2 ratio2] f32.add [sum2.])
+    ([.sum2 half] f32.mul [guess3.])
+
+    ([.x guess3] f32.div [ratio3.])
+    ([.guess3 ratio3] f32.add [sum3.])
+    ([.sum3 half] f32.mul [guess4.])
+
+    ([.x guess4] f32.div [ratio4.])
+    ([.guess4 ratio4] f32.add [sum4.])
+    ([.sum4 half] f32.mul [guess5.])
+
+    ([.x guess5] f32.div [ratio5.])
+    ([.guess5 ratio5] f32.add [sum5.])
+    ([.sum5 half] f32.mul [guess6.])
+
+    ([.x zero] f32.lte [is_nonpositive.])
+    ([.is_nonpositive zero guess6] f32.select [result.])
+    [.result]
+  }
+)
+
 # sigmoid(x) = 1 / (1 + exp(-x))
 (def program sigmoid : (f32 val) -> (f32 val) =
   {[x.]

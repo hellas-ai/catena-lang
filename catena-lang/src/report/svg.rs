@@ -1,4 +1,4 @@
-use std::{fs, io, path::Path};
+use std::{fmt, fs, io, path::Path};
 
 use hexpr::Operation;
 use metacat::theory::{Theory, TheoryId};
@@ -185,8 +185,8 @@ fn render_untyped_svg(term: &OpenHypergraph<(), Operation>) -> io::Result<Vec<u8
     to_svg_with(&labelled, &Options::default().display().lr())
 }
 
-fn render_typed_svg(
-    term: &OpenHypergraph<metacat::tree::Tree<(), Operation>, Operation>,
+fn render_typed_svg<A: Clone + fmt::Debug + fmt::Display + PartialEq>(
+    term: &OpenHypergraph<metacat::tree::Tree<(), Operation>, A>,
     syntax_theory: &Theory,
 ) -> io::Result<Vec<u8>> {
     let mut term = term.clone();

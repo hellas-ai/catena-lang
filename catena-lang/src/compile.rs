@@ -1,14 +1,15 @@
 use hexpr::Operation;
-use metacat::theory::{RawTheorySet, Theory, TheorySet};
+use metacat::theory::{RawTheorySet, Theory, TheoryId, TheorySet};
 use open_hypergraphs::lax::OpenHypergraph;
+use std::collections::BTreeMap;
 use thiserror::Error;
 
 use crate::{
     check::{CheckError, partial_definition_types},
     codegen::CodegenError,
     elaborate::ElaborateError,
-    pass::forget_closures::ForgetClosuresError,
-    report::CompileReport,
+    pass::{record_object_sizes::erase_operation_sizes, run::PassRunError},
+    report::{CompileReport, SizedTheoryTermMap, TheoryTermMap},
 };
 
 #[derive(Debug, Error)]
@@ -32,7 +33,7 @@ pub enum CompileError {
     )]
     ClosureOnGlobalInterface { theory: String, definition: String },
     #[error(transparent)]
-    ForgetClosures(#[from] ForgetClosuresError),
+    Passes(#[from] PassRunError),
     #[error(transparent)]
     Codegen(#[from] CodegenError),
 }
@@ -86,14 +87,32 @@ fn compile_into(report: &mut CompileReport) -> Result<(), CompileError> {
     // don't allow `=>` types on global interfaces
     reject_closure_global_interfaces(&theory_set)?;
 
-    // Compute out closures by bending wires
-    let forgotten_closures = crate::pass::forget_closures::run(&theory_set, &definition_types)?;
+    // Run typed graph passes before lowering to codegen.
+    let forgotten_closures = crate::pass::run::run(&theory_set, &definition_types)?;
     report.forgotten_closures = Some(forgotten_closures.clone());
 
-    let gpu_modules = crate::codegen::codegen(&forgotten_closures)?;
+    let codegen_terms = erase_recorded_sizes(&forgotten_closures);
+    let gpu_modules = crate::codegen::codegen(&codegen_terms)?;
     report.gpu_modules = Some(gpu_modules);
 
     Ok(())
+}
+
+fn erase_recorded_sizes(terms: &SizedTheoryTermMap) -> TheoryTermMap {
+    terms
+        .iter()
+        .map(|(theory_id, definitions)| {
+            (
+                theory_id.clone(),
+                definitions
+                    .iter()
+                    .map(|(definition_name, term)| {
+                        (definition_name.clone(), erase_operation_sizes(term.clone()))
+                    })
+                    .collect::<BTreeMap<Operation, _>>(),
+            )
+        })
+        .collect::<BTreeMap<TheoryId, _>>()
 }
 
 fn reject_closure_global_interfaces(theory_set: &TheorySet) -> Result<(), CompileError> {

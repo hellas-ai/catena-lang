@@ -14,11 +14,15 @@ use std::collections::BTreeMap;
 
 use crate::check::PartialDefinitionTypes;
 use crate::codegen::GpuModuleMap;
+use crate::pass::record_object_sizes::OperationWithSizes;
 
 /// A definition graph whose nodes are annotated with their computed object types.
 pub type AnnotatedTerm = OpenHypergraph<Tree<(), Operation>, Operation>;
+/// A definition graph whose operation labels include recorded source/target object sizes.
+pub type SizedAnnotatedTerm = OpenHypergraph<Tree<(), Operation>, OperationWithSizes<Operation>>;
 /// Generic storage for per-theory, per-definition graph results produced by compiler passes.
 pub type TheoryTermMap = BTreeMap<TheoryId, BTreeMap<Operation, AnnotatedTerm>>;
+pub type SizedTheoryTermMap = BTreeMap<TheoryId, BTreeMap<Operation, SizedAnnotatedTerm>>;
 #[derive(Debug)]
 pub struct CompileReport {
     pub raw_theories: RawTheorySet,
@@ -26,7 +30,7 @@ pub struct CompileReport {
     pub theory_set: Option<TheorySet>,
     pub definition_types: Option<BTreeMap<TheoryId, BTreeMap<Operation, Vec<Tree<(), Operation>>>>>,
     pub partial_definition_types: Option<PartialDefinitionTypes>,
-    pub forgotten_closures: Option<TheoryTermMap>,
+    pub forgotten_closures: Option<SizedTheoryTermMap>,
     pub gpu_modules: Option<GpuModuleMap>,
 }
 

@@ -4,34 +4,52 @@ use open_hypergraphs::lax::{
     OpenHypergraph,
     functor::{Functor, try_define_map_arrow},
 };
+use std::fmt;
+
+use crate::pass::forget_intro_elim_units::IntroElimUnitOperation;
 
 pub type Obj = Tree<(), Operation>;
-pub type Arr = Operation;
 
 const PRODUCT_TYPE: &str = "*";
 const UNIT_TYPE: &str = "1";
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct OperationWithSizes {
-    pub operation: Operation,
+pub struct OperationWithSizes<A> {
+    pub operation: A,
     pub source_sizes: Vec<usize>,
     pub target_sizes: Vec<usize>,
+}
+
+impl<A: fmt::Display> fmt::Display for OperationWithSizes<A> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{} {:?} -> {:?}",
+            self.operation, self.source_sizes, self.target_sizes
+        )
+    }
+}
+
+impl<A: IntroElimUnitOperation> IntroElimUnitOperation for OperationWithSizes<A> {
+    fn is_intro_elim_unit_operation(&self) -> bool {
+        self.operation.is_intro_elim_unit_operation()
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct RecordObjectSizes;
 
-impl Functor<Obj, Arr, Obj, OperationWithSizes> for RecordObjectSizes {
+impl<A: Clone> Functor<Obj, A, Obj, OperationWithSizes<A>> for RecordObjectSizes {
     fn map_object(&self, o: &Obj) -> impl ExactSizeIterator<Item = Obj> {
         std::iter::once(o.clone())
     }
 
     fn map_operation(
         &self,
-        a: &Arr,
+        a: &A,
         source: &[Obj],
         target: &[Obj],
-    ) -> OpenHypergraph<Obj, OperationWithSizes> {
+    ) -> OpenHypergraph<Obj, OperationWithSizes<A>> {
         OpenHypergraph::singleton(
             OperationWithSizes {
                 operation: a.clone(),
@@ -43,10 +61,16 @@ impl Functor<Obj, Arr, Obj, OperationWithSizes> for RecordObjectSizes {
         )
     }
 
-    fn map_arrow(&self, f: &OpenHypergraph<Obj, Arr>) -> OpenHypergraph<Obj, OperationWithSizes> {
+    fn map_arrow(&self, f: &OpenHypergraph<Obj, A>) -> OpenHypergraph<Obj, OperationWithSizes<A>> {
         try_define_map_arrow(self, f)
             .expect("programmer error: record-object-sizes is not a functor")
     }
+}
+
+pub fn erase_operation_sizes<A>(
+    term: OpenHypergraph<Obj, OperationWithSizes<A>>,
+) -> OpenHypergraph<Obj, A> {
+    term.map_edges(|label| label.operation)
 }
 
 pub fn object_size(o: &Obj) -> usize {
@@ -90,6 +114,19 @@ mod tests {
         assert_eq!(mapped.hypergraph.nodes[0], source[0]);
         assert_eq!(mapped.hypergraph.nodes[1], source[1]);
         assert_eq!(mapped.hypergraph.nodes[2], target[0]);
+    }
+
+    #[test]
+    fn records_sizes_without_requiring_operation_labels() {
+        let source = vec![product(vec![ty("A"), ty("B")])];
+        let target = vec![ty("C")];
+
+        let mapped = RecordObjectSizes.map_operation(&"f0".to_string(), &source, &target);
+        let label = &mapped.hypergraph.edges[0];
+
+        assert_eq!(label.operation, "f0");
+        assert_eq!(label.source_sizes, vec![2]);
+        assert_eq!(label.target_sizes, vec![1]);
     }
 
     #[test]

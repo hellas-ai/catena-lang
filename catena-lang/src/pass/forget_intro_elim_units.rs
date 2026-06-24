@@ -6,7 +6,6 @@ use open_hypergraphs::lax::{
 };
 
 pub type Obj = Tree<(), Operation>;
-pub type Arr = Operation;
 
 const PRODUCT_TYPE: &str = "*";
 const UNIT_TYPE: &str = "1";
@@ -19,16 +18,26 @@ const UNIT_ELIM: &str = "unit.elim";
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ForgetIntroElimUnits;
 
-impl Functor<Obj, Arr, Obj, Arr> for ForgetIntroElimUnits {
+pub trait IntroElimUnitOperation {
+    fn is_intro_elim_unit_operation(&self) -> bool;
+}
+
+impl IntroElimUnitOperation for Operation {
+    fn is_intro_elim_unit_operation(&self) -> bool {
+        is_forgotten_operation(self.as_str())
+    }
+}
+
+impl<A: Clone + IntroElimUnitOperation> Functor<Obj, A, Obj, A> for ForgetIntroElimUnits {
     fn map_object(&self, o: &Obj) -> impl ExactSizeIterator<Item = Obj> {
         flatten_object(o).into_iter()
     }
 
-    fn map_operation(&self, a: &Arr, source: &[Obj], target: &[Obj]) -> OpenHypergraph<Obj, Arr> {
+    fn map_operation(&self, a: &A, source: &[Obj], target: &[Obj]) -> OpenHypergraph<Obj, A> {
         let source = map_objects(source);
         let target = map_objects(target);
 
-        if is_forgotten_operation(a.as_str()) {
+        if a.is_intro_elim_unit_operation() {
             assert_eq!(
                 source, target,
                 "forgotten intro/elim/unit operation must have matching flattened boundaries"
@@ -39,7 +48,7 @@ impl Functor<Obj, Arr, Obj, Arr> for ForgetIntroElimUnits {
         OpenHypergraph::singleton(a.clone(), source, target)
     }
 
-    fn map_arrow(&self, f: &OpenHypergraph<Obj, Arr>) -> OpenHypergraph<Obj, Arr> {
+    fn map_arrow(&self, f: &OpenHypergraph<Obj, A>) -> OpenHypergraph<Obj, A> {
         try_define_map_arrow(self, f)
             .expect("programmer error: forget-intro-elim-units is not a functor")
     }

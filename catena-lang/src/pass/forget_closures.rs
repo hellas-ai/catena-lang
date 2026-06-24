@@ -1,21 +1,12 @@
-use std::collections::BTreeMap;
-
 use hexpr::Operation;
-use metacat::{
-    theory::{Theory, TheoryId, TheorySet},
-    tree::Tree,
-};
+use metacat::tree::Tree;
 use open_hypergraphs::category::Arrow;
 use open_hypergraphs::lax::{
     NodeId, OpenHypergraph,
     functor::{Functor, try_define_map_arrow},
 };
-use thiserror::Error;
 
-use crate::{
-    check::DefinitionTypes,
-    report::{AnnotatedTerm, TheoryTermMap},
-};
+use crate::report::AnnotatedTerm;
 
 const CLOSURE_TYPE: &str = "=>";
 const FUNCTION_TYPE: &str = "->";
@@ -33,20 +24,8 @@ const EVAL: &str = "eval";
 pub type Obj = Tree<(), Operation>;
 pub type Arr = Operation;
 
-#[derive(Debug, Error)]
-pub enum ForgetClosuresError {
-    #[error("missing definition `{definition}` in theory `{theory}`")]
-    MissingDefinition { theory: String, definition: String },
-    #[error("missing checked node types for definition `{definition}` in theory `{theory}`")]
-    MissingDefinitionTypes { theory: String, definition: String },
-    #[error(
-        "typechecked node label count mismatch for definition `{definition}` in theory `{theory}`"
-    )]
-    NodeLabelCountMismatch { theory: String, definition: String },
-}
-
 #[derive(Clone)]
-struct ForgetClosures;
+pub struct ForgetClosures;
 
 impl Functor<Obj, Arr, Obj, Arr> for ForgetClosures {
     fn map_object(&self, o: &Obj) -> impl ExactSizeIterator<Item = Obj> {
@@ -73,72 +52,6 @@ impl Functor<Obj, Arr, Obj, Arr> for ForgetClosures {
     fn map_arrow(&self, f: &OpenHypergraph<Obj, Arr>) -> OpenHypergraph<Obj, Arr> {
         try_define_map_arrow(self, f).expect("programmer error: forget-closures is not a functor")
     }
-}
-
-pub fn run(
-    theory_set: &TheorySet,
-    definition_types: &DefinitionTypes,
-) -> Result<TheoryTermMap, ForgetClosuresError> {
-    let mut output = BTreeMap::new();
-
-    for (theory_id, theory) in &theory_set.theories {
-        let Theory::Theory { arrows, .. } = theory else {
-            continue;
-        };
-
-        let mut transformed = BTreeMap::new();
-        let theory_definition_types = definition_types.get(theory_id);
-        for (definition_name, arrow) in arrows {
-            let Some(_) = &arrow.definition else {
-                continue;
-            };
-
-            let typed =
-                typed_definition(theory_id, definition_name, theory, theory_definition_types)?;
-            transformed.insert(definition_name.clone(), ForgetClosures.map_arrow(&typed));
-        }
-
-        if !transformed.is_empty() {
-            output.insert(theory_id.clone(), transformed);
-        }
-    }
-
-    Ok(output)
-}
-
-fn typed_definition(
-    theory_id: &TheoryId,
-    definition_name: &Operation,
-    theory: &Theory,
-    theory_definition_types: Option<&BTreeMap<Operation, Vec<Tree<(), Operation>>>>,
-) -> Result<AnnotatedTerm, ForgetClosuresError> {
-    let Theory::Theory { arrows, .. } = theory else {
-        unreachable!("typed_definition only called on user theories");
-    };
-    let arrow = arrows
-        .get(definition_name)
-        .expect("definition should exist in current theory");
-    let body = arrow
-        .definition
-        .clone()
-        .ok_or_else(|| ForgetClosuresError::MissingDefinition {
-            theory: theory_id.to_string(),
-            definition: definition_name.to_string(),
-        })?;
-    let mut body = body;
-    body.quotient().ok();
-    let labels = theory_definition_types
-        .and_then(|types| types.get(definition_name))
-        .cloned()
-        .ok_or_else(|| ForgetClosuresError::MissingDefinitionTypes {
-            theory: theory_id.to_string(),
-            definition: definition_name.to_string(),
-        })?;
-    body.with_nodes(|_| labels)
-        .ok_or_else(|| ForgetClosuresError::NodeLabelCountMismatch {
-            theory: theory_id.to_string(),
-            definition: definition_name.to_string(),
-        })
 }
 
 fn map_name_operation(name: &str, source: &[Obj], target: &[Obj]) -> OpenHypergraph<Obj, Arr> {

@@ -401,7 +401,7 @@ mod tests {
     }
 
     fn product(left: Obj, right: Obj) -> Obj {
-        Tree::Node(op(PRODUCT_TYPE), 0, vec![left, right])
+        Tree::Node(op("*"), 0, vec![left, right])
     }
 
     #[test]

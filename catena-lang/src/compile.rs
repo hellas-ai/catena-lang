@@ -7,7 +7,7 @@ use crate::{
     check::{CheckError, partial_definition_types},
     codegen::CodegenError,
     elaborate::ElaborateError,
-    pass::forget_closures::ForgetClosuresError,
+    pass::forget_closures_old::ForgetClosuresError,
     report::CompileReport,
 };
 
@@ -87,7 +87,9 @@ fn compile_into(report: &mut CompileReport) -> Result<(), CompileError> {
     reject_closure_global_interfaces(&theory_set)?;
 
     // Compute out closures by bending wires
-    let forgotten_closures = crate::pass::forget_closures::run(&theory_set, &definition_types)?;
+    // TODO: Switch to `forget_closures` once explicit product/unit adapters are supported by
+    // downstream compiler passes.
+    let forgotten_closures = crate::pass::forget_closures_old::run(&theory_set, &definition_types)?;
     report.forgotten_closures = Some(forgotten_closures.clone());
 
     let gpu_modules = crate::codegen::codegen(&forgotten_closures)?;

@@ -10,7 +10,8 @@ use thiserror::Error;
 use crate::{
     check::DefinitionTypes,
     pass::passes,
-    report::{AnnotatedTerm, SizedTheoryTermMap},
+    pass::record_object_sizes::OperationWithSizes,
+    report::{AnnotatedTerm, TheoryTermMap},
 };
 
 #[derive(Debug, Error)]
@@ -28,7 +29,7 @@ pub enum PassRunError {
 pub fn run(
     theory_set: &TheorySet,
     definition_types: &DefinitionTypes,
-) -> Result<SizedTheoryTermMap, PassRunError> {
+) -> Result<TheoryTermMap<OperationWithSizes<Operation>>, PassRunError> {
     let mut output = BTreeMap::new();
 
     for (theory_id, theory) in &theory_set.theories {

@@ -8,8 +8,11 @@ use crate::{
     check::{CheckError, partial_definition_types},
     codegen::CodegenError,
     elaborate::ElaborateError,
-    pass::{record_object_sizes::erase_operation_sizes, run::PassRunError},
-    report::{CompileReport, SizedTheoryTermMap, TheoryTermMap},
+    pass::{
+        record_object_sizes::{OperationWithSizes, erase_operation_sizes},
+        run::PassRunError,
+    },
+    report::{CompileReport, TheoryTermMap},
 };
 
 #[derive(Debug, Error)]
@@ -98,7 +101,7 @@ fn compile_into(report: &mut CompileReport) -> Result<(), CompileError> {
     Ok(())
 }
 
-fn erase_recorded_sizes(terms: &SizedTheoryTermMap) -> TheoryTermMap {
+fn erase_recorded_sizes(terms: &TheoryTermMap<OperationWithSizes<Operation>>) -> TheoryTermMap {
     terms
         .iter()
         .map(|(theory_id, definitions)| {

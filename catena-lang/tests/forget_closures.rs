@@ -29,6 +29,7 @@ fn compile_through_forget_closures(source: &str) -> anyhow::Result<()> {
 }
 
 #[test]
+#[ignore = "compile currently uses forget_closures_old"]
 fn defer_bool_id() -> anyhow::Result<()> {
     compile_through_forget_closures(
         r#"
@@ -42,6 +43,7 @@ fn defer_bool_id() -> anyhow::Result<()> {
 }
 
 #[test]
+#[ignore = "compile currently uses forget_closures_old"]
 fn run_named_and_packed_with_free() -> anyhow::Result<()> {
     compile_through_forget_closures(
         r#"

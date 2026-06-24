@@ -4,6 +4,7 @@
 //! GPU artifact. Report generation should render this artifact, not make codegen
 //! decisions itself.
 
+mod components;
 pub mod fn_ptrs;
 pub mod gpu;
 pub mod lower_types;

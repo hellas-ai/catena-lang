@@ -21,8 +21,12 @@
 
 use crate::codegen::{
     GpuAssign, GpuValue,
+    components::{
+        Component, input_components, is_runtime_value, runtime_values, single_function,
+        single_value, value_expr,
+    },
     gpu::GpuRenderError,
-    render_utils::{c_type, invalid_outputs, sanitize_ident},
+    render_utils::{c_type, invalid_outputs},
     runtime_type,
 };
 
@@ -85,9 +89,9 @@ pub(in crate::codegen) fn render(
 
 type ReducecParts<'a> = (
     &'a GpuValue,
-    Vec<&'a GpuValue>,
+    Component<'a>,
     &'a GpuValue,
-    Vec<&'a GpuValue>,
+    Component<'a>,
     &'a GpuValue,
     &'a GpuValue,
 );
@@ -95,91 +99,62 @@ type ReducecParts<'a> = (
 fn parts(assignment: &GpuAssign) -> Result<ReducecParts<'_>, GpuRenderError> {
     let components = input_components(assignment)?;
     let [zero, add_env, add_fn, get_env, get_fn, n] = components.as_slice() else {
-        return Err(GpuRenderError::InvalidReducecSourceSizeCount {
+        return Err(GpuRenderError::InvalidSourceComponentCount {
+            op: assignment.op.clone(),
+            expected: 6,
             actual: components.len(),
         });
     };
 
-    let [zero] = zero.as_slice() else {
-        return Err(GpuRenderError::MissingReducecZero);
-    };
-    if !is_runtime_value(zero) {
-        return Err(GpuRenderError::ErasedReducecZero);
+    if zero.is_empty() {
+        return Err(invalid_component_count(
+            assignment,
+            "zero",
+            "runtime zero input",
+            0,
+        ));
     }
-
-    let add_fn = single_function(add_fn)?;
-    let get_fn = single_function(get_fn)?;
-
-    let n_runtime = n
-        .iter()
-        .copied()
-        .filter(|input| is_runtime_value(input))
-        .collect::<Vec<_>>();
-    let [n] = n_runtime.as_slice() else {
-        return Err(GpuRenderError::InvalidReducecLengthCount {
-            actual: n_runtime.len(),
-        });
-    };
-
-    Ok((zero, add_env.clone(), add_fn, get_env.clone(), get_fn, n))
-}
-
-fn single_function<'a>(component: &[&'a GpuValue]) -> Result<&'a GpuValue, GpuRenderError> {
-    let [function] = component else {
-        return Err(GpuRenderError::InvalidReducecFunctionCount {
-            actual: component
-                .iter()
-                .filter(|input| matches!(input, GpuValue::FnSymbol(_)))
-                .count(),
-        });
-    };
-    if !matches!(function, GpuValue::FnSymbol(_)) {
-        return Err(GpuRenderError::InvalidReducecFunctionCount { actual: 0 });
-    }
-    Ok(function)
-}
-
-fn input_components<'a>(
-    assignment: &'a GpuAssign,
-) -> Result<Vec<Vec<&'a GpuValue>>, GpuRenderError> {
-    let expected = assignment.source_sizes.iter().sum::<usize>();
-    if expected != assignment.inputs.len() {
-        return Err(GpuRenderError::InvalidReducecFlattenedInputCount {
-            expected,
-            actual: assignment.inputs.len(),
+    if zero.len() == 1 && !is_runtime_value(&zero[0]) {
+        return Err(GpuRenderError::ErasedSourceComponentValue {
+            op: assignment.op.clone(),
+            component: "zero",
+            description: "reducec zero input must be a runtime value",
         });
     }
+    let zero = single_value(zero).map_err(|error| {
+        invalid_component_count(assignment, "zero", "runtime zero input", error.actual)
+    })?;
 
-    let mut offset = 0;
-    Ok(assignment
-        .source_sizes
-        .iter()
-        .map(|size| {
-            let end = offset + *size;
-            let component = assignment.inputs[offset..end].iter().collect::<Vec<_>>();
-            offset = end;
-            component
-        })
-        .collect())
+    let add_fn = single_function(add_fn).map_err(|error| {
+        invalid_component_count(assignment, "add_fn", "function symbol input", error.actual)
+    })?;
+    let get_fn = single_function(get_fn).map_err(|error| {
+        invalid_component_count(assignment, "get_fn", "function symbol input", error.actual)
+    })?;
+    let n = single_value(n).map_err(|error| {
+        invalid_component_count(assignment, "n", "runtime length input", error.actual)
+    })?;
+
+    Ok((zero, add_env, add_fn, get_env, get_fn, n))
 }
 
-fn runtime_args(values: Vec<&GpuValue>) -> Vec<String> {
-    values
-        .into_iter()
-        .filter(|value| is_runtime_value(value))
-        .map(value_expr)
-        .collect()
-}
-
-fn is_runtime_value(value: &GpuValue) -> bool {
-    matches!(value, GpuValue::Var(var) if runtime_type(var).is_some())
-}
-
-fn value_expr(value: &GpuValue) -> String {
-    match value {
-        GpuValue::Var(var) => var.name.clone(),
-        GpuValue::FnSymbol(symbol) => sanitize_ident(&format!("program.{}", symbol.target)),
+fn invalid_component_count(
+    assignment: &GpuAssign,
+    component: &'static str,
+    description: &'static str,
+    actual: usize,
+) -> GpuRenderError {
+    GpuRenderError::InvalidSourceComponentValueCount {
+        op: assignment.op.clone(),
+        component,
+        description,
+        expected: 1,
+        actual,
     }
+}
+
+fn runtime_args(values: Component<'_>) -> Vec<String> {
+    runtime_values(values).map(value_expr).collect()
 }
 
 #[cfg(test)]

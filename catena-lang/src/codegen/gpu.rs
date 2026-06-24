@@ -33,34 +33,40 @@ pub enum GpuRenderError {
         expected: usize,
         actual: usize,
     },
+    #[error("operation `{op}` expected {expected} source components, found {actual}")]
+    InvalidSourceComponentCount {
+        op: Operation,
+        expected: usize,
+        actual: usize,
+    },
+    #[error(
+        "operation `{op}` source sizes account for {expected} flattened inputs, but assignment has {actual}"
+    )]
+    InvalidFlattenedInputCount {
+        op: Operation,
+        expected: usize,
+        actual: usize,
+    },
+    #[error(
+        "operation `{op}` expected {expected} {description} in source component `{component}`, found {actual}"
+    )]
+    InvalidSourceComponentValueCount {
+        op: Operation,
+        component: &'static str,
+        description: &'static str,
+        expected: usize,
+        actual: usize,
+    },
+    #[error("operation `{op}` source component `{component}` is erased: {description}")]
+    ErasedSourceComponentValue {
+        op: Operation,
+        component: &'static str,
+        description: &'static str,
+    },
     #[error("gpu.materialize is missing launch params")]
     MissingMaterializeLaunchParams,
     #[error("gpu.materialize is missing function input")]
     MissingMaterializeFunction,
-    #[error(
-        "reducec flat ABI parser expected exactly two function symbol inputs, found {actual}; function-valued reducec environments are not supported yet"
-    )]
-    InvalidReducecFunctionCount { actual: usize },
-    #[error("reducec expected six source-size components, found {actual}")]
-    InvalidReducecSourceSizeCount { actual: usize },
-    #[error(
-        "reducec source sizes account for {expected} flattened inputs, but assignment has {actual}"
-    )]
-    InvalidReducecFlattenedInputCount { expected: usize, actual: usize },
-    #[error("reducec is missing zero input")]
-    MissingReducecZero,
-    #[error("reducec zero input is erased")]
-    ErasedReducecZero,
-    #[error(
-        "reducec expected exactly one runtime length input after the producer function, found {actual}"
-    )]
-    InvalidReducecLengthCount { actual: usize },
-    #[error("materializec is missing function input")]
-    MissingMaterializecFunction,
-    #[error("materializec is missing length input")]
-    MissingMaterializecLength,
-    #[error("materializec expected one length input after the function, found {actual}")]
-    InvalidMaterializecLength { actual: usize },
     #[error("invalid integer constant operation `{op}`")]
     InvalidIntegerConstant { op: Operation },
 }
@@ -938,7 +944,7 @@ mod tests {
                 targets: vec![out.clone()],
                 assignments: vec![GpuAssign {
                     op: op("materializec"),
-                    source_sizes: Vec::new(),
+                    source_sizes: vec![0, 1, 1],
                     target_sizes: Vec::new(),
                     call_symbol: None,
                     inputs: vec![

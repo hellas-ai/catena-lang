@@ -24,9 +24,12 @@
 
 use crate::codegen::{
     GpuAssign, GpuDialect, GpuFunction, GpuValue,
+    components::{
+        Component, input_components, runtime_values, single_function, single_value, value_expr,
+    },
     gpu::GpuRenderError,
     lower_types::CType,
-    render_utils::{c_type, invalid_outputs, param_decl, sanitize_ident},
+    render_utils::{c_type, invalid_outputs, param_decl},
     runtime_type,
 };
 
@@ -51,10 +54,8 @@ pub(in crate::codegen) fn render_kernel(
         "__global__ void {kernel_name}({} *out, uint64_t len",
         c_type(element)
     ));
-    for arg in &env {
-        if let GpuValue::Var(var) = arg
-            && runtime_type(var).is_some()
-        {
+    for arg in runtime_values(env) {
+        if let GpuValue::Var(var) = arg {
             out.push_str(", ");
             out.push_str(&param_decl(var, false)?);
         }
@@ -66,10 +67,9 @@ pub(in crate::codegen) fn render_kernel(
     out.push_str("    ");
     out.push_str(&value_expr(func));
     out.push('(');
-    let mut call_args = env
-        .iter()
+    let mut call_args = runtime_values(env)
         .filter_map(|arg| match arg {
-            GpuValue::Var(var) if runtime_type(var).is_some() => Some(var.name.clone()),
+            GpuValue::Var(var) => Some(var.name.clone()),
             _ => None,
         })
         .collect::<Vec<_>>();
@@ -125,10 +125,8 @@ pub(in crate::codegen) fn render_call(
         "        ({name}_data, {name}_len",
         name = output.name
     ));
-    for arg in env {
-        if let GpuValue::Var(var) = arg
-            && runtime_type(var).is_some()
-        {
+    for arg in runtime_values(env) {
+        if let GpuValue::Var(var) = arg {
             out.push_str(", ");
             out.push_str(&var.name);
         }
@@ -152,39 +150,51 @@ pub(in crate::codegen) fn kernel_name(
     Ok(format!("materialize_{}_{}", function_name, output.name))
 }
 
-fn parts(assignment: &GpuAssign) -> Result<(&GpuValue, &GpuValue, Vec<&GpuValue>), GpuRenderError> {
+fn parts(assignment: &GpuAssign) -> Result<(&GpuValue, &GpuValue, Component<'_>), GpuRenderError> {
     // The lowered inputs follow the closure-converted call shape:
     //
-    //     env..., producer_fn, erased_witnesses..., len
+    //     env..., producer_fn, len
     //
-    // Values before the function symbol are the producer environment. After the function symbol,
-    // `materializec` may still carry erased parameter-level inputs, so the length is recovered as
-    // the single runtime value in that suffix.
-    let func_index = assignment
-        .inputs
-        .iter()
-        .position(|input| matches!(input, GpuValue::FnSymbol(_)))
-        .ok_or(GpuRenderError::MissingMaterializecFunction)?;
-    let func = &assignment.inputs[func_index];
-    let env = assignment.inputs[..func_index].iter().collect::<Vec<_>>();
-    let trailing_runtime = assignment.inputs[func_index + 1..]
-        .iter()
-        .filter(|input| matches!(input, GpuValue::Var(var) if runtime_type(var).is_some()))
-        .collect::<Vec<_>>();
-    let [len] = trailing_runtime.as_slice() else {
-        if trailing_runtime.is_empty() {
-            return Err(GpuRenderError::MissingMaterializecLength);
-        }
-        return Err(GpuRenderError::InvalidMaterializecLength {
-            actual: trailing_runtime.len(),
+    // `env` may be a zero-size component when the source environment is unit.
+    let components = input_components(assignment)?;
+    let [env, func, len] = components.as_slice() else {
+        return Err(GpuRenderError::InvalidSourceComponentCount {
+            op: assignment.op.clone(),
+            expected: 3,
+            actual: components.len(),
         });
     };
+
+    let func = single_function(func).map_err(|error| {
+        invalid_component_count(
+            assignment,
+            "producer_fn",
+            "materializec producer function symbol",
+            error.actual,
+        )
+    })?;
+    let len = single_value(len).map_err(|error| {
+        invalid_component_count(
+            assignment,
+            "len",
+            "materializec runtime length input",
+            error.actual,
+        )
+    })?;
     Ok((func, len, env))
 }
 
-fn value_expr(value: &GpuValue) -> String {
-    match value {
-        GpuValue::Var(var) => var.name.clone(),
-        GpuValue::FnSymbol(symbol) => sanitize_ident(&format!("program.{}", symbol.target)),
+fn invalid_component_count(
+    assignment: &GpuAssign,
+    component: &'static str,
+    description: &'static str,
+    actual: usize,
+) -> GpuRenderError {
+    GpuRenderError::InvalidSourceComponentValueCount {
+        op: assignment.op.clone(),
+        component,
+        description,
+        expected: 1,
+        actual,
     }
 }

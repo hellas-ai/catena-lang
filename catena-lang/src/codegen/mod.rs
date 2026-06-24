@@ -121,6 +121,8 @@ pub struct GpuFunction {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GpuAssign {
     pub op: Operation,
+    pub source_sizes: Vec<usize>,
+    pub target_sizes: Vec<usize>,
     pub call_symbol: Option<String>,
     pub inputs: Vec<GpuValue>,
     pub outputs: Vec<GpuVar>,
@@ -291,6 +293,8 @@ impl CodegenState<'_> {
 
             assignments.push(GpuAssign {
                 op,
+                source_sizes: assignment.op.source_sizes,
+                target_sizes: assignment.op.target_sizes,
                 call_symbol,
                 inputs,
                 outputs,

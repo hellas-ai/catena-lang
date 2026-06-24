@@ -41,6 +41,12 @@ pub enum GpuRenderError {
         "reducec flat ABI parser expected exactly two function symbol inputs, found {actual}; function-valued reducec environments are not supported yet"
     )]
     InvalidReducecFunctionCount { actual: usize },
+    #[error("reducec expected six source-size components, found {actual}")]
+    InvalidReducecSourceSizeCount { actual: usize },
+    #[error(
+        "reducec source sizes account for {expected} flattened inputs, but assignment has {actual}"
+    )]
+    InvalidReducecFlattenedInputCount { expected: usize, actual: usize },
     #[error("reducec is missing zero input")]
     MissingReducecZero,
     #[error("reducec zero input is erased")]
@@ -932,6 +938,8 @@ mod tests {
                 targets: vec![out.clone()],
                 assignments: vec![GpuAssign {
                     op: op("materializec"),
+                    source_sizes: Vec::new(),
+                    target_sizes: Vec::new(),
                     call_symbol: None,
                     inputs: vec![
                         GpuValue::FnSymbol(FnPtrSymbol {
@@ -952,6 +960,8 @@ mod tests {
                 targets: vec![value.clone()],
                 assignments: vec![GpuAssign {
                     op: op("u64.one"),
+                    source_sizes: Vec::new(),
+                    target_sizes: Vec::new(),
                     call_symbol: None,
                     inputs: vec![],
                     outputs: vec![value],

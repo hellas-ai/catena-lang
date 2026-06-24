@@ -93,57 +93,74 @@ type ReducecParts<'a> = (
 );
 
 fn parts(assignment: &GpuAssign) -> Result<ReducecParts<'_>, GpuRenderError> {
-    // assume there are only two function indices for now
-    // we don't allow function pointers in context
-    // a cleaner solution requires a refactoring of lowering that preserves type info
-    let func_indices = assignment
-        .inputs
-        .iter()
-        .enumerate()
-        .filter_map(|(index, input)| matches!(input, GpuValue::FnSymbol(_)).then_some(index))
-        .collect::<Vec<_>>();
-    let [add_index, get_index] = func_indices.as_slice() else {
-        return Err(GpuRenderError::InvalidReducecFunctionCount {
-            actual: func_indices.len(),
+    let components = input_components(assignment)?;
+    let [zero, add_env, add_fn, get_env, get_fn, n] = components.as_slice() else {
+        return Err(GpuRenderError::InvalidReducecSourceSizeCount {
+            actual: assignment.source_sizes.len(),
         });
     };
-    if *add_index == 0 {
-        return Err(GpuRenderError::MissingReducecZero);
-    }
 
-    // The zero value must be a runtime value because it initializes the emitted
-    // accumulator variable directly.
-    let zero = &assignment.inputs[0];
+    let [zero] = zero.as_slice() else {
+        return Err(GpuRenderError::MissingReducecZero);
+    };
     if !is_runtime_value(zero) {
         return Err(GpuRenderError::ErasedReducecZero);
     }
 
-    // Everything between zero and the add function is the add closure's
-    // environment. Erased values can appear here; they are filtered at call
-    // rendering time.
-    let add_env = assignment.inputs[1..*add_index].iter().collect::<Vec<_>>();
-    let add_fn = &assignment.inputs[*add_index];
+    let add_fn = single_function(add_fn)?;
+    let get_fn = single_function(get_fn)?;
 
-    // Everything between the add function and producer function is the
-    // producer closure's environment.
-    let get_env = assignment.inputs[*add_index + 1..*get_index]
+    let n_runtime = n
         .iter()
-        .collect::<Vec<_>>();
-    let get_fn = &assignment.inputs[*get_index];
-
-    // After the producer function, only one runtime value should remain: the
-    // reduction length. Type-level witnesses in this suffix are erased.
-    let trailing_runtime = assignment.inputs[*get_index + 1..]
-        .iter()
+        .copied()
         .filter(|input| is_runtime_value(input))
         .collect::<Vec<_>>();
-    let [n] = trailing_runtime.as_slice() else {
+    let [n] = n_runtime.as_slice() else {
         return Err(GpuRenderError::InvalidReducecLengthCount {
-            actual: trailing_runtime.len(),
+            actual: n_runtime.len(),
         });
     };
 
-    Ok((zero, add_env, add_fn, get_env, get_fn, n))
+    Ok((zero, add_env.clone(), add_fn, get_env.clone(), get_fn, n))
+}
+
+fn single_function<'a>(component: &[&'a GpuValue]) -> Result<&'a GpuValue, GpuRenderError> {
+    let [function] = component else {
+        return Err(GpuRenderError::InvalidReducecFunctionCount {
+            actual: component
+                .iter()
+                .filter(|input| matches!(input, GpuValue::FnSymbol(_)))
+                .count(),
+        });
+    };
+    if !matches!(function, GpuValue::FnSymbol(_)) {
+        return Err(GpuRenderError::InvalidReducecFunctionCount { actual: 0 });
+    }
+    Ok(function)
+}
+
+fn input_components<'a>(
+    assignment: &'a GpuAssign,
+) -> Result<Vec<Vec<&'a GpuValue>>, GpuRenderError> {
+    let expected = assignment.source_sizes.iter().sum::<usize>();
+    if expected != assignment.inputs.len() {
+        return Err(GpuRenderError::InvalidReducecFlattenedInputCount {
+            expected,
+            actual: assignment.inputs.len(),
+        });
+    }
+
+    let mut offset = 0;
+    Ok(assignment
+        .source_sizes
+        .iter()
+        .map(|size| {
+            let end = offset + *size;
+            let component = assignment.inputs[offset..end].iter().collect::<Vec<_>>();
+            offset = end;
+            component
+        })
+        .collect())
 }
 
 fn runtime_args(values: Vec<&GpuValue>) -> Vec<String> {
@@ -162,5 +179,69 @@ fn value_expr(value: &GpuValue) -> String {
     match value {
         GpuValue::Var(var) => var.name.clone(),
         GpuValue::FnSymbol(symbol) => sanitize_ident(&format!("program.{}", symbol.target)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::codegen::{
+        GpuAssign, GpuVar,
+        fn_ptrs::FnPtrSymbol,
+        lower_types::{CType, LoweredType},
+    };
+    use hexpr::Operation;
+    use open_hypergraphs::lax::NodeId;
+
+    fn op(name: &str) -> Operation {
+        name.parse().unwrap()
+    }
+
+    fn var(node: usize, name: &str) -> GpuValue {
+        GpuValue::Var(GpuVar {
+            node: NodeId(node),
+            name: name.to_string(),
+            lowered: LoweredType::Runtime(CType::U64),
+        })
+    }
+
+    fn fn_symbol(name: &str) -> GpuValue {
+        GpuValue::FnSymbol(FnPtrSymbol { target: op(name) })
+    }
+
+    #[test]
+    fn source_sizes_group_flattened_reducec_environments() {
+        let output = GpuVar {
+            node: NodeId(9),
+            name: "out".to_string(),
+            lowered: LoweredType::Runtime(CType::U64),
+        };
+        let assignment = GpuAssign {
+            op: op("reducec"),
+            source_sizes: vec![1, 2, 1, 2, 1, 1],
+            target_sizes: vec![1],
+            call_symbol: None,
+            inputs: vec![
+                var(0, "zero"),
+                var(1, "add_env0"),
+                var(2, "add_env1"),
+                fn_symbol("add"),
+                var(3, "get_env0"),
+                var(4, "get_env1"),
+                fn_symbol("get"),
+                var(5, "n"),
+            ],
+            outputs: vec![output],
+        };
+
+        let mut out = String::new();
+        render(&mut out, &assignment).unwrap();
+
+        assert!(out.contains("program_get(get_env0, get_env1, reduce_i_out, &reduce_value_out);"));
+        assert!(
+            out.contains(
+                "program_add(add_env0, add_env1, out, reduce_value_out, &reduce_next_out);"
+            )
+        );
     }
 }

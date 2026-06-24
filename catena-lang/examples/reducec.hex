@@ -46,68 +46,68 @@
     reducec
 ))
 
-# Dot product is disabled until product environments are lowered for reducec producers.
-#(def program dot-u64-product-at :
-#  ([n.] {
-#    ({({cap.ref [.n] u64} buf val) ({cap.ref [.n] u64} buf val)} *)
-#    ([.n] ix val)
-#  })
-#  ->
-#  ([n.] (u64 val))
-#= {[env i.]
-#    ([.env] prod.elim [lhs rhs.])
-#    ({[.i lhs]} ix [lval.])
-#    ({[.i rhs]} ix [rval.])
-#    ([.lval rval] u64.mul [result.])
-#    [.result]
-#})
-#
-## Convert two memory buffers to u64 buffers and assert they have the same length.
-#(def program mem.cast.u64.same-length :
-#  ([n p.] {(cap.ref mem) (cap.ref mem)})
-#  ->
-#  ([n p.] {
-#    ({[.n] u64} :)
-#    ({cap.ref [.n] u64} buf val)
-#    ({cap.ref [.n] u64} buf val)
-#  })
-#= (
-#  {mem.cast.u64 mem.cast.u64}
-#  [lhs-len lhs rhs-len rhs.]
-#    {
-#      ([.lhs-len rhs-len] u64.eq [lengths-equal if-equal _if-not-equal. lengths-equal if-equal] assert-then)
-#      [.lhs-len]
-#      [.lhs]
-#      [.rhs]
-#    }
-#  [same-length lhs-len lhs rhs.]
-#    {
-#      [.lhs-len]
-#      [.lhs]
-#      ({[.rhs same-length]} buf.u64.cast-same-length)
-#    }
-#))
-#
-#(def program dot-u64 :
-#  {(cap.ref mem) (cap.ref mem)}
-#  ->
-#  (u64 val)
-#= (
-#  mem.cast.u64.same-length
-#  [n lhs rhs.]
-#    {
-#      # zero
-#      const.u64.0x0000000000000000
-#
-#      # accumulator closure: unit environment plus adapter function pointer
-#      unit.intro
-#      name.u64.add-env
-#
-#      # producer closure: lhs/rhs environment plus function pointer
-#      ({({[.lhs] [.rhs]} prod.intro) (([.n] :.param) name.dot-u64-product-at)})
-#
-#      # reduction length
-#      [.n]
-#    }
-#    reducec
-#))
+# Dot product
+(def program dot-u64-product-at :
+  ([n.] {
+    ({({cap.ref [.n] u64} buf val) ({cap.ref [.n] u64} buf val)} *)
+    ([.n] ix val)
+  })
+  ->
+  ([n.] (u64 val))
+= {[env i.]
+    ([.env] *.elim [lhs rhs.])
+    ({[.i lhs]} ix [lval.])
+    ({[.i rhs]} ix [rval.])
+    ([.lval rval] u64.mul [result.])
+    [.result]
+})
+
+# Convert two memory buffers to u64 buffers and assert they have the same length.
+(def program mem.cast.u64.same-length :
+  ([n p.] {(cap.ref mem) (cap.ref mem)})
+  ->
+  ([n p.] {
+    ({[.n] u64} :)
+    ({cap.ref [.n] u64} buf val)
+    ({cap.ref [.n] u64} buf val)
+  })
+= (
+  {mem.cast.u64 mem.cast.u64}
+  [lhs-len lhs rhs-len rhs.]
+    {
+      ([.lhs-len rhs-len] u64.eq [lengths-equal if-equal _if-not-equal. lengths-equal if-equal] assert-then)
+      [.lhs-len]
+      [.lhs]
+      [.rhs]
+    }
+  [same-length lhs-len lhs rhs.]
+    {
+      [.lhs-len]
+      [.lhs]
+      ({[.rhs same-length]} buf.u64.cast-same-length)
+    }
+))
+
+(def program dot-u64 :
+  {(cap.ref mem) (cap.ref mem)}
+  ->
+  (u64 val)
+= (
+  mem.cast.u64.same-length
+  [n lhs rhs.]
+    {
+      # zero
+      const.u64.0x0000000000000000
+
+      # accumulator closure: unit environment plus adapter function pointer
+      unit.intro
+      name.u64.add-env
+
+      # producer closure: lhs/rhs environment plus function pointer
+      ({({[.lhs] [.rhs]} *.intro) (([.n] :.param) name.dot-u64-product-at)})
+
+      # reduction length
+      [.n]
+    }
+    reducec
+))

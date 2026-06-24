@@ -96,7 +96,7 @@ fn parts(assignment: &GpuAssign) -> Result<ReducecParts<'_>, GpuRenderError> {
     let components = input_components(assignment)?;
     let [zero, add_env, add_fn, get_env, get_fn, n] = components.as_slice() else {
         return Err(GpuRenderError::InvalidReducecSourceSizeCount {
-            actual: assignment.source_sizes.len(),
+            actual: components.len(),
         });
     };
 

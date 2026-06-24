@@ -10,8 +10,6 @@ use crate::report::AnnotatedTerm;
 
 const CLOSURE_TYPE: &str = "=>";
 const FUNCTION_TYPE: &str = "->";
-const PRODUCT_TYPE: &str = "*";
-const UNIT_TYPE: &str = "1";
 const VALUE_TYPE: &str = "val";
 const NAME_PREFIX: &str = "name.";
 const DEFER: &str = "defer";
@@ -171,10 +169,6 @@ fn expand_object(o: &Obj) -> Vec<Obj> {
     match o {
         Tree::Empty => vec![],
         Tree::Leaf(_, _) => vec![o.clone()],
-        Tree::Node(op, _, children) if op.as_str() == UNIT_TYPE && children.is_empty() => vec![],
-        Tree::Node(op, _, children) if op.as_str() == PRODUCT_TYPE => {
-            children.iter().flat_map(expand_object).collect()
-        }
         Tree::Node(op, _, children) if op.as_str() == CLOSURE_TYPE => {
             children.iter().flat_map(expand_object).collect()
         }

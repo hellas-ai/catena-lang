@@ -124,6 +124,21 @@ mod tests {
     }
 
     #[test]
+    fn records_zero_size_unit_components() {
+        let source = vec![ty("A"), ty(UNIT_TYPE), ty("B")];
+        let target = vec![ty("C")];
+
+        let mapped = RecordObjectSizes.map_operation(&op("f0"), &source, &target);
+        let label = &mapped.hypergraph.edges[0];
+
+        assert_eq!(label.source_sizes, vec![1, 0, 1]);
+        assert_eq!(
+            mapped.hypergraph.nodes,
+            vec![ty("A"), ty(UNIT_TYPE), ty("B"), ty("C")]
+        );
+    }
+
+    #[test]
     fn unit_and_empty_have_size_zero() {
         assert_eq!(object_size(&Tree::Empty), 0);
         assert_eq!(object_size(&ty(UNIT_TYPE)), 0);

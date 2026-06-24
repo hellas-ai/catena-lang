@@ -21,16 +21,13 @@ pub enum FnPtrSymbolError {
         "function pointer symbol `{operation}` should produce exactly one target, found {target_count}"
     )]
     InvalidTargetCount {
-        operation: OperationWithBoundarySizes<Operation>,
+        operation: Operation,
         target_count: usize,
     },
     #[error(
         "function pointer symbol `{operation}` should not overwrite an existing symbol on node {node}"
     )]
-    DuplicateNodeSymbol {
-        operation: OperationWithBoundarySizes<Operation>,
-        node: usize,
-    },
+    DuplicateNodeSymbol { operation: Operation, node: usize },
     #[error("generated function pointer target `{0}` is not a valid operation")]
     InvalidTargetOperation(String),
 }
@@ -57,13 +54,13 @@ pub fn direct_fn_ptr_symbols(
         let adjacency = &term.hypergraph.adjacency[edge_index];
         let [target] = adjacency.targets.as_slice() else {
             return Err(FnPtrSymbolError::InvalidTargetCount {
-                operation: operation.clone(),
+                operation: operation.operation.clone(),
                 target_count: adjacency.targets.len(),
             });
         };
         if symbols.contains_key(target) {
             return Err(FnPtrSymbolError::DuplicateNodeSymbol {
-                operation: operation.clone(),
+                operation: operation.operation.clone(),
                 node: target.0,
             });
         }

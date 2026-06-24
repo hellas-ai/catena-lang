@@ -33,14 +33,14 @@ pub enum GpuRenderError {
         expected: usize,
         actual: usize,
     },
-    #[error("operation `{op}` expected {expected} source components, found {actual}")]
-    InvalidSourceComponentCount {
+    #[error("operation `{op}` expected {expected} input components, found {actual}")]
+    InvalidInputComponentCount {
         op: Operation,
         expected: usize,
         actual: usize,
     },
     #[error(
-        "operation `{op}` source sizes account for {expected} flattened inputs, but assignment has {actual}"
+        "operation `{op}` input sizes account for {expected} flattened inputs, but assignment has {actual}"
     )]
     InvalidFlattenedInputCount {
         op: Operation,
@@ -48,17 +48,17 @@ pub enum GpuRenderError {
         actual: usize,
     },
     #[error(
-        "operation `{op}` expected {expected} {description} in source component `{component}`, found {actual}"
+        "operation `{op}` expected {expected} {description} in input component `{component}`, found {actual}"
     )]
-    InvalidSourceComponentValueCount {
+    InvalidInputComponentValueCount {
         op: Operation,
         component: &'static str,
         description: &'static str,
         expected: usize,
         actual: usize,
     },
-    #[error("operation `{op}` source component `{component}` is erased: {description}")]
-    ErasedSourceComponentValue {
+    #[error("operation `{op}` input component `{component}` is erased: {description}")]
+    ErasedInputComponentValue {
         op: Operation,
         component: &'static str,
         description: &'static str,
@@ -944,8 +944,8 @@ mod tests {
                 targets: vec![out.clone()],
                 assignments: vec![GpuAssign {
                     op: op("materializec"),
-                    source_sizes: vec![0, 1, 1],
-                    target_sizes: Vec::new(),
+                    input_sizes: vec![0, 1, 1],
+                    output_sizes: Vec::new(),
                     call_symbol: None,
                     inputs: vec![
                         GpuValue::FnSymbol(FnPtrSymbol {
@@ -966,8 +966,8 @@ mod tests {
                 targets: vec![value.clone()],
                 assignments: vec![GpuAssign {
                     op: op("u64.one"),
-                    source_sizes: Vec::new(),
-                    target_sizes: Vec::new(),
+                    input_sizes: Vec::new(),
+                    output_sizes: Vec::new(),
                     call_symbol: None,
                     inputs: vec![],
                     outputs: vec![value],

@@ -99,7 +99,7 @@ type ReducecParts<'a> = (
 fn parts(assignment: &GpuAssign) -> Result<ReducecParts<'_>, GpuRenderError> {
     let components = input_components(assignment)?;
     let [zero, add_env, add_fn, get_env, get_fn, n] = components.as_slice() else {
-        return Err(GpuRenderError::InvalidSourceComponentCount {
+        return Err(GpuRenderError::InvalidInputComponentCount {
             op: assignment.op.clone(),
             expected: 6,
             actual: components.len(),
@@ -115,7 +115,7 @@ fn parts(assignment: &GpuAssign) -> Result<ReducecParts<'_>, GpuRenderError> {
         ));
     }
     if zero.len() == 1 && !is_runtime_value(&zero[0]) {
-        return Err(GpuRenderError::ErasedSourceComponentValue {
+        return Err(GpuRenderError::ErasedInputComponentValue {
             op: assignment.op.clone(),
             component: "zero",
             description: "reducec zero input must be a runtime value",
@@ -144,7 +144,7 @@ fn invalid_component_count(
     description: &'static str,
     actual: usize,
 ) -> GpuRenderError {
-    GpuRenderError::InvalidSourceComponentValueCount {
+    GpuRenderError::InvalidInputComponentValueCount {
         op: assignment.op.clone(),
         component,
         description,
@@ -185,7 +185,7 @@ mod tests {
     }
 
     #[test]
-    fn source_sizes_group_flattened_reducec_environments() {
+    fn input_sizes_group_flattened_reducec_environments() {
         let output = GpuVar {
             node: NodeId(9),
             name: "out".to_string(),
@@ -193,8 +193,8 @@ mod tests {
         };
         let assignment = GpuAssign {
             op: op("reducec"),
-            source_sizes: vec![1, 2, 1, 2, 1, 1],
-            target_sizes: vec![1],
+            input_sizes: vec![1, 2, 1, 2, 1, 1],
+            output_sizes: vec![1],
             call_symbol: None,
             inputs: vec![
                 var(0, "zero"),

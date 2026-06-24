@@ -12,7 +12,7 @@ pub(in crate::codegen) struct ComponentValueCountError {
 pub(in crate::codegen) fn input_components<'a>(
     assignment: &'a GpuAssign,
 ) -> Result<Vec<Component<'a>>, GpuRenderError> {
-    let expected = assignment.source_sizes.iter().sum::<usize>();
+    let expected = assignment.input_sizes.iter().sum::<usize>();
     if expected != assignment.inputs.len() {
         return Err(GpuRenderError::InvalidFlattenedInputCount {
             op: assignment.op.clone(),
@@ -23,7 +23,7 @@ pub(in crate::codegen) fn input_components<'a>(
 
     let mut offset = 0;
     Ok(assignment
-        .source_sizes
+        .input_sizes
         .iter()
         .map(|size| {
             let end = offset + *size;
@@ -106,11 +106,11 @@ mod tests {
     }
 
     #[test]
-    fn source_sizes_split_flattened_inputs_into_components() {
+    fn input_sizes_split_flattened_inputs_into_components() {
         let assignment = GpuAssign {
             op: op("f"),
-            source_sizes: vec![1, 0, 2],
-            target_sizes: vec![],
+            input_sizes: vec![1, 0, 2],
+            output_sizes: vec![],
             call_symbol: None,
             inputs: vec![var(0, "a"), var(1, "b"), fn_symbol("g")],
             outputs: vec![],

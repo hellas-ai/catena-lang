@@ -158,7 +158,7 @@ fn parts(assignment: &GpuAssign) -> Result<(&GpuValue, &GpuValue, Component<'_>)
     // `env` may be a zero-size component when the source environment is unit.
     let components = input_components(assignment)?;
     let [env, func, len] = components.as_slice() else {
-        return Err(GpuRenderError::InvalidSourceComponentCount {
+        return Err(GpuRenderError::InvalidInputComponentCount {
             op: assignment.op.clone(),
             expected: 3,
             actual: components.len(),
@@ -190,7 +190,7 @@ fn invalid_component_count(
     description: &'static str,
     actual: usize,
 ) -> GpuRenderError {
-    GpuRenderError::InvalidSourceComponentValueCount {
+    GpuRenderError::InvalidInputComponentValueCount {
         op: assignment.op.clone(),
         component,
         description,

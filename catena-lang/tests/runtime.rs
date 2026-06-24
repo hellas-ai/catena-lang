@@ -572,6 +572,27 @@ fn exp_approx_test() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[test]
+fn exp2_approx_test() -> anyhow::Result<()> {
+    let runtime = runtime_with(NN_EXAMPLES)?;
+
+    for input in [-3.0_f32, -1.0, -0.5, 0.0, 0.5, 1.0, 3.0] {
+        let [result] = runtime.exec("exp2-approx", [input.into()])?;
+        let Value::F32(result) = result else {
+            anyhow::bail!("exp2-approx returned non-f32 value: {result:?}");
+        };
+
+        let expected = input.exp2();
+        let error = (result - expected).abs() / expected.max(1.0);
+        assert!(
+            error < 4e-3,
+            "exp2-approx({input}) = {result}, expected {expected}, rel-ish error {error}"
+        );
+    }
+
+    Ok(())
+}
+
 #[path = "cases/materializec.rs"]
 mod materializec;
 
@@ -698,6 +719,56 @@ fn log_approx_test() -> anyhow::Result<()> {
         assert!(
             error < 6e-4,
             "log-approx({input}) = {result}, expected {expected}, abs error {error}"
+        );
+    }
+
+    Ok(())
+}
+
+#[test]
+fn log2_approx_test() -> anyhow::Result<()> {
+    let runtime = runtime_with(NN_EXAMPLES)?;
+
+    for input in [0.1_f32, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 8.0, 10.0] {
+        let [result] = runtime.exec("log2-approx", [input.into()])?;
+        let Value::F32(result) = result else {
+            anyhow::bail!("log2-approx returned non-f32 value: {result:?}");
+        };
+
+        let expected = input.log2();
+        let error = (result - expected).abs();
+        assert!(
+            error < 1e-3,
+            "log2-approx({input}) = {result}, expected {expected}, abs error {error}"
+        );
+    }
+
+    Ok(())
+}
+
+#[test]
+fn powf_test() -> anyhow::Result<()> {
+    let runtime = runtime_with(NN_EXAMPLES)?;
+
+    for (base, exponent) in [
+        (0.25_f32, 0.5_f32),
+        (0.5_f32, 2.0_f32),
+        (1.0_f32, 3.0_f32),
+        (1.5_f32, -1.0_f32),
+        (2.0_f32, 3.0_f32),
+        (3.0_f32, 0.5_f32),
+        (10.0_f32, 0.25_f32),
+    ] {
+        let [result] = runtime.exec("powf", [base.into(), exponent.into()])?;
+        let Value::F32(result) = result else {
+            anyhow::bail!("powf returned non-f32 value: {result:?}");
+        };
+
+        let expected = base.powf(exponent);
+        let error = (result - expected).abs() / expected.abs().max(1.0);
+        assert!(
+            error < 8e-3,
+            "powf({base}, {exponent}) = {result}, expected {expected}, rel-ish error {error}"
         );
     }
 

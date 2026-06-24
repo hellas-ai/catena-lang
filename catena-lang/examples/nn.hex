@@ -95,6 +95,38 @@
   }
 )
 
+# exp2(x) = exp(x * ln(2))
+(def program exp2-approx : (f32 val) -> (f32 val) =
+  {[x.]
+    (const.u32.0x3F317218 u32.bitcast-f32 [ln2.])
+
+    ([.x ln2] f32.mul [scaled.])
+    ([.scaled] exp-approx [result.])
+    [.result]
+  }
+)
+
+# log2(x) = log(x) / ln(2)
+(def program log2-approx : (f32 val) -> (f32 val) =
+  {[x.]
+    (const.u32.0x3FB8AA3B u32.bitcast-f32 [inv_ln2.])
+
+    ([.x] log-approx [ln_x.])
+    ([.ln_x inv_ln2] f32.mul [result.])
+    [.result]
+  }
+)
+
+# powf(x, y) = exp2(y * log2(x))
+(def program powf : {(f32 val) (f32 val)} -> (f32 val) =
+  {[x y.]
+    ([.x] log2-approx [log2_x.])
+    ([.y log2_x] f32.mul [scaled.])
+    ([.scaled] exp2-approx [result.])
+    [.result]
+  }
+)
+
 # sqrt(x) by Newton-Raphson iteration
 # guess{n+1} = 0.5 * (guess{n} + x / guess{n})
 (def program sqrt : (f32 val) -> (f32 val) =

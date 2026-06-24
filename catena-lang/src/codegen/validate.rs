@@ -4,11 +4,12 @@ use hexpr::Operation;
 
 use crate::{
     codegen::{CodegenError, GpuValue},
+    pass::record_object_sizes::OperationWithSizes,
     report::AnnotatedTerm,
 };
 
 pub(super) fn assignment(
-    definitions: &BTreeMap<Operation, AnnotatedTerm>,
+    definitions: &BTreeMap<Operation, AnnotatedTerm<OperationWithSizes<Operation>>>,
     caller: &Operation,
     op: &Operation,
     inputs: &[GpuValue],
@@ -20,7 +21,7 @@ pub(super) fn assignment(
 }
 
 fn materializec_producer(
-    definitions: &BTreeMap<Operation, AnnotatedTerm>,
+    definitions: &BTreeMap<Operation, AnnotatedTerm<OperationWithSizes<Operation>>>,
     caller: &Operation,
     inputs: &[GpuValue],
 ) -> Result<(), CodegenError> {
@@ -44,7 +45,7 @@ fn materializec_producer(
 }
 
 fn first_materialize_op_in_call_chain(
-    definitions: &BTreeMap<Operation, AnnotatedTerm>,
+    definitions: &BTreeMap<Operation, AnnotatedTerm<OperationWithSizes<Operation>>>,
     definition: &Operation,
     visited: &mut BTreeSet<Operation>,
 ) -> Option<(Operation, Operation)> {
@@ -52,7 +53,8 @@ fn first_materialize_op_in_call_chain(
         return None;
     }
     let term = definitions.get(definition)?;
-    for op in &term.hypergraph.edges {
+    for label in &term.hypergraph.edges {
+        let op = &label.operation;
         if is_materialize_op(op) {
             return Some((definition.clone(), op.clone()));
         }

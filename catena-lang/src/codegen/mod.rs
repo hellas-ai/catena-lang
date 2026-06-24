@@ -32,10 +32,14 @@ use crate::{
             specialization_overrides,
         },
     },
+    pass::record_object_sizes::OperationWithSizes,
     report::{AnnotatedTerm, TheoryTermMap},
 };
 
 pub type GpuModuleMap = BTreeMap<Operation, GpuModule>;
+type CodegenOperation = OperationWithSizes<Operation>;
+type CodegenTerm = AnnotatedTerm<CodegenOperation>;
+type CodegenTermMap = TheoryTermMap<CodegenOperation>;
 
 const PROGRAM_THEORY: &str = "program";
 
@@ -136,7 +140,7 @@ pub struct GpuVar {
 }
 
 struct CodegenState<'a> {
-    definitions: &'a BTreeMap<Operation, AnnotatedTerm>,
+    definitions: &'a BTreeMap<Operation, CodegenTerm>,
     modules: GpuModuleMap,
     instances: BTreeMap<(Operation, SpecializationKey), String>,
     queue: VecDeque<PendingInstance>,
@@ -144,7 +148,7 @@ struct CodegenState<'a> {
 }
 
 /// Codegen for all functions, producing per-definition GPU modules.
-pub fn codegen(terms: &TheoryTermMap) -> Result<GpuModuleMap, CodegenError> {
+pub fn codegen(terms: &CodegenTermMap) -> Result<GpuModuleMap, CodegenError> {
     let theory_id = TheoryId(
         PROGRAM_THEORY
             .parse()
@@ -229,7 +233,7 @@ impl CodegenState<'_> {
     /// symbols and enqueue those specializations as needed.
     fn codegen_definition(
         &mut self,
-        term: &AnnotatedTerm,
+        term: &CodegenTerm,
         instance: &PendingInstance,
     ) -> Result<GpuModule, CodegenError> {
         let fn_symbols = direct_fn_ptr_symbols(term)?;
@@ -255,7 +259,8 @@ impl CodegenState<'_> {
 
         let mut assignments = Vec::new();
         for assignment in ssa(term.clone().to_strict())? {
-            if assignment.op.as_str().starts_with("name.") {
+            let op = assignment.op.operation.clone();
+            if op.as_str().starts_with("name.") {
                 continue;
             }
 
@@ -276,16 +281,16 @@ impl CodegenState<'_> {
                 .map(|(node, _)| var(*node, &term, &instance.overrides))
                 .collect::<Result<Vec<_>, CodegenError>>()?;
 
-            validate::assignment(&self.definitions, &instance.op, &assignment.op, &inputs)?;
+            validate::assignment(&self.definitions, &instance.op, &op, &inputs)?;
 
-            let call_symbol = if self.definitions.contains_key(&assignment.op) {
-                Some(self.ensure_specialization(&assignment.op, &inputs, &outputs)?)
+            let call_symbol = if self.definitions.contains_key(&op) {
+                Some(self.ensure_specialization(&op, &inputs, &outputs)?)
             } else {
                 None
             };
 
             assignments.push(GpuAssign {
-                op: assignment.op,
+                op,
                 call_symbol,
                 inputs,
                 outputs,
@@ -342,7 +347,7 @@ impl CodegenState<'_> {
 
 fn var(
     node: NodeId,
-    term: &AnnotatedTerm,
+    term: &CodegenTerm,
     overrides: &BTreeMap<usize, LoweredType>,
 ) -> Result<GpuVar, CodegenError> {
     Ok(GpuVar {

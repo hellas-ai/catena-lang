@@ -67,12 +67,6 @@ impl<A: Clone> Functor<Obj, A, Obj, OperationWithSizes<A>> for RecordObjectSizes
     }
 }
 
-pub fn erase_operation_sizes<A>(
-    term: OpenHypergraph<Obj, OperationWithSizes<A>>,
-) -> OpenHypergraph<Obj, A> {
-    term.map_edges(|label| label.operation)
-}
-
 pub fn object_size(o: &Obj) -> usize {
     match o {
         Tree::Empty => 0,

@@ -1,18 +1,14 @@
 use hexpr::Operation;
-use metacat::theory::{RawTheorySet, Theory, TheoryId, TheorySet};
+use metacat::theory::{RawTheorySet, Theory, TheorySet};
 use open_hypergraphs::lax::OpenHypergraph;
-use std::collections::BTreeMap;
 use thiserror::Error;
 
 use crate::{
     check::{CheckError, partial_definition_types},
     codegen::CodegenError,
     elaborate::ElaborateError,
-    pass::{
-        record_object_sizes::{OperationWithSizes, erase_operation_sizes},
-        run::PassRunError,
-    },
-    report::{CompileReport, TheoryTermMap},
+    pass::run::PassRunError,
+    report::CompileReport,
 };
 
 #[derive(Debug, Error)]
@@ -91,31 +87,13 @@ fn compile_into(report: &mut CompileReport) -> Result<(), CompileError> {
     reject_closure_global_interfaces(&theory_set)?;
 
     // Run typed graph passes before lowering to codegen.
-    let forgotten_closures = crate::pass::run::run(&theory_set, &definition_types)?;
-    report.forgotten_closures = Some(forgotten_closures.clone());
+    let theories = crate::pass::run::run(&theory_set, &definition_types)?;
+    report.forgotten_closures = Some(theories.clone());
 
-    let codegen_terms = erase_recorded_sizes(&forgotten_closures);
-    let gpu_modules = crate::codegen::codegen(&codegen_terms)?;
+    let gpu_modules = crate::codegen::codegen(&theories)?;
     report.gpu_modules = Some(gpu_modules);
 
     Ok(())
-}
-
-fn erase_recorded_sizes(terms: &TheoryTermMap<OperationWithSizes<Operation>>) -> TheoryTermMap {
-    terms
-        .iter()
-        .map(|(theory_id, definitions)| {
-            (
-                theory_id.clone(),
-                definitions
-                    .iter()
-                    .map(|(definition_name, term)| {
-                        (definition_name.clone(), erase_operation_sizes(term.clone()))
-                    })
-                    .collect::<BTreeMap<Operation, _>>(),
-            )
-        })
-        .collect::<BTreeMap<TheoryId, _>>()
 }
 
 fn reject_closure_global_interfaces(theory_set: &TheorySet) -> Result<(), CompileError> {

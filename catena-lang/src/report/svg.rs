@@ -96,35 +96,65 @@ pub fn dump_svgs(report: &CompileReport, dir: &Path) -> io::Result<()> {
                 })?;
             }
 
-            if let Some(transformed) = report
-                .forgotten_closures
-                .as_ref()
-                .and_then(|theories| theories.get(theory_id))
-                .and_then(|defs| defs.get(definition_name))
-            {
-                let forget_closures_svg = render_typed_svg(transformed, syntax_theory).map_err(|error| {
-                    io::Error::new(
-                        error.kind(),
-                        format!(
-                            "failed to render forget_closures svg for `{theory_id}.{definition_name}`: {error}"
-                        ),
-                    )
-                })?;
-                let forget_closures_path = definition_dir.join("forget_closures.svg");
-                fs::write(&forget_closures_path, forget_closures_svg).map_err(|error| {
-                    io::Error::new(
-                        error.kind(),
-                        format!(
-                            "failed to write {}: {error}",
-                            forget_closures_path.display()
-                        ),
-                    )
-                })?;
-            }
+            dump_typed_stage_svg(
+                &report.forgotten_closures,
+                "forget_closures",
+                theory_id,
+                definition_name,
+                syntax_theory,
+                &definition_dir,
+            )?;
+            dump_typed_stage_svg(
+                &report.boundary_sizes,
+                "boundary_sizes",
+                theory_id,
+                definition_name,
+                syntax_theory,
+                &definition_dir,
+            )?;
+            dump_typed_stage_svg(
+                &report.unpacked_products,
+                "unpacked_products",
+                theory_id,
+                definition_name,
+                syntax_theory,
+                &definition_dir,
+            )?;
         }
     }
 
     Ok(())
+}
+
+fn dump_typed_stage_svg<A: Clone + fmt::Debug + fmt::Display + PartialEq>(
+    theories: &Option<crate::report::TheoryTermMap<A>>,
+    stage: &str,
+    theory_id: &TheoryId,
+    definition_name: &Operation,
+    syntax_theory: &Theory,
+    definition_dir: &Path,
+) -> io::Result<()> {
+    let Some(transformed) = theories
+        .as_ref()
+        .and_then(|theories| theories.get(theory_id))
+        .and_then(|defs| defs.get(definition_name))
+    else {
+        return Ok(());
+    };
+
+    let svg = render_typed_svg(transformed, syntax_theory).map_err(|error| {
+        io::Error::new(
+            error.kind(),
+            format!("failed to render {stage} svg for `{theory_id}.{definition_name}`: {error}"),
+        )
+    })?;
+    let path = definition_dir.join(format!("{stage}.svg"));
+    fs::write(&path, svg).map_err(|error| {
+        io::Error::new(
+            error.kind(),
+            format!("failed to write {}: {error}", path.display()),
+        )
+    })
 }
 
 fn render_check_result_svg(

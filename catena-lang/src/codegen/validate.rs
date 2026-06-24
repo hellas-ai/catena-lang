@@ -4,12 +4,12 @@ use hexpr::Operation;
 
 use crate::{
     codegen::{CodegenError, GpuValue},
-    pass::record_object_sizes::OperationWithSizes,
+    pass::record_boundary_sizes::OperationWithBoundarySizes,
     report::AnnotatedTerm,
 };
 
 pub(super) fn assignment(
-    definitions: &BTreeMap<Operation, AnnotatedTerm<OperationWithSizes<Operation>>>,
+    definitions: &BTreeMap<Operation, AnnotatedTerm<OperationWithBoundarySizes<Operation>>>,
     caller: &Operation,
     op: &Operation,
     inputs: &[GpuValue],
@@ -21,7 +21,7 @@ pub(super) fn assignment(
 }
 
 fn materializec_producer(
-    definitions: &BTreeMap<Operation, AnnotatedTerm<OperationWithSizes<Operation>>>,
+    definitions: &BTreeMap<Operation, AnnotatedTerm<OperationWithBoundarySizes<Operation>>>,
     caller: &Operation,
     inputs: &[GpuValue],
 ) -> Result<(), CodegenError> {
@@ -45,7 +45,7 @@ fn materializec_producer(
 }
 
 fn first_materialize_op_in_call_chain(
-    definitions: &BTreeMap<Operation, AnnotatedTerm<OperationWithSizes<Operation>>>,
+    definitions: &BTreeMap<Operation, AnnotatedTerm<OperationWithBoundarySizes<Operation>>>,
     definition: &Operation,
     visited: &mut BTreeSet<Operation>,
 ) -> Option<(Operation, Operation)> {

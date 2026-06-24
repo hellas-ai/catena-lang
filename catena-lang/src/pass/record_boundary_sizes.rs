@@ -6,7 +6,10 @@ use open_hypergraphs::lax::{
 };
 use std::fmt;
 
-use crate::pass::forget_intro_elim_units::IntroElimUnitOperation;
+use crate::{
+    pass::{PassError, unpack_products::UnpackProductOperation},
+    report::TheoryTermMap,
+};
 
 pub type Obj = Tree<(), Operation>;
 
@@ -14,13 +17,13 @@ const PRODUCT_TYPE: &str = "*";
 const UNIT_TYPE: &str = "1";
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct OperationWithSizes<A> {
+pub struct OperationWithBoundarySizes<A> {
     pub operation: A,
     pub source_sizes: Vec<usize>,
     pub target_sizes: Vec<usize>,
 }
 
-impl<A: fmt::Display> fmt::Display for OperationWithSizes<A> {
+impl<A: fmt::Display> fmt::Display for OperationWithBoundarySizes<A> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
@@ -30,16 +33,16 @@ impl<A: fmt::Display> fmt::Display for OperationWithSizes<A> {
     }
 }
 
-impl<A: IntroElimUnitOperation> IntroElimUnitOperation for OperationWithSizes<A> {
-    fn is_intro_elim_unit_operation(&self) -> bool {
-        self.operation.is_intro_elim_unit_operation()
+impl<A: UnpackProductOperation> UnpackProductOperation for OperationWithBoundarySizes<A> {
+    fn is_unpack_product_operation(&self) -> bool {
+        self.operation.is_unpack_product_operation()
     }
 }
 
 #[derive(Clone, Copy, Debug, Default)]
-pub struct RecordObjectSizes;
+pub struct RecordBoundarySizes;
 
-impl<A: Clone> Functor<Obj, A, Obj, OperationWithSizes<A>> for RecordObjectSizes {
+impl<A: Clone> Functor<Obj, A, Obj, OperationWithBoundarySizes<A>> for RecordBoundarySizes {
     fn map_object(&self, o: &Obj) -> impl ExactSizeIterator<Item = Obj> {
         std::iter::once(o.clone())
     }
@@ -49,9 +52,9 @@ impl<A: Clone> Functor<Obj, A, Obj, OperationWithSizes<A>> for RecordObjectSizes
         a: &A,
         source: &[Obj],
         target: &[Obj],
-    ) -> OpenHypergraph<Obj, OperationWithSizes<A>> {
+    ) -> OpenHypergraph<Obj, OperationWithBoundarySizes<A>> {
         OpenHypergraph::singleton(
-            OperationWithSizes {
+            OperationWithBoundarySizes {
                 operation: a.clone(),
                 source_sizes: source.iter().map(object_size).collect(),
                 target_sizes: target.iter().map(object_size).collect(),
@@ -61,10 +64,36 @@ impl<A: Clone> Functor<Obj, A, Obj, OperationWithSizes<A>> for RecordObjectSizes
         )
     }
 
-    fn map_arrow(&self, f: &OpenHypergraph<Obj, A>) -> OpenHypergraph<Obj, OperationWithSizes<A>> {
+    fn map_arrow(
+        &self,
+        f: &OpenHypergraph<Obj, A>,
+    ) -> OpenHypergraph<Obj, OperationWithBoundarySizes<A>> {
         try_define_map_arrow(self, f)
-            .expect("programmer error: record-object-sizes is not a functor")
+            .expect("programmer error: record-boundary-sizes is not a functor")
     }
+}
+
+pub fn run<A: Clone>(
+    terms: &TheoryTermMap<A>,
+) -> Result<TheoryTermMap<OperationWithBoundarySizes<A>>, PassError> {
+    terms
+        .iter()
+        .map(|(theory_id, definitions)| {
+            let definitions = definitions
+                .iter()
+                .map(|(definition_name, term)| {
+                    let mut transformed = RecordBoundarySizes.map_arrow(term);
+                    transformed.quotient().map_err(|_| PassError::Quotient {
+                        pass: "record_boundary_sizes",
+                        theory: theory_id.to_string(),
+                        definition: definition_name.to_string(),
+                    })?;
+                    Ok((definition_name.clone(), transformed))
+                })
+                .collect::<Result<_, PassError>>()?;
+            Ok((theory_id.clone(), definitions))
+        })
+        .collect()
 }
 
 pub fn object_size(o: &Obj) -> usize {
@@ -99,7 +128,7 @@ mod tests {
         let source = vec![product(vec![ty("A"), ty("B")]), ty("C")];
         let target = vec![ty("D")];
 
-        let mapped = RecordObjectSizes.map_operation(&op("f0"), &source, &target);
+        let mapped = RecordBoundarySizes.map_operation(&op("f0"), &source, &target);
         let label = &mapped.hypergraph.edges[0];
 
         assert_eq!(label.operation, op("f0"));
@@ -115,7 +144,7 @@ mod tests {
         let source = vec![product(vec![ty("A"), ty("B")])];
         let target = vec![ty("C")];
 
-        let mapped = RecordObjectSizes.map_operation(&"f0".to_string(), &source, &target);
+        let mapped = RecordBoundarySizes.map_operation(&"f0".to_string(), &source, &target);
         let label = &mapped.hypergraph.edges[0];
 
         assert_eq!(label.operation, "f0");
@@ -128,7 +157,7 @@ mod tests {
         let source = vec![ty("A"), ty(UNIT_TYPE), ty("B")];
         let target = vec![ty("C")];
 
-        let mapped = RecordObjectSizes.map_operation(&op("f0"), &source, &target);
+        let mapped = RecordBoundarySizes.map_operation(&op("f0"), &source, &target);
         let label = &mapped.hypergraph.edges[0];
 
         assert_eq!(label.source_sizes, vec![1, 0, 1]);

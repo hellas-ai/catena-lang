@@ -4,7 +4,7 @@ use hexpr::Operation;
 use open_hypergraphs::lax::NodeId;
 use thiserror::Error;
 
-use crate::{pass::record_object_sizes::OperationWithSizes, report::AnnotatedTerm};
+use crate::{pass::record_boundary_sizes::OperationWithBoundarySizes, report::AnnotatedTerm};
 
 const NAME_PREFIX: &str = "name.";
 
@@ -21,14 +21,14 @@ pub enum FnPtrSymbolError {
         "function pointer symbol `{operation}` should produce exactly one target, found {target_count}"
     )]
     InvalidTargetCount {
-        operation: OperationWithSizes<Operation>,
+        operation: OperationWithBoundarySizes<Operation>,
         target_count: usize,
     },
     #[error(
         "function pointer symbol `{operation}` should not overwrite an existing symbol on node {node}"
     )]
     DuplicateNodeSymbol {
-        operation: OperationWithSizes<Operation>,
+        operation: OperationWithBoundarySizes<Operation>,
         node: usize,
     },
     #[error("generated function pointer target `{0}` is not a valid operation")]
@@ -42,7 +42,7 @@ pub enum FnPtrSymbolError {
 /// pointer wires, values flowing through ordinary operations, and conditionally-produced function
 /// pointers are not resolved here.
 pub fn direct_fn_ptr_symbols(
-    term: &AnnotatedTerm<OperationWithSizes<Operation>>,
+    term: &AnnotatedTerm<OperationWithBoundarySizes<Operation>>,
 ) -> Result<FnPtrNodeMap, FnPtrSymbolError> {
     let mut term = term.clone();
     term.quotient().ok();
@@ -92,8 +92,8 @@ mod tests {
         name.parse().unwrap()
     }
 
-    fn sized_op(name: &str) -> OperationWithSizes<Operation> {
-        OperationWithSizes {
+    fn sized_op(name: &str) -> OperationWithBoundarySizes<Operation> {
+        OperationWithBoundarySizes {
             operation: op(name),
             source_sizes: Vec::new(),
             target_sizes: Vec::new(),

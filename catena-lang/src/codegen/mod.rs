@@ -32,12 +32,12 @@ use crate::{
             specialization_overrides,
         },
     },
-    pass::record_object_sizes::OperationWithSizes,
+    pass::record_boundary_sizes::OperationWithBoundarySizes,
     report::{AnnotatedTerm, TheoryTermMap},
 };
 
 pub type GpuModuleMap = BTreeMap<Operation, GpuModule>;
-type CodegenOperation = OperationWithSizes<Operation>;
+type CodegenOperation = OperationWithBoundarySizes<Operation>;
 type CodegenTerm = AnnotatedTerm<CodegenOperation>;
 type CodegenTermMap = TheoryTermMap<CodegenOperation>;
 

@@ -8,7 +8,7 @@ use crate::{
         fn_ptrs::FnPtrSymbol,
         lower_types::{CType, LowerTypeError, LoweredType, lower_type},
     },
-    pass::record_object_sizes::OperationWithSizes,
+    pass::record_boundary_sizes::OperationWithBoundarySizes,
     report::AnnotatedTerm,
 };
 
@@ -86,7 +86,7 @@ pub fn specialization_key(inputs: &[GpuValue], outputs: &[GpuVar]) -> Option<Spe
 }
 
 pub fn specialization_overrides(
-    term: &AnnotatedTerm<OperationWithSizes<Operation>>,
+    term: &AnnotatedTerm<OperationWithBoundarySizes<Operation>>,
     inputs: &[GpuValue],
     outputs: &[GpuVar],
 ) -> BTreeMap<usize, LoweredType> {

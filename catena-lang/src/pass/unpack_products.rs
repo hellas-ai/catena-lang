@@ -5,6 +5,8 @@ use open_hypergraphs::lax::{
     functor::{Functor, try_define_map_arrow},
 };
 
+use crate::{pass::PassError, report::TheoryTermMap};
+
 pub type Obj = Tree<(), Operation>;
 
 const PRODUCT_TYPE: &str = "*";
@@ -16,19 +18,19 @@ const UNIT_INTRO: &str = "unit.intro";
 const UNIT_ELIM: &str = "unit.elim";
 
 #[derive(Clone, Copy, Debug, Default)]
-pub struct ForgetIntroElimUnits;
+pub struct UnpackProducts;
 
-pub trait IntroElimUnitOperation {
-    fn is_intro_elim_unit_operation(&self) -> bool;
+pub trait UnpackProductOperation {
+    fn is_unpack_product_operation(&self) -> bool;
 }
 
-impl IntroElimUnitOperation for Operation {
-    fn is_intro_elim_unit_operation(&self) -> bool {
+impl UnpackProductOperation for Operation {
+    fn is_unpack_product_operation(&self) -> bool {
         is_forgotten_operation(self.as_str())
     }
 }
 
-impl<A: Clone + IntroElimUnitOperation> Functor<Obj, A, Obj, A> for ForgetIntroElimUnits {
+impl<A: Clone + UnpackProductOperation> Functor<Obj, A, Obj, A> for UnpackProducts {
     fn map_object(&self, o: &Obj) -> impl ExactSizeIterator<Item = Obj> {
         flatten_object(o).into_iter()
     }
@@ -37,10 +39,10 @@ impl<A: Clone + IntroElimUnitOperation> Functor<Obj, A, Obj, A> for ForgetIntroE
         let source = map_objects(source);
         let target = map_objects(target);
 
-        if a.is_intro_elim_unit_operation() {
+        if a.is_unpack_product_operation() {
             assert_eq!(
                 source, target,
-                "forgotten intro/elim/unit operation must have matching flattened boundaries"
+                "unpacked product/unit operation must have matching flattened boundaries"
             );
             return OpenHypergraph::identity(source);
         }
@@ -49,9 +51,31 @@ impl<A: Clone + IntroElimUnitOperation> Functor<Obj, A, Obj, A> for ForgetIntroE
     }
 
     fn map_arrow(&self, f: &OpenHypergraph<Obj, A>) -> OpenHypergraph<Obj, A> {
-        try_define_map_arrow(self, f)
-            .expect("programmer error: forget-intro-elim-units is not a functor")
+        try_define_map_arrow(self, f).expect("programmer error: unpack-products is not a functor")
     }
+}
+
+pub fn run<A: Clone + UnpackProductOperation>(
+    terms: &TheoryTermMap<A>,
+) -> Result<TheoryTermMap<A>, PassError> {
+    terms
+        .iter()
+        .map(|(theory_id, definitions)| {
+            let definitions = definitions
+                .iter()
+                .map(|(definition_name, term)| {
+                    let mut transformed = UnpackProducts.map_arrow(term);
+                    transformed.quotient().map_err(|_| PassError::Quotient {
+                        pass: "unpack_products",
+                        theory: theory_id.to_string(),
+                        definition: definition_name.to_string(),
+                    })?;
+                    Ok((definition_name.clone(), transformed))
+                })
+                .collect::<Result<_, PassError>>()?;
+            Ok((theory_id.clone(), definitions))
+        })
+        .collect()
 }
 
 pub fn flatten_object(o: &Obj) -> Vec<Obj> {
@@ -109,7 +133,7 @@ mod tests {
         let source = vec![ty("A"), ty("B")];
         let target = vec![product(vec![ty("A"), ty("B")])];
 
-        let mapped = ForgetIntroElimUnits.map_operation(&op(PRODUCT_INTRO), &source, &target);
+        let mapped = UnpackProducts.map_operation(&op(PRODUCT_INTRO), &source, &target);
 
         assert!(mapped.hypergraph.edges.is_empty());
         assert_eq!(mapped.source(), vec![ty("A"), ty("B")]);
@@ -121,7 +145,7 @@ mod tests {
         let source = vec![];
         let target = vec![unit()];
 
-        let mapped = ForgetIntroElimUnits.map_operation(&op(UNIT_INTRO), &source, &target);
+        let mapped = UnpackProducts.map_operation(&op(UNIT_INTRO), &source, &target);
 
         assert!(mapped.hypergraph.edges.is_empty());
         assert_eq!(mapped.source(), vec![]);
@@ -133,7 +157,7 @@ mod tests {
         let source = vec![product(vec![ty("A"), ty("B")])];
         let target = vec![ty("C")];
 
-        let mapped = ForgetIntroElimUnits.map_operation(&op("f"), &source, &target);
+        let mapped = UnpackProducts.map_operation(&op("f"), &source, &target);
 
         assert_eq!(mapped.hypergraph.edges, vec![op("f")]);
         assert_eq!(mapped.source(), vec![ty("A"), ty("B")]);

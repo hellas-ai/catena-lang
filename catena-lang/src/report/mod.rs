@@ -14,7 +14,7 @@ use std::collections::BTreeMap;
 
 use crate::check::PartialDefinitionTypes;
 use crate::codegen::GpuModuleMap;
-use crate::pass::record_object_sizes::OperationWithSizes;
+use crate::pass::record_boundary_sizes::OperationWithBoundarySizes;
 
 /// A definition graph whose nodes are annotated with their computed object types.
 pub type AnnotatedTerm<A = Operation> = OpenHypergraph<Tree<(), Operation>, A>;
@@ -27,7 +27,9 @@ pub struct CompileReport {
     pub theory_set: Option<TheorySet>,
     pub definition_types: Option<BTreeMap<TheoryId, BTreeMap<Operation, Vec<Tree<(), Operation>>>>>,
     pub partial_definition_types: Option<PartialDefinitionTypes>,
-    pub forgotten_closures: Option<TheoryTermMap<OperationWithSizes<Operation>>>,
+    pub forgotten_closures: Option<TheoryTermMap>,
+    pub boundary_sizes: Option<TheoryTermMap<OperationWithBoundarySizes<Operation>>>,
+    pub unpacked_products: Option<TheoryTermMap<OperationWithBoundarySizes<Operation>>>,
     pub gpu_modules: Option<GpuModuleMap>,
 }
 
@@ -40,6 +42,8 @@ impl CompileReport {
             definition_types: None,
             partial_definition_types: None,
             forgotten_closures: None,
+            boundary_sizes: None,
+            unpacked_products: None,
             gpu_modules: None,
         }
     }

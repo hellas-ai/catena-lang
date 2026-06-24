@@ -7,7 +7,7 @@ use crate::{
     check::{CheckError, partial_definition_types},
     codegen::CodegenError,
     elaborate::ElaborateError,
-    pass::run::PassRunError,
+    pass::{PassError, forget_closures::ForgetClosuresError},
     report::CompileReport,
 };
 
@@ -32,7 +32,9 @@ pub enum CompileError {
     )]
     ClosureOnGlobalInterface { theory: String, definition: String },
     #[error(transparent)]
-    Passes(#[from] PassRunError),
+    ForgetClosures(#[from] ForgetClosuresError),
+    #[error(transparent)]
+    Pass(#[from] PassError),
     #[error(transparent)]
     Codegen(#[from] CodegenError),
 }
@@ -86,11 +88,16 @@ fn compile_into(report: &mut CompileReport) -> Result<(), CompileError> {
     // don't allow `=>` types on global interfaces
     reject_closure_global_interfaces(&theory_set)?;
 
-    // Run typed graph passes before lowering to codegen.
-    let theories = crate::pass::run::run(&theory_set, &definition_types)?;
-    report.forgotten_closures = Some(theories.clone());
+    let forgotten_closures = crate::pass::forget_closures::run(&theory_set, &definition_types)?;
+    report.forgotten_closures = Some(forgotten_closures.clone());
 
-    let gpu_modules = crate::codegen::codegen(&theories)?;
+    let boundary_sizes = crate::pass::record_boundary_sizes::run(&forgotten_closures)?;
+    report.boundary_sizes = Some(boundary_sizes.clone());
+
+    let unpacked_products = crate::pass::unpack_products::run(&boundary_sizes)?;
+    report.unpacked_products = Some(unpacked_products.clone());
+
+    let gpu_modules = crate::codegen::codegen(&unpacked_products)?;
     report.gpu_modules = Some(gpu_modules);
 
     Ok(())

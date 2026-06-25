@@ -15,12 +15,7 @@ const STDLIB: &[&str] = &[
 
 fn compile_through_forget_closures(source: &str) -> anyhow::Result<()> {
     let raw = RawTheorySet::from_texts(STDLIB.iter().copied().chain([source]))?;
-    let report = match compile(raw) {
-        Ok(report) => report,
-        Err(failure) if matches!(failure.cause, CompileError::Codegen(_)) => failure.report,
-        Err(failure) => return Err(failure.into()),
-    };
-
+    let report = compile(raw)?;
     anyhow::ensure!(
         report.forgotten_closures.is_some(),
         "compile stopped before forget_closures completed"
@@ -29,7 +24,6 @@ fn compile_through_forget_closures(source: &str) -> anyhow::Result<()> {
 }
 
 #[test]
-#[ignore = "compile currently uses forget_closures_old"]
 fn defer_bool_id() -> anyhow::Result<()> {
     compile_through_forget_closures(
         r#"
@@ -43,7 +37,6 @@ fn defer_bool_id() -> anyhow::Result<()> {
 }
 
 #[test]
-#[ignore = "compile currently uses forget_closures_old"]
 fn run_named_and_packed_with_free() -> anyhow::Result<()> {
     compile_through_forget_closures(
         r#"

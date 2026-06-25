@@ -1,10 +1,11 @@
 use super::*;
 
-const SOURCE: &str = include_str!("../../examples/reducec.hex");
+const BASIC_SOURCE: &str = include_str!("reducec/basic.hex");
+const NAMED_PRIMITIVE_SOURCE: &str = include_str!("reducec/named_primitive.hex");
 
 #[test]
 fn sum_u64_exec() -> anyhow::Result<()> {
-    let runtime = runtime_with(SOURCE)?;
+    let runtime = runtime_with(BASIC_SOURCE)?;
 
     let input = runtime.mem_u64(&[2, 3, 5, 7, 11])?;
     let [result] = runtime.exec("sum-u64", [input])?;
@@ -17,8 +18,22 @@ fn sum_u64_exec() -> anyhow::Result<()> {
 }
 
 #[test]
+#[ignore = "depends on symbol resolution bug"]
+fn reduce_with_named_primitive_exec() -> anyhow::Result<()> {
+    let runtime = runtime_with(NAMED_PRIMITIVE_SOURCE)?;
+
+    let [result] = runtime.exec("reduce-f32-fma-primitive", [1_u64.into()])?;
+    let Value::F32(result) = result else {
+        anyhow::bail!("reduce-f32-fma-primitive returned non-f32 value: {result:?}");
+    };
+
+    assert_eq!(result, 2.0);
+    Ok(())
+}
+
+#[test]
 fn dot_u64_exec() -> anyhow::Result<()> {
-    let runtime = runtime_with(SOURCE)?;
+    let runtime = runtime_with(BASIC_SOURCE)?;
 
     let lhs = runtime.mem_u64(&[2, 3, 5, 7])?;
     let rhs = runtime.mem_u64(&[11, 13, 17, 19])?;

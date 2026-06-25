@@ -100,3 +100,25 @@ The problem above is that we need a dependent type:
 
 Meaning we need a *type level dependent sum* - the returned closure env still
 depends on b.
+
+# Implementation
+
+This section describes the *implementation* of closure conversion.
+Closure conversion is implemented *for each definition*.
+So for the purposes of this section, fix a particular definition `d`.
+
+- For each operation `x` in `d`
+    - For each *source node* `w` of `x`
+        - If the type of `w` declared by `x` is not a closure, continue. Otherwise...
+        - Assume type of the closure is `A => B`
+        - Cut the "closure region" `c` (see below) ending at `w` from the graph
+        - Add a new definition `closure.d.x_id.w_id` whose body is `(c × id) ; ev`
+        - ... and whose type is `X ● A -> B`
+        - Run name elaboration on closures
+        - ... and then replace the "cut" closure with `id_X ● name.closure.d.x_id.w_id`
+
+The "closure region" is:
+
+- Starting at a node `w` labeled `A => B`,
+- "flood fill" left until meeting a `defer` or `name` operation
+- The region includes `defer` and `name`

@@ -1,0 +1,23 @@
+# Produce one f32 value at each index, ignoring the unit environment and index.
+(def program f32.one-at :
+  ([n.] {1 ([.n] ix val)})
+  ->
+  ([n.] (f32 val))
+= ([env i.] f32.one))
+
+# Use the primitive f32.fma directly as the accumulator function pointer.
+(def program reduce-f32-fma-primitive :
+  ({[n] u64} :)
+  ->
+  ([n.] (f32 val))
+= ([len.]
+  {
+    f32.one
+    f32.one
+    name.f32.fma
+    unit.intro
+    (([.len] :.param) name.f32.one-at)
+    [.len]
+  }
+  reducec
+))

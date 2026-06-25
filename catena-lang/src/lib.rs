@@ -1,8 +1,11 @@
 pub mod check;
+pub mod closure;
 pub mod codegen;
 pub mod compile;
 pub mod elaborate;
+pub mod hexpr;
 pub mod nonstrict;
 pub mod pass;
 pub mod report;
 pub mod runtime;
+pub mod stdlib;

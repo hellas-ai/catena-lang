@@ -1,5 +1,5 @@
 /// Add name.{f} for each arrow f
-mod name_symbols;
+pub(crate) mod name_symbols;
 
 /// Add const.{type}.{c} arrows for each constant c required.
 mod constants;

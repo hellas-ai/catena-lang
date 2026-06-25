@@ -1,0 +1,5 @@
+
+(def program f32.id : (f32 val) -> (f32 val) = [x]) # specialised f32.id
+(def program if-id-neg : {(bool val) (f32 val)} -> (f32 val) = ([b x.]
+  {(name.f32.id lift) (name.f32.neg lift) [.b] [.x]} bool.if
+))

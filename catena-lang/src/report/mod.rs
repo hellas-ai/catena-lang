@@ -9,15 +9,12 @@ use metacat::{
     theory::{RawTheorySet, TheoryId, TheorySet},
     tree::Tree,
 };
-use open_hypergraphs::lax::OpenHypergraph;
 use std::collections::BTreeMap;
 
-use crate::check::PartialDefinitionTypes;
+use crate::check::{AnnotatedTerm, PartialDefinitionTypes};
 use crate::codegen::GpuModuleMap;
 use crate::pass::record_boundary_sizes::OperationWithBoundarySizes;
 
-/// A definition graph whose nodes are annotated with their computed object types.
-pub type AnnotatedTerm<A = Operation> = OpenHypergraph<Tree<(), Operation>, A>;
 /// Generic storage for per-theory, per-definition graph results produced by compiler passes.
 pub type TheoryTermMap<A = Operation> = BTreeMap<TheoryId, BTreeMap<Operation, AnnotatedTerm<A>>>;
 #[derive(Debug)]

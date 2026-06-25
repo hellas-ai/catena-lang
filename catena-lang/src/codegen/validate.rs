@@ -3,9 +3,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use hexpr::Operation;
 
 use crate::{
+    check::AnnotatedTerm,
     codegen::{CodegenError, GpuValue},
     pass::record_boundary_sizes::OperationWithBoundarySizes,
-    report::AnnotatedTerm,
 };
 
 pub(super) fn assignment(

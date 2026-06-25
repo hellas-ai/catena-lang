@@ -14,9 +14,9 @@ use open_hypergraphs::lax::{
 use thiserror::Error;
 
 use crate::{
-    check::DefinitionTypes,
+    check::{AnnotatedTerm, DefinitionTypes},
     nonstrict::{to_packer, to_unpacker, unpack_packed_object},
-    report::{AnnotatedTerm, TheoryTermMap},
+    report::TheoryTermMap,
 };
 
 const CLOSURE_TYPE: &str = "=>";

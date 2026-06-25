@@ -6,8 +6,7 @@ use thiserror::Error;
 use crate::codegen::{
     GpuAssign, GpuDialect, GpuFunction, GpuModule, GpuModuleMap, GpuValue, GpuVar,
     lower_types::CType,
-    ops::materializec,
-    ops::reducec,
+    ops::{ifc, materializec, reducec},
     prelude::render_gpu_prelude,
     render_utils::{c_type, invalid_inputs, invalid_outputs, param_decl, sanitize_ident},
     runtime_type,
@@ -259,7 +258,7 @@ fn render_assignment(
         }
         "bool.and" => render_binary_bool(out, assignment, "&&")?,
         "bool.or" => render_binary_bool(out, assignment, "||")?,
-        "bool.ifc" => render_bool_ifc(out, assignment)?,
+        "bool.ifc" => ifc::render(out, assignment)?,
         "unit.intro" => {}
         "ax-mp" | "assert-then" | ":.forget" | ":.param" => {}
         "assert" => render_assert(out, assignment)?,
@@ -699,26 +698,6 @@ fn render_binary_bool(
         output.name,
         value_expr(lhs),
         value_expr(rhs)
-    ));
-    Ok(())
-}
-
-fn render_bool_ifc(out: &mut String, assignment: &GpuAssign) -> Result<(), GpuRenderError> {
-    let [env_true, fn_true, env_false, fn_false, flag, arg] = assignment.inputs.as_slice() else {
-        return Err(invalid_inputs(assignment, 6));
-    };
-    let [output] = assignment.outputs.as_slice() else {
-        return Err(invalid_outputs(assignment, 1));
-    };
-    out.push_str(&format!(
-        "    if ({flag}) {{ {fn_true}({env_true}, {arg}, &{output}); }} else {{ {fn_false}({env_false}, {arg}, &{output}); }}\n",
-        flag = value_expr(flag),
-        fn_true = callable_expr(fn_true),
-        env_true = value_expr(env_true),
-        arg = value_expr(arg),
-        output = output.name,
-        fn_false = callable_expr(fn_false),
-        env_false = value_expr(env_false),
     ));
     Ok(())
 }

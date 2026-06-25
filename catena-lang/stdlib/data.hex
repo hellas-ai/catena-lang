@@ -38,8 +38,12 @@
 
   # execute one of two *closures* depending on a boolean flag
   #
-  #   if : 2 ● (A => B) ● (A => B) -> (A => B)
-  (arr bool.if : {bool (=> val)} -> (=> val))
+  #   if : (A => B) ● (A => B) ● Bool ● A -> B
+  (arr bool.if : {[a b.]
+    ([. a b] => [f . f f]) # (A => B) ● (A => B)
+    (bool val)             # Val(Bool)
+    [.a]                   # A
+  } -> [a b . b])
 
   # Execute one of two *converted closures* depending on a flag
   # (A "converted closure" is an explicit environment plus a fn pointer)

@@ -74,7 +74,7 @@ fn elaborate_theory_with_interpreted_syntax(
     Ok(())
 }
 
-fn name_arrow(
+pub(crate) fn name_arrow(
     syntax: &Theory,
     theory_name: &Operation,
     raw: &RawTheoryArrow,

@@ -8,8 +8,11 @@ use metacat::{
     theory::{Theory, TheoryId, TheorySet},
     tree::Tree,
 };
+use open_hypergraphs::lax::OpenHypergraph;
 use thiserror::Error;
 
+/// A definition graph whose nodes are annotated with their computed object types.
+pub type AnnotatedTerm<A = Operation> = OpenHypergraph<Tree<(), Operation>, A>;
 pub type DefinitionTypes = BTreeMap<TheoryId, BTreeMap<Operation, Vec<Tree<(), Operation>>>>;
 pub type PartialDefinitionTypes =
     BTreeMap<TheoryId, BTreeMap<Operation, Vec<Option<Tree<(), Operation>>>>>;

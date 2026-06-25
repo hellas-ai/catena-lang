@@ -48,7 +48,7 @@ RUN mkdir -p /run/sshd \
 
 WORKDIR /workspace
 
-COPY scripts/runpod-entrypoint.sh /usr/local/bin/runpod-entrypoint
+COPY runpod/dev-image/entrypoint.sh /usr/local/bin/runpod-entrypoint
 RUN chmod +x /usr/local/bin/runpod-entrypoint
 
 CMD ["runpod-entrypoint"]

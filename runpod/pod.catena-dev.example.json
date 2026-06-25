@@ -2,7 +2,7 @@
   "name": "catena-dev",
   "cloudType": "SECURE",
   "computeType": "GPU",
-  "imageName": "ghcr.io/hellas-ai/catena-lang/runpod-dev:sha-045e017",
+  "imageName": "ghcr.io/hellas-ai/catena-lang/runpod-dev:sha-4960ace",
   "containerRegistryAuthId": "REPLACE_WITH_RUNPOD_REGISTRY_AUTH_ID",
   "gpuCount": 1,
   "gpuTypeIds": [

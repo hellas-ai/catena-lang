@@ -12,7 +12,11 @@ It provides:
 
 It intentionally does not copy the repository source into the image. Source code is synced into `/workspace/catena-lang` after the pod starts, using `scripts/runpod-sync.sh`.
 
-The image entrypoint starts `sshd` and then keeps the container alive.
+The image entrypoint writes RunPod's injected `PUBLIC_KEY` value to `/root/.ssh/authorized_keys`, then starts `sshd` in the foreground. This keeps RunPod account SSH settings as the source of truth for direct TCP SSH access.
+
+RunPod documents this `PUBLIC_KEY` flow for custom images here:
+
+https://docs.runpod.io/pods/configuration/use-ssh#full-ssh-via-public-ip-with-key-authentication
 
 Build it from the repository root so the Dockerfile can copy files from this folder:
 

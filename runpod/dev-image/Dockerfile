@@ -42,6 +42,7 @@ RUN curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs \
     && chmod -R a+w /usr/local/cargo /usr/local/rustup
 
 RUN mkdir -p /run/sshd \
+    && ssh-keygen -A \
     && sed -i 's/^#\?PermitRootLogin .*/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config \
     && sed -i 's/^#\?PasswordAuthentication .*/PasswordAuthentication no/' /etc/ssh/sshd_config \
     && sed -i 's/^#\?PubkeyAuthentication .*/PubkeyAuthentication yes/' /etc/ssh/sshd_config
@@ -50,5 +51,7 @@ WORKDIR /workspace
 
 COPY runpod/dev-image/entrypoint.sh /usr/local/bin/runpod-entrypoint
 RUN chmod +x /usr/local/bin/runpod-entrypoint
+
+EXPOSE 22/tcp
 
 CMD ["runpod-entrypoint"]

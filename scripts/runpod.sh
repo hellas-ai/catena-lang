@@ -45,6 +45,8 @@ Notes:
   Set RUNPOD_ENV_FILE when you want the script to load variables from a file.
   Create the private GHCR registry auth manually in Runpod, then put its ID in
   RUNPOD_REGISTRY_AUTH_ID or pass it to pod-create.
+  pod-create injects the container registry auth ID and strips _comment fields
+  from the JSON spec before sending it to Runpod.
 EOF
 }
 
@@ -185,7 +187,12 @@ EOF
 
     tmp="$(mktemp)"
     trap 'rm -f "$tmp"' EXIT
-    jq --arg id "$registry_auth_id" '.containerRegistryAuthId = $id' "$spec" > "$tmp"
+    jq \
+      --arg id "$registry_auth_id" \
+      '
+        .containerRegistryAuthId = $id
+        | del(._comment)
+      ' "$spec" > "$tmp"
     json_api POST pods "$tmp" | pod_summary
     ;;
   pod-list)

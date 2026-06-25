@@ -45,7 +45,11 @@ pub(crate) fn compile(cpp_path: &Path, dialect: GpuDialect) -> Result<Artifact, 
     let build_dir = tempfile::Builder::new()
         .prefix("catena-module-")
         .tempdir()?;
-    let module_path = build_dir.path().join("module.cpp");
+    let module_filename = match dialect {
+        GpuDialect::Hip => "module.cpp",
+        GpuDialect::Cuda => "module.cu",
+    };
+    let module_path = build_dir.path().join(module_filename);
     let so_path = build_dir.path().join("module.so");
     std::fs::copy(cpp_path, &module_path)?;
 

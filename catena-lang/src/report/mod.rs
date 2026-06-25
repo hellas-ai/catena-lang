@@ -14,11 +14,12 @@ use std::collections::BTreeMap;
 
 use crate::check::PartialDefinitionTypes;
 use crate::codegen::GpuModuleMap;
+use crate::pass::record_boundary_sizes::OperationWithBoundarySizes;
 
 /// A definition graph whose nodes are annotated with their computed object types.
-pub type AnnotatedTerm = OpenHypergraph<Tree<(), Operation>, Operation>;
+pub type AnnotatedTerm<A = Operation> = OpenHypergraph<Tree<(), Operation>, A>;
 /// Generic storage for per-theory, per-definition graph results produced by compiler passes.
-pub type TheoryTermMap = BTreeMap<TheoryId, BTreeMap<Operation, AnnotatedTerm>>;
+pub type TheoryTermMap<A = Operation> = BTreeMap<TheoryId, BTreeMap<Operation, AnnotatedTerm<A>>>;
 #[derive(Debug)]
 pub struct CompileReport {
     pub raw_theories: RawTheorySet,
@@ -27,6 +28,8 @@ pub struct CompileReport {
     pub definition_types: Option<BTreeMap<TheoryId, BTreeMap<Operation, Vec<Tree<(), Operation>>>>>,
     pub partial_definition_types: Option<PartialDefinitionTypes>,
     pub forgotten_closures: Option<TheoryTermMap>,
+    pub boundary_sizes: Option<TheoryTermMap<OperationWithBoundarySizes<Operation>>>,
+    pub unpacked_products: Option<TheoryTermMap<OperationWithBoundarySizes<Operation>>>,
     pub gpu_modules: Option<GpuModuleMap>,
 }
 
@@ -39,6 +42,8 @@ impl CompileReport {
             definition_types: None,
             partial_definition_types: None,
             forgotten_closures: None,
+            boundary_sizes: None,
+            unpacked_products: None,
             gpu_modules: None,
         }
     }

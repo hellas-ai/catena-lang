@@ -12,12 +12,12 @@ const STDLIB: &[&str] = &[
     include_str!("../stdlib/index.hex"),
     include_str!("../stdlib/data.hex"),
     include_str!("../stdlib/fn.hex"),
+    include_str!("../stdlib/combinators.hex"),
     include_str!("../stdlib/product.hex"),
     include_str!("../stdlib/gpu.hex"),
 ];
 const SIN_EXAMPLES: &str = include_str!("../examples/sincos.hex");
-const LOG_EXAMPLES: &str = include_str!("../examples/log.hex");
-const SOFTMAX_EXAMPLES: &str = include_str!("../examples/softmax.hex");
+const NN_EXAMPLES: &str = include_str!("../examples/nn.hex");
 
 /// Create a runtime with a provided user source file
 fn runtime_with(source: &'static str) -> anyhow::Result<Runtime> {
@@ -119,6 +119,58 @@ fn two_times_two_float() -> anyhow::Result<()> {
     };
 
     assert_eq!(result, 4.0);
+    Ok(())
+}
+
+#[test]
+fn f32_fma_basic_test() -> anyhow::Result<()> {
+    let runtime = runtime_with(
+        r#"
+        (def program fma-basic : [] -> (f32 val) = (
+          {f32.one f32.one f32.one}
+          f32.fma
+        ))
+        "#,
+    )?;
+
+    let [result] = runtime.exec("fma-basic", [])?;
+    let Value::F32(result) = result else {
+        anyhow::bail!("fma-basic returned non-f32 value: {result:?}");
+    };
+
+    assert_eq!(result, 2.0);
+    Ok(())
+}
+
+#[test]
+fn f32_fma_is_fused_test() -> anyhow::Result<()> {
+    let a = f32::from_bits(0x3F800001);
+    let b = f32::from_bits(0x3F800001);
+    let c = f32::from_bits(0x33800000);
+    let fused_bits = a.mul_add(b, c).to_bits();
+    let separate_bits = ((a * b) + c).to_bits();
+
+    assert_eq!(fused_bits, 0x3F800003);
+    assert_eq!(separate_bits, 0x3F800002);
+
+    let runtime = runtime_with(
+        r#"
+        (def program fma-fused-bits : {(f32 val) (f32 val) (f32 val)} -> (u32 val) = (
+          {[a b c.]
+            ([.a b c] f32.fma [result.])
+            ([.result] f32.bitcast-u32 [bits.])
+            [.bits]
+          }
+        ))
+        "#,
+    )?;
+
+    let [result] = runtime.exec("fma-fused-bits", [a.into(), b.into(), c.into()])?;
+    let Value::U32(result) = result else {
+        anyhow::bail!("fma-fused-bits returned non-u32 value: {result:?}");
+    };
+
+    assert_eq!(result, fused_bits);
     Ok(())
 }
 
@@ -501,7 +553,7 @@ fn array_head_u64() -> anyhow::Result<()> {
 
 #[test]
 fn exp_approx_test() -> anyhow::Result<()> {
-    let runtime = runtime_with(SOFTMAX_EXAMPLES)?;
+    let runtime = runtime_with(NN_EXAMPLES)?;
 
     for input in [-3.0_f32, -1.0, -0.5, 0.0, 0.5, 1.0, 3.0] {
         let [result] = runtime.exec("exp-approx", [input.into()])?;
@@ -521,8 +573,140 @@ fn exp_approx_test() -> anyhow::Result<()> {
 }
 
 #[test]
+fn exp2_approx_test() -> anyhow::Result<()> {
+    let runtime = runtime_with(NN_EXAMPLES)?;
+
+    for input in [-3.0_f32, -1.0, -0.5, 0.0, 0.5, 1.0, 3.0] {
+        let [result] = runtime.exec("exp2-approx", [input.into()])?;
+        let Value::F32(result) = result else {
+            anyhow::bail!("exp2-approx returned non-f32 value: {result:?}");
+        };
+
+        let expected = input.exp2();
+        let error = (result - expected).abs() / expected.max(1.0);
+        assert!(
+            error < 4e-3,
+            "exp2-approx({input}) = {result}, expected {expected}, rel-ish error {error}"
+        );
+    }
+
+    Ok(())
+}
+
+#[path = "cases/materializec.rs"]
+mod materializec;
+
+#[test]
+fn sigmoid_test() -> anyhow::Result<()> {
+    let runtime = runtime_with(NN_EXAMPLES)?;
+
+    for input in [-6.0_f32, -1.0, 0.0, 1.0, 6.0] {
+        let [result] = runtime.exec("sigmoid", [input.into()])?;
+        let Value::F32(result) = result else {
+            anyhow::bail!("sigmoid returned non-f32 value: {result:?}");
+        };
+
+        let expected = 1.0 / (1.0 + (-input).exp());
+        let error = (result - expected).abs();
+        assert!(
+            error < 4e-3,
+            "sigmoid({input}) = {result}, expected {expected}, abs error {error}"
+        );
+    }
+
+    Ok(())
+}
+
+#[test]
+fn silu_test() -> anyhow::Result<()> {
+    let runtime = runtime_with(NN_EXAMPLES)?;
+
+    for input in [-3.0_f32, -1.0, 0.0, 1.0, 3.0] {
+        let [result] = runtime.exec("silu", [input.into()])?;
+        let Value::F32(result) = result else {
+            anyhow::bail!("silu returned non-f32 value: {result:?}");
+        };
+
+        let sigmoid = 1.0 / (1.0 + (-input).exp());
+        let expected = input * sigmoid;
+        let error = (result - expected).abs();
+        assert!(
+            error < 2e-2,
+            "silu({input}) = {result}, expected {expected}, abs error {error}"
+        );
+    }
+
+    Ok(())
+}
+
+#[test]
+fn tanh_test() -> anyhow::Result<()> {
+    let runtime = runtime_with(NN_EXAMPLES)?;
+
+    for input in [-3.0_f32, -1.0, 0.0, 1.0, 3.0] {
+        let [result] = runtime.exec("tanh", [input.into()])?;
+        let Value::F32(result) = result else {
+            anyhow::bail!("tanh returned non-f32 value: {result:?}");
+        };
+
+        let expected = input.tanh();
+        let error = (result - expected).abs();
+        assert!(
+            error < 8e-3,
+            "tanh({input}) = {result}, expected {expected}, abs error {error}"
+        );
+    }
+
+    Ok(())
+}
+
+#[test]
+fn gelu_approx_test() -> anyhow::Result<()> {
+    let runtime = runtime_with(NN_EXAMPLES)?;
+
+    for input in [-3.0_f32, -1.0, 0.0, 1.0, 3.0] {
+        let [result] = runtime.exec("gelu-approx", [input.into()])?;
+        let Value::F32(result) = result else {
+            anyhow::bail!("gelu-approx returned non-f32 value: {result:?}");
+        };
+
+        let sqrt_2_over_pi = (2.0_f32 / std::f32::consts::PI).sqrt();
+        let expected =
+            0.5 * input * (1.0 + (sqrt_2_over_pi * (input + 0.044_715 * input.powi(3))).tanh());
+        let error = (result - expected).abs();
+        assert!(
+            error < 2e-2,
+            "gelu-approx({input}) = {result}, expected {expected}, abs error {error}"
+        );
+    }
+
+    Ok(())
+}
+
+#[test]
+fn sqrt_test() -> anyhow::Result<()> {
+    let runtime = runtime_with(NN_EXAMPLES)?;
+
+    for input in [0.0_f32, 0.25, 1.0, 2.0, 9.0, 100.0] {
+        let [result] = runtime.exec("sqrt", [input.into()])?;
+        let Value::F32(result) = result else {
+            anyhow::bail!("sqrt returned non-f32 value: {result:?}");
+        };
+
+        let expected = input.sqrt();
+        let error = (result - expected).abs();
+        assert!(
+            error < 1e-4,
+            "sqrt({input}) = {result}, expected {expected}, abs error {error}"
+        );
+    }
+
+    Ok(())
+}
+
+#[test]
 fn log_approx_test() -> anyhow::Result<()> {
-    let runtime = runtime_with(LOG_EXAMPLES)?;
+    let runtime = runtime_with(NN_EXAMPLES)?;
 
     for input in [0.1_f32, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 8.0, 10.0] {
         let [result] = runtime.exec("log-approx", [input.into()])?;
@@ -540,3 +724,56 @@ fn log_approx_test() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+#[test]
+fn log2_approx_test() -> anyhow::Result<()> {
+    let runtime = runtime_with(NN_EXAMPLES)?;
+
+    for input in [0.1_f32, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 8.0, 10.0] {
+        let [result] = runtime.exec("log2-approx", [input.into()])?;
+        let Value::F32(result) = result else {
+            anyhow::bail!("log2-approx returned non-f32 value: {result:?}");
+        };
+
+        let expected = input.log2();
+        let error = (result - expected).abs();
+        assert!(
+            error < 1e-3,
+            "log2-approx({input}) = {result}, expected {expected}, abs error {error}"
+        );
+    }
+
+    Ok(())
+}
+
+#[test]
+fn powf_test() -> anyhow::Result<()> {
+    let runtime = runtime_with(NN_EXAMPLES)?;
+
+    for (base, exponent) in [
+        (0.25_f32, 0.5_f32),
+        (0.5_f32, 2.0_f32),
+        (1.0_f32, 3.0_f32),
+        (1.5_f32, -1.0_f32),
+        (2.0_f32, 3.0_f32),
+        (3.0_f32, 0.5_f32),
+        (10.0_f32, 0.25_f32),
+    ] {
+        let [result] = runtime.exec("powf", [base.into(), exponent.into()])?;
+        let Value::F32(result) = result else {
+            anyhow::bail!("powf returned non-f32 value: {result:?}");
+        };
+
+        let expected = base.powf(exponent);
+        let error = (result - expected).abs() / expected.abs().max(1.0);
+        assert!(
+            error < 8e-3,
+            "powf({base}, {exponent}) = {result}, expected {expected}, rel-ish error {error}"
+        );
+    }
+
+    Ok(())
+}
+
+#[path = "cases/reducec.rs"]
+mod reducec;

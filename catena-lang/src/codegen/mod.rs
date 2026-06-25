@@ -4,11 +4,15 @@
 //! GPU artifact. Report generation should render this artifact, not make codegen
 //! decisions itself.
 
+mod components;
 pub mod fn_ptrs;
 pub mod gpu;
 pub mod lower_types;
+mod ops;
 mod prelude;
+mod render_utils;
 mod specialize;
+mod validate;
 
 use std::collections::{BTreeMap, VecDeque};
 
@@ -29,10 +33,14 @@ use crate::{
             specialization_overrides,
         },
     },
+    pass::record_boundary_sizes::OperationWithBoundarySizes,
     report::{AnnotatedTerm, TheoryTermMap},
 };
 
 pub type GpuModuleMap = BTreeMap<Operation, GpuModule>;
+type CodegenOperation = OperationWithBoundarySizes<Operation>;
+type CodegenTerm = AnnotatedTerm<CodegenOperation>;
+type CodegenTermMap = TheoryTermMap<CodegenOperation>;
 
 const PROGRAM_THEORY: &str = "program";
 
@@ -78,6 +86,13 @@ impl GpuDialect {
         }
     }
 
+    pub fn synchronize_fn(self) -> &'static str {
+        match self {
+            Self::Hip => "hipDeviceSynchronize",
+            Self::Cuda => "cudaDeviceSynchronize",
+        }
+    }
+
     pub fn device_compile_guard(self) -> &'static str {
         match self {
             Self::Hip => "__HIP_DEVICE_COMPILE__",
@@ -107,6 +122,8 @@ pub struct GpuFunction {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GpuAssign {
     pub op: Operation,
+    pub input_sizes: Vec<usize>,
+    pub output_sizes: Vec<usize>,
     pub call_symbol: Option<String>,
     pub inputs: Vec<GpuValue>,
     pub outputs: Vec<GpuVar>,
@@ -126,7 +143,7 @@ pub struct GpuVar {
 }
 
 struct CodegenState<'a> {
-    definitions: &'a BTreeMap<Operation, AnnotatedTerm>,
+    definitions: &'a BTreeMap<Operation, CodegenTerm>,
     modules: GpuModuleMap,
     instances: BTreeMap<(Operation, SpecializationKey), String>,
     queue: VecDeque<PendingInstance>,
@@ -134,7 +151,7 @@ struct CodegenState<'a> {
 }
 
 /// Codegen for all functions, producing per-definition GPU modules.
-pub fn codegen(terms: &TheoryTermMap) -> Result<GpuModuleMap, CodegenError> {
+pub fn codegen(terms: &CodegenTermMap) -> Result<GpuModuleMap, CodegenError> {
     let theory_id = TheoryId(
         PROGRAM_THEORY
             .parse()
@@ -200,6 +217,15 @@ pub enum CodegenError {
     FnPtrSymbol(#[from] FnPtrSymbolError),
     #[error("definition `{0}` is used with non-monomorphic runtime interface")]
     NonMonomorphicUse(Operation),
+    #[error(
+        "definition `{caller}` uses `{producer}` as a materializec producer, but device-callable producer dependency `{containing}` contains `{nested}`. materializec lowering is host-only: it allocates output memory and launches a GPU kernel. A materializec producer is called from GPU device code, so it and the program definitions it calls must be device-callable and allocation-free. Move the nested materialization out of the producer call chain, or pass a precomputed buffer as the producer environment."
+    )]
+    MaterializecProducerContainsMaterialize {
+        caller: Operation,
+        producer: Operation,
+        containing: Operation,
+        nested: Operation,
+    },
 }
 
 impl CodegenState<'_> {
@@ -210,7 +236,7 @@ impl CodegenState<'_> {
     /// symbols and enqueue those specializations as needed.
     fn codegen_definition(
         &mut self,
-        term: &AnnotatedTerm,
+        term: &CodegenTerm,
         instance: &PendingInstance,
     ) -> Result<GpuModule, CodegenError> {
         let fn_symbols = direct_fn_ptr_symbols(term)?;
@@ -236,7 +262,8 @@ impl CodegenState<'_> {
 
         let mut assignments = Vec::new();
         for assignment in ssa(term.clone().to_strict())? {
-            if assignment.op.as_str().starts_with("name.") {
+            let op = assignment.op.operation.clone();
+            if op.as_str().starts_with("name.") {
                 continue;
             }
 
@@ -257,14 +284,18 @@ impl CodegenState<'_> {
                 .map(|(node, _)| var(*node, &term, &instance.overrides))
                 .collect::<Result<Vec<_>, CodegenError>>()?;
 
-            let call_symbol = if self.definitions.contains_key(&assignment.op) {
-                Some(self.ensure_specialization(&assignment.op, &inputs, &outputs)?)
+            validate::assignment(&self.definitions, &instance.op, &op, &inputs)?;
+
+            let call_symbol = if self.definitions.contains_key(&op) {
+                Some(self.ensure_specialization(&op, &inputs, &outputs)?)
             } else {
                 None
             };
 
             assignments.push(GpuAssign {
-                op: assignment.op,
+                op,
+                input_sizes: assignment.op.source_sizes,
+                output_sizes: assignment.op.target_sizes,
                 call_symbol,
                 inputs,
                 outputs,
@@ -321,7 +352,7 @@ impl CodegenState<'_> {
 
 fn var(
     node: NodeId,
-    term: &AnnotatedTerm,
+    term: &CodegenTerm,
     overrides: &BTreeMap<usize, LoweredType>,
 ) -> Result<GpuVar, CodegenError> {
     Ok(GpuVar {

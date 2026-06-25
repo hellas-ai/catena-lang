@@ -8,6 +8,7 @@ use crate::{
         fn_ptrs::FnPtrSymbol,
         lower_types::{CType, LowerTypeError, LoweredType, lower_type},
     },
+    pass::record_boundary_sizes::OperationWithBoundarySizes,
     report::AnnotatedTerm,
 };
 
@@ -28,7 +29,9 @@ pub struct PendingInstance {
     pub overrides: BTreeMap<usize, LoweredType>,
 }
 
-pub fn entrypoint_key(term: &AnnotatedTerm) -> Result<Option<SpecializationKey>, LowerTypeError> {
+pub fn entrypoint_key<A>(
+    term: &AnnotatedTerm<A>,
+) -> Result<Option<SpecializationKey>, LowerTypeError> {
     let mut sources = Vec::new();
     let mut targets = Vec::new();
     for source in &term.sources {
@@ -83,7 +86,7 @@ pub fn specialization_key(inputs: &[GpuValue], outputs: &[GpuVar]) -> Option<Spe
 }
 
 pub fn specialization_overrides(
-    term: &AnnotatedTerm,
+    term: &AnnotatedTerm<OperationWithBoundarySizes<Operation>>,
     inputs: &[GpuValue],
     outputs: &[GpuVar],
 ) -> BTreeMap<usize, LoweredType> {
@@ -141,14 +144,15 @@ mod tests {
 
     #[test]
     fn erased_only_generic_definition_is_not_an_entrypoint() {
-        let term = OpenHypergraph::identity(vec![Tree::Leaf(0, ())]);
+        let term: AnnotatedTerm = OpenHypergraph::identity(vec![Tree::Leaf(0, ())]);
 
         assert!(entrypoint_key(&term).unwrap().is_none());
     }
 
     #[test]
     fn runtime_interface_definition_is_an_entrypoint() {
-        let term = OpenHypergraph::identity(vec![node("val", vec![node("bool", vec![])])]);
+        let term: AnnotatedTerm =
+            OpenHypergraph::identity(vec![node("val", vec![node("bool", vec![])])]);
 
         assert_eq!(
             entrypoint_key(&term).unwrap().unwrap(),

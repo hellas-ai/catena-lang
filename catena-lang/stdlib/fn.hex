@@ -7,10 +7,3 @@
   # A ● (A ~> B) -> B
   (arr eval : 2 -> 1)
 })
-
-# Eliminators of function pointers
-#(theory type nat {
-  # TODO!
-  # reduce (n : extent) (x : ix n -> t) (z : t) (add : (t * t) -> t) : t
-  #(arr reduce :
-#})

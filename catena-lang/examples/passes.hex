@@ -1,0 +1,47 @@
+# Small examples whose transformed graphs are useful when inspecting compiler
+# pass output SVGs.
+
+(theory program type {
+  # A non-structural operation on packed products. The record-boundary-sizes pass
+  # should annotate this operation with source/target sizes [2] -> [2] before
+  # the later intro/elim/unit pass flattens product objects.
+  (arr pass.keep-packed : * -> *)
+})
+
+# Exercises ForgetClosures: defer/run should become an identity on the
+# flattened object.
+(def program pass-closure-run :
+  [a]
+  ->
+  [a]
+= (
+  defer
+  run
+))
+
+# Exercises UnpackProducts: product intro/elim should disappear after
+# products are flattened.
+(def program pass-product-roundtrip :
+  [a b]
+  ->
+  [a b]
+= (
+  *.intro
+  *.elim
+))
+
+# Exercises unit flattening: unit.intro maps to an empty-boundary identity.
+(def program pass-unit-intro :
+  []
+  ->
+  1
+= unit.intro)
+
+# Exercises RecordBoundarySizes on a non-structural operation with a packed
+# product boundary. The operation label should retain [2] -> [2] even after the
+# graph's product objects are flattened by later passes.
+(def program pass-record-packed-size :
+  ({[a] [b]} *)
+  ->
+  ({[a] [b]} *)
+= pass.keep-packed)

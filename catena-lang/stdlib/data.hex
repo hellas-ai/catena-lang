@@ -72,6 +72,7 @@
   (arr f32.sub  : {(f32 val) (f32 val)} -> (f32 val))
   (arr f32.neg  : (f32 val) -> (f32 val))
   (arr f32.mul  : {(f32 val) (f32 val)} -> (f32 val))
+  (arr f32.fma  : {(f32 val) (f32 val) (f32 val)} -> (f32 val))
   (arr f32.div  : {(f32 val) (f32 val)} -> (f32 val))
   (arr f32.lt   : {(f32 val) (f32 val)} -> (bool val))
   (arr f32.eq   : {(f32 val) (f32 val)} -> (bool val))
@@ -136,5 +137,19 @@
     ({[.b] bool} :)                     # (b : bool)
     ([.b_true  x_gt_y] ==> |-)          # |- b = true  ==> (x > y)
     ([.x_gt_y] {[.b_false] not} ==> |-) # |- b = false ==> ¬ (x > y)
+  })
+
+  # u64.eq with predicate results.
+  (arr u64.eq : {[x y b.]
+    ({[.x] u64} :)
+    ({[.y] u64} :)
+  } -> {[x y b.]
+    ({[.b] bool.t} = [b_true .]) # b = true
+    ({[.b] bool.f} = [b_false.]) # b = false
+    ([.x y] = [x_eq_y.])         # x = y
+
+    ({[.b] bool} :)                     # (b : bool)
+    ([.b_true  x_eq_y] ==> |-)          # |- b = true  ==> (x = y)
+    ([.x_eq_y] {[.b_false] not} ==> |-) # |- b = false ==> ¬ (x = y)
   })
 })

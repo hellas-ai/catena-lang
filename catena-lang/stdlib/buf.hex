@@ -38,6 +38,29 @@
     ({[.m n] u64} buf val) # val(buf m n u64)
   })
 
+  # Transport a u64 buffer across a proven length equality.
+  (arr buf.u64.cast-same-length : {[m n p.]
+    ({[.m p] u64} buf val) # val(buf m p u64)
+    ([.n p] = |-)           # n = p
+  } -> ([m n p.] ({[.m n] u64} buf val)))
+
+  # Materialize an owned buffer from an indexed producer.
+  #
+  #   materialize : (n : u64) ● val(val(ix n) => val(t)) -> val(buf cap.own n t)
+  (arr materialize : {[n t.]
+    ({[.n] u64} :)
+    ({([.n] ix val) ([.t] val)} => val)
+  } -> {[n t.] ({cap.own [.n t]} buf val)})
+
+  # Materialize an owned buffer from a converted indexed producer.
+  #
+  #   materializec : X ● val(X * val(ix n) -> val(t)) ● (n : u64) -> val(buf cap.own n t)
+  (arr materializec : {[x n t.]
+    ([.x])
+    ({({[.x] ([.n] ix val)} *) ([.t] val)} -> val)
+    ({[.n] u64} :)
+  } -> {[x n t.] ({cap.own [.n t]} buf val)})
+
   # TODO: make all mem.cast.* into definitions, using the below:
   #   mem.cast : mem ● (s : u64) ● sizeof(t, s) -> (n : u64) ● val(buf n t)
   # and introduce

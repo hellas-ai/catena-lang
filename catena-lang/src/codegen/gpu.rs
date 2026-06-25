@@ -5,7 +5,12 @@ use thiserror::Error;
 
 use crate::codegen::{
     GpuAssign, GpuDialect, GpuFunction, GpuModule, GpuModuleMap, GpuValue, GpuVar,
-    lower_types::CType, prelude::render_gpu_prelude, runtime_type,
+    lower_types::CType,
+    ops::materializec,
+    ops::reducec,
+    prelude::render_gpu_prelude,
+    render_utils::{c_type, invalid_inputs, invalid_outputs, param_decl, sanitize_ident},
+    runtime_type,
 };
 
 #[derive(Debug, Error)]
@@ -27,6 +32,36 @@ pub enum GpuRenderError {
         op: Operation,
         expected: usize,
         actual: usize,
+    },
+    #[error("operation `{op}` expected {expected} input components, found {actual}")]
+    InvalidInputComponentCount {
+        op: Operation,
+        expected: usize,
+        actual: usize,
+    },
+    #[error(
+        "operation `{op}` input sizes account for {expected} flattened inputs, but assignment has {actual}"
+    )]
+    InvalidFlattenedInputCount {
+        op: Operation,
+        expected: usize,
+        actual: usize,
+    },
+    #[error(
+        "operation `{op}` expected {expected} {description} in input component `{component}`, found {actual}"
+    )]
+    InvalidInputComponentValueCount {
+        op: Operation,
+        component: &'static str,
+        description: &'static str,
+        expected: usize,
+        actual: usize,
+    },
+    #[error("operation `{op}` input component `{component}` is erased: {description}")]
+    ErasedInputComponentValue {
+        op: Operation,
+        component: &'static str,
+        description: &'static str,
     },
     #[error("gpu.materialize is missing launch params")]
     MissingMaterializeLaunchParams,
@@ -59,7 +94,7 @@ pub fn render_modules(
     out.push('\n');
 
     for module in modules.values() {
-        render_function_decl(&mut out, &module.entry)?;
+        render_function_decl(&mut out, &module.entry, dialect)?;
     }
     if !modules.is_empty() {
         out.push('\n');
@@ -88,6 +123,13 @@ fn render_module_body(
                 assignment,
             )?;
             out.push('\n');
+        } else if assignment.op.as_str() == "materializec" {
+            materializec::render_kernel(
+                out,
+                &materializec::kernel_name(&module.entry.name, assignment)?,
+                assignment,
+            )?;
+            out.push('\n');
         }
     }
 
@@ -96,9 +138,19 @@ fn render_module_body(
     Ok(())
 }
 
-fn render_function_decl(out: &mut String, function: &GpuFunction) -> Result<(), GpuRenderError> {
+fn render_function_decl(
+    out: &mut String,
+    function: &GpuFunction,
+    dialect: GpuDialect,
+) -> Result<(), GpuRenderError> {
+    if function_is_host_only(function) {
+        out.push_str(&format!("#ifndef {}\n", dialect.device_compile_guard()));
+    }
     out.push_str(&function_signature(function)?);
     out.push_str(";\n");
+    if function_is_host_only(function) {
+        out.push_str("#endif\n");
+    }
     Ok(())
 }
 
@@ -107,6 +159,9 @@ fn render_function(
     function: &GpuFunction,
     dialect: GpuDialect,
 ) -> Result<(), GpuRenderError> {
+    if function_is_host_only(function) {
+        out.push_str(&format!("#ifndef {}\n", dialect.device_compile_guard()));
+    }
     out.push_str(&function_signature(function)?);
     out.push_str(" {\n");
     let mut declared = function
@@ -130,16 +185,22 @@ fn render_function(
     }
     out.push_str("    return;\n");
     out.push_str("}\n");
+    if function_is_host_only(function) {
+        out.push_str("#endif\n");
+    }
     Ok(())
 }
 
-fn function_signature(function: &GpuFunction) -> Result<String, GpuRenderError> {
-    let qualifier = if function
+fn function_is_host_only(function: &GpuFunction) -> bool {
+    function
         .assignments
         .iter()
-        .any(|assignment| assignment.op.as_str() == "gpu.materialize")
-    {
-        ""
+        .any(|assignment| matches!(assignment.op.as_str(), "gpu.materialize" | "materializec"))
+}
+
+fn function_signature(function: &GpuFunction) -> Result<String, GpuRenderError> {
+    let qualifier = if function_is_host_only(function) {
+        "__host__ "
     } else {
         "__host__ __device__ "
     };
@@ -200,7 +261,7 @@ fn render_assignment(
         "bool.or" => render_binary_bool(out, assignment, "||")?,
         "bool.ifc" => render_bool_ifc(out, assignment)?,
         "unit.intro" => {}
-        "ax-mp" | "assert-then" | ":.forget" => {}
+        "ax-mp" | "assert-then" | ":.forget" | ":.param" => {}
         "assert" => render_assert(out, assignment)?,
         "u64.zero" => render_u64_zero(out, assignment)?,
         "u64.one" => render_u64_one(out, assignment)?,
@@ -224,13 +285,17 @@ fn render_assignment(
         "u32.not" => render_unary_prefix(out, assignment, "~")?,
         "u32.to-f32" => render_u32_cast_to_f32(out, assignment)?,
         "u32.bitcast-f32" => render_u32_bitcast_f32(out, assignment)?,
+        "u64.eq" => render_u64_eq(out, assignment)?,
         "u64.gt" => render_u64_gt(out, assignment)?,
         "mem.cast.u64" => render_mem_cast_u64(out, assignment)?,
+        "buf.u64.cast-same-length" => render_buf_u64_cast_same_length(out, assignment)?,
+        "buf.to-mem" => render_buf_to_mem(out, assignment)?,
         "f32.one" => render_f32_one(out, assignment)?,
         "f32.add" => render_binary(out, assignment, "+")?,
         "f32.sub" => render_binary(out, assignment, "-")?,
         "f32.neg" => render_f32_neg(out, assignment)?,
         "f32.mul" => render_binary(out, assignment, "*")?,
+        "f32.fma" => render_f32_fma(out, assignment)?,
         "f32.div" => render_binary(out, assignment, "/")?,
         "f32.eq" => render_binary_bool(out, assignment, "==")?,
         "f32.ne" => render_binary_bool(out, assignment, "!=")?,
@@ -246,7 +311,9 @@ fn render_assignment(
         "ix.zero" => render_ix_zero(out, assignment)?,
         "ix" => render_ix(out, assignment)?,
         "eval" => render_eval(out, assignment)?,
+        "reducec" => reducec::render(out, assignment)?,
         "gpu.materialize" => render_materialize_call(out, function, assignment, dialect)?,
+        "materializec" => materializec::render_call(out, function, assignment, dialect)?,
         op if op.starts_with("const.u64.") => {
             render_int_const(out, assignment, "const.u64.", "ULL")?
         }
@@ -342,6 +409,23 @@ fn render_f32_neg(out: &mut String, assignment: &GpuAssign) -> Result<(), GpuRen
         return Err(invalid_outputs(assignment, 1));
     };
     out.push_str(&format!("    {} = -{};\n", output.name, value_expr(input)));
+    Ok(())
+}
+
+fn render_f32_fma(out: &mut String, assignment: &GpuAssign) -> Result<(), GpuRenderError> {
+    let [multiplicand, multiplier, addend] = assignment.inputs.as_slice() else {
+        return Err(invalid_inputs(assignment, 3));
+    };
+    let [output] = assignment.outputs.as_slice() else {
+        return Err(invalid_outputs(assignment, 1));
+    };
+    out.push_str(&format!(
+        "    {} = fmaf({}, {}, {});\n",
+        output.name,
+        value_expr(multiplicand),
+        value_expr(multiplier),
+        value_expr(addend)
+    ));
     Ok(())
 }
 
@@ -475,6 +559,22 @@ fn render_u64_gt(out: &mut String, assignment: &GpuAssign) -> Result<(), GpuRend
     Ok(())
 }
 
+fn render_u64_eq(out: &mut String, assignment: &GpuAssign) -> Result<(), GpuRenderError> {
+    let [lhs, rhs] = assignment.inputs.as_slice() else {
+        return Err(invalid_inputs(assignment, 2));
+    };
+    let [flag, _true_witness, _false_witness] = assignment.outputs.as_slice() else {
+        return Err(invalid_outputs(assignment, 3));
+    };
+    out.push_str(&format!(
+        "    {} = {} == {};\n",
+        flag.name,
+        value_expr(lhs),
+        value_expr(rhs)
+    ));
+    Ok(())
+}
+
 fn render_mem_cast_u64(out: &mut String, assignment: &GpuAssign) -> Result<(), GpuRenderError> {
     let [input] = assignment.inputs.as_slice() else {
         return Err(invalid_inputs(assignment, 1));
@@ -487,6 +587,47 @@ fn render_mem_cast_u64(out: &mut String, assignment: &GpuAssign) -> Result<(), G
         len = len.name,
         buf = buffer.name,
         mem = value_expr(input)
+    ));
+    Ok(())
+}
+
+fn render_buf_u64_cast_same_length(
+    out: &mut String,
+    assignment: &GpuAssign,
+) -> Result<(), GpuRenderError> {
+    let [buffer, _same_length] = assignment.inputs.as_slice() else {
+        return Err(invalid_inputs(assignment, 2));
+    };
+    let [output] = assignment.outputs.as_slice() else {
+        return Err(invalid_outputs(assignment, 1));
+    };
+    out.push_str(&format!("    {} = {};\n", output.name, value_expr(buffer)));
+    Ok(())
+}
+
+fn render_buf_to_mem(out: &mut String, assignment: &GpuAssign) -> Result<(), GpuRenderError> {
+    let [len, buffer] = assignment.inputs.as_slice() else {
+        return Err(invalid_inputs(assignment, 2));
+    };
+    let [output] = assignment.outputs.as_slice() else {
+        return Err(invalid_outputs(assignment, 1));
+    };
+    let GpuValue::Var(buffer) = buffer else {
+        return Err(GpuRenderError::UnsupportedOp(assignment.op.clone()));
+    };
+    let CType::Pointer(element) =
+        runtime_type(buffer).ok_or_else(|| GpuRenderError::ErasedType(buffer.clone()))?
+    else {
+        return Err(GpuRenderError::UnsupportedType(
+            runtime_type(buffer).unwrap().clone(),
+        ));
+    };
+    out.push_str(&format!(
+        "    {mem}.data = (void *){buf};\n    {mem}.len = {len} * sizeof({element});\n",
+        mem = output.name,
+        buf = buffer.name,
+        len = value_expr(len),
+        element = c_type(element),
     ));
     Ok(())
 }
@@ -685,7 +826,7 @@ fn render_materialize_call(
         name = output.name
     ));
     out.push_str(&format!(
-        "    catena_gpu_check({managed_alloc_fn}((void **)&{name}_data, {name}_len * sizeof({element})));\n",
+        "    catena_host_gpu_check({managed_alloc_fn}((void **)&{name}_data, {name}_len * sizeof({element})));\n",
         name = output.name,
         element = c_type(element),
         managed_alloc_fn = dialect.managed_alloc_fn(),
@@ -747,30 +888,9 @@ fn materialize_kernel_name(
     Ok(format!("materialize_{}_{}", function_name, output.name))
 }
 
-fn param_decl(var: &GpuVar, by_pointer: bool) -> Result<String, GpuRenderError> {
-    let ty = runtime_type(var).ok_or_else(|| GpuRenderError::ErasedType(var.clone()))?;
-    if by_pointer {
-        Ok(format!("{} *out_{}", c_type(ty), var.name))
-    } else {
-        Ok(format!("{} {}", c_type(ty), var.name))
-    }
-}
-
 fn local_decl(var: &GpuVar) -> Result<String, GpuRenderError> {
     let ty = runtime_type(var).ok_or_else(|| GpuRenderError::ErasedType(var.clone()))?;
     Ok(format!("{} {}", c_type(ty), var.name))
-}
-
-fn c_type(ty: &CType) -> String {
-    match ty {
-        CType::Unit => "catena_unit_t".to_string(),
-        CType::Bool => "uint8_t".to_string(),
-        CType::U32 => "uint32_t".to_string(),
-        CType::U64 => "uint64_t".to_string(),
-        CType::F32 => "float".to_string(),
-        CType::Pointer(inner) => format!("{} *", c_type(inner)),
-        CType::Named(name) => name.clone(),
-    }
 }
 
 fn value_expr(value: &GpuValue) -> String {
@@ -784,29 +904,89 @@ fn callable_expr(value: &GpuValue) -> String {
     value_expr(value)
 }
 
-fn invalid_inputs(assignment: &GpuAssign, expected: usize) -> GpuRenderError {
-    GpuRenderError::InvalidInputCount {
-        op: assignment.op.clone(),
-        expected,
-        actual: assignment.inputs.len(),
-    }
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-fn invalid_outputs(assignment: &GpuAssign, expected: usize) -> GpuRenderError {
-    GpuRenderError::InvalidOutputCount {
-        op: assignment.op.clone(),
-        expected,
-        actual: assignment.outputs.len(),
-    }
-}
+    use std::collections::BTreeMap;
 
-fn sanitize_ident(name: &str) -> String {
-    let mut ident = name
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
-        .collect::<String>();
-    if ident.chars().next().is_some_and(|c| c.is_ascii_digit()) {
-        ident.insert(0, '_');
+    use crate::codegen::{
+        fn_ptrs::FnPtrSymbol,
+        lower_types::{CType, LoweredType},
+    };
+    use open_hypergraphs::lax::NodeId;
+
+    fn op(name: &str) -> Operation {
+        name.parse().unwrap()
     }
-    ident
+
+    fn var(node: usize, name: &str, ty: CType) -> GpuVar {
+        GpuVar {
+            node: NodeId(node),
+            name: name.to_string(),
+            lowered: LoweredType::Runtime(ty),
+        }
+    }
+
+    #[test]
+    fn materializing_host_wrappers_are_hidden_from_hip_device_parse() {
+        let len = var(0, "len", CType::U64);
+        let out = var(1, "out", CType::Pointer(Box::new(CType::U64)));
+        let value = var(2, "value", CType::U64);
+        let index = var(3, "i", CType::U64);
+
+        let materialize = GpuModule {
+            name: "program_materialize".to_string(),
+            source_name: Some(op("materialize")),
+            entry: GpuFunction {
+                name: "program_materialize".to_string(),
+                sources: vec![len.clone()],
+                targets: vec![out.clone()],
+                assignments: vec![GpuAssign {
+                    op: op("materializec"),
+                    input_sizes: vec![0, 1, 1],
+                    output_sizes: Vec::new(),
+                    call_symbol: None,
+                    inputs: vec![
+                        GpuValue::FnSymbol(FnPtrSymbol {
+                            target: op("program.producer"),
+                        }),
+                        GpuValue::Var(len),
+                    ],
+                    outputs: vec![out],
+                }],
+            },
+        };
+        let producer = GpuModule {
+            name: "program_producer".to_string(),
+            source_name: Some(op("producer")),
+            entry: GpuFunction {
+                name: "program_producer".to_string(),
+                sources: vec![index],
+                targets: vec![value.clone()],
+                assignments: vec![GpuAssign {
+                    op: op("u64.one"),
+                    input_sizes: Vec::new(),
+                    output_sizes: Vec::new(),
+                    call_symbol: None,
+                    inputs: vec![],
+                    outputs: vec![value],
+                }],
+            },
+        };
+
+        let modules =
+            BTreeMap::from([(op("materialize"), materialize), (op("producer"), producer)]);
+        let source = render_modules(&modules, GpuDialect::Hip).unwrap();
+
+        assert!(source.contains(
+            "#ifndef __HIP_DEVICE_COMPILE__\nextern \"C\" __host__ void program_materialize"
+        ));
+        assert!(source.contains(
+            "#ifndef __HIP_DEVICE_COMPILE__\nextern \"C\" __host__ void program_materialize(uint64_t len, uint64_t * *out_out) {"
+        ));
+        assert!(source.contains("catena_host_gpu_check(hipMallocManaged"));
+        assert!(source.contains("catena_host_gpu_check(hipDeviceSynchronize"));
+        assert!(!source.contains("catena_gpu_check"));
+    }
 }

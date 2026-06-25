@@ -4,7 +4,7 @@ use hexpr::Operation;
 use open_hypergraphs::lax::NodeId;
 use thiserror::Error;
 
-use crate::report::AnnotatedTerm;
+use crate::{pass::record_boundary_sizes::OperationWithBoundarySizes, report::AnnotatedTerm};
 
 const NAME_PREFIX: &str = "name.";
 
@@ -38,27 +38,29 @@ pub enum FnPtrSymbolError {
 /// later SSA/codegen passes. This is intentionally a partial map: externally supplied function
 /// pointer wires, values flowing through ordinary operations, and conditionally-produced function
 /// pointers are not resolved here.
-pub fn direct_fn_ptr_symbols(term: &AnnotatedTerm) -> Result<FnPtrNodeMap, FnPtrSymbolError> {
+pub fn direct_fn_ptr_symbols(
+    term: &AnnotatedTerm<OperationWithBoundarySizes<Operation>>,
+) -> Result<FnPtrNodeMap, FnPtrSymbolError> {
     let mut term = term.clone();
     term.quotient().ok();
 
     let mut symbols = HashMap::new();
 
     for (edge_index, operation) in term.hypergraph.edges.iter().enumerate() {
-        let Some(target_name) = operation.as_str().strip_prefix(NAME_PREFIX) else {
+        let Some(target_name) = operation.operation.as_str().strip_prefix(NAME_PREFIX) else {
             continue;
         };
 
         let adjacency = &term.hypergraph.adjacency[edge_index];
         let [target] = adjacency.targets.as_slice() else {
             return Err(FnPtrSymbolError::InvalidTargetCount {
-                operation: operation.clone(),
+                operation: operation.operation.clone(),
                 target_count: adjacency.targets.len(),
             });
         };
         if symbols.contains_key(target) {
             return Err(FnPtrSymbolError::DuplicateNodeSymbol {
-                operation: operation.clone(),
+                operation: operation.operation.clone(),
                 node: target.0,
             });
         }
@@ -87,13 +89,21 @@ mod tests {
         name.parse().unwrap()
     }
 
+    fn sized_op(name: &str) -> OperationWithBoundarySizes<Operation> {
+        OperationWithBoundarySizes {
+            operation: op(name),
+            source_sizes: Vec::new(),
+            target_sizes: Vec::new(),
+        }
+    }
+
     fn ty(name: &str) -> Tree<(), Operation> {
         Tree::Node(op(name), 0, vec![])
     }
 
     #[test]
     fn maps_name_operation_target_node_to_symbol() {
-        let term = OpenHypergraph::singleton(op("name.bool.not"), vec![], vec![ty("->")]);
+        let term = OpenHypergraph::singleton(sized_op("name.bool.not"), vec![], vec![ty("->")]);
 
         let symbols = direct_fn_ptr_symbols(&term).unwrap();
 
@@ -107,7 +117,8 @@ mod tests {
 
     #[test]
     fn ignores_non_name_operations() {
-        let term = OpenHypergraph::singleton(op("bool.not"), vec![ty("bool")], vec![ty("bool")]);
+        let term =
+            OpenHypergraph::singleton(sized_op("bool.not"), vec![ty("bool")], vec![ty("bool")]);
 
         assert!(direct_fn_ptr_symbols(&term).unwrap().is_empty());
     }

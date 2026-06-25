@@ -1,0 +1,25 @@
+# Program-level combinators.
+(theory program type {
+  # Reduce over indices with a zero value, an accumulator closure, and an
+  # index-to-value closure.
+  #
+  #   reduce : A ● (A * A => A) ● (ix n => A) ● (n : u64) -> A
+  (arr reduce : {[a n.]
+    ([.a])
+    ([.a a] {* [.a]} =>)
+    ({([.n] ix val) ([.a])} =>)
+    ({[.n] u64} :)
+  } -> ([a n . a]))
+
+  # Closure-converted reduce.
+  #
+  #   reducec : A ● X ● (X * A * A -> A) ● Y ● (Y * ix n -> A) ● (n : u64) -> A
+  (arr reducec : {[x y a n.]
+    ([.a])
+    ([.x])
+    {([.x a] * [xa.]) ([.xa a] * [xaa.]) ([.xaa a] -> val)}
+    ([.y])
+    {({([.y]) ([.n] ix val)} * [yi.]) ([.yi a] -> val)}
+    ({[.n] u64} :)
+  } -> ([x y a n . a]))
+})

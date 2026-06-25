@@ -1,8 +1,9 @@
 use hexpr::Operation;
 use metacat::tree::Tree;
+use open_hypergraphs::lax::NodeId;
 use thiserror::Error;
 
-use crate::check::AnnotatedTerm;
+use crate::{check::AnnotatedTerm, nonstrict::to_unpacker};
 
 const CLOSURE_TYPE: &str = "=>";
 const PRODUCT_TYPE: &str = "*";
@@ -10,7 +11,6 @@ const UNIT_TYPE: &str = "1";
 const DEFER: &str = "defer";
 const COMPOSE: &str = "compose";
 const RUN: &str = "run";
-const PRODUCT_ELIM: &str = "*.elim";
 
 type Obj = Tree<(), Operation>;
 
@@ -67,38 +67,24 @@ pub fn closure_body(extracted: &AnnotatedTerm) -> Result<AnnotatedTerm, ClosureB
     Ok(body)
 }
 
-fn packed_environment_source(body: &mut AnnotatedTerm) -> open_hypergraphs::lax::NodeId {
-    let environment = body.sources.clone();
-    let environment_types = interface_types(body, &environment);
-    match environment.as_slice() {
-        [] => body.new_node(unit_type()),
-        [only] => *only,
-        _ => {
-            let packed = body.new_node(pack_object(&environment_types));
-            unpack_environment(body, packed, &environment, &environment_types);
-            packed
-        }
-    }
-}
+fn packed_environment_source(body: &mut AnnotatedTerm) -> NodeId {
+    let components = body.sources.clone();
+    let component_types = interface_types(body, &components);
+    let unpacker = to_unpacker(vec![pack_objects(&component_types)]);
+    let (sources, targets) = body.append(unpacker);
 
-fn unpack_environment(
-    body: &mut AnnotatedTerm,
-    packed: open_hypergraphs::lax::NodeId,
-    components: &[open_hypergraphs::lax::NodeId],
-    component_types: &[Obj],
-) {
-    match components {
-        [] | [_] => {}
-        [left, right] => {
-            body.new_edge(op(PRODUCT_ELIM), (vec![packed], vec![*left, *right]));
-        }
-        [left, rest @ ..] => {
-            let tail_type = pack_object(&component_types[1..]);
-            let tail = body.new_node(tail_type);
-            body.new_edge(op(PRODUCT_ELIM), (vec![packed], vec![*left, tail]));
-            unpack_environment(body, tail, rest, &component_types[1..]);
-        }
+    let [source] = sources.as_slice() else {
+        unreachable!("one packed environment object should produce one source");
+    };
+    assert_eq!(
+        targets.len(),
+        components.len(),
+        "environment unpacker should reproduce the extracted environment"
+    );
+    for (target, component) in targets.into_iter().zip(components) {
+        body.unify(target, component);
     }
+    *source
 }
 
 fn closure_parts(object: &Obj) -> Option<(&Obj, &Obj)> {
@@ -122,15 +108,17 @@ fn unit_type() -> Obj {
     Tree::Node(op(UNIT_TYPE), 0, vec![])
 }
 
-fn pack_object(objects: &[Obj]) -> Obj {
+fn pack_objects(objects: &[Obj]) -> Obj {
     match objects {
         [] => unit_type(),
         [only] => only.clone(),
-        [head, tail @ ..] => Tree::Node(op(PRODUCT_TYPE), 0, vec![head.clone(), pack_object(tail)]),
+        [head, tail @ ..] => {
+            Tree::Node(op(PRODUCT_TYPE), 0, vec![head.clone(), pack_objects(tail)])
+        }
     }
 }
 
-fn interface_types(term: &AnnotatedTerm, interface: &[open_hypergraphs::lax::NodeId]) -> Vec<Obj> {
+fn interface_types(term: &AnnotatedTerm, interface: &[NodeId]) -> Vec<Obj> {
     interface
         .iter()
         .map(|node| term.hypergraph.nodes[node.0].clone())

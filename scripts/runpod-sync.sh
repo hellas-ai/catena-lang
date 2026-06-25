@@ -53,7 +53,7 @@ fi
 # Sync only the files needed to run catena-lang tests on the pod. Cargo still
 # needs the workspace root and member manifests, but it does not need the other
 # packages' source trees when running `cargo test -p catena-lang`.
-rsync -az --delete --prune-empty-dirs --info=progress2 "${dry_run[@]}" \
+rsync -rlptDz --delete --prune-empty-dirs --info=progress2 "${dry_run[@]}" \
   -e "ssh -i $key -p $port -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new" \
   --include '/Cargo.lock' \
   --include '/Cargo.toml' \

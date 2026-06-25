@@ -4,7 +4,7 @@ This image is a small GPU-enabled development environment for running `catena-la
 
 It provides:
 
-- CUDA 12.6 development base image
+- CUDA 12.6 development base image with `nvcc` on `PATH`
 - Rust stable with `rustfmt` and `clippy`
 - C/C++ build tools used by runtime tests
 - SSH server for interactive access and rsync-based code sync

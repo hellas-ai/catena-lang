@@ -1,6 +1,9 @@
 name: Runpod Dev Image
 
 on:
+  push:
+    branches:
+      - marco/runpod
   workflow_dispatch:
 
 env:
@@ -43,7 +46,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: runpod/dev-image/Dockerfile
+          file: Dockerfile.dev.runpod
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

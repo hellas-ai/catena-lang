@@ -9,6 +9,7 @@ pub mod constants {
     pub const PRODUCT_TYPE: &str = "*";
     pub const UNIT_TYPE: &str = "1";
     pub const VALUE_TYPE: &str = "val";
+    pub const IX_TYPE: &str = "ix";
 
     pub const PRODUCT_INTRO: &str = "*.intro";
     pub const PRODUCT_ELIM: &str = "*.elim";

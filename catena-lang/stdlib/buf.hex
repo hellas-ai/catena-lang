@@ -4,11 +4,14 @@
   (arr cap.own : 0 -> 1)
   (arr cap.ref : 0 -> 1)
 
-  # Memory: untyped, sized bytes, with ownership mode
+  # Memory: untyped bytes with an ownership mode whose size can be queried at runtime
+  # Lowers to a fat pointer ~= (void*, size_t)
+  # Permitted on entrypoint boundaries
   (arr mem : 1 -> 1)
 
   # Buffers
   # `buf m n t` is a buffer with ownership mode m of length n with elements of type t.
+  # *NOT* permitted on entrypoint boundaries
   (arr buf : 3 -> 1)
 
   # Sized types

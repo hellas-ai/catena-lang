@@ -18,7 +18,7 @@
   ->
   ([n.] (u64 val))
 = ([input i.]
-  {[.i input]} ix
+  {[.i input]} buf.index
 ))
 
 # Sum all u64 elements in a memory buffer.
@@ -56,8 +56,8 @@
   ([n.] (u64 val))
 = {[env i.]
     ([.env] *.elim [lhs rhs.])
-    ({[.i lhs]} ix [lval.])
-    ({[.i rhs]} ix [rval.])
+    ({[.i lhs]} buf.index [lval.])
+    ({[.i rhs]} buf.index [rval.])
     ([.lval rval] u64.mul [result.])
     [.result]
 })

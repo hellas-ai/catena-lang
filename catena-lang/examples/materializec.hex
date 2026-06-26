@@ -24,7 +24,7 @@
   ->
   ([n.] (u64 val))
 = ([input i.]
-  {[.i input]} ix
+  {[.i input]} buf.index
 ))
 
 (def program materialize-copy-u64 :

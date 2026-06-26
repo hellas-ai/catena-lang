@@ -308,7 +308,7 @@ fn render_assignment(
         "f32.round-to-u32" => render_f32_round_to_u32(out, assignment)?,
         "f32.bitcast-u32" => render_f32_bitcast_u32(out, assignment)?,
         "ix.zero" => render_ix_zero(out, assignment)?,
-        "ix" => render_ix(out, assignment)?,
+        "buf.index" => render_buf_index(out, assignment)?,
         "eval" => render_eval(out, assignment)?,
         "reducec" => reducec::render(out, assignment)?,
         "gpu.materialize" => render_materialize_call(out, function, assignment, dialect)?,
@@ -642,7 +642,7 @@ fn render_ix_zero(out: &mut String, assignment: &GpuAssign) -> Result<(), GpuRen
     Ok(())
 }
 
-fn render_ix(out: &mut String, assignment: &GpuAssign) -> Result<(), GpuRenderError> {
+fn render_buf_index(out: &mut String, assignment: &GpuAssign) -> Result<(), GpuRenderError> {
     let [index, buffer] = assignment.inputs.as_slice() else {
         return Err(invalid_inputs(assignment, 2));
     };

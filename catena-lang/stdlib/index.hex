@@ -11,11 +11,32 @@
 })
 
 (theory program type {
-  # indexing buffers
-  # val(ix n) ● val(buf m n t) -> val(t)
-  (arr ix : {[m n t.] ([.n] ix val) ([.m n t] buf val)} -> ([m n t . t] val))
+  # Index a buffer at a specific location, equivalent to `buf[i]`
+  # buf.index : val(ix n) ● val(buf m n t) -> val(t)
+  (arr buf.index : {[m n t.] ([.n] ix val) ([.m n t] buf val)} -> ([m n t . t] val))
 
   # the zero index
   # ix.zero : (|- n > 0) -> val(ix n)
   (arr ix.zero : ({[n] 0} > |-) -> (ix val))
+
+
+  ################################################################################
+  # TODO: these declarations need to be made into definitions
+
+  # Convert a 2D index into a linear index
+  # (n : u64) (i : ix m) (j : ix n) -> (k : ix(m * n))
+  # m n i j k
+  # TODO: replace with a theorem; this is a hack declaration for now to unblock LLM implementation
+  (arr index.row-major :
+    {[m n i j k.]
+      ({[.n] u64} :)      # n : u64
+      ([.m] {[.i] ix} :)  # i : ix m
+      ([.n] {[.j] ix} :)  # j : ix n
+    }
+    ->
+    ([m n i j k.m n] {[.k] *} :)  # k : ix (m * n)
+  )
+
+  # val(ix n) ● val(ix m) -> val(ix(m * n))
+  (arr index.product : {(ix val) (ix val)} -> (* ix val))
 })

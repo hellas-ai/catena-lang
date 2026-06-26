@@ -2,7 +2,9 @@ use hexpr::Operation;
 use metacat::tree::Tree;
 use thiserror::Error;
 
-use crate::stdlib::constants::{FN_HOM_TYPE, FN_REF_TYPE, PRODUCT_TYPE, UNIT_TYPE, VALUE_TYPE};
+use crate::stdlib::constants::{
+    FN_HOM_TYPE, FN_REF_TYPE, IX_TYPE, PRODUCT_TYPE, UNIT_TYPE, VALUE_TYPE,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LoweredType {
@@ -125,7 +127,7 @@ pub fn lower_runtime_type(ty: &Tree<(), Operation>) -> Result<CType, LowerTypeEr
             let [_cap] = expect_unary(op.as_str(), children)?;
             Ok(CType::Named("catena_mem_t".to_string()))
         }
-        Tree::Node(op, 0, children) if op.as_str() == "ix" => {
+        Tree::Node(op, 0, children) if op.as_str() == IX_TYPE => {
             let [_extent] = expect_unary(op.as_str(), children)?;
             Ok(CType::U64)
         }

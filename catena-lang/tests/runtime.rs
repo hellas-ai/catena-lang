@@ -522,7 +522,7 @@ fn array_head_u64() -> anyhow::Result<()> {
             (u64.assert-nz ix.zero)
             [b]
           }
-          ix
+          buf.index
         ))
         "#,
     )?;

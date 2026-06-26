@@ -73,6 +73,24 @@ impl Mem {
         })
     }
 
+    pub(crate) fn from_f32_slice(gpu: Arc<GpuRuntime>, values: &[f32]) -> Result<Self, MemError> {
+        let bytes = std::mem::size_of_val(values);
+        let mut ptr = std::ptr::null_mut();
+        if bytes != 0 {
+            gpu.malloc_managed(&mut ptr, bytes)?;
+            unsafe {
+                std::ptr::copy_nonoverlapping(values.as_ptr(), ptr.cast::<f32>(), values.len());
+            }
+        }
+        Ok(Mem {
+            abi: CatenaMem {
+                data: ptr,
+                len: bytes as u64,
+            },
+            gpu,
+        })
+    }
+
     pub(crate) fn null(gpu: Arc<GpuRuntime>) -> Self {
         Self {
             abi: CatenaMem {

@@ -2,11 +2,7 @@ use hexpr::Operation;
 use metacat::tree::Tree;
 use thiserror::Error;
 
-use crate::stdlib::constants::{
-    FN_HOM_TYPE, FN_REF_TYPE, PRODUCT_TYPE, UNIT_TYPE, VALUE_TYPE, VALUE_TYPE_ALIAS,
-};
-
-const VALUE_TYPES: &[&str] = &[VALUE_TYPE, VALUE_TYPE_ALIAS];
+use crate::stdlib::constants::{FN_HOM_TYPE, FN_REF_TYPE, PRODUCT_TYPE, UNIT_TYPE, VALUE_TYPE};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LoweredType {
@@ -169,7 +165,7 @@ fn value_inner(ty: &Tree<(), Operation>) -> Result<Option<&Tree<(), Operation>>,
     let Tree::Node(op, 0, children) = ty else {
         return Ok(None);
     };
-    if !VALUE_TYPES.contains(&op.as_str()) {
+    if op.as_str() != VALUE_TYPE {
         return Ok(None);
     }
     let [inner] = expect_unary(op.as_str(), children)?;
@@ -275,6 +271,14 @@ mod tests {
         assert_eq!(
             lower_type(&node("val", vec![node("f32", vec![])])).unwrap(),
             LoweredType::Runtime(CType::F32)
+        );
+    }
+
+    #[test]
+    fn value_spelled_out_is_not_a_runtime_wrapper() {
+        assert_eq!(
+            lower_type(&node("value", vec![node("bool", vec![])])).unwrap(),
+            LoweredType::Erased
         );
     }
 

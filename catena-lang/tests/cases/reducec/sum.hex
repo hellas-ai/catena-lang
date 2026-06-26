@@ -1,0 +1,91 @@
+# Examples using reducec for f32 buffer reductions.
+
+################################################################################
+# Sum
+
+# Adapter from the environmentful reducec accumulator convention to direct f32.add.
+(def program f32.add-env :
+  {1 (f32 val) (f32 val)}
+  ->
+  (f32 val)
+= ([env acc value.]
+  {[.acc value]} f32.add
+))
+
+# Read one f32 element from a converted buffer at an index.
+(def program sum-f32-at :
+  ([n.] {
+    ({cap.ref [.n] f32} buf val)
+    ([.n] ix val)
+  })
+  ->
+  ([n.] (f32 val))
+= ([input i.]
+  {[.i input]} ix
+))
+
+# Sum all f32 elements in a memory buffer.
+(def program sum-f32 :
+  (cap.ref mem)
+  ->
+  (f32 val)
+= (
+  mem.cast.f32
+  [len input.]
+    {
+      (const.u32.0x00000000 u32.bitcast-f32)
+      unit.intro
+      name.f32.add-env
+      ({[.input] (([.len] :.param) name.sum-f32-at)})
+      [.len]
+    }
+    reducec
+))
+
+################################################################################
+# Max
+
+# Max all f32 elements in a memory buffer. Empty inputs reduce to -inf.
+(def program max-f32-at :
+  ([n.] {
+    ({cap.ref [.n] f32} buf val)
+    ([.n] ix val)
+  })
+  ->
+  ([n.] (f32 val))
+= ([input i.]
+  {[.i input]} ix
+))
+
+# Adapter from the environmentful reducec accumulator convention to max(acc, value).
+(def program f32.max-env :
+  {1 (f32 val) (f32 val)}
+  ->
+  (f32 val)
+= ([env acc value.]
+  {
+    ([.acc value] f32.gte [keep-acc.])
+    ([.keep-acc acc value] f32.select [result.])
+    [.result]
+  }
+))
+
+(def program max-f32 :
+  (cap.ref mem)
+  ->
+  (f32 val)
+= (
+  mem.cast.f32
+  [len input.]
+    {
+      (const.u32.0xFF800000 u32.bitcast-f32)
+      unit.intro
+      name.f32.max-env
+      ({[.input] (([.len] :.param) name.max-f32-at)})
+      [.len]
+    }
+    reducec
+))
+
+################################################################################
+# Argmax

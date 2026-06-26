@@ -7,14 +7,12 @@ use open_hypergraphs::lax::{
 use std::fmt;
 
 use crate::{
+    nonstrict::object_size,
     pass::{PassError, unpack_products::UnpackProductOperation},
     report::TheoryTermMap,
 };
 
 pub type Obj = Tree<(), Operation>;
-
-const PRODUCT_TYPE: &str = "*";
-const UNIT_TYPE: &str = "1";
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct OperationWithBoundarySizes<A> {
@@ -96,20 +94,12 @@ pub fn run<A: Clone>(
         .collect()
 }
 
-pub fn object_size(o: &Obj) -> usize {
-    match o {
-        Tree::Empty => 0,
-        Tree::Node(op, _, children) if op.as_str() == UNIT_TYPE && children.is_empty() => 0,
-        Tree::Node(op, _, children) if op.as_str() == PRODUCT_TYPE => {
-            children.iter().map(object_size).sum()
-        }
-        _ => 1,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const PRODUCT_TYPE: &str = "*";
+    const UNIT_TYPE: &str = "1";
 
     fn op(name: &str) -> Operation {
         name.parse().expect("test operation should parse")

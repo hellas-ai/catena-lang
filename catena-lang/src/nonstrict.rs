@@ -2,6 +2,9 @@
 //!
 //! These maps are the packers and unpackers used when interpreting string diagrams for
 //! non-strict monoidal categories in a strict hypergraph representation.
+//!
+//! For theoretical background, see
+//! [String Diagrams for Strictification and Coherence](https://arxiv.org/abs/2201.11738)
 
 use hexpr::Operation;
 use metacat::tree::Tree;
@@ -20,6 +23,23 @@ const UNIT_ELIM: &str = "unit.elim";
 pub(crate) type Obj = Tree<(), Operation>;
 pub(crate) type Arr = Operation;
 pub(crate) type Term = OpenHypergraph<Obj, Arr>;
+
+/// Compute the size of an object: equivalent to `size` in
+/// [String Diagrams for Strictification and Coherence](https://arxiv.org/abs/2201.11738)
+pub(crate) fn object_size(object: &Obj) -> usize {
+    match object {
+        Tree::Empty => 0,
+        Tree::Node(operation, _, children)
+            if operation.as_str() == UNIT_TYPE && children.is_empty() =>
+        {
+            0
+        }
+        Tree::Node(operation, _, children) if operation.as_str() == PRODUCT_TYPE => {
+            children.iter().map(object_size).sum()
+        }
+        _ => 1,
+    }
+}
 
 pub(crate) fn to_packer(objects: Vec<Obj>) -> Term {
     objects
@@ -215,5 +235,18 @@ mod tests {
             vec![ab.clone(), c.clone()]
         );
         assert_eq!(unpack_packed_object(&packed, 3), vec![a, b, c]);
+    }
+
+    #[test]
+    fn object_size_counts_flattened_product_components() {
+        assert_eq!(object_size(&Tree::Empty), 0);
+        assert_eq!(object_size(&object(UNIT_TYPE)), 0);
+        assert_eq!(
+            object_size(&product(
+                object("A"),
+                product(object(UNIT_TYPE), object("B"))
+            )),
+            2
+        );
     }
 }

@@ -20,23 +20,15 @@
   (arr ix.zero : ({[n] 0} > |-) -> (ix val))
 
 
-  ################################################################################
-  # TODO: these declarations need to be made into definitions
-
-  # Convert a 2D index into a linear index
-  # (n : u64) (i : ix m) (j : ix n) -> (k : ix(m * n))
-  # m n i j k
-  # TODO: replace with a theorem; this is a hack declaration for now to unblock LLM implementation
+  # Convert a 2D index into a linear row-major index.
+  # index.row-major : (n : u64) ● val(ix m) ● val(ix n) -> val(ix (m * n))
   (arr index.row-major :
-    {[m n i j k.]
+    {[m n.]
       ({[.n] u64} :)      # n : u64
-      ([.m] {[.i] ix} :)  # i : ix m
-      ([.n] {[.j] ix} :)  # j : ix n
+      ([.m] ix val)       # i : ix m
+      ([.n] ix val)       # j : ix n
     }
     ->
-    ([m n i j k.m n] {[.k] *} :)  # k : ix (m * n)
+    (* ix val)            # ix (m * n)
   )
-
-  # val(ix n) ● val(ix m) -> val(ix(m * n))
-  (arr index.product : {(ix val) (ix val)} -> (* ix val))
 })

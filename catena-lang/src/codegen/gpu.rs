@@ -309,6 +309,7 @@ fn render_assignment(
         "f32.bitcast-u32" => render_f32_bitcast_u32(out, assignment)?,
         "ix.zero" => render_ix_zero(out, assignment)?,
         "buf.index" => render_buf_index(out, assignment)?,
+        "index.row-major" => render_index_row_major(out, assignment)?,
         "eval" => render_eval(out, assignment)?,
         "reducec" => reducec::render(out, assignment)?,
         "gpu.materialize" => render_materialize_call(out, function, assignment, dialect)?,
@@ -658,6 +659,23 @@ fn render_buf_index(out: &mut String, assignment: &GpuAssign) -> Result<(), GpuR
     Ok(())
 }
 
+fn render_index_row_major(out: &mut String, assignment: &GpuAssign) -> Result<(), GpuRenderError> {
+    let [width, row, col] = assignment.inputs.as_slice() else {
+        return Err(invalid_inputs(assignment, 3));
+    };
+    let [output] = assignment.outputs.as_slice() else {
+        return Err(invalid_outputs(assignment, 1));
+    };
+    out.push_str(&format!(
+        "    {} = {} * {} + {};\n",
+        output.name,
+        value_expr(row),
+        value_expr(width),
+        value_expr(col)
+    ));
+    Ok(())
+}
+
 fn render_call(
     out: &mut String,
     symbol: &str,
@@ -905,6 +923,36 @@ mod tests {
             name: name.to_string(),
             lowered: LoweredType::Runtime(ty),
         }
+    }
+
+    #[test]
+    fn renders_row_major_index_primitive() {
+        let width = var(0, "width", CType::U64);
+        let row = var(1, "row", CType::U64);
+        let col = var(2, "col", CType::U64);
+        let output = var(3, "linear", CType::U64);
+        let function = GpuFunction {
+            name: "program_row_major".to_string(),
+            sources: vec![width.clone(), row.clone(), col.clone()],
+            targets: vec![output.clone()],
+            assignments: vec![GpuAssign {
+                op: op("index.row-major"),
+                input_sizes: Vec::new(),
+                output_sizes: Vec::new(),
+                call_symbol: None,
+                inputs: vec![GpuValue::Var(width), GpuValue::Var(row), GpuValue::Var(col)],
+                outputs: vec![output],
+            }],
+        };
+        let module = GpuModule {
+            name: "program_row_major".to_string(),
+            source_name: Some(op("row-major")),
+            entry: function,
+        };
+
+        let source = render_module(&module, GpuDialect::Hip).unwrap();
+
+        assert!(source.contains("    linear = row * width + col;\n"));
     }
 
     #[test]

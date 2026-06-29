@@ -31,4 +31,20 @@
     ->
     (* ix val)            # ix (m * n)
   )
+
+  # Index a row-major 2D view backed by a flat buffer.
+  # buf.index-row-major : (n : u64) ● val(buf c (m * n) t) ● val(ix m) ● val(ix n) -> val(t)
+  (def buf.index-row-major :
+    {[c m n t.]
+      ({[.n] u64} :)              # n : u64
+      ({[.c] ([.m n] *) [.t]} buf val)
+      ([.m] ix val)               # row : ix m
+      ([.n] ix val)               # col : ix n
+    }
+    ->
+    ([c m n t . t] val)
+  = ([width buffer row col.]
+    ({[.width row col]} index.row-major [linear.])
+    ({[.linear buffer]} buf.index)
+  ))
 })

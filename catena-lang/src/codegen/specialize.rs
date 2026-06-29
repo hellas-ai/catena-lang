@@ -35,13 +35,17 @@ pub fn entrypoint_key<A>(
     let mut sources = Vec::new();
     let mut targets = Vec::new();
     for source in &term.sources {
-        if let LoweredType::Runtime(ty) = lower_type(&term.hypergraph.nodes[source.0])? {
-            sources.push(ty);
+        match entrypoint_lower_type(&term.hypergraph.nodes[source.0])? {
+            Some(LoweredType::Runtime(ty)) => sources.push(ty),
+            Some(LoweredType::Erased) => {}
+            None => return Ok(None),
         }
     }
     for target in &term.targets {
-        if let LoweredType::Runtime(ty) = lower_type(&term.hypergraph.nodes[target.0])? {
-            targets.push(ty);
+        match entrypoint_lower_type(&term.hypergraph.nodes[target.0])? {
+            Some(LoweredType::Runtime(ty)) => targets.push(ty),
+            Some(LoweredType::Erased) => {}
+            None => return Ok(None),
         }
     }
     if sources.is_empty() && targets.is_empty() {
@@ -52,6 +56,16 @@ pub fn entrypoint_key<A>(
         targets,
         static_inputs: Vec::new(),
     }))
+}
+
+fn entrypoint_lower_type(
+    ty: &metacat::tree::Tree<(), Operation>,
+) -> Result<Option<LoweredType>, LowerTypeError> {
+    match lower_type(ty) {
+        Ok(lowered) => Ok(Some(lowered)),
+        Err(LowerTypeError::NoRuntimeRepresentation(_)) => Ok(None),
+        Err(error) => Err(error),
+    }
 }
 
 /// Compute a specialisation key for a given concrete lowered type
@@ -145,6 +159,24 @@ mod tests {
     #[test]
     fn erased_only_generic_definition_is_not_an_entrypoint() {
         let term: AnnotatedTerm = OpenHypergraph::identity(vec![Tree::Leaf(0, ())]);
+
+        assert!(entrypoint_key(&term).unwrap().is_none());
+    }
+
+    #[test]
+    fn generic_runtime_definition_is_not_an_entrypoint() {
+        let term: AnnotatedTerm =
+            OpenHypergraph::identity(vec![node("val", vec![Tree::Leaf(0, ())])]);
+
+        assert!(entrypoint_key(&term).unwrap().is_none());
+    }
+
+    #[test]
+    fn mixed_generic_runtime_definition_is_not_an_entrypoint() {
+        let term: AnnotatedTerm = OpenHypergraph::identity(vec![
+            node("val", vec![node("u64", vec![])]),
+            node("val", vec![Tree::Leaf(0, ())]),
+        ]);
 
         assert!(entrypoint_key(&term).unwrap().is_none());
     }

@@ -146,9 +146,10 @@
       ({[.width buffer]} *.intro [env-product.])
       ([.env-product] defer [env.])
       (([.idx] name.index.id) lift [id.])
-      ({[.env id]} tensor [defer-id.]) # 1 * idx => (width * buffer) * (val(ix m) * val(ix n))
+      # 1 * (val(ix m) * val(ix n)) => (width * buffer) * (val(ix m) * val(ix n))
+      ({[.env id]} tensor [defer-id.]) 
       ([.idx] *.elim [row col.])
-      ({[.env-product row col]} name.*.assoc-left lift [assoc.])
+      ([.env-product row col] assoc-left [assoc.])
 
       # Function pointer for width * buffer * row * col -> val(t).
       ([.nm] *.elim [m n.])

@@ -32,6 +32,17 @@
     ([. src tgt] =>)
   })
 
+  # assoc-left : A * (B * C) => (A * B) * C
+  (arr assoc-left :
+    {[a b c.] [.a] [.b] [.c]}
+    ->
+    {[a b c.]
+      ({[.a] ([.b c] *)} * [src.])
+      ({([.a b] *) [.c]} * [tgt.])
+      ([.src tgt] =>)
+    }
+  )
+
   # Additional to CMC structure
   # (A -> B) -> (A => B)
   (arr lift : (-> val) -> =>)

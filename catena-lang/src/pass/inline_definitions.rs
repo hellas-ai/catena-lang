@@ -14,6 +14,10 @@ pub type Term = OpenHypergraph<(), Operation>;
 
 #[derive(Debug, Error)]
 pub enum InlineDefinitionsError {
+    #[error("missing theory `{0}`")]
+    MissingTheory(String),
+    #[error("theory `{0}` is not a user theory")]
+    NotUserTheory(String),
     #[error("missing definition `{definition}` in theory `{theory}`")]
     MissingDefinition { theory: String, definition: String },
     #[error("cyclic inline dependency in theory `{theory}` at definition `{definition}`")]
@@ -38,13 +42,17 @@ pub fn run(
             continue;
         }
 
-        let Some(Theory::Theory { arrows, .. }) = theory_set.theories.get(theory_id) else {
-            continue;
+        let theory = theory_set
+            .theories
+            .get(theory_id)
+            .ok_or_else(|| InlineDefinitionsError::MissingTheory(theory_id.to_string()))?;
+        let Theory::Theory { arrows, .. } = theory else {
+            return Err(InlineDefinitionsError::NotUserTheory(theory_id.to_string()));
         };
 
         let inline_bodies = collect_inline_bodies(theory_id, arrows, selected)?;
         let Some(Theory::Theory { arrows, .. }) = output.theories.get_mut(theory_id) else {
-            continue;
+            unreachable!("validated user theory should exist in cloned output");
         };
 
         for (definition_name, arrow) in arrows.iter_mut() {
@@ -284,6 +292,32 @@ mod tests {
         );
     }
 
+    #[test]
+    fn errors_when_selected_theory_is_missing() {
+        let theory_set = theory_set("");
+        let selected = selected_definitions("missing", ["mk-closure"]);
+
+        let error = run(&theory_set, &selected).expect_err("missing theory should error");
+
+        assert!(matches!(
+            error,
+            InlineDefinitionsError::MissingTheory(theory) if theory == "missing"
+        ));
+    }
+
+    #[test]
+    fn errors_when_selected_theory_is_not_user_theory() {
+        let theory_set = theory_set("");
+        let selected = selected_definitions("nat", ["mk-closure"]);
+
+        let error = run(&theory_set, &selected).expect_err("nat theory should error");
+
+        assert!(matches!(
+            error,
+            InlineDefinitionsError::NotUserTheory(theory) if theory == "nat"
+        ));
+    }
+
     fn theory_set(source: &'static str) -> TheorySet {
         let raw = RawTheorySet::from_texts(stdlib::sources().chain([source]))
             .expect("test theories should parse");
@@ -294,8 +328,15 @@ mod tests {
     fn selected_program_definitions(
         definitions: impl IntoIterator<Item = &'static str>,
     ) -> BTreeMap<TheoryId, BTreeSet<Operation>> {
+        selected_definitions("program", definitions)
+    }
+
+    fn selected_definitions(
+        theory: &'static str,
+        definitions: impl IntoIterator<Item = &'static str>,
+    ) -> BTreeMap<TheoryId, BTreeSet<Operation>> {
         BTreeMap::from([(
-            TheoryId("program".parse().unwrap()),
+            TheoryId(theory.parse().unwrap()),
             definitions
                 .into_iter()
                 .map(|definition| definition.parse().unwrap())

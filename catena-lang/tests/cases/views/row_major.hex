@@ -8,8 +8,9 @@
 # the returned buffer should be `[10, 21, 32]`.
 
 (theory program type {
-  # Interpret runtime memory as an n x n row-major u64 buffer and expose the
-  # flat length as a runtime value.
+  # Temporary local workaround: interpret runtime memory as an n x n row-major
+  # u64 buffer. The general flat mem -> product-shaped buf cast needs a small
+  # arithmetic/ascription primitive that is still being designed.
   (arr matrix-cast-u64-square :
     {[n.]
       ({[.n] u64} :)
@@ -17,7 +18,6 @@
     }
     ->
     {[n.]
-      ({([.n n] *) u64} :)
       ({cap.ref ([.n n] *) u64} buf val)
     }
   )
@@ -40,7 +40,7 @@
   {[n.] (cap.own mem)}
 = ([dim input.]
   {
-    ({[.dim input]} matrix-cast-u64-square [flat-len buffer.])
+    ({[.dim input]} matrix-cast-u64-square [buffer.])
 
     # matrix : val(ix n) * val(ix n) => val(u64)
     ({[.dim buffer]} buf.row-major-view [matrix.])

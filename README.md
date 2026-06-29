@@ -5,7 +5,8 @@ Catena is a **deterministic array programming language**:
 - **Deterministic**: Programs produce bitwise identical results on all platforms 
 - **Secure**: It is safe to execute programs from third parties
 
-<h3> ⚠️ NOTE: Caten is **alpha quality software**. ⚠️</h3>
+<h3> ⚠️ NOTE: Catena is alpha quality software⚠️</h3>
+
 If you find that these promises don't hold,
 [open an issue!](https://github.com/hellas-ai/catena-lang/issues)
 

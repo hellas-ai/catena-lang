@@ -52,19 +52,14 @@ pub fn run(
             return Err(InlineDefinitionsError::NotUserTheory(theory_id.to_string()));
         };
 
-        let inlined = inlined_definitions(arrows, selected);
-        if inlined.is_empty() {
-            continue;
-        }
-
-        let inline_bodies = collect_inline_bodies(theory_id, arrows, &inlined)?;
+        let inline_bodies = collect_inline_bodies(theory_id, arrows, selected)?;
 
         let Some(Theory::Theory { arrows, .. }) = output.theories.get_mut(theory_id) else {
             unreachable!("validated user theory should exist in cloned output");
         };
 
         for (definition_name, arrow) in arrows.iter_mut() {
-            if inlined.contains(definition_name) {
+            if selected.contains(definition_name) {
                 continue;
             }
 
@@ -80,7 +75,7 @@ pub fn run(
             )?);
         }
 
-        for definition_name in &inlined {
+        for definition_name in selected {
             arrows.remove(definition_name);
             arrows.remove(&name_operation(definition_name));
         }
@@ -109,50 +104,6 @@ fn collect_inline_bodies(
     }
 
     Ok(inline_bodies)
-}
-
-fn inlined_definitions(
-    arrows: &BTreeMap<Operation, metacat::theory::TheoryArrow>,
-    selected: &BTreeSet<Operation>,
-) -> BTreeSet<Operation> {
-    // The pass removes only selected definitions that are actually substituted.
-    // Selected definitions with no surviving caller stay in the theory for
-    // later validation by the caller.
-    let mut inlined = BTreeSet::new();
-    let mut pending = Vec::new();
-
-    for (definition_name, arrow) in arrows {
-        if selected.contains(definition_name) {
-            continue;
-        }
-
-        let Some(definition) = &arrow.definition else {
-            continue;
-        };
-
-        for dependency in selected_dependencies(definition, selected) {
-            if inlined.insert(dependency.clone()) {
-                pending.push(dependency);
-            }
-        }
-    }
-
-    while let Some(definition_name) = pending.pop() {
-        let Some(definition) = arrows
-            .get(&definition_name)
-            .and_then(|arrow| arrow.definition.as_ref())
-        else {
-            continue;
-        };
-
-        for dependency in selected_dependencies(definition, selected) {
-            if inlined.insert(dependency.clone()) {
-                pending.push(dependency);
-            }
-        }
-    }
-
-    inlined
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -350,28 +301,6 @@ mod tests {
                 .iter()
                 .any(|operation| operation.as_str() == "defer")
         );
-    }
-
-    #[test]
-    fn unused_selected_definitions_are_preserved() {
-        let theory_set = theory_set(
-            r#"
-            (def program mk-closure : (f32 val) -> ({1 (f32 val)} =>) = defer)
-            "#,
-        );
-        let selected = selected_program_definitions(["mk-closure"]);
-
-        let output = run(&theory_set, &selected).expect("inline pass should succeed");
-        let program = output
-            .theories
-            .get(&TheoryId("program".parse().unwrap()))
-            .expect("program theory should exist");
-        let Theory::Theory { arrows, .. } = program else {
-            panic!("program should be a user theory");
-        };
-
-        assert!(arrows.contains_key(&"mk-closure".parse().unwrap()));
-        assert!(arrows.contains_key(&"name.mk-closure".parse().unwrap()));
     }
 
     #[test]

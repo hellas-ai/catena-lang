@@ -165,6 +165,10 @@ impl Runtime {
         Mem::from_u64_slice(self.gpu.clone(), values).map(Value::Mem)
     }
 
+    pub fn mem_f32(&self, values: &[f32]) -> Result<Value, MemError> {
+        Mem::from_f32_slice(self.gpu.clone(), values).map(Value::Mem)
+    }
+
     /// Run a source-level `program` definition, which must have M arguments, and return its N arguments.
     pub fn exec<const M: usize, const N: usize>(
         &self,

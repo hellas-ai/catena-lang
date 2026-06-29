@@ -1,0 +1,40 @@
+{
+  "name": "catena-dev",
+  "cloudType": "SECURE",
+  "computeType": "GPU",
+  "imageName": "ghcr.io/hellas-ai/catena-lang/runpod-dev:sha-4960ace",
+  "containerRegistryAuthId": "REPLACE_WITH_RUNPOD_REGISTRY_AUTH_ID",
+  "gpuCount": 1,
+  "gpuTypeIds": [
+    "NVIDIA RTX 2000 Ada Generation",
+    "NVIDIA RTX A4500",
+    "NVIDIA RTX A4000",
+    "NVIDIA RTX 4000 Ada Generation",
+    "NVIDIA RTX A5000",
+    "NVIDIA L4",
+    "NVIDIA A40",
+    "NVIDIA GeForce RTX 3090",
+    "NVIDIA RTX A6000"
+  ],
+  "gpuTypePriority": "custom",
+  "allowedCudaVersions": [
+    "12.6",
+    "12.7",
+    "12.8",
+    "12.9",
+    "13.0"
+  ],
+  "interruptible": false,
+  "supportPublicIp": true,
+  "minVCPUPerGPU": 2,
+  "minRAMPerGPU": 8,
+  "containerDiskInGb": 40,
+  "volumeInGb": 20,
+  "volumeMountPath": "/workspace",
+  "ports": [
+    "22/tcp"
+  ],
+  "dockerEntrypoint": [],
+  "dockerStartCmd": [],
+  "env": {}
+}

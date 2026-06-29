@@ -2,6 +2,7 @@ use super::*;
 
 const BASIC_SOURCE: &str = include_str!("reducec/basic.hex");
 const NAMED_PRIMITIVE_SOURCE: &str = include_str!("reducec/named_primitive.hex");
+const SUM_SOURCE: &str = include_str!("reducec/sum.hex");
 
 #[test]
 fn sum_u64_exec() -> anyhow::Result<()> {
@@ -44,5 +45,33 @@ fn dot_u64_exec() -> anyhow::Result<()> {
 
     let dot = 2 * 11 + 3 * 13 + 5 * 17 + 7 * 19;
     assert_eq!(result, dot);
+    Ok(())
+}
+
+#[test]
+fn sum_f32_exec() -> anyhow::Result<()> {
+    let runtime = runtime_with(SUM_SOURCE)?;
+
+    let input = runtime.mem_f32(&[1.5_f32, -0.5, 2.0, 4.0])?;
+    let [result] = runtime.exec("sum-f32", [input])?;
+    let Value::F32(result) = result else {
+        anyhow::bail!("sum-f32 returned non-f32 value: {result:?}");
+    };
+
+    assert_eq!(result, 7.0);
+    Ok(())
+}
+
+#[test]
+fn max_f32_exec() -> anyhow::Result<()> {
+    let runtime = runtime_with(SUM_SOURCE)?;
+
+    let input = runtime.mem_f32(&[1.5_f32, -0.5, 2.0, 4.0])?;
+    let [result] = runtime.exec("max-f32", [input])?;
+    let Value::F32(result) = result else {
+        anyhow::bail!("max-f32 returned non-f32 value: {result:?}");
+    };
+
+    assert_eq!(result, 4.0);
     Ok(())
 }

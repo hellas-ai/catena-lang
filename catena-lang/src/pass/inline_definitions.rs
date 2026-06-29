@@ -52,18 +52,19 @@ pub fn run(
             return Err(InlineDefinitionsError::NotUserTheory(theory_id.to_string()));
         };
 
-        let inlined_definitions = inlined_definitions(arrows, selected);
-        if inlined_definitions.is_empty() {
+        let inlined = inlined_definitions(arrows, selected);
+        if inlined.is_empty() {
             continue;
         }
-        let inline_bodies = collect_inline_bodies(theory_id, arrows, &inlined_definitions)?;
+
+        let inline_bodies = collect_inline_bodies(theory_id, arrows, &inlined)?;
 
         let Some(Theory::Theory { arrows, .. }) = output.theories.get_mut(theory_id) else {
             unreachable!("validated user theory should exist in cloned output");
         };
 
         for (definition_name, arrow) in arrows.iter_mut() {
-            if inlined_definitions.contains(definition_name) {
+            if inlined.contains(definition_name) {
                 continue;
             }
 
@@ -79,7 +80,7 @@ pub fn run(
             )?);
         }
 
-        for definition_name in &inlined_definitions {
+        for definition_name in &inlined {
             arrows.remove(definition_name);
             arrows.remove(&name_operation(definition_name));
         }
@@ -114,14 +115,14 @@ fn inlined_definitions(
     arrows: &BTreeMap<Operation, metacat::theory::TheoryArrow>,
     selected: &BTreeSet<Operation>,
 ) -> BTreeSet<Operation> {
-    // Only remove selected definitions that are actually substituted into a
-    // definition that survives the pass. Selected definitions with no surviving
-    // caller remain in the theory for later validation.
+    // The pass removes only selected definitions that are actually substituted.
+    // Selected definitions with no surviving caller stay in the theory for
+    // later validation by the caller.
     let mut inlined = BTreeSet::new();
     let mut pending = Vec::new();
 
-    for (current_definition, arrow) in arrows {
-        if selected.contains(current_definition) {
+    for (definition_name, arrow) in arrows {
+        if selected.contains(definition_name) {
             continue;
         }
 
@@ -352,7 +353,7 @@ mod tests {
     }
 
     #[test]
-    fn selected_roots_are_preserved() {
+    fn unused_selected_definitions_are_preserved() {
         let theory_set = theory_set(
             r#"
             (def program mk-closure : (f32 val) -> ({1 (f32 val)} =>) = defer)

@@ -25,6 +25,19 @@
 (theory program type {
   (arr :.forget : : -> ([x t.t] val))
   (arr :.param : : -> [x t . x])
+  (arr val.wrap : [a . a] -> ([a . a] val))
+
+  # Distribute val over product objects.
+  # A × B -> Val(A) × Val(B)
+  (arr val.*.map :
+    ([a b] *)
+    ->
+    {[a b.] ({([.a] val) ([.b] val)} *)}
+  )
+  # Val(A × B) -> Val(A) × Val(B)
+  (arr val.*.elim : (* val) -> {val val})
+  # Val(A) × Val(B) -> Val(A × B)
+  (arr val.*.intro : {val val} -> (* val))
 
   # Modus ponens:
   #   h0 : |- φ

@@ -22,14 +22,25 @@
   # ix.zero : (|- n > 0) -> val(ix n)
   (arr ix.zero : ({[n] 0} > |-) -> (ix val))
 
-  # Build the erased index-value object for a size parameter.
-  (arr ix.param : [n . n] -> ([n . n] ix val))
-
-  # Split an erased product-sized index object into a pair of index-value objects.
-  (arr ix.product-elim :
-    (* ix val)
+  # Split an erased product-sized index domain into a pair of index domains.
+  (arr ix.*.elim :
+    (* ix)
     ->
-    ({(ix val) (ix val)} *)
+    ({ix ix} *)
+  )
+  (arr ix.*.intro :
+    ({ix ix} *)
+    ->
+    (* ix)
+  )
+
+  # Extract the erased index-domain object from a buffer type.
+  (arr buf.index-domain :
+    {[c n t.]
+      ([.c n t] buf val)
+    }
+    ->
+    ([c n t.] ([.n] ix))
   )
 
   # Extract the row/column index-domain object from a product-sized buffer.
@@ -40,9 +51,9 @@
     ->
     ([c m n t.] ({([.m] ix val) ([.n] ix val)} *))
   = ([buffer.]
-    ([.buffer] buf.size-param)
-    ix.param
-    ix.product-elim
+    ([.buffer] buf.index-domain)
+    ix.*.elim
+    val.*.map
   ))
 
   # Convert a 2D index into a linear row-major index.
@@ -119,7 +130,7 @@
       ([.buffer] buf.ix-product-param [idx.])
 
       # lambda : B => 1 * B
-      (([.idx] name.product.left-intro) lift [lambda.])
+      (([.idx] name.*.left-intro) lift [lambda.])
 
       # defer-id : B => Env * B
       ({[.width buffer]} *.intro defer [env.])

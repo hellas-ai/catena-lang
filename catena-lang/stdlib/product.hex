@@ -11,5 +11,5 @@
   (arr *.elim : * -> [a b])
 
   # Left unit introduction: A -> 1 * A.
-  (def product.left-intro : [a] -> {1 [a]} = {unit.intro [x]})
+  (def *.left-intro : [a] -> {1 [a]} = {unit.intro [x]})
 })

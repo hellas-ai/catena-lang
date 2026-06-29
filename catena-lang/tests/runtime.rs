@@ -767,3 +767,6 @@ mod reducec;
 
 #[path = "cases/closure.rs"]
 mod closure;
+
+#[path = "cases/views.rs"]
+mod views;

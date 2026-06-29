@@ -93,36 +93,6 @@
     ({[.linear buffer]} buf.index)
   ))
 
-  # Packed form with source `(n, buffer) * (row, col)`, used for partial application.
-  (def buf.index-row-major.packed :
-    {[c m n t.]
-      ({({({[.n] u64} :) ({[.c] ([.m n] *) [.t]} buf val)} *)
-        ({([.m] ix val) ([.n] ix val)} *)} *)
-    }
-    ->
-    ([c m n t . t] val)
-  = ([packed.]
-    ([.packed] *.elim [env idx.])
-    ([.env] *.elim [width buffer.])
-    ([.idx] *.elim [row col.])
-    ({[.width buffer row col]} buf.index-row-major)
-  ))
-
-  # Specialized function pointer for the packed row-major indexer.
-  (arr buf.index-row-major.packed.fn :
-    {[c m n t.]
-      ({[.n] u64} :)
-      ({[.c] ([.m n] *) [.t]} buf val)
-    }
-    ->
-    ([c m n t.]
-      {({({({[.n] u64} :) ({[.c] ([.m n] *) [.t]} buf val)} *)
-        ({([.m] ix val) ([.n] ix val)} *)} *)
-       ([.t] val)}
-      ->
-      val)
-  )
-
   # View a flat row-major buffer as an index function.
   # buf.row-major-view : (n : u64) ● val(buf c (m * n) t) -> val(ix m) * val(ix n) => val(t)
   (def buf.row-major-view :

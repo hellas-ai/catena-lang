@@ -1,0 +1,56 @@
+# Build a row-major 2D matrix view from runtime memory, then materialize the
+# diagonal into a new flat buffer. For a 3 x 3 input laid out as:
+#
+#   [10, 11, 12,
+#    20, 21, 22,
+#    30, 31, 32]
+#
+# the returned buffer should be `[10, 21, 32]`.
+
+(theory program type {
+  # Interpret runtime memory as an n x n row-major u64 buffer and expose the
+  # flat length as a runtime value.
+  (arr matrix-cast-u64-square :
+    {[n.]
+      ({[.n] u64} :)
+      (cap.ref mem)
+    }
+    ->
+    {[n.]
+      ({([.n n] *) u64} :)
+      ({cap.ref ([.n n] *) u64} buf val)
+    }
+  )
+
+  # Convert a diagonal materialization index into a 2D index.
+  (def matrix-diagonal-index :
+    ([n.] ([.n] ix val))
+    ->
+    {[n.] ({([.n] ix val) ([.n] ix val)} *)}
+  = ([i.] {[.i i]} *.intro))
+})
+
+# Runtime memory -> square u64 buffer -> row-major view -> diagonal memory.
+(def program matrix-diagonal-u64 :
+  {[n.]
+    ({[.n] u64} :)
+    (cap.ref mem)
+  }
+  ->
+  {[n.] (cap.own mem)}
+= ([dim input.]
+  {
+    ({[.dim input]} matrix-cast-u64-square [flat-len buffer.])
+
+    # matrix : val(ix n) * val(ix n) => val(u64)
+    ({[.dim buffer]} buf.row-major-view [matrix.])
+
+    # diagonal-index : val(ix n) => val(ix n) * val(ix n)
+    ((([.dim] :.param) name.matrix-diagonal-index) lift [diagonal-index.])
+    ({[.diagonal-index matrix]} compose [diagonal-view.])
+    ([.diagonal-view] val.wrap [diagonal-view-val.])
+
+    ({[.dim diagonal-view-val]} materialize [out-buffer.])
+  }
+  ({[.dim out-buffer]} buf.to-mem)
+))

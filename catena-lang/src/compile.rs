@@ -1,6 +1,7 @@
+use std::collections::{BTreeMap, BTreeSet};
+
 use hexpr::Operation;
 use metacat::theory::{RawTheorySet, Theory, TheoryId, TheorySet};
-use open_hypergraphs::lax::OpenHypergraph;
 use thiserror::Error;
 
 use crate::{
@@ -8,9 +9,10 @@ use crate::{
     closure::theory::ConvertTheoryError,
     codegen::CodegenError,
     elaborate::ElaborateError,
-    pass::{PassError, forget_closures::ForgetClosuresError},
+    pass::{
+        PassError, forget_closures::ForgetClosuresError, inline_definitions::InlineDefinitionsError,
+    },
     report::CompileReport,
-    stdlib::constants::FN_HOM_TYPE,
 };
 
 #[derive(Debug, Error)]
@@ -35,6 +37,8 @@ pub enum CompileError {
     ClosureOnGlobalInterface { theory: String, definition: String },
     #[error(transparent)]
     ClosureConversion(#[from] ConvertTheoryError),
+    #[error(transparent)]
+    InlineDefinitions(#[from] InlineDefinitionsError),
     #[error(transparent)]
     ForgetClosures(#[from] ForgetClosuresError),
     #[error(transparent)]
@@ -89,7 +93,19 @@ fn compile_into(report: &mut CompileReport) -> Result<(), CompileError> {
     };
     report.definition_types = Some(definition_types.clone());
 
-    // don't allow `=>` types on global interfaces
+    let definitions_to_inline = closure_boundary_definitions(&theory_set);
+    let theory_set = crate::pass::inline_definitions::run(&theory_set, &definitions_to_inline)?;
+    report.theory_set = Some(theory_set.clone());
+
+    let definition_types = match crate::check::check(&theory_set) {
+        Ok(definition_types) => definition_types,
+        Err(error) => {
+            report.partial_definition_types = partial_definition_types(&error);
+            return Err(error.into());
+        }
+    };
+    report.definition_types = Some(definition_types.clone());
+
     reject_closure_global_interfaces(&theory_set)?;
 
     let theory_set = convert_closures(&theory_set, &definition_types)?;
@@ -169,10 +185,36 @@ fn reject_closure_global_interfaces(theory_set: &TheorySet) -> Result<(), Compil
     Ok(())
 }
 
-fn contains_closure_type_map(type_map: &OpenHypergraph<(), Operation>) -> bool {
+fn closure_boundary_definitions(theory_set: &TheorySet) -> BTreeMap<TheoryId, BTreeSet<Operation>> {
+    let mut output = BTreeMap::new();
+
+    for (theory_id, theory) in &theory_set.theories {
+        let Theory::Theory { arrows, .. } = theory else {
+            continue;
+        };
+
+        let definitions = arrows
+            .iter()
+            .filter_map(|(definition_name, arrow)| {
+                arrow.definition.as_ref()?;
+                (contains_closure_type_map(&arrow.type_maps.0)
+                    || contains_closure_type_map(&arrow.type_maps.1))
+                .then_some(definition_name.clone())
+            })
+            .collect::<BTreeSet<_>>();
+
+        if !definitions.is_empty() {
+            output.insert(theory_id.clone(), definitions);
+        }
+    }
+
+    output
+}
+
+fn contains_closure_type_map(type_map: &metacat::theory::Term) -> bool {
     type_map
         .hypergraph
         .edges
         .iter()
-        .any(|op| op.as_str() == FN_HOM_TYPE)
+        .any(|op| op.as_str() == crate::stdlib::constants::FN_HOM_TYPE)
 }

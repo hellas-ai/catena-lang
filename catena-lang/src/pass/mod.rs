@@ -1,4 +1,5 @@
 pub mod forget_closures;
+pub mod inline_definitions;
 pub mod record_boundary_sizes;
 pub mod unpack_products;
 

@@ -57,3 +57,20 @@ fn run_named_and_packed_with_free() -> anyhow::Result<()> {
         "#,
     )
 }
+
+#[test]
+fn closure_boundary_root_is_rejected() -> anyhow::Result<()> {
+    let raw = RawTheorySet::from_texts(STDLIB.iter().copied().chain([r#"
+        (def program mk-closure : (f32 val) -> ({1 (f32 val)} =>) = defer)
+    "#]))?;
+
+    let failure = compile(raw).expect_err("closure-boundary root should be rejected");
+
+    assert!(matches!(
+        failure.cause,
+        CompileError::ClosureOnGlobalInterface { theory, definition }
+            if theory == "program" && definition == "mk-closure"
+    ));
+
+    Ok(())
+}

@@ -9,6 +9,7 @@
   (arr unit.elim : [] -> 1)
   (arr *.intro : [a b] -> *)
   (arr *.elim : * -> [a b])
+  (arr *.assoc-left : {[a b c.] ({[.a] ([.b c] *)} *)} -> {[a b c.] ({([.a b] *) [.c]} *)})
 
   # Left unit introduction: A -> 1 * A.
   (def *.left-intro : [a] -> {1 [a]} = {unit.intro [x]})

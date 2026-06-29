@@ -43,6 +43,15 @@
     ([c n t.] ([.n] ix))
   )
 
+  # Extract erased buffer parameters from a buffer type.
+  (arr buf.params :
+    {[c n t.]
+      ([.c n t] buf val)
+    }
+    ->
+    ([c n t.] {[.c] [.n] ([.n] ix) [.t]})
+  )
+
   # Extract the row/column index-domain object from a product-sized buffer.
   (def buf.ix-product-param :
     {[c m n t.]
@@ -127,21 +136,27 @@
     }
   = ([width buffer.]
     {
-      ([.buffer] buf.ix-product-param [idx.])
+      ([.buffer] buf.params [c nm ix-nm t.])
+      ([.ix-nm] ix.*.elim val.*.map [idx.])
 
-      # lambda : B => 1 * B
+      # idx => 1 * idx, where idx = val(ix m) * val(ix n).
       (([.idx] name.*.left-intro) lift [lambda.])
 
-      # defer-id : B => Env * B
-      ({[.width buffer]} *.intro defer [env.])
+      # defer (width * buffer) : 1 => width * buffer
+      ({[.width buffer]} *.intro [env-product.])
+      ([.env-product] defer [env.])
       (([.idx] name.index.id) lift [id.])
-      ({[.env id]} tensor [defer-id.])
+      ({[.env id]} tensor [defer-id.]) # 1 * idx => (width * buffer) * (val(ix m) * val(ix n))
+      ([.idx] *.elim [row col.])
+      ({[.env-product row col]} name.*.assoc-left lift [assoc.])
 
-      # f : Env * B => T
-      ({[.width buffer]} buf.index-row-major.packed.fn [packed-fn.])
-      ([.packed-fn] lift [f.])
+      # Function pointer for width * buffer * row * col -> val(t).
+      ([.nm] *.elim [m n.])
+      ([.c m n t] name.buf.index-row-major [f.])
+      ([.f] lift [f-lift.])
     }
-    ({[.defer-id f]} compose [apply-f.])
+    ({[.defer-id assoc]} compose [packed-input.])
+    ({[.packed-input f-lift]} compose [apply-f.])
     ({[.lambda apply-f]} compose)
   ))
 })

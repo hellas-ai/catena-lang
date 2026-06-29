@@ -47,6 +47,12 @@
     ([.n p] = |-)           # n = p
   } -> ([m n p.] ({[.m n] u64} buf val)))
 
+  # Extract the erased length parameter from a buffer type.
+  # This is type-level information only, analogous to `:.param`.
+  (arr buf.size-param : {[m n t.]
+    ([.m n t] buf val)
+  } -> ([m n t . n]))
+
   # Materialize an owned buffer from an indexed producer.
   #
   #   materialize : (n : u64) ● val(val(ix n) => val(t)) -> val(buf cap.own n t)

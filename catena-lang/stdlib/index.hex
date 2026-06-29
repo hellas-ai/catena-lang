@@ -11,6 +11,9 @@
 })
 
 (theory program type {
+  # Identity arrow, named locally for index closure construction.
+  (def index.id : [a] -> [a] = [x])
+
   # Index a buffer at a specific location, equivalent to `buf[i]`
   # buf.index : val(ix n) ● val(buf m n t) -> val(t)
   (arr buf.index : {[m n t.] ([.n] ix val) ([.m n t] buf val)} -> ([m n t . t] val))
@@ -19,6 +22,28 @@
   # ix.zero : (|- n > 0) -> val(ix n)
   (arr ix.zero : ({[n] 0} > |-) -> (ix val))
 
+  # Build the erased index-value object for a size parameter.
+  (arr ix.param : [n . n] -> ([n . n] ix val))
+
+  # Split an erased product-sized index object into a pair of index-value objects.
+  (arr ix.product-elim :
+    (* ix val)
+    ->
+    ({(ix val) (ix val)} *)
+  )
+
+  # Extract the row/column index-domain object from a product-sized buffer.
+  (def buf.ix-product-param :
+    {[c m n t.]
+      ({[.c] ([.m n] *) [.t]} buf val)
+    }
+    ->
+    ([c m n t.] ({([.m] ix val) ([.n] ix val)} *))
+  = ([buffer.]
+    ([.buffer] buf.size-param)
+    ix.param
+    ix.product-elim
+  ))
 
   # Convert a 2D index into a linear row-major index.
   # index.row-major : (n : u64) ● val(ix m) ● val(ix n) -> val(ix (m * n))
@@ -46,5 +71,66 @@
   = ([width buffer row col.]
     ({[.width row col]} index.row-major [linear.])
     ({[.linear buffer]} buf.index)
+  ))
+
+  # Packed form with source `(n, buffer) * (row, col)`, used for partial application.
+  (def buf.index-row-major.packed :
+    {[c m n t.]
+      ({({({[.n] u64} :) ({[.c] ([.m n] *) [.t]} buf val)} *)
+        ({([.m] ix val) ([.n] ix val)} *)} *)
+    }
+    ->
+    ([c m n t . t] val)
+  = ([packed.]
+    ([.packed] *.elim [env idx.])
+    ([.env] *.elim [width buffer.])
+    ([.idx] *.elim [row col.])
+    ({[.width buffer row col]} buf.index-row-major)
+  ))
+
+  # Specialized function pointer for the packed row-major indexer.
+  (arr buf.index-row-major.packed.fn :
+    {[c m n t.]
+      ({[.n] u64} :)
+      ({[.c] ([.m n] *) [.t]} buf val)
+    }
+    ->
+    ([c m n t.]
+      {({({({[.n] u64} :) ({[.c] ([.m n] *) [.t]} buf val)} *)
+        ({([.m] ix val) ([.n] ix val)} *)} *)
+       ([.t] val)}
+      ->
+      val)
+  )
+
+  # View a flat row-major buffer as an index function.
+  # buf.row-major-view : (n : u64) ● val(buf c (m * n) t) -> val(ix m) * val(ix n) => val(t)
+  (def buf.row-major-view :
+    {[c m n t.]
+      ({[.n] u64} :)              
+      ({[.c] ([.m n] *) [.t]} buf val)
+    }
+    ->
+    {[c m n t.]
+      ({({([.m] ix val) ([.n] ix val)} *) ([.t] val)} =>)
+    }
+  = ([width buffer.]
+    {
+      ([.buffer] buf.ix-product-param [idx.])
+
+      # lambda : B => 1 * B
+      (([.idx] name.product.left-intro) lift [lambda.])
+
+      # defer-id : B => Env * B
+      ({[.width buffer]} *.intro defer [env.])
+      (([.idx] name.index.id) lift [id.])
+      ({[.env id]} tensor [defer-id.])
+
+      # f : Env * B => T
+      ({[.width buffer]} buf.index-row-major.packed.fn [packed-fn.])
+      ([.packed-fn] lift [f.])
+    }
+    ({[.defer-id f]} compose [apply-f.])
+    ({[.lambda apply-f]} compose)
   ))
 })

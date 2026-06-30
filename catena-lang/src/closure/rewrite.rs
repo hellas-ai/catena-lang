@@ -45,10 +45,10 @@ pub fn rewrite_region(
     rewritten.delete_edges(&region.edges);
     let deleted_nodes = non_defer_region_nodes(region);
     let node_map = delete_nodes_with_witness(&mut rewritten, &deleted_nodes);
-    let defer_inputs = remap_boundary_nodes(&node_map, &region.defer_inputs)?;
+    let leaf_inputs = remap_boundary_nodes(&node_map, &region.leaf_inputs)?;
 
     let (replacement_sources, replacement_targets) = rewritten.append(replacement.clone());
-    for (region_source, replacement_source) in defer_inputs.into_iter().zip(replacement_sources) {
+    for (region_source, replacement_source) in leaf_inputs.into_iter().zip(replacement_sources) {
         rewritten.unify(region_source, replacement_source);
     }
 
@@ -100,15 +100,15 @@ fn validate_replacement(
     region: &ClosureRegion,
     replacement: &AnnotatedTerm,
 ) -> Result<(), RewriteRegionError> {
-    if replacement.sources.len() != region.defer_inputs.len() {
+    if replacement.sources.len() != region.leaf_inputs.len() {
         return Err(RewriteRegionError::SourceArity {
-            expected: region.defer_inputs.len(),
+            expected: region.leaf_inputs.len(),
             actual: replacement.sources.len(),
         });
     }
 
     for (index, (&region_source, &replacement_source)) in region
-        .defer_inputs
+        .leaf_inputs
         .iter()
         .zip(&replacement.sources)
         .enumerate()
@@ -134,8 +134,8 @@ fn validate_replacement(
 }
 
 fn non_defer_region_nodes(region: &ClosureRegion) -> Vec<NodeId> {
-    let defer_inputs = region
-        .defer_inputs
+    let leaf_inputs = region
+        .leaf_inputs
         .iter()
         .map(|node| node.0)
         .collect::<BTreeSet<_>>();
@@ -143,7 +143,7 @@ fn non_defer_region_nodes(region: &ClosureRegion) -> Vec<NodeId> {
         .nodes
         .iter()
         .copied()
-        .filter(|node| !defer_inputs.contains(&node.0))
+        .filter(|node| !leaf_inputs.contains(&node.0))
         .collect()
 }
 

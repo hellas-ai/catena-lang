@@ -49,7 +49,7 @@ pub fn extract_region(
         );
     }
 
-    extracted.sources = remap_interface(&node_map, &region.defer_inputs, |wire| {
+    extracted.sources = remap_interface(&node_map, &region.leaf_inputs, |wire| {
         ExtractRegionError::DeferInputOutsideRegion { wire }
     })?;
     extracted.targets = remap_interface(&node_map, &[region.closure_wire], |wire| {

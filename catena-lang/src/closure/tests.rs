@@ -90,7 +90,7 @@ fn deferred_bool_id_closure_converts_through_each_stage() {
     assert_eq!(extracted.hypergraph.edges.len(), 4);
     assert_eq!(
         interface_types(&extracted, &extracted.sources),
-        interface_types(&definition, &region.defer_inputs)
+        interface_types(&definition, &region.leaf_inputs)
     );
     assert_eq!(
         interface_types(&extracted, &extracted.targets),
@@ -308,6 +308,76 @@ fn theory_conversion_converts_if_id_neg_example_end_to_end() {
                 .iter()
                 .any(|operation| operation == name_closure_name),
             "converted if-id-neg should refer to {name_closure_name}"
+        );
+    }
+}
+
+#[test]
+fn theory_conversion_converts_reduce_closure_arguments() {
+    let (theory_set, definition_types) = theories_with(
+        r#"
+        (def program u64.one-at :
+          ([n.] ([.n] ix val))
+          ->
+          ([n.] (u64 val))
+        = ([i.] u64.one))
+
+        (def program reduce-ones :
+          []
+          ->
+          (u64 val)
+        = (
+          {
+            const.u64.0x0000000000000000
+            (name.u64.add lift)
+            ((u64.zero :.param) name.u64.one-at lift)
+            u64.zero
+          }
+          reduce
+        ))
+        "#,
+    );
+    let program = TheoryId(op("program"));
+
+    let converted =
+        convert_theory(&theory_set, &definition_types, &program).expect("theory should convert");
+
+    let Theory::Theory { arrows, .. } = converted else {
+        panic!("program should be a theory");
+    };
+
+    let reduce_ones = arrows
+        .get(&op("reduce-ones"))
+        .expect("converted original definition should exist");
+    let reduce_ones_body = reduce_ones
+        .definition
+        .as_ref()
+        .expect("converted original definition should have a body");
+
+    assert_operation_count(reduce_ones_body, "reducec", 1);
+    assert_operation_count(reduce_ones_body, "reduce", 0);
+
+    let closure_names = arrows
+        .keys()
+        .filter(|operation| operation.as_str().starts_with("closure.reduce-ones."))
+        .cloned()
+        .collect::<Vec<_>>();
+    let name_closure_names = arrows
+        .keys()
+        .filter(|operation| operation.as_str().starts_with("name.closure.reduce-ones."))
+        .cloned()
+        .collect::<Vec<_>>();
+    assert_eq!(closure_names.len(), 2);
+    assert_eq!(name_closure_names.len(), 2);
+
+    for name_closure_name in &name_closure_names {
+        assert!(
+            reduce_ones_body
+                .hypergraph
+                .edges
+                .iter()
+                .any(|operation| operation == name_closure_name),
+            "converted reduce-ones should refer to {name_closure_name}"
         );
     }
 }

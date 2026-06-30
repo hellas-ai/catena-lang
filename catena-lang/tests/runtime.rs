@@ -765,5 +765,8 @@ fn powf_test() -> anyhow::Result<()> {
 #[path = "cases/reducec.rs"]
 mod reducec;
 
+#[path = "cases/reduce.rs"]
+mod reduce;
+
 #[path = "cases/closure.rs"]
 mod closure;

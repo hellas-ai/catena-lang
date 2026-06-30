@@ -16,7 +16,11 @@ use crate::{
     stdlib::constants::FN_HOM_TYPE,
 };
 
-const IF_OPS: &[&str] = &["if", "bool.if"];
+const CONVERTED_PRIMITIVES: &[(&str, &str)] = &[
+    ("if", "ifc"),
+    ("bool.if", "bool.ifc"),
+    ("reduce", "reducec"),
+];
 
 type Obj = Tree<(), Operation>;
 
@@ -74,7 +78,7 @@ pub fn convert_theory(
         }
 
         let typed = typed_definition(theory_id, definition_name, arrow, theory_definition_types)?;
-        let closure_wires = if_closure_wires(&typed);
+        let closure_wires = primitive_closure_wires(&typed);
         if closure_wires.is_empty() {
             continue;
         }
@@ -105,7 +109,7 @@ fn update_definition_arrow(
     converted: Converted,
 ) -> Result<(), ConvertTheoryError> {
     let mut converted_definition = converted.definition;
-    rewrite_if_operations(&mut converted_definition);
+    rewrite_converted_primitives(&mut converted_definition);
 
     let mut raw = original.raw.clone();
     raw.definition = Some(term_to_hexpr(&converted_definition));
@@ -189,11 +193,11 @@ fn typed_definition(
         })
 }
 
-fn if_closure_wires(definition: &AnnotatedTerm) -> Vec<NodeId> {
+fn primitive_closure_wires(definition: &AnnotatedTerm) -> Vec<NodeId> {
     let mut seen = BTreeSet::new();
     let mut wires = Vec::new();
     for (edge_index, operation) in definition.hypergraph.edges.iter().enumerate() {
-        if !IF_OPS.contains(&operation.as_str()) {
+        if converted_primitive(operation).is_none() {
             continue;
         }
         for &source in &definition.hypergraph.adjacency[edge_index].sources {
@@ -205,14 +209,18 @@ fn if_closure_wires(definition: &AnnotatedTerm) -> Vec<NodeId> {
     wires
 }
 
-fn rewrite_if_operations(definition: &mut AnnotatedTerm) {
+fn rewrite_converted_primitives(definition: &mut AnnotatedTerm) {
     for operation in &mut definition.hypergraph.edges {
-        match operation.as_str() {
-            "if" => *operation = op("ifc"),
-            "bool.if" => *operation = op("bool.ifc"),
-            _ => {}
+        if let Some(converted) = converted_primitive(operation) {
+            *operation = op(converted);
         }
     }
+}
+
+fn converted_primitive(operation: &Operation) -> Option<&'static str> {
+    CONVERTED_PRIMITIVES
+        .iter()
+        .find_map(|(source, target)| (operation.as_str() == *source).then_some(*target))
 }
 
 fn type_maps_for_term(term: &AnnotatedTerm) -> (Hexpr, Hexpr) {

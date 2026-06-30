@@ -13,11 +13,11 @@
 
   # Closure-converted reduce.
   #
-  #   reducec : A ● X ● (X * A * A -> A) ● Y ● (Y * ix n -> A) ● (n : u64) -> A
+  #   reducec : A ● X ● (X * (A * A) -> A) ● Y ● (Y * ix n -> A) ● (n : u64) -> A
   (arr reducec : {[x y a n.]
     ([.a])
     ([.x])
-    {([.x a] * [xa.]) ([.xa a] * [xaa.]) ([.xaa a] -> val)}
+    {([.a a] * [aa.]) ([.x aa] * [xaa.]) ([.xaa a] -> val)}
     ([.y])
     {({([.y]) ([.n] ix val)} * [yi.]) ([.yi a] -> val)}
     ({[.n] u64} :)

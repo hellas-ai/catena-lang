@@ -1,0 +1,72 @@
+# Build a row-major 2D matrix view from runtime memory, then sum its diagonal
+# through source-level reduce. This avoids materialize while still exercising
+# closure conversion from reduce to reducec.
+#
+# For a 3 x 3 input laid out as:
+#
+#   [10, 11, 12,
+#    20, 21, 22,
+#    30, 31, 32]
+#
+# the result should be `10 + 21 + 32 = 63`.
+
+(theory program type {
+  # Temporary local workaround: interpret runtime memory as an n x n row-major
+  # u64 buffer. The general flat mem -> product-shaped buf cast needs a small
+  # arithmetic/ascription primitive that is still being designed.
+  (arr matrix-cast-u64-square :
+    {[n.]
+      ({[.n] u64} :)
+      (cap.ref mem)
+    }
+    ->
+    {[n.]
+      ({cap.ref ([.n n] *) u64} buf val)
+    }
+  )
+
+  # Adapter from the reduce accumulator closure convention to direct u64.add.
+  (def u64.add-reduce :
+    ({(u64 val) (u64 val)} *)
+    ->
+    (u64 val)
+  = ([pair.]
+    ([.pair] *.elim [acc value.])
+    {[.acc value]} u64.add
+  ))
+
+  # Convert a diagonal reduction index into the 2D row/column index expected by
+  # buf.row-major-view.
+  (def matrix-diagonal-index :
+    ([n.] ([.n] ix val))
+    ->
+    {[n.] ({([.n] ix val) ([.n] ix val)} *)}
+  = ([i. i i] *.intro))
+})
+
+# Runtime memory -> square u64 buffer -> row-major view -> diagonal sum.
+(def program matrix-diagonal-sum-u64 :
+  {[n.]
+    ({[.n] u64} :)
+    (cap.ref mem)
+  }
+  ->
+  {[n.] (u64 val)}
+= ([dim input.]
+  {
+    ({[.dim input]} matrix-cast-u64-square [buffer.])
+
+    # matrix : val(ix n) * val(ix n) => val(u64)
+    ({[.dim buffer]} buf.row-major-view [matrix.])
+
+    # diagonal-view : val(ix n) => val(u64)
+    ((([.dim] :.param) name.matrix-diagonal-index) lift [diagonal-index.])
+    ({[.diagonal-index matrix]} compose [diagonal-view.])
+
+    const.u64.0x0000000000000000
+    (name.u64.add-reduce lift)
+    [.diagonal-view]
+    [.dim]
+  }
+  reduce
+))

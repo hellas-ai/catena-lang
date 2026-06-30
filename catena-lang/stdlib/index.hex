@@ -78,17 +78,22 @@
   )
 
   # Index a row-major 2D view backed by a flat buffer.
-  # buf.index-row-major : (n : u64) ● val(buf c (m * n) t) ● val(ix m) ● val(ix n) -> val(t)
+  # Packed input shape:
+  #   ((n : u64) * val(buf c (m * n) t)) * (val(ix m) * val(ix n)) -> val(t)
+  # This matches the closure produced by buf.row-major-view without an explicit associator.
   (def buf.index-row-major :
     {[c m n t.]
-      ({[.n] u64} :)              # n : u64
-      ({[.c] ([.m n] *) [.t]} buf val)
-      ([.m] ix val)               # row : ix m
-      ([.n] ix val)               # col : ix n
+      ({
+        ({({[.n] u64} :) ({[.c] ([.m n] *) [.t]} buf val)} *)
+        ({([.m] ix val) ([.n] ix val)} *)
+      } *)
     }
     ->
     ([c m n t . t] val)
-  = ([width buffer row col.]
+  = ([packed.]
+    ([.packed] *.elim [env-product idx.])
+    ([.env-product] *.elim [width buffer.])
+    ([.idx] *.elim [row col.])
     ({[.width row col]} index.row-major [linear.])
     ({[.linear buffer]} buf.index)
   ))
@@ -118,16 +123,13 @@
       (([.idx] name.index.id) lift [id.])
       # 1 * (val(ix m) * val(ix n)) => (width * buffer) * (val(ix m) * val(ix n))
       ({[.env id]} tensor [defer-id.]) 
-      ([.idx] *.elim [row col.])
-      ([.env-product row col] assoc-left [assoc.])
 
-      # Function pointer for width * buffer * row * col -> val(t).
+      # Function pointer for (width * buffer) * (row * col) -> val(t).
       ([.nm] *.elim [m n.])
       ([.c m n t] name.buf.index-row-major [f.])
       ([.f] lift [f-lift.])
     }
-    ({[.defer-id assoc]} compose [packed-input.])
-    ({[.packed-input f-lift]} compose [apply-f.])
+    ({[.defer-id f-lift]} compose [apply-f.])
     ({[.lambda apply-f]} compose)
   ))
 })

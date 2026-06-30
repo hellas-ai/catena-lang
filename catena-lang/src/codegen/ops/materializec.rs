@@ -112,17 +112,21 @@ pub(in crate::codegen) fn render_call(
         name = output.name
     ));
     out.push_str(&format!(
-        "    catena_host_gpu_check({managed_alloc_fn}((void **)&{name}_data, {name}_len * sizeof({element})));\n",
+        "    if ({name}_len != 0) {{\n",
+        name = output.name
+    ));
+    out.push_str(&format!(
+        "        catena_host_gpu_check({managed_alloc_fn}((void **)&{name}_data, {name}_len * sizeof({element})));\n",
         name = output.name,
         element = c_type(element),
         managed_alloc_fn = dialect.managed_alloc_fn(),
     ));
     out.push_str(&format!(
-        "    {kernel_name}<<<dim3(({name}_len + 255) / 256), dim3(256)>>>\n",
+        "        {kernel_name}<<<dim3(({name}_len + 255) / 256), dim3(256)>>>\n",
         name = output.name
     ));
     out.push_str(&format!(
-        "        ({name}_data, {name}_len",
+        "            ({name}_data, {name}_len",
         name = output.name
     ));
     for arg in runtime_values(env) {
@@ -133,9 +137,10 @@ pub(in crate::codegen) fn render_call(
     }
     out.push_str(");\n");
     out.push_str(&format!(
-        "    catena_host_gpu_check({synchronize_fn}());\n",
+        "        catena_host_gpu_check({synchronize_fn}());\n",
         synchronize_fn = dialect.synchronize_fn()
     ));
+    out.push_str("    }\n");
     out.push_str(&format!("    {} = {}_data;\n", output.name, output.name));
     Ok(())
 }
@@ -153,11 +158,11 @@ pub(in crate::codegen) fn kernel_name(
 fn parts(assignment: &GpuAssign) -> Result<(&GpuValue, &GpuValue, Component<'_>), GpuRenderError> {
     // The lowered inputs follow the closure-converted call shape:
     //
-    //     env..., producer_fn, len
+    //     len, env..., producer_fn
     //
     // `env` may be a zero-size component when the source environment is unit.
     let components = input_components(assignment)?;
-    let [env, func, len] = components.as_slice() else {
+    let [len, env, func] = components.as_slice() else {
         return Err(GpuRenderError::InvalidInputComponentCount {
             op: assignment.op.clone(),
             expected: 3,

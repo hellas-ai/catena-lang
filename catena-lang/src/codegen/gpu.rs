@@ -264,6 +264,7 @@ fn render_assignment(
         "ax-mp" | "assert-then" | ":.forget" | ":.param" => {}
         "assert" => render_assert(out, assignment)?,
         "u64.zero" => render_u64_zero(out, assignment)?,
+        "u64.ten" => render_u64_const(out, assignment, "10ULL")?,
         "u64.one" => render_u64_one(out, assignment)?,
         "u64.add" => render_binary(out, assignment, "+")?,
         "u64.mul" => render_binary(out, assignment, "*")?,
@@ -311,6 +312,7 @@ fn render_assignment(
         "f32.round-to-u32" => render_f32_round_to_u32(out, assignment)?,
         "f32.bitcast-u32" => render_f32_bitcast_u32(out, assignment)?,
         "ix.zero" => render_ix_zero(out, assignment)?,
+        "ix.to-u64" => render_unary_copy(out, assignment)?,
         "ix" => render_ix(out, assignment)?,
         "eval" => render_eval(out, assignment)?,
         "reducec" => reducec::render(out, assignment)?,
@@ -341,24 +343,25 @@ fn render_assert(out: &mut String, assignment: &GpuAssign) -> Result<(), GpuRend
 }
 
 fn render_u64_zero(out: &mut String, assignment: &GpuAssign) -> Result<(), GpuRenderError> {
-    let [] = assignment.inputs.as_slice() else {
-        return Err(invalid_inputs(assignment, 0));
-    };
-    let [output] = assignment.outputs.as_slice() else {
-        return Err(invalid_outputs(assignment, 1));
-    };
-    out.push_str(&format!("    {} = 0;\n", output.name));
-    Ok(())
+    render_u64_const(out, assignment, "0")
 }
 
 fn render_u64_one(out: &mut String, assignment: &GpuAssign) -> Result<(), GpuRenderError> {
+    render_u64_const(out, assignment, "1")
+}
+
+fn render_u64_const(
+    out: &mut String,
+    assignment: &GpuAssign,
+    literal: &str,
+) -> Result<(), GpuRenderError> {
     let [] = assignment.inputs.as_slice() else {
         return Err(invalid_inputs(assignment, 0));
     };
     let [output] = assignment.outputs.as_slice() else {
         return Err(invalid_outputs(assignment, 1));
     };
-    out.push_str(&format!("    {} = 1;\n", output.name));
+    out.push_str(&format!("    {} = {literal};\n", output.name));
     Ok(())
 }
 
@@ -447,6 +450,17 @@ fn render_unary_prefix(
         output.name,
         value_expr(input)
     ));
+    Ok(())
+}
+
+fn render_unary_copy(out: &mut String, assignment: &GpuAssign) -> Result<(), GpuRenderError> {
+    let [input] = assignment.inputs.as_slice() else {
+        return Err(invalid_inputs(assignment, 1));
+    };
+    let [output] = assignment.outputs.as_slice() else {
+        return Err(invalid_outputs(assignment, 1));
+    };
+    out.push_str(&format!("    {} = {};\n", output.name, value_expr(input)));
     Ok(())
 }
 
@@ -945,14 +959,14 @@ mod tests {
                 targets: vec![out.clone()],
                 assignments: vec![GpuAssign {
                     op: op("materializec"),
-                    input_sizes: vec![0, 1, 1],
+                    input_sizes: vec![1, 0, 1],
                     output_sizes: Vec::new(),
                     call_symbol: None,
                     inputs: vec![
+                        GpuValue::Var(len),
                         GpuValue::FnSymbol(FnPtrSymbol {
                             target: op("program.producer"),
                         }),
-                        GpuValue::Var(len),
                     ],
                     outputs: vec![out],
                 }],

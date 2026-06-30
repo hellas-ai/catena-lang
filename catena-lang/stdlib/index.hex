@@ -7,6 +7,7 @@
 
   # Numerics (TODO!)
   (arr 0 : 0 -> 1)
+  (arr 10 : 0 -> 1)
   (arr > : 2 -> 1)
 })
 
@@ -18,4 +19,7 @@
   # the zero index
   # ix.zero : (|- n > 0) -> val(ix n)
   (arr ix.zero : ({[n] 0} > |-) -> (ix val))
+
+  # Runtime indices are represented as u64 values.
+  (arr ix.to-u64 : ([n.] ([.n] ix val)) -> ([n.] (u64 val)))
 })

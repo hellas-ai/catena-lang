@@ -20,6 +20,7 @@ const CONVERTED_PRIMITIVES: &[(&str, &str)] = &[
     ("if", "ifc"),
     ("bool.if", "bool.ifc"),
     ("reduce", "reducec"),
+    ("materialize", "materializec"),
 ];
 
 type Obj = Tree<(), Operation>;

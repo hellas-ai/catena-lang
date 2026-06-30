@@ -382,6 +382,79 @@ fn theory_conversion_converts_reduce_closure_arguments() {
     }
 }
 
+#[test]
+fn theory_conversion_converts_materialize_closure_argument() {
+    let (theory_set, definition_types) = theories_with(
+        r#"
+        (def program u64.one-at :
+          ([n.] ([.n] ix val))
+          ->
+          ([n.] (u64 val))
+        = ([i.] u64.one))
+
+        (def program materialize-ones :
+          []
+          ->
+          (cap.own mem)
+        = (
+          {
+            u64.zero
+            ({u64.zero (((u64.zero :.param) name.u64.one-at) lift)}
+              materialize)
+          }
+          buf.to-mem
+        ))
+        "#,
+    );
+    let program = TheoryId(op("program"));
+
+    let converted =
+        convert_theory(&theory_set, &definition_types, &program).expect("theory should convert");
+
+    let Theory::Theory { arrows, .. } = converted else {
+        panic!("program should be a theory");
+    };
+
+    let materialize_ones = arrows
+        .get(&op("materialize-ones"))
+        .expect("converted original definition should exist");
+    let materialize_ones_body = materialize_ones
+        .definition
+        .as_ref()
+        .expect("converted original definition should have a body");
+
+    assert_operation_count(materialize_ones_body, "materializec", 1);
+    assert_operation_count(materialize_ones_body, "materialize", 0);
+
+    let closure_names = arrows
+        .keys()
+        .filter(|operation| operation.as_str().starts_with("closure.materialize-ones."))
+        .cloned()
+        .collect::<Vec<_>>();
+    let name_closure_names = arrows
+        .keys()
+        .filter(|operation| {
+            operation
+                .as_str()
+                .starts_with("name.closure.materialize-ones.")
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    assert_eq!(closure_names.len(), 1);
+    assert_eq!(name_closure_names.len(), 1);
+
+    for name_closure_name in &name_closure_names {
+        assert!(
+            materialize_ones_body
+                .hypergraph
+                .edges
+                .iter()
+                .any(|operation| operation == name_closure_name),
+            "converted materialize-ones should refer to {name_closure_name}"
+        );
+    }
+}
+
 fn theories_with(source: &'static str) -> (TheorySet, DefinitionTypes) {
     let raw_theories = RawTheorySet::from_texts(stdlib::sources().chain([source]))
         .expect("test theories should parse");

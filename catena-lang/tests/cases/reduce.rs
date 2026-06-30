@@ -3,7 +3,6 @@ use super::*;
 const BASIC_SOURCE: &str = include_str!("reduce/basic.hex");
 
 #[test]
-#[ignore = "depends on symbol resolution bug"]
 fn sum_empty_u64_reduce_exec() -> anyhow::Result<()> {
     let runtime = runtime_with(BASIC_SOURCE)?;
 

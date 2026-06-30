@@ -119,7 +119,7 @@ fn replacement_region(
 ) -> AnnotatedTerm {
     let mut replacement = AnnotatedTerm::empty();
     let sources = region
-        .defer_inputs
+        .leaf_inputs
         .iter()
         .map(|wire| replacement.new_node(definition.hypergraph.nodes[wire.0].clone()))
         .collect::<Vec<_>>();
@@ -184,7 +184,7 @@ fn pack_environment(
 fn type_info(definition: &AnnotatedTerm, region: &ClosureRegion) -> Result<TypeInfo, ConvertError> {
     let environment = pack_object(
         region
-            .defer_inputs
+            .leaf_inputs
             .iter()
             .map(|wire| definition.hypergraph.nodes[wire.0].clone())
             .collect(),

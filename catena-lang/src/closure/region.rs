@@ -19,7 +19,7 @@ pub type Obj = Tree<(), Operation>;
 pub struct ClosureRegion {
     pub closure_wire: NodeId,
     pub closure_type: Obj,
-    pub defer_inputs: Vec<NodeId>,
+    pub leaf_inputs: Vec<NodeId>,
     pub nodes: Vec<NodeId>,
     pub edges: Vec<EdgeId>,
 }
@@ -39,7 +39,8 @@ pub enum ClosureRegionError {
 /// Each `closure_wires` entry must name a closure-typed node in `definition`.
 /// The result order matches the input wire order. For each root, the region is
 /// found by walking left through producer edges until reaching an included leaf
-/// operation: `defer` or `name.*`.
+/// operation: `defer` or `name.*`. Sources of those leaf operations are
+/// retained as closure environment inputs.
 pub fn closure_region(
     definition: &AnnotatedTerm,
     closure_wires: &[NodeId],
@@ -73,11 +74,11 @@ fn closure_region_with_connectivity(
     }
 
     let Region { nodes, edges } = build_closure_region(definition, &connectivity, closure_wire)?;
-    let defer_inputs = defer_inputs(definition, &edges);
+    let leaf_inputs = leaf_inputs(definition, &edges);
     Ok(ClosureRegion {
         closure_wire,
         closure_type: closure_type.clone(),
-        defer_inputs,
+        leaf_inputs,
         nodes,
         edges,
     })
@@ -127,10 +128,10 @@ fn is_region_leaf(operation: &Operation) -> bool {
     operation.as_str() == DEFER || operation.as_str().starts_with(NAME_PREFIX)
 }
 
-fn defer_inputs(definition: &AnnotatedTerm, edges: &[EdgeId]) -> Vec<NodeId> {
+fn leaf_inputs(definition: &AnnotatedTerm, edges: &[EdgeId]) -> Vec<NodeId> {
     edges
         .iter()
-        .filter(|edge| definition.hypergraph.edges[edge.0].as_str() == DEFER)
+        .filter(|edge| is_region_leaf(&definition.hypergraph.edges[edge.0]))
         .flat_map(|edge| {
             definition.hypergraph.adjacency[edge.0]
                 .sources

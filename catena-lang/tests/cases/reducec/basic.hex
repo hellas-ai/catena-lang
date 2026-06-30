@@ -2,10 +2,11 @@
 
 # Adapter from the environmentful reducec accumulator convention to direct u64.add.
 (def program u64.add-env :
-  {1 (u64 val) (u64 val)}
+  {1 ({(u64 val) (u64 val)} *)}
   ->
   (u64 val)
-= ([env acc value.]
+= ([env pair.]
+  ([.pair] *.elim [acc value.])
   {[.acc value]} u64.add
 ))
 

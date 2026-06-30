@@ -5,10 +5,11 @@
 
 # Adapter from the environmentful reducec accumulator convention to direct f32.add.
 (def program f32.add-env :
-  {1 (f32 val) (f32 val)}
+  {1 ({(f32 val) (f32 val)} *)}
   ->
   (f32 val)
-= ([env acc value.]
+= ([env pair.]
+  ([.pair] *.elim [acc value.])
   {[.acc value]} f32.add
 ))
 
@@ -59,10 +60,11 @@
 
 # Adapter from the environmentful reducec accumulator convention to max(acc, value).
 (def program f32.max-env :
-  {1 (f32 val) (f32 val)}
+  {1 ({(f32 val) (f32 val)} *)}
   ->
   (f32 val)
-= ([env acc value.]
+= ([env pair.]
+  ([.pair] *.elim [acc value.])
   {
     ([.acc value] f32.gte [keep-acc.])
     ([.keep-acc acc value] f32.select [result.])

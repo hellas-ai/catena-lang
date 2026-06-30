@@ -5,10 +5,11 @@ use thiserror::Error;
 
 use crate::codegen::{
     GpuAssign, GpuDialect, GpuFunction, GpuModule, GpuModuleMap, GpuValue, GpuVar,
+    components::value_expr,
     lower_types::CType,
     ops::{ifc, materializec, reducec},
     prelude::render_gpu_prelude,
-    render_utils::{c_type, invalid_inputs, invalid_outputs, param_decl, sanitize_ident},
+    render_utils::{c_type, invalid_inputs, invalid_outputs, param_decl},
     runtime_type,
 };
 
@@ -748,7 +749,7 @@ fn render_eval(out: &mut String, assignment: &GpuAssign) -> Result<(), GpuRender
     );
     out.push_str(&format!(
         "    {}({});\n",
-        callable_expr(func),
+        value_expr(func),
         call_args.join(", ")
     ));
     Ok(())
@@ -791,7 +792,7 @@ fn render_materialize_kernel(
     out.push_str("    catena_gpu_state_t next_state = 0;\n");
     out.push_str(&format!("    {} value;\n", c_type(element)));
     out.push_str("    ");
-    out.push_str(&callable_expr(func));
+    out.push_str(&value_expr(func));
     out.push_str("(env, state");
     for arg in args {
         if let GpuValue::Var(var) = arg
@@ -902,17 +903,6 @@ fn materialize_kernel_name(
 fn local_decl(var: &GpuVar) -> Result<String, GpuRenderError> {
     let ty = runtime_type(var).ok_or_else(|| GpuRenderError::ErasedType(var.clone()))?;
     Ok(format!("{} {}", c_type(ty), var.name))
-}
-
-fn value_expr(value: &GpuValue) -> String {
-    match value {
-        GpuValue::Var(var) => var.name.clone(),
-        GpuValue::FnSymbol(symbol) => sanitize_ident(symbol.target.as_str()),
-    }
-}
-
-fn callable_expr(value: &GpuValue) -> String {
-    value_expr(value)
 }
 
 #[cfg(test)]

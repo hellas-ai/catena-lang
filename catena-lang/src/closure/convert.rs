@@ -55,6 +55,14 @@ pub enum ConvertError {
     Body(#[from] ClosureBodyError),
     #[error(transparent)]
     Rewrite(#[from] RewriteRegionError),
+    #[error("pending closure root n{wire} was deleted by an earlier closure rewrite")]
+    PendingClosureDeleted { wire: usize },
+}
+
+#[derive(Debug, Clone, Copy)]
+struct PendingClosure {
+    original_wire: NodeId,
+    current_wire: NodeId,
 }
 
 /// Convert closure-typed output regions of an annotated term.
@@ -67,42 +75,42 @@ pub fn convert(
     definition: &AnnotatedTerm,
     closure_wires: &[NodeId],
 ) -> Result<Converted, ConvertError> {
-    let regions = closure_region(definition, closure_wires)?;
-
     let mut closures = Vec::new();
-    let mut rewrites = Vec::new();
-    for region in regions {
-        let extracted = extract_region(definition, &region)?;
+    let mut rewritten = definition.clone();
+    let mut pending = closure_wires
+        .iter()
+        .copied()
+        .map(|wire| PendingClosure {
+            original_wire: wire,
+            current_wire: wire,
+        })
+        .collect::<Vec<_>>();
+
+    while let Some(job) = pending.first().copied() {
+        pending.remove(0);
+
+        let [region] = closure_region(&rewritten, &[job.current_wire])?
+            .try_into()
+            .expect("requested exactly one closure region");
+        let extracted = extract_region(&rewritten, &region)?;
         let body = closure_body(&extracted)?;
-        let type_info = type_info(definition, &region)?;
-        let replacement = replacement_region(definition_name, definition, &region, &type_info);
+        let type_info = type_info(&rewritten, &region)?;
+        let replacement = replacement_region(
+            definition_name,
+            &rewritten,
+            &region,
+            &type_info,
+            job.original_wire,
+        );
         closures.push(ConvertedClosure {
-            node: region.closure_wire,
+            node: job.original_wire,
             term: body,
             type_info,
         });
-        rewrites.push((region, replacement));
-    }
 
-    let mut rewritten = definition.clone();
-    rewrites.sort_by_key(|(region, _)| {
-        (
-            region
-                .nodes
-                .iter()
-                .map(|node| node.0)
-                .max()
-                .unwrap_or_default(),
-            region
-                .edges
-                .iter()
-                .map(|edge| edge.0)
-                .max()
-                .unwrap_or_default(),
-        )
-    });
-    for (region, replacement) in rewrites.into_iter().rev() {
-        rewritten = rewrite_region(&rewritten, &region, &replacement)?;
+        let rewrite = rewrite_region(&rewritten, &region, &replacement)?;
+        pending = remap_pending_closures(pending, &rewrite.node_map)?;
+        rewritten = rewrite.definition;
     }
 
     Ok(Converted {
@@ -111,11 +119,33 @@ pub fn convert(
     })
 }
 
+fn remap_pending_closures(
+    pending: Vec<PendingClosure>,
+    node_map: &[Option<usize>],
+) -> Result<Vec<PendingClosure>, ConvertError> {
+    pending
+        .into_iter()
+        .map(|job| {
+            let current_wire = node_map
+                .get(job.current_wire.0)
+                .and_then(|mapped| mapped.map(NodeId))
+                .ok_or(ConvertError::PendingClosureDeleted {
+                    wire: job.current_wire.0,
+                })?;
+            Ok(PendingClosure {
+                original_wire: job.original_wire,
+                current_wire,
+            })
+        })
+        .collect()
+}
+
 fn replacement_region(
     definition_name: &Operation,
     definition: &AnnotatedTerm,
     region: &ClosureRegion,
     type_info: &TypeInfo,
+    closure_name_wire: NodeId,
 ) -> AnnotatedTerm {
     let mut replacement = AnnotatedTerm::empty();
     let sources = region
@@ -129,7 +159,7 @@ fn replacement_region(
         vec![type_info.codomain.clone()],
     ));
     replacement.new_edge(
-        name_operation(definition_name, region.closure_wire),
+        name_operation(definition_name, closure_name_wire),
         (vec![], vec![function_pointer]),
     );
     replacement.sources = sources;

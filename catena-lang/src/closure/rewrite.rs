@@ -25,6 +25,12 @@ pub enum RewriteRegionError {
     DeletedBoundaryNode { wire: usize },
 }
 
+#[derive(Debug, Clone)]
+pub struct RewrittenRegion {
+    pub definition: AnnotatedTerm,
+    pub node_map: Vec<Option<usize>>,
+}
+
 /// Replace an identified closure region with a caller-provided lowered term.
 ///
 /// This removes the region's edges and non-`defer`-input nodes from
@@ -35,7 +41,7 @@ pub fn rewrite_region(
     definition: &AnnotatedTerm,
     region: &ClosureRegion,
     replacement: &AnnotatedTerm,
-) -> Result<AnnotatedTerm, RewriteRegionError> {
+) -> Result<RewrittenRegion, RewriteRegionError> {
     validate_region_bounds(definition, region)?;
     validate_monogamous(definition)?;
     validate_replacement(definition, region, replacement)?;
@@ -67,7 +73,10 @@ pub fn rewrite_region(
         &replacement_targets,
     )?;
 
-    Ok(rewritten)
+    Ok(RewrittenRegion {
+        definition: rewritten,
+        node_map,
+    })
 }
 
 fn validate_monogamous(definition: &AnnotatedTerm) -> Result<(), RewriteRegionError> {

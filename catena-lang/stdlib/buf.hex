@@ -38,6 +38,24 @@
   # Extract erased parameters from a buffer type witness.
   (arr buf.ty.elim : {[m n t.] ([.m n t] buf ty)} -> ([m n t.] {[.m] [.n] [.t]}))
 
+  (def buf.ty.mode : {[m n t.] ([.m n t] buf ty)} -> ([m n t . m])
+  = ([buffer-ty.]
+    ([.buffer-ty] buf.ty.elim [m n t.])
+    [.m]
+  ))
+
+  (def buf.ty.size : {[m n t.] ([.m n t] buf ty)} -> ([m n t . n])
+  = ([buffer-ty.]
+    ([.buffer-ty] buf.ty.elim [m n t.])
+    [.n]
+  ))
+
+  (def buf.ty.elem : {[m n t.] ([.m n t] buf ty)} -> ([m n t . t])
+  = ([buffer-ty.]
+    ([.buffer-ty] buf.ty.elim [m n t.])
+    [.t]
+  ))
+
   # mem.cast.u64 : mem m -> (n : u64) ● val(buf m n u64)
   (arr mem.cast.u64 : ([m n.m] mem) -> {[m n.]
     ({[.n] u64} :)   # n : u64

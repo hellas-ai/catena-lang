@@ -54,13 +54,14 @@
   {[n.] (u64 val)}
 = ([dim input.]
   {
-    ({[.dim input]} matrix-cast-u64-square [buffer.])
+    ([.dim] :.ty [dim-val dim-name dim-ty.])
+    ({[.dim-val input]} matrix-cast-u64-square [buffer.])
 
     # matrix : val(ix n) * val(ix n) => val(u64)
     ({[.dim buffer]} buf.row-major-view [matrix.])
 
     # diagonal-view : val(ix n) => val(u64)
-    ((([.dim] :.param) name.matrix-diagonal-index) lift [diagonal-index.])
+    ([.dim-name] name.matrix-diagonal-index lift [diagonal-index.])
     ({[.diagonal-index matrix]} compose [diagonal-view.])
 
     const.u64.0x0000000000000000

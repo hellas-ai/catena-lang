@@ -40,13 +40,14 @@
   {[n.] (cap.own mem)}
 = ([dim input.]
   {
-    ({[.dim input]} matrix-cast-u64-square [buffer.])
+    ([.dim] :.ty [dim-val dim-name dim-ty.])
+    ({[.dim-val input]} matrix-cast-u64-square [buffer.])
 
     # matrix : val(ix n) * val(ix n) => val(u64)
     ({[.dim buffer]} buf.row-major-view [matrix.])
 
     # diagonal-index : val(ix n) => val(ix n) * val(ix n)
-    ((([.dim] :.param) name.matrix-diagonal-index) lift [diagonal-index.])
+    ([.dim-name] name.matrix-diagonal-index lift [diagonal-index.])
     ({[.diagonal-index matrix]} compose [diagonal-view.])
     ([.diagonal-view] val.wrap [diagonal-view-val.])
 

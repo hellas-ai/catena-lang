@@ -28,7 +28,7 @@
 (theory program type {
   (arr :.forget : : -> ([x t.t] val))
   (arr :.param : : -> [x t . x])
-  (arr :.ty : : -> {[x t.] ([.x t] :) ([.t] ty)})
+  (arr :.ty : : -> {[x t.] ([.x t] :) [.x] ([.t] ty)})
   (arr val.ty : val -> {[t.] ([.t] val) ([.t] ty)})
   (arr ty.intro : [t . t] -> ([t] ty))
   (arr ty.elim : ([t] ty) -> [t . t])

@@ -84,10 +84,11 @@
     }
   = ([width buffer.]
     {
+      ([.width] :.ty [width-val width-name width-ty.])
       ([.buffer] val.ty [buffer-val buffer-ty.])
       ([.buffer-ty] ty.copy [idx-buffer-ty f-buffer-ty.])
 
-      ([.idx-buffer-ty] buf.ty.elim [idx-c idx-nm idx-t.])
+      ([.idx-buffer-ty] buf.ty.size [idx-nm.])
       ([.idx-nm] *.elim [idx-m idx-n.])
       ([.idx-m] ix.ty.intro [ix-m.])
       ([.idx-n] ix.ty.intro [ix-n.])
@@ -105,7 +106,7 @@
       (([.lambda-idx] name.*.left-intro) lift [lambda.])
 
       # defer (width * buffer) : 1 => width * buffer
-      ({[.width buffer-val]} *.intro [env-product.])
+      ({[.width-val buffer-val]} *.intro [env-product.])
       ([.env-product] defer [env.])
       (([.id-idx] name.index.id) lift [id.])
       # 1 * (val(ix m) * val(ix n)) => (width * buffer) * (val(ix m) * val(ix n))

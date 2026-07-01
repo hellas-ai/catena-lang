@@ -11,18 +11,14 @@
 # the result should be `10 + 21 + 32 = 63`.
 
 (theory program type {
-  # Temporary local workaround: interpret runtime memory as an n x n row-major
-  # u64 buffer. The general flat mem -> product-shaped buf cast needs a small
-  # arithmetic/ascription primitive that is still being designed.
-  (arr matrix-cast-u64-square :
-    {[n.]
+  # Runtime check/proof that a flat length k is the square matrix length n * n.
+  (arr u64.assert-square-length :
+    {[n k.]
+      ({[.k] u64} :)
       ({[.n] u64} :)
-      (cap.ref mem)
     }
     ->
-    {[n.]
-      ({cap.ref ([.n n] *) u64} buf val)
-    }
+    ([n k.] ([.n n] * [nn.]) ([.nn k] = |-))
   )
 
   # Adapter from the reduce accumulator closure convention to direct u64.add.
@@ -55,7 +51,9 @@
 = ([dim input.]
   {
     ([.dim] :.ty [dim-val dim-name dim-ty.])
-    ({[.dim-val input]} matrix-cast-u64-square [buffer.])
+    ([.input] mem.cast.u64 [flat-len flat-buffer.])
+    ({[.flat-len dim-val]} u64.assert-square-length [square-length.])
+    ({[.flat-buffer square-length]} buf.u64.cast-same-length [buffer.])
 
     # matrix : val(ix n) * val(ix n) => val(u64)
     ({[.dim buffer]} buf.row-major-view [matrix.])

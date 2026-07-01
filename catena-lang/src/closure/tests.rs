@@ -313,6 +313,64 @@ fn theory_conversion_converts_if_id_neg_example_end_to_end() {
 }
 
 #[test]
+fn convert_parallel_regions_with_crossed_node_and_edge_order() {
+    let bool_value = obj("val", vec![obj("bool", vec![])]);
+    let unit = obj("1", vec![]);
+    let unit_to_bool = obj("=>", vec![unit, bool_value.clone()]);
+
+    // Metacat-ish shape:
+    //
+    //   {({x defer} (name.test.id) compose) (y defer)} test.use-two
+    //
+    // Both inputs to `test.use-two` are closure regions. The graph is built by
+    // hand so the first region has higher node ids but lower edge ids than the
+    // second region; rewriting in node-id order deletes/relabels edges before
+    // the later region's recorded edge ids are consumed. The stale id shows up
+    // as `Rewrite(RegionEdgeOutOfBounds { edge: 4 })`.
+    let mut definition = AnnotatedTerm::empty();
+    let second_region_input = definition.new_node(bool_value.clone());
+    let second_region_closure = definition.new_node(unit_to_bool.clone());
+    let output = definition.new_node(bool_value.clone());
+    let first_region_input = definition.new_node(bool_value);
+    let first_region_deferred = definition.new_node(unit_to_bool.clone());
+    let first_region_named = definition.new_node(unit_to_bool.clone());
+    let first_region_closure = definition.new_node(unit_to_bool);
+
+    definition.new_edge(
+        op("defer"),
+        (vec![first_region_input], vec![first_region_deferred]),
+    );
+    definition.new_edge(op("name.test.id"), (vec![], vec![first_region_named]));
+    definition.new_edge(
+        op("compose"),
+        (
+            vec![first_region_deferred, first_region_named],
+            vec![first_region_closure],
+        ),
+    );
+    definition.new_edge(
+        op("test.use-two"),
+        (
+            vec![first_region_closure, second_region_closure],
+            vec![output],
+        ),
+    );
+    definition.new_edge(
+        op("defer"),
+        (vec![second_region_input], vec![second_region_closure]),
+    );
+    definition.sources = vec![second_region_input, first_region_input];
+    definition.targets = vec![output];
+
+    convert(
+        &op("parallel-closures"),
+        &definition,
+        &[first_region_closure, second_region_closure],
+    )
+    .expect("parallel closure conversion should succeed");
+}
+
+#[test]
 fn theory_conversion_converts_reduce_closure_arguments() {
     let (theory_set, definition_types) = theories_with(
         r#"

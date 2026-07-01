@@ -35,8 +35,8 @@
     } -> ([m n t.m] mem)
   )
 
-  # Extract erased parameters from a buffer type object.
-  (arr buf.ty.elim : buf -> [m n t])
+  # Extract erased parameters from a buffer type witness.
+  (arr buf.ty.elim : {[m n t.] ([.m n t] buf ty)} -> ([m n t.] {[.m] [.n] [.t]}))
 
   # mem.cast.u64 : mem m -> (n : u64) ● val(buf m n u64)
   (arr mem.cast.u64 : ([m n.m] mem) -> {[m n.]

@@ -9,6 +9,9 @@
   # x is the type-level name of a runtime value with type t.
   (arr :   : 2 -> 1)
 
+  # type witness for an object
+  (arr ty : 1 -> 1)
+
   # provability
   (arr |- : 1 -> 1)
 
@@ -25,8 +28,11 @@
 (theory program type {
   (arr :.forget : : -> ([x t.t] val))
   (arr :.param : : -> [x t . x])
-  (arr :.ty : : -> [x t . t])
-  (arr val.ty : val -> [t . t])
+  (arr :.ty : : -> {[x t.] ([.x t] :) ([.t] ty)})
+  (arr val.ty : val -> {[t.] ([.t] val) ([.t] ty)})
+  (arr ty.intro : [t . t] -> ([t] ty))
+  (arr ty.elim : ([t] ty) -> [t . t])
+  (arr ty.copy : ([t] ty) -> {[t.] ([.t] ty) ([.t] ty)})
   (arr val.wrap : [a . a] -> ([a . a] val))
 
   # Distribute val over product objects.

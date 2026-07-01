@@ -15,7 +15,10 @@ use crate::{
         theory::convert_theory,
     },
     elaborate::elaborate,
-    stdlib::{self, constants::FN_HOM_TYPE},
+    stdlib::{
+        self,
+        constants::{FN_HOM_TYPE, PRODUCT_TYPE, UNIT_TYPE},
+    },
 };
 
 #[test]
@@ -549,12 +552,12 @@ fn obj(name: &str, children: Vec<Obj>) -> Obj {
 }
 
 fn binary_product(left: Obj, right: Obj) -> Obj {
-    obj("*", vec![left, right])
+    obj(PRODUCT_TYPE, vec![left, right])
 }
 
 fn right_associated_product(objects: &[Obj]) -> Obj {
     match objects {
-        [] => obj("1", vec![]),
+        [] => obj(UNIT_TYPE, vec![]),
         [only] => only.clone(),
         [head, tail @ ..] => binary_product(head.clone(), right_associated_product(tail)),
     }

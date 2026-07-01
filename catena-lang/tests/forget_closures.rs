@@ -1,4 +1,4 @@
-use catena_lang::compile::{CompileError, compile};
+use catena_lang::compile::compile;
 use metacat::theory::RawTheorySet;
 
 const STDLIB: &[&str] = &[

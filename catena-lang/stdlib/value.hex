@@ -25,6 +25,8 @@
 (theory program type {
   (arr :.forget : : -> ([x t.t] val))
   (arr :.param : : -> [x t . x])
+  (arr :.ty : : -> [x t . t])
+  (arr val.ty : val -> [t . t])
   (arr val.wrap : [a . a] -> ([a . a] val))
 
   # Distribute val over product objects.

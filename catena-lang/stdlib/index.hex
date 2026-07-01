@@ -14,6 +14,10 @@
   # Identity arrow, named locally for index closure construction.
   (def index.id : [a] -> [a] = [x])
 
+  # Extract the erased bound from an index-domain type object.
+  (arr ix.ty.intro : [n] -> ix)
+  (arr ix.ty.elim : ix -> [n])
+
   # Index a buffer at a specific location, equivalent to `buf[i]`
   # buf.index : val(ix n) ● val(buf m n t) -> val(t)
   (arr buf.index : {[m n t.] ([.n] ix val) ([.m n t] buf val)} -> ([m n t . t] val))
@@ -33,37 +37,6 @@
     ->
     (* ix)
   )
-
-  # Extract the erased index-domain object from a buffer type.
-  (arr buf.index-domain :
-    {[c n t.]
-      ([.c n t] buf val)
-    }
-    ->
-    ([c n t.] ([.n] ix))
-  )
-
-  # Extract erased buffer parameters from a buffer type.
-  (arr buf.params :
-    {[c n t.]
-      ([.c n t] buf val)
-    }
-    ->
-    ([c n t.] {[.c] [.n] ([.n] ix) [.t]})
-  )
-
-  # Extract the row/column index-domain object from a product-sized buffer.
-  (def buf.ix-product-param :
-    {[c m n t.]
-      ({[.c] ([.m n] *) [.t]} buf val)
-    }
-    ->
-    ([c m n t.] ({([.m] ix val) ([.n] ix val)} *))
-  = ([buffer.]
-    ([.buffer] buf.index-domain)
-    ix.*.elim
-    val.*.map
-  ))
 
   # Convert a 2D index into a linear row-major index.
   # index.row-major : (n : u64) ● val(ix m) ● val(ix n) -> val(ix (m * n))
@@ -111,8 +84,13 @@
     }
   = ([width buffer.]
     {
-      ([.buffer] buf.params [c nm ix-nm t.])
-      ([.ix-nm] ix.*.elim val.*.map [idx.])
+      ([.buffer] val.ty [buffer-ty.])
+      ([.buffer-ty] buf.ty.elim [c nm t.])
+      ([.nm] *.elim [m n.])
+      ([.m] ix.ty.intro [ix-m.])
+      ([.n] ix.ty.intro [ix-n.])
+      ({[.ix-m ix-n]} *.intro [ix-product.])
+      ([.ix-product] val.*.map [idx.])
 
       # idx => 1 * idx, where idx = val(ix m) * val(ix n).
       (([.idx] name.*.left-intro) lift [lambda.])
@@ -125,7 +103,6 @@
       ({[.env id]} tensor [defer-id.]) 
 
       # Function pointer for (width * buffer) * (row * col) -> val(t).
-      ([.nm] *.elim [m n.])
       ([.c m n t] name.buf.index-row-major [f.])
       ([.f] lift [f-lift.])
     }

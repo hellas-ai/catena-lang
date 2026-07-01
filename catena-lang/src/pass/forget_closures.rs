@@ -401,8 +401,22 @@ mod tests {
         Tree::Node(op("*"), 0, vec![left, right])
     }
 
+    fn source_types(term: &AnnotatedTerm) -> Vec<Obj> {
+        term.sources
+            .iter()
+            .map(|node| term.hypergraph.nodes[node.0].clone())
+            .collect()
+    }
+
+    fn target_types(term: &AnnotatedTerm) -> Vec<Obj> {
+        term.targets
+            .iter()
+            .map(|node| term.hypergraph.nodes[node.0].clone())
+            .collect()
+    }
+
     #[test]
-    fn regular_operations_are_wrapped_in_packers_and_unpackers() {
+    fn regular_operations_are_wrapped_in_flatteners() {
         let a = object("A");
         let b = object("B");
         let c = object("C");
@@ -414,6 +428,60 @@ mod tests {
         assert_eq!(
             mapped.hypergraph.edges,
             vec![op("*.intro"), op("f"), op("*.elim")]
+        );
+    }
+
+    #[test]
+    fn regular_operation_adapter_flattens_boundary_without_repacking_operation_arity() {
+        let a = object("A");
+        let b = object("B");
+        let c = object("C");
+        let d = object("D");
+        let e = object("E");
+        let f = object("F");
+        let g = object("G");
+        let h = object("H");
+        let i = object("I");
+        let source = vec![
+            product(product(a.clone(), b.clone()), c.clone()),
+            product(d.clone(), e.clone()),
+        ];
+        let target = vec![product(f.clone(), product(g.clone(), h.clone())), i.clone()];
+
+        let mapped = map_non_cmc_operation(&op("f"), &source, &target);
+        let operation_index = mapped
+            .hypergraph
+            .edges
+            .iter()
+            .position(|operation| operation.as_str() == "f")
+            .expect("adapter should contain the original operation");
+        let operation = &mapped.hypergraph.adjacency[operation_index];
+
+        assert_eq!(
+            source_types(&mapped),
+            vec![a.clone(), b.clone(), c.clone(), d.clone(), e.clone()]
+        );
+        assert_eq!(
+            target_types(&mapped),
+            vec![f.clone(), g.clone(), h.clone(), i.clone()]
+        );
+        assert_eq!(
+            operation
+                .sources
+                .iter()
+                .map(|node| mapped.hypergraph.nodes[node.0].clone())
+                .collect::<Vec<_>>(),
+            source,
+            "f should still see its declared top-level source objects"
+        );
+        assert_eq!(
+            operation
+                .targets
+                .iter()
+                .map(|node| mapped.hypergraph.nodes[node.0].clone())
+                .collect::<Vec<_>>(),
+            target,
+            "f should still produce its declared top-level target objects"
         );
     }
 

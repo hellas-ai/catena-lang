@@ -15,7 +15,7 @@ use thiserror::Error;
 
 use crate::{
     check::{AnnotatedTerm, DefinitionTypes},
-    nonstrict::{to_packer, to_unpacker, unpack_packed_object},
+    nonstrict::{to_flatteners, to_unflatteners, unpack_packed_object},
     report::TheoryTermMap,
     stdlib::constants::{
         COMPOSE, DEFER, EVAL, FN_HOM_TYPE, FN_REF_TYPE, LIFT, NAME_PREFIX, PRODUCT_TYPE, RUN,
@@ -191,15 +191,15 @@ fn map_name_operation(
 }
 
 // Defines the action of forget_closures on non-CMC operations f:
-// Φ ; f ; Φ⁻¹
+// unflatten ; f ; flatten
 fn map_non_cmc_operation(a: &Arr, source: &[Obj], target: &[Obj]) -> AnnotatedTerm {
-    let pack = to_packer(source.to_vec());
+    let pack = to_unflatteners(source);
     let operation = OpenHypergraph::singleton(
         a.clone(),
         forget_closures_in_objects(source),
         forget_closures_in_objects(target),
     );
-    let unpack = to_unpacker(target.to_vec());
+    let unpack = to_flatteners(target);
 
     pack.compose(&operation)
         .and_then(|packed| packed.compose(&unpack))

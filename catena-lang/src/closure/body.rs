@@ -6,7 +6,7 @@ use thiserror::Error;
 use crate::{
     check::AnnotatedTerm,
     nonstrict::to_unpacker,
-    stdlib::constants::{COMPOSE, DEFER, FN_HOM_TYPE, PRODUCT_TYPE, RUN, UNIT_TYPE},
+    stdlib::constants::{COMPOSE, DEFER, FN_HOM_TYPE, RUN, UNIT_TYPE},
 };
 
 type Obj = Tree<(), Operation>;
@@ -67,7 +67,7 @@ pub fn closure_body(extracted: &AnnotatedTerm) -> Result<AnnotatedTerm, ClosureB
 fn packed_environment_source(body: &mut AnnotatedTerm) -> NodeId {
     let components = body.sources.clone();
     let component_types = interface_types(body, &components);
-    let unpacker = to_unpacker(vec![pack_objects(&component_types)]);
+    let unpacker = to_unpacker(component_types);
     let (sources, targets) = body.append(unpacker);
 
     let [source] = sources.as_slice() else {
@@ -103,16 +103,6 @@ fn closure_type_of(domain: Obj, codomain: Obj) -> Obj {
 
 fn unit_type() -> Obj {
     Tree::Node(op(UNIT_TYPE), 0, vec![])
-}
-
-fn pack_objects(objects: &[Obj]) -> Obj {
-    match objects {
-        [] => unit_type(),
-        [only] => only.clone(),
-        [head, tail @ ..] => {
-            Tree::Node(op(PRODUCT_TYPE), 0, vec![head.clone(), pack_objects(tail)])
-        }
-    }
 }
 
 fn interface_types(term: &AnnotatedTerm, interface: &[NodeId]) -> Vec<Obj> {

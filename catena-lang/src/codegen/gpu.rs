@@ -261,7 +261,8 @@ fn render_assignment(
         "bool.or" => render_binary_bool(out, assignment, "||")?,
         "bool.ifc" => ifc::render(out, assignment)?,
         "unit.intro" => {}
-        "ax-mp" | "assert-then" | ":.forget" | ":.param" => {}
+        "ax-mp" | "assert-then" | ":.param" => {}
+        ":.forget" => render_forget(out, assignment)?,
         "assert" => render_assert(out, assignment)?,
         "u64.zero" => render_u64_zero(out, assignment)?,
         "u64.one" => render_u64_one(out, assignment)?,
@@ -284,6 +285,7 @@ fn render_assignment(
         "u32.shr" => render_binary(out, assignment, ">>")?,
         "u32.not" => render_unary_prefix(out, assignment, "~")?,
         "u32.to-f32" => render_u32_cast_to_f32(out, assignment)?,
+        "u64.to-f32" => render_u64_cast_to_f32(out, assignment)?,
         "u32.bitcast-f32" => render_u32_bitcast_f32(out, assignment)?,
         "u64.eq" => render_u64_eq(out, assignment)?,
         "u64.gt" => render_u64_gt(out, assignment)?,
@@ -340,6 +342,17 @@ fn render_assert(out: &mut String, assignment: &GpuAssign) -> Result<(), GpuRend
     Ok(())
 }
 
+fn render_forget(out: &mut String, assignment: &GpuAssign) -> Result<(), GpuRenderError> {
+    let [input] = assignment.inputs.as_slice() else {
+        return Err(invalid_inputs(assignment, 1));
+    };
+    let [output] = assignment.outputs.as_slice() else {
+        return Err(invalid_outputs(assignment, 1));
+    };
+    out.push_str(&format!("    {} = {};\n", output.name, value_expr(input)));
+    Ok(())
+}
+
 fn render_u64_zero(out: &mut String, assignment: &GpuAssign) -> Result<(), GpuRenderError> {
     let [] = assignment.inputs.as_slice() else {
         return Err(invalid_inputs(assignment, 0));
@@ -374,6 +387,21 @@ fn render_f32_one(out: &mut String, assignment: &GpuAssign) -> Result<(), GpuRen
 }
 
 fn render_u32_cast_to_f32(out: &mut String, assignment: &GpuAssign) -> Result<(), GpuRenderError> {
+    let [input] = assignment.inputs.as_slice() else {
+        return Err(invalid_inputs(assignment, 1));
+    };
+    let [output] = assignment.outputs.as_slice() else {
+        return Err(invalid_outputs(assignment, 1));
+    };
+    out.push_str(&format!(
+        "    {} = (float)({});\n",
+        output.name,
+        value_expr(input)
+    ));
+    Ok(())
+}
+
+fn render_u64_cast_to_f32(out: &mut String, assignment: &GpuAssign) -> Result<(), GpuRenderError> {
     let [input] = assignment.inputs.as_slice() else {
         return Err(invalid_inputs(assignment, 1));
     };

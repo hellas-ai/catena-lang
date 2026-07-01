@@ -118,6 +118,7 @@
   (arr u32.select : {(bool val) (u32 val) (u32 val)} -> (u32 val))
   (arr u32.to-f32 : (u32 val) -> (f32 val))
   (arr u32.bitcast-f32 : (u32 val) -> (f32 val))
+  (arr u64.to-f32 : (u64 val) -> (f32 val))
 
   # Indices & dependent types
   # assert-nz : (n : u64) -> |- (n > 0)

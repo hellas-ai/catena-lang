@@ -43,6 +43,29 @@
     reducec
 ))
 
+# Mean all f32 elements in a memory buffer. Caller must provide a non-empty input.
+(def program mean-f32 :
+  (cap.ref mem)
+  ->
+  (f32 val)
+= (
+  mem.cast.f32
+  [len input.]
+    {
+      ({
+        (const.u32.0x00000000 u32.bitcast-f32)
+        unit.intro
+        name.f32.add-env
+        ({[.input] (([.len] :.param) name.f32-at)})
+        [.len]
+      } reducec [sum.])
+      ([.len] :.forget [len-val.])
+      ([.len-val] u64.to-f32 [len-f32.])
+      ([.sum len-f32] f32.div [mean.])
+      [.mean]
+    }
+))
+
 ################################################################################
 # Max
 

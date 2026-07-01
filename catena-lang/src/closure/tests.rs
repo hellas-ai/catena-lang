@@ -325,8 +325,8 @@ fn convert_parallel_regions_with_crossed_node_and_edge_order() {
     // Both inputs to `test.use-two` are closure regions. The graph is built by
     // hand so the first region has higher node ids but lower edge ids than the
     // second region; rewriting in node-id order deletes/relabels edges before
-    // the later region's recorded edge ids are consumed. The stale id shows up
-    // as `Rewrite(RegionEdgeOutOfBounds { edge: 4 })`.
+    // the later region's recorded edge ids are consumed. The stale id used to
+    // show up as `Rewrite(RegionEdgeOutOfBounds { edge: 4 })`.
     let mut definition = AnnotatedTerm::empty();
     let second_region_input = definition.new_node(bool_value.clone());
     let second_region_closure = definition.new_node(unit_to_bool.clone());

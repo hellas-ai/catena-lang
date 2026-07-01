@@ -260,9 +260,13 @@ mod tests {
 
     #[test]
     fn packers_adapt_an_interface_to_one_right_associated_product() {
-        let ab = object("AxB");
-        let cd = object("CxD");
+        let width = object("width");
+        let buffer = object("buffer");
+        let row = object("row");
+        let col = object("col");
         let e = object("E");
+        let ab = product(width, buffer);
+        let cd = product(row, col);
         let packed = product(ab.clone(), product(cd.clone(), e.clone()));
 
         let packer = to_packer(vec![ab.clone(), cd.clone(), e.clone()]);

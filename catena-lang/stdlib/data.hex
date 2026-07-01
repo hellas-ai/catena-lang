@@ -94,6 +94,7 @@
   # u64.sizeof : I -> (s : u64) ● sizeof(u64, s)
   (arr u64.zero : [] -> ({0 u64} :))
   (arr u64.one  : [] -> (u64 val))
+  (arr u64.copy : (u64 val) -> {(u64 val) (u64 val)})
   (arr u64.add  : {(u64 val) (u64 val)} -> (u64 val))
   (arr u64.mul  : {(u64 val) (u64 val)} -> (u64 val))
   (arr u64.select : {(bool val) (u64 val) (u64 val)} -> (u64 val))

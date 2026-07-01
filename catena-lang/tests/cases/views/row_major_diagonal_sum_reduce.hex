@@ -50,13 +50,16 @@
   {[n.] (u64 val)}
 = ([dim input.]
   {
-    ([.dim] :.ty [dim-val dim-name dim-ty.])
+    ([.dim] :.copy [dim-proof dim-rest.])
+    ([.dim-rest] :.copy [dim-view dim-reduce.])
+    ([.dim-proof] :.ty [dim-proof-value dim-name dim-ty.])
+
     ([.input] mem.cast.u64 [flat-len flat-buffer.])
-    ({[.flat-len dim-val]} u64.assert-square-length [square-length.])
+    ({[.flat-len dim-proof-value]} u64.assert-square-length [square-length.])
     ({[.flat-buffer square-length]} buf.u64.cast-same-length [buffer.])
 
     # matrix : val(ix n) * val(ix n) => val(u64)
-    ({[.dim buffer]} buf.row-major-view [matrix.])
+    ({[.dim-view buffer]} buf.row-major-view [matrix.])
 
     # diagonal-view : val(ix n) => val(u64)
     ([.dim-name] name.matrix-diagonal-index lift [diagonal-index.])
@@ -65,7 +68,7 @@
     const.u64.0x0000000000000000
     (name.u64.add-reduce lift)
     [.diagonal-view]
-    [.dim]
+    [.dim-reduce]
   }
   reduce
 ))

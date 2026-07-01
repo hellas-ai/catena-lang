@@ -36,20 +36,24 @@
   {[n.] (cap.own mem)}
 = ([dim input.]
   {
-    ([.dim] :.ty [dim-val dim-name dim-ty.])
+    ([.dim] :.copy [dim-proof dim-rest.])
+    ([.dim-rest] :.copy [dim-view dim-rest2.])
+    ([.dim-rest2] :.copy [dim-materialize dim-out.])
+    ([.dim-proof] :.ty [dim-proof-value dim-name dim-ty.])
+
     ([.input] mem.cast.u64 [flat-len flat-buffer.])
-    ({[.flat-len dim-val]} u64.assert-square-length [square-length.])
+    ({[.flat-len dim-proof-value]} u64.assert-square-length [square-length.])
     ({[.flat-buffer square-length]} buf.u64.cast-same-length [buffer.])
 
     # matrix : val(ix n) * val(ix n) => val(u64)
-    ({[.dim buffer]} buf.row-major-view [matrix.])
+    ({[.dim-view buffer]} buf.row-major-view [matrix.])
 
     # diagonal-index : val(ix n) => val(ix n) * val(ix n)
     ([.dim-name] name.matrix-diagonal-index lift [diagonal-index.])
     ({[.diagonal-index matrix]} compose [diagonal-view.])
     ([.diagonal-view] val.wrap [diagonal-view-val.])
 
-    ({[.dim diagonal-view-val]} materialize [out-buffer.])
+    ({[.dim-materialize diagonal-view-val]} materialize [out-buffer.])
   }
-  ({[.dim out-buffer]} buf.to-mem)
+  ({[.dim-out out-buffer]} buf.to-mem)
 ))

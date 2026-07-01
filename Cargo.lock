@@ -86,24 +86,11 @@ dependencies = [
  "anyhow",
  "catena-core",
  "clap",
- "metacat",
 ]
 
 [[package]]
 name = "catena-core"
 version = "0.1.0"
-dependencies = [
- "anyhow",
- "graphviz-rust",
- "hexpr",
- "libffi",
- "libloading",
- "metacat",
- "open-hypergraphs",
- "open-hypergraphs-dot",
- "tempfile",
- "thiserror",
-]
 
 [[package]]
 name = "catena-lang"

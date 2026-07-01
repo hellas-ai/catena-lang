@@ -1,16 +1,12 @@
-// Types
-pub mod lang;
-pub mod pass;
+//! Minimal scaffold for `catena-core`.
 
-pub mod backend;
-pub mod compile;
-pub mod elaborate;
-pub mod hypergraph;
-pub mod lower;
-pub mod scope;
-pub mod shallow;
-pub mod stdlib;
-pub mod structured;
-pub mod union_find;
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Status {
+    pub name: &'static str,
+    pub implemented: bool,
+}
 
-pub mod check;
+pub const STATUS: Status = Status {
+    name: "catena-core",
+    implemented: false,
+};

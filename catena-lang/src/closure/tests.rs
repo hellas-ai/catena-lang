@@ -3,7 +3,7 @@ use metacat::{
     theory::{RawTheorySet, Theory, TheoryId, TheorySet},
     tree::Tree,
 };
-use open_hypergraphs::lax::NodeId;
+use open_hypergraphs::lax::{NodeId, OpenHypergraph};
 
 use crate::{
     check::{AnnotatedTerm, DefinitionTypes, check},
@@ -15,7 +15,10 @@ use crate::{
         theory::convert_theory,
     },
     elaborate::elaborate,
-    stdlib::{self, constants::FN_HOM_TYPE},
+    stdlib::{
+        self,
+        constants::{FN_HOM_TYPE, PRODUCT_TYPE, UNIT_TYPE},
+    },
 };
 
 #[test]
@@ -173,6 +176,69 @@ fn deferred_bool_id_closure_converts_through_each_stage() {
             .iter()
             .any(|operation| operation.as_str()
                 == format!("name.closure.run-bool-id.{}", original_target.0))
+    );
+}
+
+#[test]
+fn closure_body_unpacker_reproduces_product_typed_environment_wires() {
+    let width = obj("width", vec![]);
+    let buffer = obj("buffer", vec![]);
+    let row = obj("row", vec![]);
+    let col = obj("col", vec![]);
+    let scale = obj("scale", vec![]);
+    let env_product = binary_product(width.clone(), buffer.clone());
+    let idx = binary_product(row.clone(), col.clone());
+    let captured = vec![env_product.clone(), idx.clone(), scale.clone()];
+    let domain = obj("argument", vec![]);
+    let codomain = obj("output", vec![]);
+    let closure = obj(FN_HOM_TYPE, vec![domain.clone(), codomain.clone()]);
+
+    let mut extracted: AnnotatedTerm = OpenHypergraph::empty();
+    extracted.sources = captured
+        .iter()
+        .map(|object| extracted.new_node(object.clone()))
+        .collect();
+    extracted.targets = vec![extracted.new_node(closure)];
+
+    let body = closure_body(&extracted).expect("closure body construction should succeed");
+    let body_sources = interface_types(&body, &body.sources);
+    let expected_environment = right_associated_product(&captured);
+
+    assert_eq!(
+        body_sources,
+        vec![expected_environment, domain],
+        "closure body should receive one packed environment plus the argument"
+    );
+
+    let product_elims = body
+        .hypergraph
+        .edges
+        .iter()
+        .filter(|operation| operation.as_str() == "*.elim")
+        .count();
+    assert_eq!(
+        product_elims,
+        captured.len() - 1,
+        "environment unpacker should split only top-level captured wires"
+    );
+
+    let unpacked_environment_targets = body
+        .hypergraph
+        .adjacency
+        .iter()
+        .zip(&body.hypergraph.edges)
+        .filter(|(_, operation)| operation.as_str() == "*.elim")
+        .flat_map(|(edge, _)| edge.targets.iter())
+        .filter_map(|node| {
+            let ty = &body.hypergraph.nodes[node.0];
+            captured.contains(ty).then_some(ty.clone())
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        captured
+            .iter()
+            .all(|ty| unpacked_environment_targets.contains(ty)),
+        "unpacker should reproduce product-typed captured wires themselves"
     );
 }
 
@@ -483,6 +549,18 @@ fn assert_operation_count(term: &metacat::theory::Term, operation: &str, expecte
 
 fn obj(name: &str, children: Vec<Obj>) -> Obj {
     Tree::Node(op(name), 0, children)
+}
+
+fn binary_product(left: Obj, right: Obj) -> Obj {
+    obj(PRODUCT_TYPE, vec![left, right])
+}
+
+fn right_associated_product(objects: &[Obj]) -> Obj {
+    match objects {
+        [] => obj(UNIT_TYPE, vec![]),
+        [only] => only.clone(),
+        [head, tail @ ..] => binary_product(head.clone(), right_associated_product(tail)),
+    }
 }
 
 fn function_pointer_type(sources: Vec<Obj>, targets: Vec<Obj>) -> Obj {

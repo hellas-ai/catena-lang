@@ -36,13 +36,14 @@
   {[n.] (cap.own mem)}
 = ([dim input.]
   {
-    ([.dim] :.copy [dim-proof dim-rest.])
-    ([.dim-rest] :.copy [dim-view dim-rest2.])
-    ([.dim-rest2] :.copy [dim-materialize dim-out.])
-    ([.dim-proof] :.ty [dim-proof-value dim-name dim-ty.])
+    ([.dim] :.copy [dim-name-source dim-rest.])
+    ([.dim-name-source] :.name [dim-name.])
+    ([.dim-rest] :.copy [dim-proof dim-rest2.])
+    ([.dim-rest2] :.copy [dim-view dim-rest3.])
+    ([.dim-rest3] :.copy [dim-materialize dim-out.])
 
     ([.input] mem.cast.u64 [flat-len flat-buffer.])
-    ({[.flat-len dim-proof-value]} u64.assert-square-length [square-length.])
+    ({[.flat-len dim-proof]} u64.assert-square-length [square-length.])
     ({[.flat-buffer square-length]} buf.u64.cast-same-length [buffer.])
 
     # matrix : val(ix n) * val(ix n) => val(u64)

@@ -30,6 +30,16 @@
   (arr :.param : : -> [x t . x])
   (arr :.copy : ([x t.] ({[.x t]} :)) -> ([x t.] {({[.x t]} :) ({[.x t]} :)}))
   (arr :.ty : : -> {[x t.] ([.x t] :) [.x] ([.t] ty)})
+  (def :.name : : -> [x t . x]
+  = ([ascribed.]
+    ([.ascribed] :.ty [value name ty.])
+    [.name]
+  ))
+  (def :.type : : -> ([x t.] ([.t] ty))
+  = ([ascribed.]
+    ([.ascribed] :.ty [value name ty.])
+    [.ty]
+  ))
   (arr val.ty : val -> {[t.] ([.t] val) ([.t] ty)})
   (arr ty.intro : [t . t] -> ([t] ty))
   (arr ty.elim : ([t] ty) -> [t . t])

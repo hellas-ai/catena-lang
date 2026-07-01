@@ -193,16 +193,17 @@ fn map_name_operation(
 // Defines the action of forget_closures on non-CMC operations f:
 // unflatten ; f ; flatten
 fn map_non_cmc_operation(a: &Arr, source: &[Obj], target: &[Obj]) -> AnnotatedTerm {
-    let pack = to_unflatteners(source);
+    let unflatten = to_unflatteners(source);
     let operation = OpenHypergraph::singleton(
         a.clone(),
         forget_closures_in_objects(source),
         forget_closures_in_objects(target),
     );
-    let unpack = to_flatteners(target);
+    let flatten = to_flatteners(target);
 
-    pack.compose(&operation)
-        .and_then(|packed| packed.compose(&unpack))
+    unflatten
+        .compose(&operation)
+        .and_then(|unflattened| unflattened.compose(&flatten))
         .expect("regular operation adapters should compose")
 }
 

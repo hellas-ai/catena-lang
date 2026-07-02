@@ -380,7 +380,22 @@ fn theory_conversion_converts_if_closure_arguments() {
     converted_set
         .theories
         .insert(program.clone(), converted.clone());
-    check(&converted_set).expect("converted theory should still typecheck");
+    let converted_definition_types =
+        check(&converted_set).expect("converted theory should still typecheck");
+    let forgotten = crate::pass::forget_closures::run(&converted_set, &converted_definition_types)
+        .expect("forget-closures should erase converted closure structure");
+    let forgotten_if_id_neg = forgotten
+        .get(&program)
+        .and_then(|definitions| definitions.get(&op("if-id-neg")))
+        .expect("forgotten closures should include converted if-id-neg");
+    assert!(
+        forgotten_if_id_neg
+            .hypergraph
+            .edges
+            .iter()
+            .all(|operation| !operation.as_str().starts_with("copy.closure.")),
+        "copy.closure.* should be erased before codegen"
+    );
 
     let Theory::Theory { arrows, .. } = converted else {
         panic!("program should be a theory");

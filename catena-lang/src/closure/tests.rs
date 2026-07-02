@@ -243,6 +243,43 @@ fn closure_body_unpacker_reproduces_product_typed_environment_wires() {
 }
 
 #[test]
+fn converted_closure_name_keeps_free_variable_input() {
+    let n = obj("n", vec![]);
+    let ix_n = obj("val", vec![obj("ix", vec![n.clone()])]);
+    let u64_value = obj("val", vec![obj("u64", vec![])]);
+    let closure_type = obj(FN_HOM_TYPE, vec![ix_n.clone(), u64_value.clone()]);
+    let function_pointer = function_pointer_type(vec![ix_n], vec![u64_value]);
+
+    let mut definition = AnnotatedTerm::empty();
+    let free_n = definition.new_node(n);
+    let named_function = definition.new_node(function_pointer);
+    let closure = definition.new_node(closure_type);
+
+    definition.new_edge(op("name.u64.one-at"), (vec![free_n], vec![named_function]));
+    definition.new_edge(op("lift"), (vec![named_function], vec![closure]));
+    definition.sources = vec![free_n];
+    definition.targets = vec![closure];
+
+    let converted =
+        convert(&op("reduce-n"), &definition, &[closure]).expect("conversion should succeed");
+    let name_edge = converted
+        .definition
+        .hypergraph
+        .edges
+        .iter()
+        .zip(&converted.definition.hypergraph.adjacency)
+        .find(|(operation, _)| operation.as_str().starts_with("name.closure.reduce-n."))
+        .map(|(_, edge)| edge)
+        .expect("converted definition should generate a closure name edge");
+
+    assert_eq!(
+        name_edge.sources,
+        vec![free_n],
+        "generated closure name should depend on the free variable n"
+    );
+}
+
+#[test]
 fn theory_conversion_converts_if_closure_arguments() {
     let (theory_set, definition_types) = theories_with(
         r#"

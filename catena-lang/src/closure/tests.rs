@@ -3,7 +3,7 @@ use metacat::{
     theory::{RawTheorySet, Theory, TheoryId, TheorySet},
     tree::Tree,
 };
-use open_hypergraphs::lax::NodeId;
+use open_hypergraphs::lax::{NodeId, OpenHypergraph};
 
 use crate::{
     check::{AnnotatedTerm, DefinitionTypes, check},
@@ -174,6 +174,39 @@ fn deferred_bool_id_closure_converts_through_each_stage() {
             .any(|operation| operation.as_str()
                 == format!("name.closure.run-bool-id.{}", original_target.0))
     );
+}
+
+#[test]
+fn closure_body_for_dependent_argument_plain_result_has_mismatched_type_map_domains() {
+    // Minimal form of the closure-valued argument passed to reduce in:
+    //
+    //   ({[.dim-view buffer]} buf.row-major-view [matrix.])
+    //   ([.dim-name] name.matrix-diagonal-index lift [diagonal-index.])
+    //   ({[.diagonal-index matrix]} compose [diagonal-view.])
+    //   ...
+    //   [.diagonal-view]
+    //   [.dim-reduce]
+    // } reduce
+    //
+    // `diagonal-view` has type val(ix n) => val(u64). After closure_body turns
+    // 1 -> (val(ix n) => val(u64)) into 1, val(ix n) -> val(u64), the source
+    // side mentions `n` but the target side does not.
+    let index_bound = Tree::Leaf(0, ());
+    let domain = obj("val", vec![obj("ix", vec![index_bound.clone()])]);
+    let codomain = obj("val", vec![obj("u64", vec![])]);
+    let closure = obj(FN_HOM_TYPE, vec![domain.clone(), codomain.clone()]);
+
+    let mut extracted: AnnotatedTerm = OpenHypergraph::empty();
+    extracted.targets = vec![extracted.new_node(closure)];
+
+    let body = closure_body(&extracted).expect("closure body construction should succeed");
+    let source_types = interface_types(&body, &body.sources);
+    let target_types = interface_types(&body, &body.targets);
+
+    assert_eq!(source_types, vec![obj("1", vec![]), domain]);
+    assert_eq!(target_types, vec![codomain]);
+    assert_eq!(leaf_indices(&source_types), vec![0]);
+    assert_eq!(leaf_indices(&target_types), Vec::<usize>::new());
 }
 
 #[test]
@@ -443,6 +476,26 @@ fn interface_types(term: &AnnotatedTerm, interface: &[NodeId]) -> Vec<Obj> {
         .iter()
         .map(|node| term.hypergraph.nodes[node.0].clone())
         .collect()
+}
+
+fn leaf_indices(objects: &[Obj]) -> Vec<usize> {
+    let mut indices = Vec::new();
+    for object in objects {
+        collect_leaf_indices(object, &mut indices);
+    }
+    indices
+}
+
+fn collect_leaf_indices(object: &Obj, indices: &mut Vec<usize>) {
+    match object {
+        Tree::Empty => {}
+        Tree::Leaf(index, _) => indices.push(*index),
+        Tree::Node(_, _, children) => {
+            for child in children {
+                collect_leaf_indices(child, indices);
+            }
+        }
+    }
 }
 
 fn assert_same_definition_interface(actual: &AnnotatedTerm, expected: &AnnotatedTerm) {

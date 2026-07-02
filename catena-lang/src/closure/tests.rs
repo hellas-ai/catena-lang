@@ -156,7 +156,7 @@ fn deferred_bool_id_closure_converts_through_each_stage() {
     // val(bool) ● (val(bool) * 1 -> val(bool))
     assert_converted_definition(
         &converted.definition,
-        4,
+        5,
         vec![obj("val", vec![obj("bool", vec![])])],
         vec![
             obj("val", vec![obj("bool", vec![])]),
@@ -165,6 +165,16 @@ fn deferred_bool_id_closure_converts_through_each_stage() {
                 vec![obj("val", vec![obj("bool", vec![])])],
             ),
         ],
+    );
+    assert!(
+        converted
+            .definition
+            .hypergraph
+            .edges
+            .iter()
+            .any(|operation| operation.as_str()
+                == format!("copy.closure.run-bool-id.{}.0", original_target.0)),
+        "converted definition should split the captured environment before naming the closure"
     );
 
     // Verify that original definition uses the *name* of the closure conversion
@@ -313,6 +323,17 @@ fn converted_closure_name_keeps_free_variable_input() {
         .expect("quotient should succeed");
 
     let converted_hexpr = crate::hexpr::term_to_hexpr(&converted_definition);
+    let expected_converted: Hexpr =
+        "([w0 . ] ([ . w0] copy.closure.reduce-n.1.0 [w1 w2 . ]) \
+         ([ . w2] name.closure.reduce-n.1 [w3 . ]) [ . w1 w3])"
+            .parse()
+            .expect("expected converted definition Hexpr should parse");
+    assert_eq!(
+        converted_hexpr, expected_converted,
+        "closure conversion should split n, keep one copy as the environment, \
+         and pass the other copy to the generated closure name"
+    );
+
     let name_edge = converted_definition
         .hypergraph
         .edges
@@ -322,12 +343,22 @@ fn converted_closure_name_keeps_free_variable_input() {
         .map(|(_, edge)| edge)
         .expect("converted definition should generate a closure name edge");
 
+    // `name.closure.reduce-n.*` should no longer be nullary: it receives the
+    // copied `n` input produced by the split above, and returns only the
+    // function pointer. The environment remains the other split output.
     assert_eq!(
-        name_edge.sources,
-        vec![free_n],
-        "generated closure name should depend on the free variable n; expected Hexpr shape: \
-         `([w0 . ] ([w0] name.closure.reduce-n.1 [w1 . ]) [ . w0 w1])`, actual: \
-         `{converted_hexpr}`"
+        name_edge
+            .sources
+            .iter()
+            .map(|node| converted_definition.hypergraph.nodes[node.0].clone())
+            .collect::<Vec<_>>(),
+        vec![Tree::Leaf(0, ())],
+        "generated closure name should consume the free variable n"
+    );
+    assert_eq!(
+        name_edge.targets,
+        vec![converted_definition.targets[1]],
+        "generated closure name should only produce the function pointer"
     );
 }
 
@@ -345,6 +376,12 @@ fn theory_conversion_converts_if_closure_arguments() {
 
     let converted =
         convert_theory(&theory_set, &definition_types, &program).expect("theory should convert");
+    let mut converted_set = theory_set.clone();
+    converted_set
+        .theories
+        .insert(program.clone(), converted.clone());
+    check(&converted_set).expect("converted theory should still typecheck");
+
     let Theory::Theory { arrows, .. } = converted else {
         panic!("program should be a theory");
     };

@@ -153,18 +153,51 @@ fn replacement_region(
         .iter()
         .map(|wire| replacement.new_node(definition.hypergraph.nodes[wire.0].clone()))
         .collect::<Vec<_>>();
-    let environment = packed_environment_target(&mut replacement, &sources, &type_info.environment);
+    let (environment_components, name_sources) =
+        split_sources_for_environment_and_name(
+            &mut replacement,
+            definition_name,
+            closure_name_wire,
+            &sources,
+        );
+    let environment = packed_environment_target(
+        &mut replacement,
+        &environment_components,
+        &type_info.environment,
+    );
     let function_pointer = replacement.new_node(function_pointer_type(
         vec![type_info.environment.clone(), type_info.domain.clone()],
         vec![type_info.codomain.clone()],
     ));
     replacement.new_edge(
         name_operation(definition_name, closure_name_wire),
-        (vec![], vec![function_pointer]),
+        (name_sources, vec![function_pointer]),
     );
     replacement.sources = sources;
     replacement.targets = vec![environment, function_pointer];
     replacement
+}
+
+fn split_sources_for_environment_and_name(
+    replacement: &mut AnnotatedTerm,
+    definition_name: &Operation,
+    closure_name_wire: NodeId,
+    sources: &[NodeId],
+) -> (Vec<NodeId>, Vec<NodeId>) {
+    sources
+        .iter()
+        .enumerate()
+        .map(|(index, source)| {
+            let source_type = replacement.hypergraph.nodes[source.0].clone();
+            let environment_component = replacement.new_node(source_type.clone());
+            let name_source = replacement.new_node(source_type);
+            replacement.new_edge(
+                copy_operation(definition_name, closure_name_wire, index),
+                (vec![*source], vec![environment_component, name_source]),
+            );
+            (environment_component, name_source)
+        })
+        .unzip()
 }
 
 fn packed_environment_target(
@@ -241,6 +274,12 @@ fn name_operation(definition_name: &Operation, closure_wire: NodeId) -> Operatio
     )
     .parse()
     .expect("generated name operation should parse")
+}
+
+fn copy_operation(definition_name: &Operation, closure_wire: NodeId, index: usize) -> Operation {
+    format!("copy.closure.{}.{}.{}", definition_name, closure_wire.0, index)
+        .parse()
+        .expect("generated copy operation should parse")
 }
 
 fn closure_parts(object: &Obj) -> Option<(&Obj, &Obj)> {

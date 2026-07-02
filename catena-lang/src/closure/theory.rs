@@ -113,6 +113,7 @@ fn update_definition_arrow(
 
     let mut raw = original.raw.clone();
     raw.definition = Some(term_to_hexpr(&converted_definition));
+    insert_copy_arrows(syntax, arrows, &converted_definition)?;
     let mut arrow = original.clone();
     arrow.raw = raw;
     arrow.definition = Some(converted_definition.map_nodes(|_| ()));
@@ -120,6 +121,41 @@ fn update_definition_arrow(
 
     for closure in converted.closures {
         insert_closure_arrows(syntax, theory_id, arrows, definition_name, closure)?;
+    }
+
+    Ok(())
+}
+
+fn insert_copy_arrows(
+    syntax: &Theory,
+    arrows: &mut BTreeMap<Operation, TheoryArrow>,
+    definition: &AnnotatedTerm,
+) -> Result<(), ConvertTheoryError> {
+    for (operation, edge) in definition
+        .hypergraph
+        .edges
+        .iter()
+        .zip(&definition.hypergraph.adjacency)
+        .filter(|(operation, _)| operation.as_str().starts_with("copy.closure."))
+    {
+        let raw_copy = RawTheoryArrow {
+            name: operation.clone(),
+            type_maps: (
+                objects_to_hexpr(&interface_types(definition, &edge.sources)),
+                objects_to_hexpr(&interface_types(definition, &edge.targets)),
+            ),
+            definition: None,
+        };
+        let copy_type_maps = interpret_type_maps(syntax, &raw_copy.type_maps)?;
+        arrows.insert(
+            operation.clone(),
+            TheoryArrow {
+                name: operation.clone(),
+                raw: raw_copy,
+                type_maps: copy_type_maps,
+                definition: None,
+            },
+        );
     }
 
     Ok(())

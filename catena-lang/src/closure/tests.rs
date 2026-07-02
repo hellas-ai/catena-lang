@@ -211,6 +211,8 @@ fn closure_body_for_dependent_argument_plain_result_has_mismatched_type_map_doma
     assert_eq!(leaf_indices(&source_types), vec![0]);
     assert_eq!(leaf_indices(&target_types), Vec::<usize>::new());
 }
+
+#[test]
 fn closure_body_unpacker_reproduces_product_typed_environment_wires() {
     let width = obj("width", vec![]);
     let buffer = obj("buffer", vec![]);

@@ -11,7 +11,7 @@ use thiserror::Error;
 use crate::{
     check::{AnnotatedTerm, DefinitionTypes},
     closure::convert::{ConvertError, Converted, ConvertedClosure, convert},
-    elaborate::{ElaborateError, name_symbols},
+    elaborate::{ElaborateError, GENERATED_VARIABLE_PREFIX, name_symbols},
     hexpr::{objects_to_hexpr, term_to_hexpr},
     stdlib::constants::FN_HOM_TYPE,
 };
@@ -253,10 +253,15 @@ fn objects_to_hexpr_in_context(objects: &[Obj], ambient_context_arity: usize) ->
             "object leaf index {max_leaf} is outside ambient context arity {ambient_context_arity}"
         );
     }
+    let context_vars = context_vars(ambient_context_arity);
+    let used_context_vars = leaves
+        .into_iter()
+        .map(|leaf| context_vars[leaf].clone())
+        .collect();
     Hexpr::Composition(vec![
         Hexpr::Frobenius {
-            sources: (0..ambient_context_arity).map(context_var).collect(),
-            targets: leaves.into_iter().map(context_var).collect(),
+            sources: context_vars,
+            targets: used_context_vars,
         },
         objects_to_hexpr(objects),
     ])
@@ -321,8 +326,12 @@ fn op(name: &str) -> Operation {
     name.parse().expect("generated operation should parse")
 }
 
+fn context_vars(arity: usize) -> Vec<Variable> {
+    (0..arity).map(context_var).collect()
+}
+
 fn context_var(index: usize) -> Variable {
-    format!("p{index}")
+    format!("{GENERATED_VARIABLE_PREFIX}closure_ctx{index}")
         .parse()
         .expect("generated variable should parse")
 }

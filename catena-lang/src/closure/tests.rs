@@ -1,4 +1,4 @@
-use hexpr::Operation;
+use hexpr::{Hexpr, Operation};
 use metacat::{
     theory::{RawTheorySet, Theory, TheoryId, TheorySet},
     tree::Tree,
@@ -244,30 +244,80 @@ fn closure_body_unpacker_reproduces_product_typed_environment_wires() {
 
 #[test]
 fn converted_closure_name_keeps_free_variable_input() {
-    let n = obj("n", vec![]);
-    let ix_n = obj("val", vec![obj("ix", vec![n.clone()])]);
+    // Build the smallest closure region that depends on a free variable.
+    //
+    // The hand-built `name.manual-ix-n-to-u64` edge stands for a named closure
+    // family indexed by `n`. Supplying the free length parameter `n` produces a
+    // concrete closure of type `ix n => u64`.
+    //
+    // Types used in the hand-built graph:
+    //
+    //   n            type-level length parameter
+    //   val(ix n)    runtime index into a collection of length n
+    //   val(u64)     runtime u64 output
+    //   ix n => u64  closure returned by name.manual-ix-n-to-u64
+    let length_parameter_n = Tree::Leaf(0, ());
+    let index_value_at_n = obj("val", vec![obj("ix", vec![length_parameter_n.clone()])]);
     let u64_value = obj("val", vec![obj("u64", vec![])]);
-    let closure_type = obj(FN_HOM_TYPE, vec![ix_n.clone(), u64_value.clone()]);
-    let function_pointer = function_pointer_type(vec![ix_n], vec![u64_value]);
+    let producer_closure_type = obj(
+        FN_HOM_TYPE,
+        vec![index_value_at_n.clone(), u64_value.clone()],
+    );
 
+    // Wires and edges:
+    //
+    //   n -- name.manual-ix-n-to-u64 --> (ix n => u64)
+    //
+    // `free_n` indexes which closure name should be produced. Therefore the
+    // replacement `name.closure.reduce-n.*` must still receive `free_n`.
     let mut definition = AnnotatedTerm::empty();
-    let free_n = definition.new_node(n);
-    let named_function = definition.new_node(function_pointer);
-    let closure = definition.new_node(closure_type);
+    let free_n = definition.new_node(length_parameter_n);
+    let closure = definition.new_node(producer_closure_type);
 
-    definition.new_edge(op("name.u64.one-at"), (vec![free_n], vec![named_function]));
-    definition.new_edge(op("lift"), (vec![named_function], vec![closure]));
+    definition.new_edge(op("name.manual-ix-n-to-u64"), (vec![free_n], vec![closure]));
     definition.sources = vec![free_n];
     definition.targets = vec![closure];
 
+    let constructed = crate::hexpr::term_to_hexpr(&definition);
+    let expected_construction: Hexpr =
+        "([w0 . ] ([ . w0] name.manual-ix-n-to-u64 [w1 . ]) [ . w1])"
+            .parse()
+            .expect("expected constructed definition Hexpr should parse");
+    assert_eq!(
+        constructed, expected_construction,
+        "test setup should construct w0=n |- name.manual-ix-n-to-u64"
+    );
+
+    // Closure conversion replaces the closure-producing region with an explicit
+    // environment and a generated closure name. Since the manual closure name
+    // depended on `n`, the generated `name.closure.reduce-n.*` must preserve the
+    // same dependency instead of becoming nullary.
     let converted =
         convert(&op("reduce-n"), &definition, &[closure]).expect("conversion should succeed");
-    let name_edge = converted
-        .definition
+    let generated_closure = converted
+        .closures
+        .first()
+        .expect("conversion should generate a closure body");
+    assert_eq!(
+        interface_types(&generated_closure.term, &generated_closure.term.sources),
+        vec![
+            Tree::Leaf(0, ()),
+            obj("val", vec![obj("ix", vec![Tree::Leaf(0, ())])])
+        ],
+        "generated closure body should still depend on free variable n"
+    );
+
+    let mut converted_definition = converted.definition.clone();
+    converted_definition
+        .quotient()
+        .expect("quotient should succeed");
+
+    let converted_hexpr = crate::hexpr::term_to_hexpr(&converted_definition);
+    let name_edge = converted_definition
         .hypergraph
         .edges
         .iter()
-        .zip(&converted.definition.hypergraph.adjacency)
+        .zip(&converted_definition.hypergraph.adjacency)
         .find(|(operation, _)| operation.as_str().starts_with("name.closure.reduce-n."))
         .map(|(_, edge)| edge)
         .expect("converted definition should generate a closure name edge");
@@ -275,7 +325,9 @@ fn converted_closure_name_keeps_free_variable_input() {
     assert_eq!(
         name_edge.sources,
         vec![free_n],
-        "generated closure name should depend on the free variable n"
+        "generated closure name should depend on the free variable n; expected Hexpr shape: \
+         `([w0 . ] ([w0] name.closure.reduce-n.1 [w1 . ]) [ . w0 w1])`, actual: \
+         `{converted_hexpr}`"
     );
 }
 

@@ -15,7 +15,10 @@ use crate::{
         theory::convert_theory,
     },
     elaborate::elaborate,
-    stdlib::{self, constants::FN_HOM_TYPE},
+    stdlib::{
+        self,
+        constants::{FN_HOM_TYPE, PRODUCT_TYPE, UNIT_TYPE},
+    },
 };
 
 #[test]
@@ -208,6 +211,67 @@ fn closure_body_for_dependent_argument_plain_result_has_mismatched_type_map_doma
     assert_eq!(leaf_indices(&source_types), vec![0]);
     assert_eq!(leaf_indices(&target_types), Vec::<usize>::new());
 }
+fn closure_body_unpacker_reproduces_product_typed_environment_wires() {
+    let width = obj("width", vec![]);
+    let buffer = obj("buffer", vec![]);
+    let row = obj("row", vec![]);
+    let col = obj("col", vec![]);
+    let scale = obj("scale", vec![]);
+    let env_product = binary_product(width.clone(), buffer.clone());
+    let idx = binary_product(row.clone(), col.clone());
+    let captured = vec![env_product.clone(), idx.clone(), scale.clone()];
+    let domain = obj("argument", vec![]);
+    let codomain = obj("output", vec![]);
+    let closure = obj(FN_HOM_TYPE, vec![domain.clone(), codomain.clone()]);
+
+    let mut extracted: AnnotatedTerm = OpenHypergraph::empty();
+    extracted.sources = captured
+        .iter()
+        .map(|object| extracted.new_node(object.clone()))
+        .collect();
+    extracted.targets = vec![extracted.new_node(closure)];
+
+    let body = closure_body(&extracted).expect("closure body construction should succeed");
+    let body_sources = interface_types(&body, &body.sources);
+    let expected_environment = right_associated_product(&captured);
+
+    assert_eq!(
+        body_sources,
+        vec![expected_environment, domain],
+        "closure body should receive one packed environment plus the argument"
+    );
+
+    let product_elims = body
+        .hypergraph
+        .edges
+        .iter()
+        .filter(|operation| operation.as_str() == "*.elim")
+        .count();
+    assert_eq!(
+        product_elims,
+        captured.len() - 1,
+        "environment unpacker should split only top-level captured wires"
+    );
+
+    let unpacked_environment_targets = body
+        .hypergraph
+        .adjacency
+        .iter()
+        .zip(&body.hypergraph.edges)
+        .filter(|(_, operation)| operation.as_str() == "*.elim")
+        .flat_map(|(edge, _)| edge.targets.iter())
+        .filter_map(|node| {
+            let ty = &body.hypergraph.nodes[node.0];
+            captured.contains(ty).then_some(ty.clone())
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        captured
+            .iter()
+            .all(|ty| unpacked_environment_targets.contains(ty)),
+        "unpacker should reproduce product-typed captured wires themselves"
+    );
+}
 
 #[test]
 fn theory_conversion_converts_if_closure_arguments() {
@@ -343,6 +407,64 @@ fn theory_conversion_converts_if_id_neg_example_end_to_end() {
             "converted if-id-neg should refer to {name_closure_name}"
         );
     }
+}
+
+#[test]
+fn convert_parallel_regions_with_crossed_node_and_edge_order() {
+    let bool_value = obj("val", vec![obj("bool", vec![])]);
+    let unit = obj("1", vec![]);
+    let unit_to_bool = obj("=>", vec![unit, bool_value.clone()]);
+
+    // Metacat-ish shape:
+    //
+    //   {({x defer} (name.test.id) compose) (y defer)} test.use-two
+    //
+    // Both inputs to `test.use-two` are closure regions. The graph is built by
+    // hand so the first region has higher node ids but lower edge ids than the
+    // second region; rewriting in node-id order deletes/relabels edges before
+    // the later region's recorded edge ids are consumed. The stale id used to
+    // show up as `Rewrite(RegionEdgeOutOfBounds { edge: 4 })`.
+    let mut definition = AnnotatedTerm::empty();
+    let second_region_input = definition.new_node(bool_value.clone());
+    let second_region_closure = definition.new_node(unit_to_bool.clone());
+    let output = definition.new_node(bool_value.clone());
+    let first_region_input = definition.new_node(bool_value);
+    let first_region_deferred = definition.new_node(unit_to_bool.clone());
+    let first_region_named = definition.new_node(unit_to_bool.clone());
+    let first_region_closure = definition.new_node(unit_to_bool);
+
+    definition.new_edge(
+        op("defer"),
+        (vec![first_region_input], vec![first_region_deferred]),
+    );
+    definition.new_edge(op("name.test.id"), (vec![], vec![first_region_named]));
+    definition.new_edge(
+        op("compose"),
+        (
+            vec![first_region_deferred, first_region_named],
+            vec![first_region_closure],
+        ),
+    );
+    definition.new_edge(
+        op("test.use-two"),
+        (
+            vec![first_region_closure, second_region_closure],
+            vec![output],
+        ),
+    );
+    definition.new_edge(
+        op("defer"),
+        (vec![second_region_input], vec![second_region_closure]),
+    );
+    definition.sources = vec![second_region_input, first_region_input];
+    definition.targets = vec![output];
+
+    convert(
+        &op("parallel-closures"),
+        &definition,
+        &[first_region_closure, second_region_closure],
+    )
+    .expect("parallel closure conversion should succeed");
 }
 
 #[test]
@@ -536,6 +658,18 @@ fn assert_operation_count(term: &metacat::theory::Term, operation: &str, expecte
 
 fn obj(name: &str, children: Vec<Obj>) -> Obj {
     Tree::Node(op(name), 0, children)
+}
+
+fn binary_product(left: Obj, right: Obj) -> Obj {
+    obj(PRODUCT_TYPE, vec![left, right])
+}
+
+fn right_associated_product(objects: &[Obj]) -> Obj {
+    match objects {
+        [] => obj(UNIT_TYPE, vec![]),
+        [only] => only.clone(),
+        [head, tail @ ..] => binary_product(head.clone(), right_associated_product(tail)),
+    }
 }
 
 fn function_pointer_type(sources: Vec<Obj>, targets: Vec<Obj>) -> Obj {

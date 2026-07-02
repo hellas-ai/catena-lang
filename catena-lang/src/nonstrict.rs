@@ -1,7 +1,8 @@
 //! Adapters between strict tensor interfaces and explicit product/unit objects.
 //!
-//! These maps are the packers and unpackers used when interpreting string diagrams for
-//! non-strict monoidal categories in a strict hypergraph representation.
+//! Flatteners/unflatteners adapt one object to or from its strict, flattened
+//! tensor interface. Packers/unpackers adapt a tensor interface to or from one
+//! right-associated packed product object.
 //!
 //! For theoretical background, see
 //! [String Diagrams for Strictification and Coherence](https://arxiv.org/abs/2201.11738)
@@ -38,25 +39,7 @@ pub(crate) fn object_size(object: &Obj) -> usize {
     }
 }
 
-pub(crate) fn to_packer(objects: Vec<Obj>) -> Term {
-    objects
-        .iter()
-        .map(pack_object)
-        .fold(OpenHypergraph::empty(), |packed, object| {
-            packed.tensor(&object)
-        })
-}
-
-pub(crate) fn to_unpacker(objects: Vec<Obj>) -> Term {
-    objects
-        .iter()
-        .map(unpack_object)
-        .fold(OpenHypergraph::empty(), |unpacked, object| {
-            unpacked.tensor(&object)
-        })
-}
-
-fn pack_object(object: &Obj) -> Term {
+pub(crate) fn to_unflattener(object: &Obj) -> Term {
     match object {
         Tree::Node(operation, _, children)
             if operation.as_str() == UNIT_TYPE && children.is_empty() =>
@@ -67,7 +50,7 @@ fn pack_object(object: &Obj) -> Term {
             let [left, right] = children.as_slice() else {
                 panic!("product object should have exactly two children");
             };
-            let children = pack_object(left).tensor(&pack_object(right));
+            let children = to_unflattener(left).tensor(&to_unflattener(right));
             let intro = OpenHypergraph::singleton(
                 op(PRODUCT_INTRO),
                 vec![left.clone(), right.clone()],
@@ -75,14 +58,70 @@ fn pack_object(object: &Obj) -> Term {
             );
             children
                 .compose(&intro)
-                .expect("nested product packer should compose")
+                .expect("nested product unflattener should compose")
         }
         _ => OpenHypergraph::identity(vec![object.clone()]),
     }
 }
 
-fn unpack_object(object: &Obj) -> Term {
-    dual(pack_object(object).map_edges(opposite_operation))
+pub(crate) fn to_flattener(object: &Obj) -> Term {
+    dual(to_unflattener(object).map_edges(opposite_operation))
+}
+
+pub(crate) fn to_unflatteners(objects: &[Obj]) -> Term {
+    objects
+        .iter()
+        .map(to_unflattener)
+        .fold(OpenHypergraph::empty(), |unflattened, object| {
+            unflattened.tensor(&object)
+        })
+}
+
+pub(crate) fn to_flatteners(objects: &[Obj]) -> Term {
+    objects
+        .iter()
+        .map(to_flattener)
+        .fold(OpenHypergraph::empty(), |flattened, object| {
+            flattened.tensor(&object)
+        })
+}
+
+pub(crate) fn to_packer(objects: Vec<Obj>) -> Term {
+    packer_for(&objects)
+}
+
+pub(crate) fn to_unpacker(objects: Vec<Obj>) -> Term {
+    dual(to_packer(objects).map_edges(opposite_operation))
+}
+
+fn packer_for(objects: &[Obj]) -> Term {
+    let packed = pack_objects(objects);
+    match objects {
+        [] => OpenHypergraph::singleton(op(UNIT_INTRO), vec![], vec![packed]),
+        [only] => OpenHypergraph::identity(vec![only.clone()]),
+        [head, tail @ ..] => {
+            let packed_tail = pack_objects(tail);
+            let intro = OpenHypergraph::singleton(
+                op(PRODUCT_INTRO),
+                vec![head.clone(), packed_tail],
+                vec![packed],
+            );
+            OpenHypergraph::identity(vec![head.clone()])
+                .tensor(&packer_for(tail))
+                .compose(&intro)
+                .expect("product packer should compose")
+        }
+    }
+}
+
+fn pack_objects(objects: &[Obj]) -> Obj {
+    match objects {
+        [] => Tree::Node(op(UNIT_TYPE), 0, vec![]),
+        [only] => only.clone(),
+        [head, tail @ ..] => {
+            Tree::Node(op(PRODUCT_TYPE), 0, vec![head.clone(), pack_objects(tail)])
+        }
+    }
 }
 
 fn opposite_operation(operation: Operation) -> Operation {
@@ -174,40 +213,96 @@ mod tests {
     }
 
     #[test]
-    fn packer_and_unpacker_preserve_top_level_operation_arity() {
+    fn flatteners_adapt_one_object_to_its_flattened_components() {
         let a = object("A");
         let b = object("B");
         let c = object("C");
         let ab = product(a.clone(), b.clone());
 
-        let packer = to_packer(vec![ab.clone(), c.clone()]);
-        assert_eq!(packer.hypergraph.edges, vec![op(PRODUCT_INTRO)]);
+        let unflattener = to_unflatteners(&[ab.clone(), c.clone()]);
+        assert_eq!(unflattener.hypergraph.edges, vec![op(PRODUCT_INTRO)]);
         assert_eq!(
-            packer
+            unflattener
                 .sources
                 .iter()
-                .map(|node| packer.hypergraph.nodes[node.0].clone())
+                .map(|node| unflattener.hypergraph.nodes[node.0].clone())
                 .collect::<Vec<_>>(),
             vec![a.clone(), b.clone(), c.clone()]
         );
         assert_eq!(
+            unflattener
+                .targets
+                .iter()
+                .map(|node| unflattener.hypergraph.nodes[node.0].clone())
+                .collect::<Vec<_>>(),
+            vec![ab.clone(), c.clone()]
+        );
+
+        let flattener = to_flatteners(&[ab.clone(), c.clone()]);
+        assert_eq!(flattener.hypergraph.edges, vec![op(PRODUCT_ELIM)]);
+        assert_eq!(
+            flattener
+                .sources
+                .iter()
+                .map(|node| flattener.hypergraph.nodes[node.0].clone())
+                .collect::<Vec<_>>(),
+            vec![ab, c]
+        );
+        assert_eq!(
+            flattener
+                .targets
+                .iter()
+                .map(|node| flattener.hypergraph.nodes[node.0].clone())
+                .collect::<Vec<_>>(),
+            vec![a, b, object("C")]
+        );
+    }
+
+    #[test]
+    fn packers_adapt_an_interface_to_one_right_associated_product() {
+        let width = object("width");
+        let buffer = object("buffer");
+        let row = object("row");
+        let col = object("col");
+        let e = object("E");
+        let ab = product(width, buffer);
+        let cd = product(row, col);
+        let packed = product(ab.clone(), product(cd.clone(), e.clone()));
+
+        let packer = to_packer(vec![ab.clone(), cd.clone(), e.clone()]);
+        assert_eq!(
+            packer.hypergraph.edges,
+            vec![op(PRODUCT_INTRO), op(PRODUCT_INTRO)]
+        );
+        assert_eq!(
+            packer
+                .sources
+                .iter()
+                .map(|node| packer.hypergraph.nodes[node.0].clone())
+                .collect::<Vec<_>>(),
+            vec![ab.clone(), cd.clone(), e.clone()]
+        );
+        assert_eq!(
             packer
                 .targets
                 .iter()
                 .map(|node| packer.hypergraph.nodes[node.0].clone())
                 .collect::<Vec<_>>(),
-            vec![ab.clone(), c.clone()]
+            vec![packed.clone()]
         );
 
-        let unpacker = to_unpacker(vec![ab.clone(), c.clone()]);
-        assert_eq!(unpacker.hypergraph.edges, vec![op(PRODUCT_ELIM)]);
+        let unpacker = to_unpacker(vec![ab.clone(), cd.clone(), e.clone()]);
+        assert_eq!(
+            unpacker.hypergraph.edges,
+            vec![op(PRODUCT_ELIM), op(PRODUCT_ELIM)]
+        );
         assert_eq!(
             unpacker
                 .sources
                 .iter()
                 .map(|node| unpacker.hypergraph.nodes[node.0].clone())
                 .collect::<Vec<_>>(),
-            vec![ab, c]
+            vec![packed]
         );
         assert_eq!(
             unpacker
@@ -215,7 +310,7 @@ mod tests {
                 .iter()
                 .map(|node| unpacker.hypergraph.nodes[node.0].clone())
                 .collect::<Vec<_>>(),
-            vec![a, b, object("C")]
+            vec![ab, cd, e]
         );
     }
 

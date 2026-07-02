@@ -506,6 +506,97 @@ fn theory_conversion_converts_reduce_closure_arguments() {
     }
 }
 
+#[test]
+fn theory_conversion_generates_diagonal_view_closure_with_shared_context() {
+    let (theory_set, definition_types) = theories_with(
+        r#"
+        (def program diagonal-view :
+          ([n.] ([.n] ix val))
+          ->
+          ([n.] (u64 val))
+        = ([i.] u64.one))
+
+        (def program reduce-diagonal :
+          ([n.] {({[.n] u64} :) ({[.n] u64} :)})
+          ->
+          ([n.] (u64 val))
+        = ([producer-len reduce-len.]
+          {
+            const.u64.0x0000000000000000
+            (name.u64.add lift)
+            (([.producer-len] :.param) name.diagonal-view lift)
+            [.reduce-len]
+          }
+          reduce
+        ))
+        "#,
+    );
+    let program = TheoryId(op("program"));
+
+    let converted =
+        convert_theory(&theory_set, &definition_types, &program).expect("theory should convert");
+    let Theory::Theory { arrows, .. } = converted else {
+        panic!("program should be a theory");
+    };
+
+    let reduce_diagonal = arrows
+        .get(&op("reduce-diagonal"))
+        .expect("converted original definition should exist");
+    let reduce_diagonal_body = reduce_diagonal
+        .definition
+        .as_ref()
+        .expect("converted original definition should have a body");
+
+    assert_operation_count(reduce_diagonal_body, "reducec", 1);
+    assert_operation_count(reduce_diagonal_body, "reduce", 0);
+
+    let closure_names = arrows
+        .keys()
+        .filter(|operation| operation.as_str().starts_with("closure.reduce-diagonal."))
+        .cloned()
+        .collect::<Vec<_>>();
+    assert_eq!(closure_names.len(), 2);
+
+    // `diagonal-view` has type val(ix n) -> val(u64). Closure conversion
+    // lowers the lifted producer closure to a generated arrow with source
+    // 1, val(ix n) and target val(u64). The target does not mention `n`, but
+    // both generated type maps must still share reduce-diagonal's ambient
+    // context so positional variables keep the same meaning.
+    let (closure_name, closure) = closure_names
+        .iter()
+        .filter_map(|name| arrows.get(name).map(|closure| (name, closure)))
+        .find(|(_, closure)| closure.raw.type_maps.0.to_string().contains("ix"))
+        .expect("generated diagonal-view closure should mention ix on its source type map");
+
+    assert!(
+        closure.definition.is_some(),
+        "generated closure arrow {closure_name} should have a definition"
+    );
+    assert_eq!(
+        closure.type_maps.0.sources, closure.type_maps.1.sources,
+        "generated diagonal-view closure should use one shared context"
+    );
+    assert_eq!(
+        closure.type_maps.0.sources.len(),
+        1,
+        "generated diagonal-view closure should inherit the ambient n context"
+    );
+    assert_eq!(
+        closure.type_maps.0.targets.len(),
+        2,
+        "generated diagonal-view closure source should be 1, val(ix n)"
+    );
+    assert_eq!(
+        closure.type_maps.1.targets.len(),
+        1,
+        "generated diagonal-view closure target should be val(u64)"
+    );
+    assert!(
+        closure.raw.type_maps.1.to_string().contains("u64"),
+        "target type map should contain val(u64)"
+    );
+}
+
 fn theories_with(source: &'static str) -> (TheorySet, DefinitionTypes) {
     let raw_theories = RawTheorySet::from_texts(stdlib::sources().chain([source]))
         .expect("test theories should parse");

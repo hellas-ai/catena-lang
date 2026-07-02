@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use hexpr::{Hexpr, Operation, interpret::Error as HexprInterpretError, try_interpret};
+use hexpr::{Hexpr, Operation, Variable, interpret::Error as HexprInterpretError, try_interpret};
 use metacat::theory::{
     Term, Theory, TheoryArrow, TheoryId, TheorySet, ast::RawTheoryArrow, model::SignatureError,
 };
@@ -11,7 +11,7 @@ use thiserror::Error;
 use crate::{
     check::{AnnotatedTerm, DefinitionTypes},
     closure::convert::{ConvertError, Converted, ConvertedClosure, convert},
-    elaborate::{ElaborateError, name_symbols},
+    elaborate::{ElaborateError, GENERATED_VARIABLE_PREFIX, name_symbols},
     hexpr::{objects_to_hexpr, term_to_hexpr},
     stdlib::constants::FN_HOM_TYPE,
 };
@@ -118,8 +118,22 @@ fn update_definition_arrow(
     arrow.definition = Some(converted_definition.map_nodes(|_| ()));
     arrows.insert(definition_name.clone(), arrow);
 
+    assert_eq!(
+        original.type_maps.0.sources.len(),
+        original.type_maps.1.sources.len(),
+        "closure conversion expects original arrow type maps to share one context"
+    );
+    let ambient_context_arity = original.type_maps.0.sources.len();
+
     for closure in converted.closures {
-        insert_closure_arrows(syntax, theory_id, arrows, definition_name, closure)?;
+        insert_closure_arrows(
+            syntax,
+            theory_id,
+            arrows,
+            definition_name,
+            ambient_context_arity,
+            closure,
+        )?;
     }
 
     Ok(())
@@ -130,12 +144,13 @@ fn insert_closure_arrows(
     theory_id: &TheoryId,
     arrows: &mut BTreeMap<Operation, TheoryArrow>,
     definition_name: &Operation,
+    ambient_context_arity: usize,
     closure: ConvertedClosure,
 ) -> Result<(), ConvertTheoryError> {
     let closure_name = closure.name(definition_name);
     let raw_closure = RawTheoryArrow {
         name: closure_name.clone(),
-        type_maps: type_maps_for_term(&closure.term),
+        type_maps: type_maps_for_term(&closure.term, ambient_context_arity),
         definition: Some(term_to_hexpr(&closure.term)),
     };
     let closure_type_maps = interpret_type_maps(syntax, &raw_closure.type_maps)?;
@@ -223,11 +238,53 @@ fn converted_primitive(operation: &Operation) -> Option<&'static str> {
         .find_map(|(source, target)| (operation.as_str() == *source).then_some(*target))
 }
 
-fn type_maps_for_term(term: &AnnotatedTerm) -> (Hexpr, Hexpr) {
+fn type_maps_for_term(term: &AnnotatedTerm, ambient_context_arity: usize) -> (Hexpr, Hexpr) {
     (
-        objects_to_hexpr(&interface_types(term, &term.sources)),
-        objects_to_hexpr(&interface_types(term, &term.targets)),
+        objects_to_hexpr_in_context(&interface_types(term, &term.sources), ambient_context_arity),
+        objects_to_hexpr_in_context(&interface_types(term, &term.targets), ambient_context_arity),
     )
+}
+
+fn objects_to_hexpr_in_context(objects: &[Obj], ambient_context_arity: usize) -> Hexpr {
+    let leaves = leaf_indices(objects);
+    if let Some(max_leaf) = leaves.iter().max() {
+        assert!(
+            *max_leaf < ambient_context_arity,
+            "object leaf index {max_leaf} is outside ambient context arity {ambient_context_arity}"
+        );
+    }
+    let context_vars = context_vars(ambient_context_arity);
+    let used_context_vars = leaves
+        .into_iter()
+        .map(|leaf| context_vars[leaf].clone())
+        .collect();
+    Hexpr::Composition(vec![
+        Hexpr::Frobenius {
+            sources: context_vars,
+            targets: used_context_vars,
+        },
+        objects_to_hexpr(objects),
+    ])
+}
+
+fn leaf_indices(objects: &[Obj]) -> Vec<usize> {
+    let mut indices = Vec::new();
+    for object in objects {
+        collect_leaf_indices(object, &mut indices);
+    }
+    indices
+}
+
+fn collect_leaf_indices(object: &Obj, indices: &mut Vec<usize>) {
+    match object {
+        Tree::Empty => {}
+        Tree::Leaf(index, _) => indices.push(*index),
+        Tree::Node(_, _, children) => {
+            for child in children {
+                collect_leaf_indices(child, indices);
+            }
+        }
+    }
 }
 
 fn interface_types(term: &AnnotatedTerm, interface: &[NodeId]) -> Vec<Obj> {
@@ -267,4 +324,14 @@ fn is_closure_type(object: &Obj) -> bool {
 
 fn op(name: &str) -> Operation {
     name.parse().expect("generated operation should parse")
+}
+
+fn context_vars(arity: usize) -> Vec<Variable> {
+    (0..arity).map(context_var).collect()
+}
+
+fn context_var(index: usize) -> Variable {
+    format!("{GENERATED_VARIABLE_PREFIX}closure_ctx{index}")
+        .parse()
+        .expect("generated variable should parse")
 }

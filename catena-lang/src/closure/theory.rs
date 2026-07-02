@@ -247,11 +247,15 @@ fn type_maps_for_term(term: &AnnotatedTerm, ambient_context_arity: usize) -> (He
 
 fn objects_to_hexpr_in_context(objects: &[Obj], ambient_context_arity: usize) -> Hexpr {
     let leaves = leaf_indices(objects);
-    let context_arity =
-        ambient_context_arity.max(leaves.iter().map(|leaf| leaf + 1).max().unwrap_or(0));
+    if let Some(max_leaf) = leaves.iter().max() {
+        assert!(
+            *max_leaf < ambient_context_arity,
+            "object leaf index {max_leaf} is outside ambient context arity {ambient_context_arity}"
+        );
+    }
     Hexpr::Composition(vec![
         Hexpr::Frobenius {
-            sources: (0..context_arity).map(context_var).collect(),
+            sources: (0..ambient_context_arity).map(context_var).collect(),
             targets: leaves.into_iter().map(context_var).collect(),
         },
         objects_to_hexpr(objects),

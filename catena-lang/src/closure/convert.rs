@@ -153,13 +153,12 @@ fn replacement_region(
         .iter()
         .map(|wire| replacement.new_node(definition.hypergraph.nodes[wire.0].clone()))
         .collect::<Vec<_>>();
-    let (environment_components, name_sources) =
-        split_sources_for_environment_and_name(
-            &mut replacement,
-            definition_name,
-            closure_name_wire,
-            &sources,
-        );
+    let (environment_components, name_sources) = split_sources_for_environment_and_name(
+        &mut replacement,
+        definition_name,
+        closure_name_wire,
+        &sources,
+    );
     let environment = packed_environment_target(
         &mut replacement,
         &environment_components,
@@ -277,9 +276,12 @@ fn name_operation(definition_name: &Operation, closure_wire: NodeId) -> Operatio
 }
 
 fn copy_operation(definition_name: &Operation, closure_wire: NodeId, index: usize) -> Operation {
-    format!("copy.closure.{}.{}.{}", definition_name, closure_wire.0, index)
-        .parse()
-        .expect("generated copy operation should parse")
+    format!(
+        "copy.closure.{}.{}.{}",
+        definition_name, closure_wire.0, index
+    )
+    .parse()
+    .expect("generated copy operation should parse")
 }
 
 fn closure_parts(object: &Obj) -> Option<(&Obj, &Obj)> {

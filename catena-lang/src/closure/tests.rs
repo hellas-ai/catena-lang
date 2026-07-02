@@ -323,11 +323,10 @@ fn converted_closure_name_keeps_free_variable_input() {
         .expect("quotient should succeed");
 
     let converted_hexpr = crate::hexpr::term_to_hexpr(&converted_definition);
-    let expected_converted: Hexpr =
-        "([w0 . ] ([ . w0] copy.closure.reduce-n.1.0 [w1 w2 . ]) \
+    let expected_converted: Hexpr = "([w0 . ] ([ . w0] copy.closure.reduce-n.1.0 [w1 w2 . ]) \
          ([ . w2] name.closure.reduce-n.1 [w3 . ]) [ . w1 w3])"
-            .parse()
-            .expect("expected converted definition Hexpr should parse");
+        .parse()
+        .expect("expected converted definition Hexpr should parse");
     assert_eq!(
         converted_hexpr, expected_converted,
         "closure conversion should split n, keep one copy as the environment, \

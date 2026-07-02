@@ -3,5 +3,5 @@ members = ["catena-core", "catena-cli", "catena-lang"]
 resolver = "2"
 
 [workspace.dependencies]
-metacat = { git = "https://github.com/statusfailed/metacat", branch = "act-2026" }
+metacat = { git = "https://github.com/statusfailed/metacat", version = "0.2.2", branch = "act-2026" }
 open-hypergraphs = "0.3.0"

@@ -8,10 +8,19 @@ const GPU_DIALECT_ENV: &str = "CATENA_GPU_DIALECT";
 
 const SIN_EXAMPLES: &str = include_str!("../examples/sincos.hex");
 const NN_EXAMPLES: &str = include_str!("../examples/nn.hex");
+const SOFTMAX_EXAMPLES: &str = include_str!("../examples/softmax.hex");
+const REDUCEC_SUM_EXAMPLES: &str = include_str!("cases/reducec/sum.hex");
 
 /// Create a runtime with a provided user source file
 fn runtime_with(source: &'static str) -> anyhow::Result<Runtime> {
     Runtime::from_sources(stdlib::sources().chain([source]), configured_gpu_dialect()?)
+        .map_err(Into::into)
+}
+
+fn runtime_with_sources(
+    sources: impl IntoIterator<Item = &'static str>,
+) -> anyhow::Result<Runtime> {
+    Runtime::from_sources(stdlib::sources().chain(sources), configured_gpu_dialect()?)
         .map_err(Into::into)
 }
 
@@ -759,6 +768,46 @@ fn powf_test() -> anyhow::Result<()> {
         );
     }
 
+    Ok(())
+}
+
+#[test]
+fn softmax_test() -> anyhow::Result<()> {
+    let runtime = runtime_with_sources([REDUCEC_SUM_EXAMPLES, NN_EXAMPLES, SOFTMAX_EXAMPLES])?;
+
+    let input_values = [1.0_f32, 2.0, 4.0];
+    let input = runtime.mem_f32(&input_values)?;
+    let [result] = runtime.exec("softmax", [input])?;
+    let Value::Mem(result) = result else {
+        anyhow::bail!("softmax returned non-mem value: {result:?}");
+    };
+
+    let values = result.to_f32_vec();
+    assert_eq!(values.len(), input_values.len());
+
+    let max = input_values
+        .iter()
+        .copied()
+        .fold(f32::NEG_INFINITY, f32::max);
+    let denom: f32 = input_values.iter().map(|x| (x - max).exp()).sum();
+    let expected: Vec<f32> = input_values
+        .iter()
+        .map(|x| (x - max).exp() / denom)
+        .collect();
+
+    for (actual, expected) in values.iter().zip(expected.iter()) {
+        let error = (actual - expected).abs();
+        assert!(
+            error < 6e-3,
+            "softmax output {actual} differed from expected {expected} by {error}"
+        );
+    }
+
+    let sum: f32 = values.iter().sum();
+    assert!(
+        (sum - 1.0).abs() < 6e-3,
+        "softmax outputs should sum to 1, got {sum}"
+    );
     Ok(())
 }
 

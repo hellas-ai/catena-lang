@@ -118,13 +118,20 @@ fn update_definition_arrow(
     arrow.definition = Some(converted_definition.map_nodes(|_| ()));
     arrows.insert(definition_name.clone(), arrow);
 
+    assert_eq!(
+        original.type_maps.0.sources.len(),
+        original.type_maps.1.sources.len(),
+        "closure conversion expects original arrow type maps to share one context"
+    );
+    let ambient_context_arity = original.type_maps.0.sources.len();
+
     for closure in converted.closures {
         insert_closure_arrows(
             syntax,
             theory_id,
             arrows,
             definition_name,
-            original.type_maps.0.sources.len(),
+            ambient_context_arity,
             closure,
         )?;
     }

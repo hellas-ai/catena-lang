@@ -285,8 +285,7 @@ fn converted_primitive(operation: &Operation) -> Option<&'static str> {
 fn type_maps_for_term(term: &AnnotatedTerm, ambient_context_arity: usize) -> (Hexpr, Hexpr) {
     let source_types = interface_types(term, &term.sources);
     let target_types = interface_types(term, &term.targets);
-    let context_arity =
-        closure_context_arity(&source_types, &target_types, ambient_context_arity);
+    let context_arity = closure_context_arity(&source_types, &target_types, ambient_context_arity);
     (
         objects_to_hexpr_in_context(&source_types, context_arity),
         objects_to_hexpr_in_context(&target_types, context_arity),

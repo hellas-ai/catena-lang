@@ -14,7 +14,7 @@
 ))
 
 # Read one f32 element from a converted buffer at an index.
-(def program sum-f32-at :
+(def program f32-at :
   ([n.] {
     ({cap.ref [.n] f32} buf val)
     ([.n] ix val)
@@ -37,26 +37,37 @@
       (const.u32.0x00000000 u32.bitcast-f32)
       unit.intro
       name.f32.add-env
-      ({[.input] (([.len] :.param) name.sum-f32-at)})
+      ({[.input] (([.len] :.param) name.f32-at)})
       [.len]
     }
     reducec
 ))
 
+# Mean all f32 elements in a memory buffer. Caller must provide a non-empty input.
+(def program mean-f32 :
+  (cap.ref mem)
+  ->
+  (f32 val)
+= (
+  mem.cast.f32
+  [len input.]
+    {
+      ({
+        (const.u32.0x00000000 u32.bitcast-f32)
+        unit.intro
+        name.f32.add-env
+        ({[.input] (([.len] :.param) name.f32-at)})
+        [.len]
+      } reducec [sum.])
+      ([.len] :.forget [len-val.])
+      ([.len-val] u64.to-f32 [len-f32.])
+      ([.sum len-f32] f32.div [mean.])
+      [.mean]
+    }
+))
+
 ################################################################################
 # Max
-
-# Max all f32 elements in a memory buffer. Empty inputs reduce to -inf.
-(def program max-f32-at :
-  ([n.] {
-    ({cap.ref [.n] f32} buf val)
-    ([.n] ix val)
-  })
-  ->
-  ([n.] (f32 val))
-= ([input i.]
-  {[.i input]} ix
-))
 
 # Adapter from the environmentful reducec accumulator convention to max(acc, value).
 (def program f32.max-env :
@@ -83,11 +94,8 @@
       (const.u32.0xFF800000 u32.bitcast-f32)
       unit.intro
       name.f32.max-env
-      ({[.input] (([.len] :.param) name.max-f32-at)})
+      ({[.input] (([.len] :.param) name.f32-at)})
       [.len]
     }
     reducec
 ))
-
-################################################################################
-# Argmax

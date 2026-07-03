@@ -1,0 +1,65 @@
+# Read exp(x_i - max_x) from a buffer environment for a stable softmax denominator.
+(def program softmax-exp-shifted-at :
+  ([n.] {
+    ({({cap.ref [.n] f32} buf val) (f32 val)} *)
+    ([.n] ix val)
+  })
+  ->
+  ([n.] (f32 val))
+= {[env i.]
+  ([.env] *.elim [input max-x.])
+  ({[.i input]} ix [x-i.])
+  ([.x-i max-x] f32.sub [shifted.])
+  ([.shifted] exp-approx [result.])
+  [.result]
+})
+
+# Materialize exp(x_i - max_x) / denom for a stable softmax output buffer.
+(def program softmax-at :
+  ([n.] {
+    ({({({cap.ref [.n] f32} buf val) (f32 val)} *) (f32 val)} *)
+    ([.n] ix val)
+  })
+  ->
+  ([n.] (f32 val))
+= {[env i.]
+  ([.env] *.elim [input-and-max denom.])
+  ([.input-and-max] *.elim [input max-x.])
+  ({[.i input]} ix [x-i.])
+  ([.x-i max-x] f32.sub [shifted.])
+  ([.shifted] exp-approx [numerator.])
+  ([.numerator denom] f32.div [result.])
+  [.result]
+})
+
+# Stable softmax over an f32 buffer. Caller must provide a non-empty input.
+(def program softmax :
+  (cap.ref mem)
+  ->
+  (cap.own mem)
+= (
+  mem.cast.f32
+  [len input.]
+    {
+      ({
+        (const.u32.0xFF800000 u32.bitcast-f32)
+        unit.intro
+        name.f32.max-env
+        ({[.input] (([.len] :.param) name.f32-at)})
+        [.len]
+      } reducec [max-x.])
+      ({
+        (const.u32.0x00000000 u32.bitcast-f32)
+        unit.intro
+        name.f32.add-env
+        ({({[.input] [.max-x]} *.intro) (([.len] :.param) name.softmax-exp-shifted-at)})
+        [.len]
+      } reducec [denom.])
+      {
+        [.len]
+        ({({({[.input] [.max-x]} *.intro) [.denom]} *.intro) (([.len] :.param) name.softmax-at) [.len]}
+          materializec)
+      }
+    }
+    buf.to-mem
+))

@@ -118,6 +118,8 @@
   (arr u32.select : {(bool val) (u32 val) (u32 val)} -> (u32 val))
   (arr u32.to-f32 : (u32 val) -> (f32 val))
   (arr u32.bitcast-f32 : (u32 val) -> (f32 val))
+  # This converts to the nearest representable f32 and should return the exact value as long as it is < 2^24
+  (arr u64.to-f32 : (u64 val) -> (f32 val))
 
   # Indices & dependent types
   # assert-nz : (n : u64) -> |- (n > 0)

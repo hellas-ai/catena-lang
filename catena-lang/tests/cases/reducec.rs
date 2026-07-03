@@ -63,6 +63,20 @@ fn sum_f32_exec() -> anyhow::Result<()> {
 }
 
 #[test]
+fn mean_f32_exec() -> anyhow::Result<()> {
+    let runtime = runtime_with(SUM_SOURCE)?;
+
+    let input = runtime.mem_f32(&[1.5_f32, -0.5, 2.0, 4.0])?;
+    let [result] = runtime.exec("mean-f32", [input])?;
+    let Value::F32(result) = result else {
+        anyhow::bail!("mean-f32 returned non-f32 value: {result:?}");
+    };
+
+    assert_eq!(result, 1.75);
+    Ok(())
+}
+
+#[test]
 fn max_f32_exec() -> anyhow::Result<()> {
     let runtime = runtime_with(SUM_SOURCE)?;
 

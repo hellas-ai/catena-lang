@@ -41,6 +41,20 @@ pub struct Mem {
 }
 
 impl Mem {
+    pub fn to_f32_vec(&self) -> Vec<f32> {
+        let bytes = self.abi.len as usize;
+        assert_eq!(
+            bytes % std::mem::size_of::<f32>(),
+            0,
+            "mem length is not a whole number of f32 values"
+        );
+        if bytes == 0 {
+            return Vec::new();
+        }
+        let len = bytes / std::mem::size_of::<f32>();
+        unsafe { std::slice::from_raw_parts(self.abi.data.cast::<f32>(), len).to_vec() }
+    }
+
     pub fn to_u64_vec(&self) -> Vec<u64> {
         let bytes = self.abi.len as usize;
         assert_eq!(

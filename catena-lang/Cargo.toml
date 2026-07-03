@@ -2,6 +2,10 @@
 name = "catena-lang"
 version = "0.1.0"
 edition = "2024"
+description = "catena: the deterministic array language"
+repository = "https://github.com/hellas-ai/catena-lang"
+documentation = "https://docs.rs/catena-lang"
+license = "MIT OR Apache-2.0"
 
 [dependencies]
 anyhow = "1.0.101"

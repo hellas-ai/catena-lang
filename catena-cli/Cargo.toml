@@ -2,6 +2,9 @@
 name = "catena-cli"
 version = "0.1.0"
 edition = "2024"
+description = "command line interface for catena-lang"
+repository = "https://github.com/hellas-ai/catena-lang"
+license = "MIT OR Apache-2.0"
 
 [dependencies]
 anyhow = "1.0.101"

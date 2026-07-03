@@ -1,0 +1,42 @@
+# Source-level reduce example for ambient index variables.
+#
+# This intentionally uses `reduce`, not `reducec`: the producer closure is
+# named under the length witness `n`, so closure conversion must lower it to a
+# generated `name.closure.*` operation that still receives `n`.
+
+# Produce one u64 value at each index.
+(def program ambient.u64.one-at :
+  ([n.] ([.n] ix val))
+  ->
+  ([n.] (u64 val))
+= ([i.] u64.one))
+
+# Adapter from the source-level reduce accumulator closure convention to direct
+# u64.add.
+(def program ambient.u64.add-reduce :
+  ({(u64 val) (u64 val)} *)
+  ->
+  (u64 val)
+= ([pair.]
+  ([.pair] *.elim [acc value.])
+  {[.acc value]} u64.add
+))
+
+# Sum one value for each element in the input buffer. `mem.cast.u64` produces
+# the length witness `n`; source-level `reduce` should closure-convert the
+# producer closure named by `n`.
+(def program sum-ones-u64-reduce :
+  (cap.ref mem)
+  ->
+  (u64 val)
+= (
+  mem.cast.u64
+  [n _input.]
+    {
+      const.u64.0x0000000000000000
+      (name.ambient.u64.add-reduce lift)
+      (([.n] :.param) name.ambient.u64.one-at lift)
+      [.n]
+    }
+    reduce
+))

@@ -10,36 +10,6 @@
   {[.acc value]} u64.add
 ))
 
-# Return the captured base value at every index.
-(def program repeat-u64-at :
-  ([n.] {
-    (u64 val)
-    ([.n] ix val)
-  })
-  ->
-  ([n.] (u64 val))
-= ([base _i.] [.base]))
-
-# Sum one copy of `base` for each element in the input buffer. The producer
-# function pointer is named in the ambient `len` context coming from
-# `mem.cast.u64`, while the runtime closure environment is `base`.
-(def program sum-repeat-u64 :
-  {(u64 val) (cap.ref mem)}
-  ->
-  (u64 val)
-= ([base input.]
-  ([.input] mem.cast.u64 [len _values.]
-    {
-      const.u64.0x0000000000000000
-      unit.intro
-      name.u64.add-env
-      ({[.base] (([.len] :.param) name.repeat-u64-at)})
-      [.len]
-    }
-    reducec
-  )
-))
-
 # Read one u64 element from a converted buffer at an index.
 (def program sum-u64-at :
   ([n.] {

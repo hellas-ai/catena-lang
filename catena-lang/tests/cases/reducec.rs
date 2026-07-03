@@ -5,20 +5,6 @@ const NAMED_PRIMITIVE_SOURCE: &str = include_str!("reducec/named_primitive.hex")
 const SUM_SOURCE: &str = include_str!("reducec/sum.hex");
 
 #[test]
-fn sum_repeat_u64_exec() -> anyhow::Result<()> {
-    let runtime = runtime_with(BASIC_SOURCE)?;
-
-    let input = runtime.mem_u64(&[0, 0, 0, 0])?;
-    let [result] = runtime.exec("sum-repeat-u64", [7_u64.into(), input])?;
-    let Value::U64(result) = result else {
-        anyhow::bail!("sum-repeat-u64 returned non-u64 value: {result:?}");
-    };
-
-    assert_eq!(result, 28);
-    Ok(())
-}
-
-#[test]
 fn sum_u64_exec() -> anyhow::Result<()> {
     let runtime = runtime_with(BASIC_SOURCE)?;
 

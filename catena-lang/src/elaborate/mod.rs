@@ -66,6 +66,15 @@ pub enum ElaborateError {
         map: Hexpr,
         error: HexprInterpretError<SignatureError>,
     },
+    #[error(
+        "arrow `{theory}.{arrow}` source and target type maps must have the same context domain: source has `{source_domain}`, target has `{target_domain}`"
+    )]
+    TypeMapDomainMismatch {
+        theory: String,
+        arrow: String,
+        source_domain: String,
+        target_domain: String,
+    },
 }
 
 pub fn elaborate(mut raw: RawTheorySet) -> Result<RawTheorySet, ElaborateError> {
@@ -201,6 +210,34 @@ mod tests {
             } if theory == "program"
                 && arrow == "__catena_copy.closure.f.0.0"
                 && prefix == GENERATED_COPY_PREFIX
+        ));
+    }
+
+    #[test]
+    fn arrows_must_use_same_context_domain_on_source_and_target() {
+        let raw = RawTheorySet::from_text(
+            r#"
+            (theory type nat {
+              (arr : : 2 -> 1)
+              (arr val : 1 -> 1)
+              (arr u64 : 0 -> 1)
+            })
+
+            (theory program type {
+              (arr bad : ({[n] u64} :) -> (u64 val))
+            })
+            "#,
+        )
+        .expect("test theory should parse");
+
+        let error = elaborate(raw).expect_err("mismatched domains should be rejected");
+        assert!(matches!(
+            error,
+            ElaborateError::TypeMapDomainMismatch {
+                theory,
+                arrow,
+                ..
+            } if theory == "program" && arrow == "bad"
         ));
     }
 }

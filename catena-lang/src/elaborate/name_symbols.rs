@@ -63,6 +63,7 @@ fn elaborate_theory_with_interpreted_syntax(
 ) -> Result<(), ElaborateError> {
     let mut new_arrows = Vec::new();
     for arrow in raw.arrows.values() {
+        validate_type_map_domains_match(syntax, &raw.name, arrow)?;
         new_arrows.push(name_arrow(syntax, &raw.name, arrow)?);
     }
 
@@ -70,6 +71,45 @@ fn elaborate_theory_with_interpreted_syntax(
         raw.arrows.insert(arrow.name.clone(), arrow);
     }
     Ok(())
+}
+
+fn validate_type_map_domains_match(
+    syntax: &Theory,
+    theory_name: &Operation,
+    raw: &RawTheoryArrow,
+) -> Result<(), ElaborateError> {
+    let interpreted_source =
+        try_interpret(&syntax.local_signature(), &raw.type_maps.0).map_err(|error| {
+            ElaborateError::NameSourceTypeMapInterpretation {
+                theory: theory_name.to_string(),
+                arrow: raw.name.to_string(),
+                map: raw.type_maps.0.clone(),
+                error,
+            }
+        })?;
+    let interpreted_target =
+        try_interpret(&syntax.local_signature(), &raw.type_maps.1).map_err(|error| {
+            ElaborateError::NameTargetTypeMapInterpretation {
+                theory: theory_name.to_string(),
+                arrow: raw.name.to_string(),
+                map: raw.type_maps.1.clone(),
+                error,
+            }
+        })?;
+
+    let source_domain = interpreted_source.sources.len();
+    let target_domain = interpreted_target.sources.len();
+
+    if source_domain == target_domain {
+        return Ok(());
+    }
+
+    Err(ElaborateError::TypeMapDomainMismatch {
+        theory: theory_name.to_string(),
+        arrow: raw.name.to_string(),
+        source_domain: source_domain.to_string(),
+        target_domain: target_domain.to_string(),
+    })
 }
 
 pub(crate) fn name_arrow(

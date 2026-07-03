@@ -17,7 +17,6 @@ fn sum_empty_u64_reduce_exec() -> anyhow::Result<()> {
 }
 
 #[test]
-#[ignore = "source-level reduce with indexed length is not runtime-clean yet"]
 fn sum_ones_u64_reduce_uses_input_length() -> anyhow::Result<()> {
     let runtime = runtime_with(SUM_ONES_U64_SOURCE)?;
 

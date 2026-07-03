@@ -26,9 +26,9 @@
 # an ascribed value `n : u64`, so runtime can pass it as a plain u64 while the
 # source graph still has the type-level name `n`.
 (def program sum-ones-u64-reduce :
-  ({[n] u64} :)
+  ([n.] ({[.n] u64} :))
   ->
-  (u64 val)
+  ([n.] (u64 val))
 = ([n.]
   ([.n] :.ty [reduce-len producer-len.]
     {

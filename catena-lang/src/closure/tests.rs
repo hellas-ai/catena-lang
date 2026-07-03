@@ -654,6 +654,37 @@ fn theory_conversion_converts_reduce_closure_arguments() {
 }
 
 #[test]
+fn theory_conversion_declares_context_dependent_copy_arrows() {
+    let (theory_set, definition_types) = theories_with(
+        r#"
+        (def program diagonal-view :
+          ([n.] ([.n] ix val))
+          ->
+          ([n.] (u64 val))
+        = ([i.] u64.one))
+
+        (def program reduce-diagonal :
+          ([n.] {({[.n] u64} :) ({[.n] u64} :)})
+          ->
+          ([n.] (u64 val))
+        = ([producer-len reduce-len.]
+          {
+            const.u64.0x0000000000000000
+            (name.u64.add lift)
+            (([.producer-len] :.param) name.diagonal-view lift)
+            [.reduce-len]
+          }
+          reduce
+        ))
+        "#,
+    );
+    let program = TheoryId(op("program"));
+
+    convert_theory(&theory_set, &definition_types, &program)
+        .expect("generated copy arrows with n-dependent types should share the ambient context");
+}
+
+#[test]
 fn theory_conversion_generates_diagonal_view_closure_with_shared_context() {
     let (theory_set, definition_types) = theories_with(
         r#"

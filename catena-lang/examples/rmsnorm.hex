@@ -1,0 +1,59 @@
+# Read x_i^2 from a converted f32 buffer.
+(def program squared-at :
+  ([n.] {
+    ({cap.ref [.n] f32} buf val)
+    ([.n] ix val)
+  })
+  ->
+  ([n.] (f32 val))
+= ([input i.]
+  ({[.i input]} ix [x-i.])
+  ([.x-i x-i] f32.mul [result.])
+  [.result]
+))
+
+# Materialize x_i / rms from a buffer environment for RMS normalization.
+(def program rmsnorm-at :
+  ([n.] {
+    ({({cap.ref [.n] f32} buf val) (f32 val)} *)
+    ([.n] ix val)
+  })
+  ->
+  ([n.] (f32 val))
+= {[env i.]
+  ([.env] *.elim [input rms.])
+  ({[.i input]} ix [x-i.])
+  ([.x-i rms] f32.div [result.])
+  [.result]
+})
+
+# RMS normalization over an f32 buffer.
+(def program rmsnorm :
+  (cap.ref mem)
+  ->
+  (cap.own mem)
+= (
+  mem.cast.f32
+  [len input.]
+    {
+      ({
+        (const.u32.0x00000000 u32.bitcast-f32)
+        unit.intro
+        name.f32.add-env
+        ({[.input] (([.len] :.param) name.squared-at)})
+        [.len]
+      } reducec [sum-sq.])
+      ([.len] :.forget [len-val.])
+      ([.len-val] u64.to-f32 [len-f32.])
+      ([.sum-sq len-f32] f32.div [mean-sq.])
+      (const.u32.0x3727C5AC u32.bitcast-f32 [eps.])
+      ([.mean-sq eps] f32.add [mean-sq-plus-eps.])
+      ([.mean-sq-plus-eps] sqrt [rms.])
+      {
+        [.len]
+        ({({[.input] [.rms]} *.intro) (([.len] :.param) name.rmsnorm-at) [.len]}
+          materializec)
+      }
+    }
+    buf.to-mem
+))

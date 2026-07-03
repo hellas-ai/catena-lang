@@ -9,6 +9,7 @@ const GPU_DIALECT_ENV: &str = "CATENA_GPU_DIALECT";
 const SIN_EXAMPLES: &str = include_str!("../examples/sincos.hex");
 const NN_EXAMPLES: &str = include_str!("../examples/nn.hex");
 const SOFTMAX_EXAMPLES: &str = include_str!("../examples/softmax.hex");
+const RMSNORM_EXAMPLES: &str = include_str!("../examples/rmsnorm.hex");
 const REDUCEC_SUM_EXAMPLES: &str = include_str!("cases/reducec/sum.hex");
 
 /// Create a runtime with a provided user source file
@@ -807,6 +808,41 @@ fn softmax_test() -> anyhow::Result<()> {
     assert!(
         (sum - 1.0).abs() < 6e-3,
         "softmax outputs should sum to 1, got {sum}"
+    );
+    Ok(())
+}
+
+#[test]
+fn rmsnorm_test() -> anyhow::Result<()> {
+    let runtime = runtime_with_sources([REDUCEC_SUM_EXAMPLES, NN_EXAMPLES, RMSNORM_EXAMPLES])?;
+
+    let input_values = [1.0_f32, 2.0, 4.0, -1.0, -9.0, 13.29];
+    let input = runtime.mem_f32(&input_values)?;
+    let [result] = runtime.exec("rmsnorm", [input])?;
+    let Value::Mem(result) = result else {
+        anyhow::bail!("rmsnorm returned non-mem value: {result:?}");
+    };
+
+    let values = result.to_f32_vec();
+    assert_eq!(values.len(), input_values.len());
+
+    let mean_sq: f32 = input_values.iter().map(|x| x * x).sum::<f32>() / input_values.len() as f32;
+    let rms = (mean_sq + 1e-5_f32).sqrt();
+    let expected: Vec<f32> = input_values.iter().map(|x| x / rms).collect();
+
+    for (actual, expected) in values.iter().zip(expected.iter()) {
+        let error = (actual - expected).abs();
+        assert!(
+            error < 3e-3,
+            "rmsnorm output {actual} differed from expected {expected} by {error}"
+        );
+    }
+
+    let output_mean_sq: f32 = values.iter().map(|x| x * x).sum::<f32>() / values.len() as f32;
+    let output_rms = output_mean_sq.sqrt();
+    assert!(
+        (output_rms - 1.0).abs() < 3e-3,
+        "rmsnorm outputs should have unit RMS, got {output_rms}"
     );
     Ok(())
 }

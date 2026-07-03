@@ -16,7 +16,7 @@ use thiserror::Error;
 use crate::{
     check::{AnnotatedTerm, DefinitionTypes},
     nonstrict::{to_flatteners, to_unflatteners, unpack_packed_object},
-    prefixes::{GENERATED_COPY_CLOSURE_PREFIX, NAME_PREFIX},
+    prefixes::{GENERATED_COPY_PREFIX, NAME_PREFIX},
     report::TheoryTermMap,
     stdlib::constants::{
         COMPOSE, DEFER, EVAL, FN_HOM_TYPE, FN_REF_TYPE, LIFT, PRODUCT_TYPE, RUN, TENSOR, UNIT_TYPE,
@@ -99,7 +99,7 @@ impl Functor<Obj, Arr, Obj, Arr> for ForgetClosures<'_> {
             return map_name_operation(self.theory, name, source, target);
         }
 
-        if a.as_str().starts_with(GENERATED_COPY_CLOSURE_PREFIX) {
+        if a.as_str().starts_with(GENERATED_COPY_PREFIX) {
             return map_copy_closure_operation(source, target);
         }
 

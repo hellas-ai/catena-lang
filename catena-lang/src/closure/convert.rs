@@ -11,7 +11,7 @@ use crate::{
         region::{ClosureRegion, ClosureRegionError, closure_region},
         rewrite::{RewriteRegionError, rewrite_region},
     },
-    prefixes::{GENERATED_COPY_CLOSURE_PREFIX, NAME_PREFIX},
+    prefixes::{GENERATED_COPY_PREFIX, NAME_PREFIX},
     stdlib::constants::{
         FN_HOM_TYPE, FN_REF_TYPE, PRODUCT_INTRO, PRODUCT_TYPE, UNIT_INTRO, UNIT_TYPE, VALUE_TYPE,
     },
@@ -277,7 +277,7 @@ fn name_operation(definition_name: &Operation, closure_wire: NodeId) -> Operatio
 
 fn copy_operation(definition_name: &Operation, closure_wire: NodeId, index: usize) -> Operation {
     format!(
-        "{GENERATED_COPY_CLOSURE_PREFIX}{}.{}.{}",
+        "{GENERATED_COPY_PREFIX}closure.{}.{}.{}",
         definition_name, closure_wire.0, index
     )
     .parse()

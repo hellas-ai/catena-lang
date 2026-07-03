@@ -10,12 +10,11 @@ use metacat::theory::{GraphError, RawTheorySet, ast::ExtensionsError};
 use thiserror::Error;
 
 use crate::prefixes::{
-    CONST_PREFIX, GENERATED_COPY_CLOSURE_PREFIX, GENERATED_VARIABLE_PREFIX, NAME_PREFIX,
+    CONST_PREFIX, GENERATED_COPY_PREFIX, GENERATED_VARIABLE_PREFIX, NAME_PREFIX,
 };
 
 const NAT_THEORY: &str = "nat";
-const RESERVED_OPERATION_PREFIXES: &[&str] =
-    &[NAME_PREFIX, CONST_PREFIX, GENERATED_COPY_CLOSURE_PREFIX];
+const RESERVED_OPERATION_PREFIXES: &[&str] = &[NAME_PREFIX, CONST_PREFIX, GENERATED_COPY_PREFIX];
 const RESERVED_VARIABLE_PREFIXES: &[&str] = &[GENERATED_VARIABLE_PREFIX];
 
 #[derive(Debug, Error)]
@@ -141,7 +140,7 @@ fn check_reserved_variables_in_hexpr(
 mod tests {
     use metacat::theory::RawTheorySet;
 
-    use crate::prefixes::{GENERATED_COPY_CLOSURE_PREFIX, GENERATED_VARIABLE_PREFIX};
+    use crate::prefixes::{GENERATED_COPY_PREFIX, GENERATED_VARIABLE_PREFIX};
 
     use super::{ElaborateError, elaborate};
 
@@ -201,7 +200,7 @@ mod tests {
                 prefix,
             } if theory == "program"
                 && arrow == "__catena_copy.closure.f.0.0"
-                && prefix == GENERATED_COPY_CLOSURE_PREFIX
+                && prefix == GENERATED_COPY_PREFIX
         ));
     }
 }

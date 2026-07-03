@@ -25,6 +25,7 @@
 (theory program type {
   (arr :.forget : : -> ([x t.t] val))
   (arr :.param : : -> [x t . x])
+  (arr :.ty : : -> {({[.x] [.t]} :) [x t . x]})
 
   # Modus ponens:
   #   h0 : |- φ

@@ -22,21 +22,21 @@
   {[.acc value]} u64.add
 ))
 
-# Sum one value for each element in the input buffer. `mem.cast.u64` produces
-# the length witness `n`; source-level `reduce` should closure-convert the
-# producer closure named by `n`.
+# Sum one value for each index below the input length witness `n`. The input is
+# an ascribed value `n : u64`, so runtime can pass it as a plain u64 while the
+# source graph still has the type-level name `n`.
 (def program sum-ones-u64-reduce :
-  (cap.ref mem)
+  ({[n] u64} :)
   ->
   (u64 val)
-= (
-  mem.cast.u64
-  [n _input.]
+= ([n.]
+  ([.n] :.ty [reduce-len producer-len.]
     {
       const.u64.0x0000000000000000
       (name.ambient.u64.add-reduce lift)
-      (([.n] :.param) name.ambient.u64.one-at lift)
-      [.n]
+      ([.producer-len] name.ambient.u64.one-at lift)
+      [.reduce-len]
     }
     reduce
+  )
 ))

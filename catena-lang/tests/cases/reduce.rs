@@ -21,8 +21,7 @@ fn sum_empty_u64_reduce_exec() -> anyhow::Result<()> {
 fn sum_ones_u64_reduce_uses_ambient_length() -> anyhow::Result<()> {
     let runtime = runtime_with(AMBIENT_SOURCE)?;
 
-    let input = runtime.mem_u64(&[0, 0, 0, 0])?;
-    let [result] = runtime.exec("sum-ones-u64-reduce", [input])?;
+    let [result] = runtime.exec("sum-ones-u64-reduce", [4_u64.into()])?;
     let Value::U64(result) = result else {
         anyhow::bail!("sum-ones-u64-reduce returned non-u64 value: {result:?}");
     };

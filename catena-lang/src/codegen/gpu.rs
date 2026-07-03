@@ -262,7 +262,7 @@ fn render_assignment(
         "bool.or" => render_binary_bool(out, assignment, "||")?,
         "bool.ifc" => ifc::render(out, assignment)?,
         "unit.intro" => {}
-        "ax-mp" | "assert-then" | ":.param" => {}
+        "ax-mp" | "assert-then" | ":.param" | ":.ty" => {}
         ":.forget" => render_forget(out, assignment)?,
         "assert" => render_assert(out, assignment)?,
         "u64.zero" => render_u64_zero(out, assignment)?,

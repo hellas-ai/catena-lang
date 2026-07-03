@@ -5,9 +5,12 @@ use metacat::theory::{
     transitive_dependency_subset,
 };
 
-use crate::elaborate::{ElaborateError, GENERATED_VARIABLE_PREFIX, NAT_THEORY};
+use crate::{
+    elaborate::{ElaborateError, NAT_THEORY},
+    prefixes::{CONST_PREFIX, GENERATED_COPY_PREFIX, GENERATED_VARIABLE_PREFIX, NAME_PREFIX},
+};
 
-const RESERVED_OPERATION_PREFIXES: &[&str] = &["name.", "const."];
+const RESERVED_OPERATION_PREFIXES: &[&str] = &[NAME_PREFIX, CONST_PREFIX, GENERATED_COPY_PREFIX];
 const RESERVED_VARIABLE_PREFIXES: &[&str] = &[GENERATED_VARIABLE_PREFIX];
 
 pub(crate) fn pre_elaboration_invariants(raw: &RawTheorySet) -> Result<(), ElaborateError> {

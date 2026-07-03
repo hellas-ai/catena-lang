@@ -11,8 +11,7 @@ use metacat::theory::model::SignatureError;
 use metacat::theory::{GraphError, RawTheorySet, ast::ExtensionsError};
 use thiserror::Error;
 
-const NAT_THEORY: &str = "nat";
-pub(crate) const GENERATED_VARIABLE_PREFIX: &str = "__catena_";
+pub(crate) const NAT_THEORY: &str = "nat";
 
 #[derive(Debug, Error)]
 pub enum ElaborateError {
@@ -98,7 +97,9 @@ pub fn elaborate(mut raw: RawTheorySet) -> Result<RawTheorySet, ElaborateError> 
 mod tests {
     use metacat::theory::RawTheorySet;
 
-    use super::{ElaborateError, GENERATED_VARIABLE_PREFIX, elaborate};
+    use crate::prefixes::GENERATED_VARIABLE_PREFIX;
+
+    use super::{ElaborateError, elaborate};
 
     #[test]
     fn user_variables_cannot_use_catena_generated_prefix() {

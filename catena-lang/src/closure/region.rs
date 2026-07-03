@@ -10,7 +10,8 @@ use thiserror::Error;
 
 use crate::{
     check::AnnotatedTerm,
-    stdlib::constants::{DEFER, FN_HOM_TYPE, NAME_PREFIX},
+    prefixes::NAME_PREFIX,
+    stdlib::constants::{DEFER, FN_HOM_TYPE},
 };
 
 pub type Obj = Tree<(), Operation>;

@@ -8,8 +8,9 @@ use metacat::theory::{
 };
 
 use crate::{
-    elaborate::{ElaborateError, GENERATED_VARIABLE_PREFIX},
-    stdlib::constants::{FN_REF_TYPE, NAME_PREFIX, PRODUCT_TYPE, UNIT_TYPE, VALUE_TYPE},
+    elaborate::ElaborateError,
+    prefixes::{GENERATED_VARIABLE_PREFIX, NAME_PREFIX},
+    stdlib::constants::{FN_REF_TYPE, PRODUCT_TYPE, UNIT_TYPE, VALUE_TYPE},
 };
 
 #[derive(Default)]

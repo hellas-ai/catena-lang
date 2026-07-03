@@ -12,6 +12,7 @@ use crate::codegen::{
     render_utils::{c_type, invalid_inputs, invalid_outputs, param_decl},
     runtime_type,
 };
+use crate::prefixes::{CONST_U32_PREFIX, CONST_U64_PREFIX};
 
 #[derive(Debug, Error)]
 pub enum GpuRenderError {
@@ -316,10 +317,12 @@ fn render_assignment(
         "reducec" => reducec::render(out, assignment)?,
         "gpu.materialize" => render_materialize_call(out, function, assignment, dialect)?,
         "materializec" => materializec::render_call(out, function, assignment, dialect)?,
-        op if op.starts_with("const.u64.") => {
-            render_int_const(out, assignment, "const.u64.", "ULL")?
+        op if op.starts_with(CONST_U64_PREFIX) => {
+            render_int_const(out, assignment, CONST_U64_PREFIX, "ULL")?
         }
-        op if op.starts_with("const.u32.") => render_int_const(out, assignment, "const.u32.", "U")?,
+        op if op.starts_with(CONST_U32_PREFIX) => {
+            render_int_const(out, assignment, CONST_U32_PREFIX, "U")?
+        }
         op => {
             return Err(GpuRenderError::UnsupportedOp(
                 op.parse().unwrap_or_else(|_| assignment.op.clone()),

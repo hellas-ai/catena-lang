@@ -6,7 +6,7 @@ use thiserror::Error;
 
 use crate::{
     check::AnnotatedTerm, pass::record_boundary_sizes::OperationWithBoundarySizes,
-    stdlib::constants::NAME_PREFIX,
+    prefixes::NAME_PREFIX,
 };
 
 pub type FnPtrNodeMap = HashMap<NodeId, FnPtrSymbol>;

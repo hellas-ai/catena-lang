@@ -21,8 +21,6 @@ pub mod constants {
     pub const TENSOR: &str = "tensor";
     pub const LIFT: &str = "lift";
     pub const EVAL: &str = "eval";
-
-    pub const NAME_PREFIX: &str = "name.";
 }
 
 pub struct StdlibFile {

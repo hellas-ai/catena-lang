@@ -15,6 +15,7 @@ use crate::{
         theory::convert_theory,
     },
     elaborate::elaborate,
+    prefixes::GENERATED_COPY_CLOSURE_PREFIX,
     stdlib::{
         self,
         constants::{FN_HOM_TYPE, PRODUCT_TYPE, UNIT_TYPE},
@@ -173,7 +174,10 @@ fn deferred_bool_id_closure_converts_through_each_stage() {
             .edges
             .iter()
             .any(|operation| operation.as_str()
-                == format!("copy.closure.run-bool-id.{}.0", original_target.0)),
+                == format!(
+                    "{GENERATED_COPY_CLOSURE_PREFIX}run-bool-id.{}.0",
+                    original_target.0
+                )),
         "converted definition should split the captured environment before naming the closure"
     );
 
@@ -323,10 +327,13 @@ fn converted_closure_name_keeps_free_variable_input() {
         .expect("quotient should succeed");
 
     let converted_hexpr = crate::hexpr::term_to_hexpr(&converted_definition);
-    let expected_converted: Hexpr = "([w0 . ] ([ . w0] copy.closure.reduce-n.1.0 [w1 w2 . ]) \
+    let expected_converted: Hexpr = format!(
+        "([w0 . ] ([ . w0] {GENERATED_COPY_CLOSURE_PREFIX}reduce-n.1.0 [w1 w2 . ]) \
          ([ . w2] name.closure.reduce-n.1 [w3 . ]) [ . w1 w3])"
-        .parse()
-        .expect("expected converted definition Hexpr should parse");
+    )
+    .as_str()
+    .parse()
+    .expect("expected converted definition Hexpr should parse");
     assert_eq!(
         converted_hexpr, expected_converted,
         "closure conversion should split n, keep one copy as the environment, \
@@ -392,7 +399,9 @@ fn theory_conversion_converts_if_closure_arguments() {
             .hypergraph
             .edges
             .iter()
-            .all(|operation| !operation.as_str().starts_with("copy.closure.")),
+            .all(|operation| !operation
+                .as_str()
+                .starts_with(GENERATED_COPY_CLOSURE_PREFIX)),
         "copy.closure.* should be erased before codegen"
     );
 

@@ -35,6 +35,7 @@ use crate::{
         },
     },
     pass::record_boundary_sizes::OperationWithBoundarySizes,
+    prefixes::NAME_PREFIX,
     report::TheoryTermMap,
 };
 
@@ -264,7 +265,7 @@ impl CodegenState<'_> {
         let mut assignments = Vec::new();
         for assignment in ssa(term.clone().to_strict())? {
             let op = assignment.op.operation.clone();
-            if op.as_str().starts_with("name.") {
+            if op.as_str().starts_with(NAME_PREFIX) {
                 continue;
             }
 

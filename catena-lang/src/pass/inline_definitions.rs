@@ -10,7 +10,7 @@ use open_hypergraphs::lax::{
 };
 use thiserror::Error;
 
-use crate::stdlib::constants::NAME_PREFIX;
+use crate::prefixes::NAME_PREFIX;
 
 pub type Term = OpenHypergraph<(), Operation>;
 

@@ -13,6 +13,7 @@ use crate::{
     closure::convert::{ConvertError, Converted, ConvertedClosure, convert},
     elaborate::{ElaborateError, name_symbols},
     hexpr::{objects_to_hexpr, term_to_hexpr},
+    prefixes::GENERATED_COPY_CLOSURE_PREFIX,
     stdlib::constants::FN_HOM_TYPE,
 };
 
@@ -136,7 +137,11 @@ fn insert_copy_arrows(
         .edges
         .iter()
         .zip(&definition.hypergraph.adjacency)
-        .filter(|(operation, _)| operation.as_str().starts_with("copy.closure."))
+        .filter(|(operation, _)| {
+            operation
+                .as_str()
+                .starts_with(GENERATED_COPY_CLOSURE_PREFIX)
+        })
     {
         let raw_copy = RawTheoryArrow {
             name: operation.clone(),

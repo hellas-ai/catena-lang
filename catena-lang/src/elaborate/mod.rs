@@ -9,9 +9,13 @@ use metacat::theory::model::SignatureError;
 use metacat::theory::{GraphError, RawTheorySet, ast::ExtensionsError};
 use thiserror::Error;
 
+use crate::prefixes::{
+    CONST_PREFIX, GENERATED_COPY_CLOSURE_PREFIX, GENERATED_VARIABLE_PREFIX, NAME_PREFIX,
+};
+
 const NAT_THEORY: &str = "nat";
-const RESERVED_OPERATION_PREFIXES: &[&str] = &["name.", "const."];
-pub(crate) const GENERATED_VARIABLE_PREFIX: &str = "__catena_";
+const RESERVED_OPERATION_PREFIXES: &[&str] =
+    &[NAME_PREFIX, CONST_PREFIX, GENERATED_COPY_CLOSURE_PREFIX];
 const RESERVED_VARIABLE_PREFIXES: &[&str] = &[GENERATED_VARIABLE_PREFIX];
 
 #[derive(Debug, Error)]
@@ -137,7 +141,9 @@ fn check_reserved_variables_in_hexpr(
 mod tests {
     use metacat::theory::RawTheorySet;
 
-    use super::{ElaborateError, GENERATED_VARIABLE_PREFIX, elaborate};
+    use crate::prefixes::{GENERATED_COPY_CLOSURE_PREFIX, GENERATED_VARIABLE_PREFIX};
+
+    use super::{ElaborateError, elaborate};
 
     #[test]
     fn user_variables_cannot_use_catena_generated_prefix() {
@@ -168,6 +174,34 @@ mod tests {
                 && arrow == "bad"
                 && variable == "__catena_p0"
                 && prefix == GENERATED_VARIABLE_PREFIX
+        ));
+    }
+
+    #[test]
+    fn user_operations_cannot_use_catena_generated_copy_prefix() {
+        let raw = RawTheorySet::from_text(
+            r#"
+            (theory type nat {
+              (arr bool : 0 -> 1)
+            })
+
+            (theory program type {
+              (arr __catena_copy.closure.f.0.0 : bool -> {bool bool})
+            })
+            "#,
+        )
+        .expect("test theory should parse");
+
+        let error = elaborate(raw).expect_err("reserved operation should be rejected");
+        assert!(matches!(
+            error,
+            ElaborateError::ReservedOperationPrefix {
+                theory,
+                arrow,
+                prefix,
+            } if theory == "program"
+                && arrow == "__catena_copy.closure.f.0.0"
+                && prefix == GENERATED_COPY_CLOSURE_PREFIX
         ));
     }
 }

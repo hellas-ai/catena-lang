@@ -6,6 +6,7 @@ pub mod elaborate;
 pub mod hexpr;
 pub mod nonstrict;
 pub mod pass;
+pub(crate) mod prefixes;
 pub mod report;
 pub mod runtime;
 pub mod stdlib;

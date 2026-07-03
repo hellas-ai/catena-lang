@@ -4,7 +4,10 @@ use metacat::theory::{
     ast::{RawTheory, RawTheoryArrow},
 };
 
-use crate::elaborate::ElaborateError;
+use crate::{
+    elaborate::ElaborateError,
+    prefixes::{CONST_U32_PREFIX, CONST_U64_PREFIX},
+};
 
 #[derive(Debug, Clone, Copy)]
 pub struct ConstantKind {
@@ -14,13 +17,13 @@ pub struct ConstantKind {
 }
 
 pub const U64: ConstantKind = ConstantKind {
-    prefix: "const.u64.",
+    prefix: CONST_U64_PREFIX,
     type_name: "u64",
     hex_nibbles: 16,
 };
 
 pub const U32: ConstantKind = ConstantKind {
-    prefix: "const.u32.",
+    prefix: CONST_U32_PREFIX,
     type_name: "u32",
     hex_nibbles: 8,
 };

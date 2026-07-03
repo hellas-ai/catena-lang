@@ -114,18 +114,18 @@ fn update_definition_arrow(
 
     let mut raw = original.raw.clone();
     raw.definition = Some(term_to_hexpr(&converted_definition));
-    insert_copy_arrows(syntax, arrows, &converted_definition)?;
-    let mut arrow = original.clone();
-    arrow.raw = raw;
-    arrow.definition = Some(converted_definition.map_nodes(|_| ()));
-    arrows.insert(definition_name.clone(), arrow);
-
     assert_eq!(
         original.type_maps.0.sources.len(),
         original.type_maps.1.sources.len(),
         "closure conversion expects original arrow type maps to share one context"
     );
     let ambient_context_arity = original.type_maps.0.sources.len();
+
+    insert_copy_arrows(syntax, arrows, &converted_definition, ambient_context_arity)?;
+    let mut arrow = original.clone();
+    arrow.raw = raw;
+    arrow.definition = Some(converted_definition.map_nodes(|_| ()));
+    arrows.insert(definition_name.clone(), arrow);
 
     for closure in converted.closures {
         insert_closure_arrows(
@@ -145,6 +145,7 @@ fn insert_copy_arrows(
     syntax: &Theory,
     arrows: &mut BTreeMap<Operation, TheoryArrow>,
     definition: &AnnotatedTerm,
+    ambient_context_arity: usize,
 ) -> Result<(), ConvertTheoryError> {
     for (operation, edge) in definition
         .hypergraph
@@ -156,8 +157,14 @@ fn insert_copy_arrows(
         let raw_copy = RawTheoryArrow {
             name: operation.clone(),
             type_maps: (
-                objects_to_hexpr(&interface_types(definition, &edge.sources)),
-                objects_to_hexpr(&interface_types(definition, &edge.targets)),
+                objects_to_hexpr_in_context(
+                    &interface_types(definition, &edge.sources),
+                    ambient_context_arity,
+                ),
+                objects_to_hexpr_in_context(
+                    &interface_types(definition, &edge.targets),
+                    ambient_context_arity,
+                ),
             ),
             definition: None,
         };

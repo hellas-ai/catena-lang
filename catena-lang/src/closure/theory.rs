@@ -11,9 +11,9 @@ use thiserror::Error;
 use crate::{
     check::{AnnotatedTerm, DefinitionTypes},
     closure::convert::{ConvertError, Converted, ConvertedClosure, convert},
-    elaborate::{ElaborateError, GENERATED_VARIABLE_PREFIX, name_symbols},
+    elaborate::{ElaborateError, name_symbols},
     hexpr::{objects_to_hexpr, term_to_hexpr},
-    prefixes::GENERATED_COPY_PREFIX,
+    prefixes::{GENERATED_COPY_PREFIX, GENERATED_VARIABLE_PREFIX},
     stdlib::constants::FN_HOM_TYPE,
 };
 

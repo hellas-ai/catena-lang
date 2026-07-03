@@ -1,7 +1,7 @@
 use super::*;
 
 const BASIC_SOURCE: &str = include_str!("reduce/basic.hex");
-const AMBIENT_SOURCE: &str = include_str!("reduce/ambient.hex");
+const SUM_ONES_U64_SOURCE: &str = include_str!("reduce/sum_ones_u64.hex");
 
 #[test]
 fn sum_empty_u64_reduce_exec() -> anyhow::Result<()> {
@@ -17,9 +17,9 @@ fn sum_empty_u64_reduce_exec() -> anyhow::Result<()> {
 }
 
 #[test]
-#[ignore = "source-level reduce with ambient index variables is not runtime-clean yet"]
-fn sum_ones_u64_reduce_uses_ambient_length() -> anyhow::Result<()> {
-    let runtime = runtime_with(AMBIENT_SOURCE)?;
+#[ignore = "source-level reduce with indexed length is not runtime-clean yet"]
+fn sum_ones_u64_reduce_uses_input_length() -> anyhow::Result<()> {
+    let runtime = runtime_with(SUM_ONES_U64_SOURCE)?;
 
     let [result] = runtime.exec("sum-ones-u64-reduce", [4_u64.into()])?;
     let Value::U64(result) = result else {

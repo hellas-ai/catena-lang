@@ -15,9 +15,7 @@ fn rejects_arrow_type_maps_with_different_context_domains() -> anyhow::Result<()
     let error = compile(raw).expect_err("arrow type maps with different domains should fail");
     let message = error.to_string();
     assert!(
-        message.contains(
-            "arrow `program.bad` source and target type maps must have the same context domain"
-        ),
+        message.contains("Arrow bad in theory program: source and target maps must have same domain"),
         "unexpected error message: {message}"
     );
 

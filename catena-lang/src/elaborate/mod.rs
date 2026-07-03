@@ -11,7 +11,8 @@ use metacat::theory::model::SignatureError;
 use metacat::theory::{GraphError, RawTheorySet, ast::ExtensionsError};
 use thiserror::Error;
 
-pub(crate) const NAT_THEORY: &str = "nat";
+const NAT_THEORY: &str = "nat";
+pub(crate) const GENERATED_VARIABLE_PREFIX: &str = "__catena_";
 
 #[derive(Debug, Error)]
 pub enum ElaborateError {
@@ -91,4 +92,43 @@ pub fn elaborate(mut raw: RawTheorySet) -> Result<RawTheorySet, ElaborateError> 
     }
 
     Ok(raw)
+}
+
+#[cfg(test)]
+mod tests {
+    use metacat::theory::RawTheorySet;
+
+    use super::{ElaborateError, GENERATED_VARIABLE_PREFIX, elaborate};
+
+    #[test]
+    fn user_variables_cannot_use_catena_generated_prefix() {
+        let raw = RawTheorySet::from_text(
+            r#"
+            (theory type nat {
+              (arr 1 : 0 -> 1)
+              (arr val : 1 -> 1)
+              (arr bool : 0 -> 1)
+            })
+
+            (theory program type {
+              (arr bad : [__catena_p0.] -> (bool val))
+            })
+            "#,
+        )
+        .expect("test theory should parse");
+
+        let error = elaborate(raw).expect_err("reserved variable should be rejected");
+        assert!(matches!(
+            error,
+            ElaborateError::ReservedVariablePrefix {
+                theory,
+                arrow,
+                variable,
+                prefix,
+            } if theory == "program"
+                && arrow == "bad"
+                && variable == "__catena_p0"
+                && prefix == GENERATED_VARIABLE_PREFIX
+        ));
+    }
 }

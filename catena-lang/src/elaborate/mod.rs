@@ -12,9 +12,7 @@ use metacat::theory::{GraphError, RawTheorySet, ast::ExtensionsError};
 use thiserror::Error;
 
 const NAT_THEORY: &str = "nat";
-const RESERVED_OPERATION_PREFIXES: &[&str] = &["name.", "const."];
 pub(crate) const GENERATED_VARIABLE_PREFIX: &str = "__catena_";
-const RESERVED_VARIABLE_PREFIXES: &[&str] = &[GENERATED_VARIABLE_PREFIX];
 
 #[derive(Debug, Error)]
 pub enum ElaborateError {
@@ -78,8 +76,6 @@ pub enum ElaborateError {
 
 pub fn elaborate(mut raw: RawTheorySet) -> Result<RawTheorySet, ElaborateError> {
     raw = raw.with_extensions()?;
-    check_reserved_operation_prefixes(&raw)?;
-    check_reserved_variable_prefixes(&raw)?;
     validate::pre_elaboration_invariants(&raw)?;
     constants::elaborate(&mut raw, constants::U64)?;
     constants::elaborate(&mut raw, constants::U32)?;
@@ -96,53 +92,6 @@ pub fn elaborate(mut raw: RawTheorySet) -> Result<RawTheorySet, ElaborateError> 
     }
 
     Ok(raw)
-}
-
-fn check_reserved_variable_prefixes(raw: &RawTheorySet) -> Result<(), ElaborateError> {
-    for (theory_name, theory) in &raw.theories {
-        for (arrow_name, arrow) in &theory.arrows {
-            for map in [&arrow.type_maps.0, &arrow.type_maps.1] {
-                check_reserved_variables_in_hexpr(theory_name, arrow_name, map)?;
-            }
-            if let Some(definition) = &arrow.definition {
-                check_reserved_variables_in_hexpr(theory_name, arrow_name, definition)?;
-            }
-        }
-    }
-    Ok(())
-}
-
-fn check_reserved_variables_in_hexpr(
-    theory_name: &hexpr::Operation,
-    arrow_name: &hexpr::Operation,
-    expr: &Hexpr,
-) -> Result<(), ElaborateError> {
-    match expr {
-        Hexpr::Composition(exprs) | Hexpr::Tensor(exprs) => {
-            for expr in exprs {
-                check_reserved_variables_in_hexpr(theory_name, arrow_name, expr)?;
-            }
-        }
-        Hexpr::Frobenius { sources, targets } => {
-            for variable in sources.iter().chain(targets) {
-                let variable = variable.to_string();
-                if let Some(prefix) = RESERVED_VARIABLE_PREFIXES
-                    .iter()
-                    .copied()
-                    .find(|prefix| variable.starts_with(prefix))
-                {
-                    return Err(ElaborateError::ReservedVariablePrefix {
-                        theory: theory_name.to_string(),
-                        arrow: arrow_name.to_string(),
-                        variable,
-                        prefix,
-                    });
-                }
-            }
-        }
-        Hexpr::Operation(_) => {}
-    }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -182,23 +131,4 @@ mod tests {
                 && prefix == GENERATED_VARIABLE_PREFIX
         ));
     }
-}
-
-fn check_reserved_operation_prefixes(raw: &RawTheorySet) -> Result<(), ElaborateError> {
-    for (theory_name, theory) in &raw.theories {
-        for arrow_name in theory.arrows.keys() {
-            if let Some(prefix) = RESERVED_OPERATION_PREFIXES
-                .iter()
-                .copied()
-                .find(|prefix| arrow_name.as_str().starts_with(prefix))
-            {
-                return Err(ElaborateError::ReservedOperationPrefix {
-                    theory: theory_name.to_string(),
-                    arrow: arrow_name.to_string(),
-                    prefix,
-                });
-            }
-        }
-    }
-    Ok(())
 }

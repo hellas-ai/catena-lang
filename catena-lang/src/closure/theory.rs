@@ -283,10 +283,31 @@ fn converted_primitive(operation: &Operation) -> Option<&'static str> {
 }
 
 fn type_maps_for_term(term: &AnnotatedTerm, ambient_context_arity: usize) -> (Hexpr, Hexpr) {
+    let source_types = interface_types(term, &term.sources);
+    let target_types = interface_types(term, &term.targets);
+    let context_arity =
+        closure_context_arity(&source_types, &target_types, ambient_context_arity);
     (
-        objects_to_hexpr_in_context(&interface_types(term, &term.sources), ambient_context_arity),
-        objects_to_hexpr_in_context(&interface_types(term, &term.targets), ambient_context_arity),
+        objects_to_hexpr_in_context(&source_types, context_arity),
+        objects_to_hexpr_in_context(&target_types, context_arity),
     )
+}
+
+fn closure_context_arity(
+    source_types: &[Obj],
+    target_types: &[Obj],
+    ambient_context_arity: usize,
+) -> usize {
+    // Temporary precision hack: closed generated closures must stay nullary.
+    // Otherwise an `n`-indexed caller would make their generated `name.*`
+    // declarations expect `n`, while the replacement graph has no such input.
+    // Non-closed closures keep the broad ambient context until we remap sparse
+    // original leaf indices into a dense local context.
+    if leaf_indices(source_types).is_empty() && leaf_indices(target_types).is_empty() {
+        0
+    } else {
+        ambient_context_arity
+    }
 }
 
 fn objects_to_hexpr_in_context(objects: &[Obj], ambient_context_arity: usize) -> Hexpr {

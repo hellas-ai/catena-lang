@@ -262,7 +262,8 @@ fn render_assignment(
         "bool.or" => render_binary_bool(out, assignment, "||")?,
         "bool.ifc" => ifc::render(out, assignment)?,
         "unit.intro" => {}
-        "ax-mp" | "assert-then" | ":.param" | ":.ty" => {}
+        "ax-mp" | "assert-then" | ":.param" => {}
+        ":.ty" => render_ty_ascription(out, assignment)?,
         ":.forget" => render_forget(out, assignment)?,
         "assert" => render_assert(out, assignment)?,
         "u64.zero" => render_u64_zero(out, assignment)?,
@@ -353,6 +354,35 @@ fn render_forget(out: &mut String, assignment: &GpuAssign) -> Result<(), GpuRend
         return Err(invalid_outputs(assignment, 1));
     };
     out.push_str(&format!("    {} = {};\n", output.name, value_expr(input)));
+    Ok(())
+}
+
+fn render_ty_ascription(out: &mut String, assignment: &GpuAssign) -> Result<(), GpuRenderError> {
+    let runtime_inputs = assignment
+        .inputs
+        .iter()
+        .filter_map(|input| match input {
+            GpuValue::Var(var) if runtime_type(var).is_some() => Some(var),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let [input] = runtime_inputs.as_slice() else {
+        return Err(GpuRenderError::InvalidInputComponentValueCount {
+            op: assignment.op.clone(),
+            component: "runtime input",
+            description: "runtime values",
+            expected: 1,
+            actual: runtime_inputs.len(),
+        });
+    };
+
+    for output in assignment
+        .outputs
+        .iter()
+        .filter(|output| runtime_type(output).is_some())
+    {
+        out.push_str(&format!("    {} = {};\n", output.name, input.name));
+    }
     Ok(())
 }
 
@@ -958,6 +988,44 @@ mod tests {
             name: name.to_string(),
             lowered: LoweredType::Runtime(ty),
         }
+    }
+
+    fn erased_var(node: usize, name: &str) -> GpuVar {
+        GpuVar {
+            node: NodeId(node),
+            name: name.to_string(),
+            lowered: LoweredType::Erased,
+        }
+    }
+
+    #[test]
+    fn ty_ascription_preserves_runtime_value_output() {
+        let input = var(0, "x0", CType::U64);
+        let runtime_output = var(1, "x1", CType::U64);
+        let type_output = erased_var(2, "x2");
+        let module = GpuModule {
+            name: "program_ascribed".to_string(),
+            source_name: Some(op("ascribed")),
+            entry: GpuFunction {
+                name: "program_ascribed".to_string(),
+                sources: vec![input.clone()],
+                targets: vec![runtime_output.clone()],
+                assignments: vec![GpuAssign {
+                    op: op(":.ty"),
+                    input_sizes: vec![1],
+                    output_sizes: vec![1, 1],
+                    call_symbol: None,
+                    inputs: vec![GpuValue::Var(input)],
+                    outputs: vec![runtime_output, type_output],
+                }],
+            },
+        };
+
+        let source = render_module(&module, GpuDialect::Hip).unwrap();
+
+        assert!(source.contains("uint64_t x1;"));
+        assert!(source.contains("    x1 = x0;\n"));
+        assert!(!source.contains("uint64_t x2;"));
     }
 
     #[test]

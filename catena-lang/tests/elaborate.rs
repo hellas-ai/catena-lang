@@ -1,4 +1,4 @@
-use catena_lang::elaborate::elaborate;
+use catena_lang::elaborate::{ElaborateError, elaborate};
 use metacat::theory::RawTheorySet;
 
 #[test]
@@ -21,12 +21,19 @@ fn rejects_arrow_type_maps_with_different_context_domains_before_name_generation
     )
     .expect("test theory should parse");
 
-    let Err(error) = elaborate(raw) else {
-        panic!("elaboration should reject invalid arrow domains before generating name.* arrows");
-    };
-    let message = error.to_string();
     assert!(
-        message.contains("source and target type maps must have the same context domain"),
-        "unexpected error message: {message}"
+        matches!(
+            elaborate(raw),
+            Err(ElaborateError::TypeMapDomainMismatch {
+                theory,
+                arrow,
+                source_domain,
+                target_domain,
+            }) if theory == "program"
+                && arrow == "bad"
+                && source_domain == "1"
+                && target_domain == "0"
+        ),
+        "elaboration should reject invalid arrow domains before generating name.* arrows"
     );
 }

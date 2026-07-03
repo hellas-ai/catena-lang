@@ -4,6 +4,8 @@ pub(crate) mod name_symbols;
 /// Add const.{type}.{c} arrows for each constant c required.
 mod constants;
 
+mod validate;
+
 use hexpr::{Hexpr, interpret::Error as HexprInterpretError};
 use metacat::theory::model::SignatureError;
 use metacat::theory::{GraphError, RawTheorySet, ast::ExtensionsError};
@@ -63,12 +65,22 @@ pub enum ElaborateError {
         map: Hexpr,
         error: HexprInterpretError<SignatureError>,
     },
+    #[error(
+        "arrow `{theory}.{arrow}` source and target type maps must have the same context domain: source has `{source_domain}`, target has `{target_domain}`"
+    )]
+    TypeMapDomainMismatch {
+        theory: String,
+        arrow: String,
+        source_domain: String,
+        target_domain: String,
+    },
 }
 
 pub fn elaborate(mut raw: RawTheorySet) -> Result<RawTheorySet, ElaborateError> {
     raw = raw.with_extensions()?;
     check_reserved_operation_prefixes(&raw)?;
     check_reserved_variable_prefixes(&raw)?;
+    validate::pre_elaboration_invariants(&raw)?;
     constants::elaborate(&mut raw, constants::U64)?;
     constants::elaborate(&mut raw, constants::U32)?;
 

@@ -4,18 +4,14 @@ pub(crate) mod name_symbols;
 /// Add const.{type}.{c} arrows for each constant c required.
 mod constants;
 
+mod validate;
+
 use hexpr::{Hexpr, interpret::Error as HexprInterpretError};
 use metacat::theory::model::SignatureError;
 use metacat::theory::{GraphError, RawTheorySet, ast::ExtensionsError};
 use thiserror::Error;
 
-use crate::prefixes::{
-    CONST_PREFIX, GENERATED_COPY_PREFIX, GENERATED_VARIABLE_PREFIX, NAME_PREFIX,
-};
-
-const NAT_THEORY: &str = "nat";
-const RESERVED_OPERATION_PREFIXES: &[&str] = &[NAME_PREFIX, CONST_PREFIX, GENERATED_COPY_PREFIX];
-const RESERVED_VARIABLE_PREFIXES: &[&str] = &[GENERATED_VARIABLE_PREFIX];
+pub(crate) const NAT_THEORY: &str = "nat";
 
 #[derive(Debug, Error)]
 pub enum ElaborateError {
@@ -79,8 +75,7 @@ pub enum ElaborateError {
 
 pub fn elaborate(mut raw: RawTheorySet) -> Result<RawTheorySet, ElaborateError> {
     raw = raw.with_extensions()?;
-    check_reserved_operation_prefixes(&raw)?;
-    check_reserved_variable_prefixes(&raw)?;
+    validate::pre_elaboration_invariants(&raw)?;
     constants::elaborate(&mut raw, constants::U64)?;
     constants::elaborate(&mut raw, constants::U32)?;
 
@@ -96,167 +91,4 @@ pub fn elaborate(mut raw: RawTheorySet) -> Result<RawTheorySet, ElaborateError> 
     }
 
     Ok(raw)
-}
-
-fn check_reserved_variable_prefixes(raw: &RawTheorySet) -> Result<(), ElaborateError> {
-    for (theory_name, theory) in &raw.theories {
-        for (arrow_name, arrow) in &theory.arrows {
-            for map in [&arrow.type_maps.0, &arrow.type_maps.1] {
-                check_reserved_variables_in_hexpr(theory_name, arrow_name, map)?;
-            }
-            if let Some(definition) = &arrow.definition {
-                check_reserved_variables_in_hexpr(theory_name, arrow_name, definition)?;
-            }
-        }
-    }
-    Ok(())
-}
-
-fn check_reserved_variables_in_hexpr(
-    theory_name: &hexpr::Operation,
-    arrow_name: &hexpr::Operation,
-    expr: &Hexpr,
-) -> Result<(), ElaborateError> {
-    match expr {
-        Hexpr::Composition(exprs) | Hexpr::Tensor(exprs) => {
-            for expr in exprs {
-                check_reserved_variables_in_hexpr(theory_name, arrow_name, expr)?;
-            }
-        }
-        Hexpr::Frobenius { sources, targets } => {
-            for variable in sources.iter().chain(targets) {
-                let variable = variable.to_string();
-                if let Some(prefix) = RESERVED_VARIABLE_PREFIXES
-                    .iter()
-                    .copied()
-                    .find(|prefix| variable.starts_with(prefix))
-                {
-                    return Err(ElaborateError::ReservedVariablePrefix {
-                        theory: theory_name.to_string(),
-                        arrow: arrow_name.to_string(),
-                        variable,
-                        prefix,
-                    });
-                }
-            }
-        }
-        Hexpr::Operation(_) => {}
-    }
-    Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use metacat::theory::RawTheorySet;
-
-    use crate::prefixes::{GENERATED_COPY_PREFIX, GENERATED_VARIABLE_PREFIX};
-
-    use super::{ElaborateError, elaborate};
-
-    #[test]
-    fn user_variables_cannot_use_catena_generated_prefix() {
-        let raw = RawTheorySet::from_text(
-            r#"
-            (theory type nat {
-              (arr 1 : 0 -> 1)
-              (arr val : 1 -> 1)
-              (arr bool : 0 -> 1)
-            })
-
-            (theory program type {
-              (arr bad : [__catena_p0.] -> (bool val))
-            })
-            "#,
-        )
-        .expect("test theory should parse");
-
-        let error = elaborate(raw).expect_err("reserved variable should be rejected");
-        assert!(matches!(
-            error,
-            ElaborateError::ReservedVariablePrefix {
-                theory,
-                arrow,
-                variable,
-                prefix,
-            } if theory == "program"
-                && arrow == "bad"
-                && variable == "__catena_p0"
-                && prefix == GENERATED_VARIABLE_PREFIX
-        ));
-    }
-
-    #[test]
-    fn user_operations_cannot_use_catena_generated_copy_prefix() {
-        let raw = RawTheorySet::from_text(
-            r#"
-            (theory type nat {
-              (arr bool : 0 -> 1)
-            })
-
-            (theory program type {
-              (arr __catena_copy.closure.f.0.0 : bool -> {bool bool})
-            })
-            "#,
-        )
-        .expect("test theory should parse");
-
-        let error = elaborate(raw).expect_err("reserved operation should be rejected");
-        assert!(matches!(
-            error,
-            ElaborateError::ReservedOperationPrefix {
-                theory,
-                arrow,
-                prefix,
-            } if theory == "program"
-                && arrow == "__catena_copy.closure.f.0.0"
-                && prefix == GENERATED_COPY_PREFIX
-        ));
-    }
-
-    #[test]
-    fn arrows_must_use_same_context_domain_on_source_and_target() {
-        let raw = RawTheorySet::from_text(
-            r#"
-            (theory type nat {
-              (arr : : 2 -> 1)
-              (arr val : 1 -> 1)
-              (arr u64 : 0 -> 1)
-            })
-
-            (theory program type {
-              (arr bad : ({[n] u64} :) -> (u64 val))
-            })
-            "#,
-        )
-        .expect("test theory should parse");
-
-        let error = elaborate(raw).expect_err("mismatched domains should be rejected");
-        assert!(matches!(
-            error,
-            ElaborateError::TypeMapDomainMismatch {
-                theory,
-                arrow,
-                ..
-            } if theory == "program" && arrow == "bad"
-        ));
-    }
-}
-
-fn check_reserved_operation_prefixes(raw: &RawTheorySet) -> Result<(), ElaborateError> {
-    for (theory_name, theory) in &raw.theories {
-        for arrow_name in theory.arrows.keys() {
-            if let Some(prefix) = RESERVED_OPERATION_PREFIXES
-                .iter()
-                .copied()
-                .find(|prefix| arrow_name.as_str().starts_with(prefix))
-            {
-                return Err(ElaborateError::ReservedOperationPrefix {
-                    theory: theory_name.to_string(),
-                    arrow: arrow_name.to_string(),
-                    prefix,
-                });
-            }
-        }
-    }
-    Ok(())
 }

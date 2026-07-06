@@ -1,0 +1,54 @@
+# f32 inner product.
+#
+# Both inputs are indexed by the same b dimension.
+#   reduce 0.0 (+) (\j -> lhs(j) * rhs(j)) b
+
+(def program matmul.f32.add-reduce :
+  ({(f32 val) (f32 val)} *)
+  ->
+  (f32 val)
+= ([pair.]
+  ([.pair] *.elim [acc value.])
+  {[.acc value]} f32.add
+))
+
+(def program matmul-f32-product-at :
+  ([b.] {
+    ({([.b] ix val) (f32 val)} =>)
+    ({([.b] ix val) (f32 val)} =>)
+    ([.b] ix val)
+  })
+  ->
+  ([b.] (f32 val))
+= ([lhs rhs j.]
+  ({([.j] defer) [.lhs]} compose run [lval.])
+  ({([.j] defer) [.rhs]} compose run [rval.])
+  ([.lval rval] f32.mul [product.])
+  [.product]
+))
+
+(def program matmul-f32-inner :
+  ([b.] {
+    ({[.b] u64} :)
+    ({([.b] ix val) (f32 val)} =>)
+    ({([.b] ix val) (f32 val)} =>)
+  })
+  ->
+  ([b.] (f32 val))
+= ([b-len lhs rhs.]
+  {
+    [.lhs]
+    [.rhs]
+    ([.b-len] :.ty)
+  }
+  [lhs rhs reduce-len _producer-len.]
+    {
+      (const.u32.0x00000000 u32.bitcast-f32)
+      (name.matmul.f32.add-reduce lift)
+      {[j.]
+        {[.lhs] [.rhs] [.j]} matmul-f32-product-at
+      }
+      [.reduce-len] # b:u64
+    }
+    reduce
+))

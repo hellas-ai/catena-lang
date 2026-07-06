@@ -32,15 +32,15 @@
     (([.b] ix val) ty)
     ({([.b] ix val) (f32 val)} =>)
     ({([.b] ix val) (f32 val)} =>)
-    ({[.b] u64} :)
+    [.b]
   })
   ->
   ([b.] ({([.b] ix val) (f32 val)} =>))
-= ([ix-b-ty lhs rhs producer-len.]
+= ([ix-b-ty lhs rhs b-dim.]
   {
     [.ix-b-ty]
     ({[.lhs] [.rhs]} *.intro)
-    (([.producer-len] :.param) name.matmul-f32-product-at lift)
+    ([.b-dim] name.matmul-f32-product-at lift)
   }
   partial.apply-left
 ))
@@ -61,13 +61,13 @@
     [.rhs]
     ([.b-len] :.ty)
   }
-  [ix-b-ty lhs rhs reduce-len producer-len b-u64-ty.]
-    ({[.ix-b-ty] [.lhs] [.rhs] [.producer-len]} matmul-f32-product-producer [product-at.]
+  [ix-b-ty lhs rhs b-len-for-reduce b-dim b-u64-ty.]
+    ({[.ix-b-ty] [.lhs] [.rhs] [.b-dim]} matmul-f32-product-producer [product-at.]
     {
       (const.u32.0x00000000 u32.bitcast-f32)
       (name.matmul.f32.add-reduce lift)
       [.product-at]
-      [.reduce-len] # b:u64
+      [.b-len-for-reduce] # b:u64
     }
     reduce)
 ))

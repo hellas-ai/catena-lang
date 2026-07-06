@@ -17,17 +17,13 @@
 = ([i.] f32.one))
 
 (def program matmul-test.f32-inner-ones :
-  ([b.] {
-    ({[.b] u64} :)
-    (([.b] ix val) ty)
-  })
+  ([b.] ({[.b] u64} :))
   ->
   ([b.] (f32 val))
-= ([b-len ix-b-ty.]
+= ([b-len.]
   ([.b-len] :.ty [b-len-for-reduce b-dim b-u64-ty.]
     {
       [.b-len-for-reduce]
-      [.ix-b-ty]
       ([.b-dim] name.matmul-test.f32-one-at-lhs lift)
       ([.b-dim] name.matmul-test.f32-one-at-rhs lift)
     }

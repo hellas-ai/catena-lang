@@ -28,6 +28,20 @@
   ([.a] name.unit-left-intro lift)
 ))
 
+(def program closure.unit-left-intro-and-identity :
+  ([a.] ([.a] ty))
+  ->
+  ([a.] {
+    ({[.a] ({1 [.a]} *)} =>)
+    ([.a a] =>)
+  })
+= ([a-ty.]
+  {
+    ([.a] name.unit-left-intro lift)
+    ([.a] name.identity lift)
+  }
+))
+
 # partial.apply-left : ty(B) * A * (A * B => C) -> (B => C)
 #
 # Given x : A and f : A * B => C, build the closure:
@@ -47,10 +61,10 @@
   ->
   ([a b c.] ([.b c] =>))
 = ([b-ty x f.]
-  ([.b-ty] closure.unit-left-intro [unit-left.])
+  ([.b-ty] closure.unit-left-intro-and-identity [unit-left identity.])
   ({
     ([.x] defer)
-    ([.b-ty] closure.identity)
+    [.identity]
   } tensor [capture.])
   ({[.unit-left capture]} compose [input-with-capture.])
   ({[.input-with-capture] [.f]} compose)

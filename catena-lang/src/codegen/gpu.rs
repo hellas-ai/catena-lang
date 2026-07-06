@@ -275,6 +275,7 @@ fn render_assignment(
         "u64.lte" => render_binary_bool(out, assignment, "<=")?,
         "u64.gte" => render_binary_bool(out, assignment, ">=")?,
         "u64.mul" => render_binary(out, assignment, "*")?,
+        "u64.name" => render_forget(out, assignment)?,
         "u32.one" => render_u64_one(out, assignment)?,
         "u32.add" => render_binary(out, assignment, "+")?,
         "u32.sub" => render_binary(out, assignment, "-")?,

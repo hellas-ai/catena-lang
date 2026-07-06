@@ -224,3 +224,86 @@
     [.result]
   }
 )
+
+# Broadcast one f32 value into an owned buffer of length n.
+(def program broadcast-at :
+  ([n.] {(f32 val) ([.n] ix val)})
+  ->
+  ([n.] (f32 val))
+= ([value i.]
+  [.value]
+))
+
+(def program broadcast-f32 :
+  {(f32 val) ({[n] u64} :)}
+  ->
+  ([n.] (cap.own mem))
+= ([value len.]
+  {
+    [.len]
+    ({[.value] (([.len] :.param) name.broadcast-at) [.len]}
+      materializec)
+  }
+  buf.to-mem
+))
+
+# Materialize the runtime index itself as f32.
+(def program arange-at :
+  ([n.] {1 ([.n] ix val)})
+  ->
+  ([n.] (f32 val))
+= ([env i.]
+  ([.i] ix.to-u64 [i-u64.])
+  ([.i-u64] u64.to-f32 [result.])
+  [.result]
+))
+
+# Materialize [0, n) as f32.
+(def program arange-f32 :
+  ({[n] u64} :)
+  ->
+  ([n.] (cap.own mem))
+= ([len.]
+  {
+    [.len]
+    ({unit.intro (([.len] :.param) name.arange-at) [.len]}
+      materializec)
+  }
+  buf.to-mem
+))
+
+# Read one slice element by casting the input mem inside the producer.
+(def program slice-at :
+  ([n.] {
+    ({(cap.ref mem) (u64 val)} *)
+    ([.n] ix val)
+  })
+  ->
+  ([n.] (f32 val))
+= {[env i.]
+  ([.env] *.elim [input-mem start-val.])
+  ([.input-mem] mem.cast.f32 [input-len input.])
+  ([.i] ix.to-u64 [out-i-u64.])
+  ([.start-val out-i-u64] u64.add [input-i-u64.])
+  ([.input-i-u64] u64.name [input-i-u64-named.])
+  ([.input-len input-i-u64-named] u64.gt [in-bounds if-in-bounds _if-oob.])
+  ([.in-bounds if-in-bounds] assert-then [input-i-proof.])
+  ([.input-i-u64-named input-len input-i-proof] u64.to-ix [input-i.])
+  ({[.input-i input]} ix [result.])
+  [.result]
+})
+
+# Slice `len` f32 elements starting at `start`.
+(def program slice-f32 :
+  {(cap.ref mem) ({[start] u64} :) ({[len] u64} :)}
+  ->
+  ([start len.] (cap.own mem))
+= ([input-mem start len.]
+  ([.start] :.forget [start-val.])
+  {
+    [.len]
+    ({({[.input-mem] [.start-val]} *.intro) (([.len] :.param) name.slice-at) [.len]}
+      materializec)
+  }
+  buf.to-mem
+))

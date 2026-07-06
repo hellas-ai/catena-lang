@@ -1,8 +1,6 @@
 # Minimal matmul-f32-inner codegen smoke test.
 #
-# The lhs and rhs closures ignore the index and return 1.0. The wrapper calls
-# the stdlib matmul-f32-inner directly; it should compute the inner product of
-# those two simple producers once the current closure-region issue is fixed.
+# The lhs and rhs closures ignore the index and return 1.0. 
 
 (def program matmul-test.f32-one-at-lhs :
   ([b.] ([.b] ix val))
@@ -16,16 +14,36 @@
   ([b.] (f32 val))
 = ([i.] f32.one))
 
+(def program matmul-test.b-dims :
+  ([b.] ({[.b] u64} :))
+  ->
+  ([b.] {
+    ({[.b] u64} :)
+    [.b]
+    [.b]
+  })
+= ([b-len.]
+  ([.b-len] :.ty [lhs-len lhs-b-dim lhs-u64-ty.]
+    ([.lhs-len] :.ty [inner-len rhs-b-dim rhs-u64-ty.]
+      {
+        [.inner-len]
+        [.lhs-b-dim]
+        [.rhs-b-dim]
+      }
+    )
+  )
+))
+
 (def program matmul-test.f32-inner-ones :
   ([b.] ({[.b] u64} :))
   ->
   ([b.] (f32 val))
 = ([b-len.]
-  ([.b-len] :.ty [b-len-for-reduce b-dim b-u64-ty.]
+  ([.b-len] matmul-test.b-dims [inner-len lhs-b-dim rhs-b-dim.]
     {
-      [.b-len-for-reduce]
-      ([.b-dim] name.matmul-test.f32-one-at-lhs lift)
-      ([.b-dim] name.matmul-test.f32-one-at-rhs lift)
+      [.inner-len]
+      ([.lhs-b-dim] name.matmul-test.f32-one-at-lhs lift)
+      ([.rhs-b-dim] name.matmul-test.f32-one-at-rhs lift)
     }
     matmul-f32-inner
   )

@@ -9,6 +9,9 @@
   # x is the type-level name of a runtime value with type t.
   (arr :   : 2 -> 1)
 
+  # type witness
+  (arr ty : 1 -> 1)
+
   # provability
   (arr |- : 1 -> 1)
 
@@ -25,7 +28,7 @@
 (theory program type {
   (arr :.forget : : -> ([x t.t] val))
   (arr :.param : : -> [x t . x])
-  (arr :.ty : : -> {({[.x] [.t]} :) [x t . x]})
+  (arr :.ty : : -> {({[.x] [.t]} :) [x t . x] ([.t] ty)})
 
   # Modus ponens:
   #   h0 : |- φ

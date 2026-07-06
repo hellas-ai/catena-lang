@@ -1003,6 +1003,7 @@ mod tests {
         let input = var(0, "x0", CType::U64);
         let runtime_output = var(1, "x1", CType::U64);
         let type_output = erased_var(2, "x2");
+        let ty_output = erased_var(3, "x3");
         let module = GpuModule {
             name: "program_ascribed".to_string(),
             source_name: Some(op("ascribed")),
@@ -1013,10 +1014,10 @@ mod tests {
                 assignments: vec![GpuAssign {
                     op: op(":.ty"),
                     input_sizes: vec![1],
-                    output_sizes: vec![1, 1],
+                    output_sizes: vec![1, 1, 1],
                     call_symbol: None,
                     inputs: vec![GpuValue::Var(input)],
-                    outputs: vec![runtime_output, type_output],
+                    outputs: vec![runtime_output, type_output, ty_output],
                 }],
             },
         };

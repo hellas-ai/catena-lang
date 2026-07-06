@@ -1,9 +1,5 @@
 # Generic helpers for building closures by capturing a left argument.
 
-(theory type nat {
-  (arr ty : 1 -> 1)
-})
-
 (def program identity :
   ([a.] [.a])
   ->

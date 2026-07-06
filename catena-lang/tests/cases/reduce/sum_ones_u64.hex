@@ -30,7 +30,7 @@
   ->
   ([n.] (u64 val))
 = ([n.]
-  ([.n] :.ty [reduce-len producer-len.]
+  ([.n] :.ty [reduce-len producer-len n-ty.]
     {
       const.u64.0x0000000000000000
       (name.sum-ones.u64.add-reduce lift)

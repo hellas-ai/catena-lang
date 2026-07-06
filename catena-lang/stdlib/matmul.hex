@@ -14,41 +14,60 @@
 
 (def program matmul-f32-product-at :
   ([b.] {
-    ({([.b] ix val) (f32 val)} =>)
-    ({([.b] ix val) (f32 val)} =>)
+    ({({([.b] ix val) (f32 val)} =>) ({([.b] ix val) (f32 val)} =>)} *)
     ([.b] ix val)
   })
   ->
   ([b.] (f32 val))
-= ([lhs rhs j.]
+= ([env j.]
+  ([.env] *.elim [lhs rhs.])
   ({([.j] defer) [.lhs]} compose run [lval.])
   ({([.j] defer) [.rhs]} compose run [rval.])
   ([.lval rval] f32.mul [product.])
   [.product]
 ))
 
+(def program matmul-f32-product-producer :
+  ([b.] {
+    (([.b] ix val) ty)
+    ({([.b] ix val) (f32 val)} =>)
+    ({([.b] ix val) (f32 val)} =>)
+    ({[.b] u64} :)
+  })
+  ->
+  ([b.] ({([.b] ix val) (f32 val)} =>))
+= ([ix-b-ty lhs rhs producer-len.]
+  {
+    [.ix-b-ty]
+    ({[.lhs] [.rhs]} *.intro)
+    (([.producer-len] :.param) name.matmul-f32-product-at lift)
+  }
+  partial.apply-left
+))
+
 (def program matmul-f32-inner :
   ([b.] {
     ({[.b] u64} :)
+    (([.b] ix val) ty)
     ({([.b] ix val) (f32 val)} =>)
     ({([.b] ix val) (f32 val)} =>)
   })
   ->
   ([b.] (f32 val))
-= ([b-len lhs rhs.]
+= ([b-len ix-b-ty lhs rhs.]
   {
+    [.ix-b-ty]
     [.lhs]
     [.rhs]
     ([.b-len] :.ty)
   }
-  [lhs rhs reduce-len _producer-len.]
+  [ix-b-ty lhs rhs reduce-len producer-len b-u64-ty.]
+    ({[.ix-b-ty] [.lhs] [.rhs] [.producer-len]} matmul-f32-product-producer [product-at.]
     {
       (const.u32.0x00000000 u32.bitcast-f32)
       (name.matmul.f32.add-reduce lift)
-      {[j.]
-        {[.lhs] [.rhs] [.j]} matmul-f32-product-at
-      }
+      [.product-at]
       [.reduce-len] # b:u64
     }
-    reduce
+    reduce)
 ))

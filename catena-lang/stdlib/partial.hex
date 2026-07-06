@@ -1,0 +1,61 @@
+# Generic helpers for building closures by capturing a left argument.
+
+(theory type nat {
+  (arr ty : 1 -> 1)
+})
+
+(def program identity :
+  ([a.] [.a])
+  ->
+  ([a.] [.a])
+= [x])
+
+(def program unit-left-intro :
+  ([a.] [.a])
+  ->
+  ([a.] ({1 [.a]} *))
+= ({unit.intro [x]} *.intro))
+
+(def program closure.identity :
+  ([a.] ([.a] ty))
+  ->
+  ([a.] ([.a a] =>))
+= ([a-ty.]
+  ([.a] name.identity lift)
+))
+
+(def program closure.unit-left-intro :
+  ([a.] ([.a] ty))
+  ->
+  ([a.] ({[.a] ({1 [.a]} *)} =>))
+= ([a-ty.]
+  ([.a] name.unit-left-intro lift)
+))
+
+# partial.apply-left : ty(B) * A * (A * B => C) -> (B => C)
+#
+# Given x : A and f : A * B => C, build the closure:
+#
+#   \y -> f(x, y)
+#
+# CMC shape:
+#   B --unit-left-intro--> 1 * B
+#     --(defer x tensor identity)--> A * B
+#     --f--> C
+(def program partial.apply-left :
+  {[a b c.]
+    ([.b] ty)
+    ([.a])
+    ({({[.a] [.b]} *) [.c]} =>)
+  }
+  ->
+  ([a b c.] ([.b c] =>))
+= ([b-ty x f.]
+  ([.b-ty] closure.unit-left-intro [unit-left.])
+  ({
+    ([.x] defer)
+    ([.b-ty] closure.identity)
+  } tensor [capture.])
+  ({[.unit-left capture]} compose [input-with-capture.])
+  ({[.input-with-capture] [.f]} compose)
+))

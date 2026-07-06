@@ -39,8 +39,33 @@
   ([b.] ({1 ([.b] ix val)} *))
 = ({unit.intro [i]} *.intro))
 
+(def program matmul-f32-product-dims :
+  ([b.] ({[.b] u64} :))
+  ->
+  ([b.] {
+    ({[.b] u64} :)
+    [.b]
+    [.b]
+    [.b]
+  })
+= ([b-len.]
+  ([.b-len] :.ty [b-len-for-unit b-for-product b-u64-ty-product.]
+    ([.b-len-for-unit] :.ty [b-len-for-identity b-for-unit b-u64-ty-unit.]
+      ([.b-len-for-identity] :.ty [b-len-for-reduce b-for-identity b-u64-ty-identity.]
+        {
+          [.b-len-for-reduce]
+          [.b-for-product]
+          [.b-for-unit]
+          [.b-for-identity]
+        }
+      )
+    )
+  )
+))
+
 (def program matmul-f32-apply-env :
   ([b.] {
+    [.b]
     [.b]
     ({({([.b] ix val) (f32 val)} =>) ({([.b] ix val) (f32 val)} =>)} *)
     ({({
@@ -50,11 +75,11 @@
   })
   ->
   ([b.] ({([.b] ix val) (f32 val)} =>))
-= ([b-dim env f.]
-  ([.b-dim] name.matmul-f32-ix-unit-left-intro lift [unit-left.])
+= ([b-for-unit b-for-identity env f.]
+  ([.b-for-unit] name.matmul-f32-ix-unit-left-intro lift [unit-left.])
   ({
     ([.env] defer)
-    ([.b-dim] name.matmul-f32-ix-identity lift)
+    ([.b-for-identity] name.matmul-f32-ix-identity lift)
   } tensor [capture.])
   ({[.unit-left capture]} compose [input-with-capture.])
   ({[.input-with-capture] [.f]} compose)
@@ -65,14 +90,17 @@
     ({([.b] ix val) (f32 val)} =>)
     ({([.b] ix val) (f32 val)} =>)
     [.b]
+    [.b]
+    [.b]
   })
   ->
   ([b.] ({([.b] ix val) (f32 val)} =>))
-= ([lhs rhs b-dim.]
+= ([lhs rhs b-for-product b-for-unit b-for-identity.]
   {
-    [.b-dim]
+    [.b-for-unit]
+    [.b-for-identity]
     ({[.lhs] [.rhs]} *.intro)
-    ([.b-dim] name.matmul-f32-product-at lift)
+    ([.b-for-product] name.matmul-f32-product-at lift)
   }
   matmul-f32-apply-env
 ))
@@ -86,13 +114,8 @@
   ->
   ([b.] (f32 val))
 = ([b-len lhs rhs.]
-  {
-    [.lhs]
-    [.rhs]
-    ([.b-len] :.ty)
-  }
-  [lhs rhs b-len-for-reduce b-dim b-u64-ty.]
-    ({[.lhs] [.rhs] [.b-dim]} matmul-f32-product-producer [product-at.]
+  ([.b-len] matmul-f32-product-dims [b-len-for-reduce b-for-product b-for-unit b-for-identity.]
+    ({[.lhs] [.rhs] [.b-for-product] [.b-for-unit] [.b-for-identity]} matmul-f32-product-producer [product-at.]
     {
       (const.u32.0x00000000 u32.bitcast-f32)
       (name.matmul.f32.add-reduce lift)
@@ -100,4 +123,5 @@
       [.b-len-for-reduce] # b:u64
     }
     reduce)
-))
+  ))
+)

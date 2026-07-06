@@ -8,7 +8,7 @@ use metacat::theory::RawTheorySet;
 const INNER_SOURCE: &str = include_str!("matmul/inner.hex");
 
 #[test]
-#[ignore = "blocked by cross-file matmul-f32-inner wrapper compilation"]
+#[ignore = "blocked by generated closure-name arity after closure conversion"]
 fn f32_inner_generates_gpu_code() -> anyhow::Result<()> {
     let raw = RawTheorySet::from_texts(stdlib::sources().chain([INNER_SOURCE]))?;
     let report = compile(raw)?;

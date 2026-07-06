@@ -855,3 +855,6 @@ mod reduce;
 
 #[path = "cases/closure.rs"]
 mod closure;
+
+#[path = "cases/matmul.rs"]
+mod matmul;

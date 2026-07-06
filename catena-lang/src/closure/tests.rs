@@ -526,6 +526,122 @@ fn theory_conversion_converts_if_id_neg_example_end_to_end() {
 }
 
 #[test]
+fn theory_conversion_declares_deferred_value_capture_name_boundary() {
+    let (theory_set, definition_types) = theories_with(
+        r#"
+        (def program if-capture-bool :
+          {(bool val) (bool val)}
+          ->
+          (bool val)
+        = ([b x.]
+          {([.x] defer) (bool.f defer) [.b] unit.intro}
+          bool.if
+        ))
+        "#,
+    );
+    let program = TheoryId(op("program"));
+
+    let converted =
+        convert_theory(&theory_set, &definition_types, &program).expect("theory should convert");
+    let Theory::Theory { arrows, .. } = converted else {
+        panic!("program should be a theory");
+    };
+    let if_capture = arrows
+        .get(&op("if-capture-bool"))
+        .expect("converted original definition should exist");
+    let if_capture_body = if_capture
+        .definition
+        .as_ref()
+        .expect("converted original definition should have a body");
+
+    // This checks the declaration/use-site invariant for generated closure-name
+    // operations after converting two simple `defer` branches passed to
+    // `bool.if`.
+    //
+    // Source shape:
+    //
+    //   x      -- defer --------.
+    //                         bool.if
+    //   bool.f -- defer --------'
+    //
+    // Each converted branch contains a generated name edge:
+    //
+    //   source wires connected to name.closure.if-capture-bool.*
+    //   ==
+    //   source boundary declared by name.closure.if-capture-bool.*
+    //
+    // The current bug connects one source wire at each use site while declaring
+    // the generated name operation as nullary, so this test should fail until
+    // closure conversion makes the two boundaries agree.
+    let mismatches = name_closure_boundary_mismatches(&arrows, if_capture_body);
+    assert_eq!(
+        mismatches,
+        Vec::<(String, usize, usize)>::new(),
+        "generated closure-name use-site source boundaries must match their declarations"
+    );
+}
+
+#[test]
+fn conversion_declares_mixed_defer_and_name_boundary_consistently() {
+    let length_parameter_n = Tree::Leaf(0, ());
+    let u64_value = obj("val", vec![obj("u64", vec![])]);
+    let unit = obj("1", vec![]);
+    let deferred_u64 = obj("=>", vec![unit.clone(), u64_value.clone()]);
+    let indexed_u64_id = obj("=>", vec![u64_value.clone(), u64_value.clone()]);
+    let composed_closure_type = obj("=>", vec![unit, u64_value]);
+
+    let mut definition = AnnotatedTerm::empty();
+    let free_n = definition.new_node(length_parameter_n);
+    let captured_value = definition.new_node(obj("val", vec![obj("u64", vec![])]));
+    let deferred = definition.new_node(deferred_u64);
+    let named = definition.new_node(indexed_u64_id);
+    let composed = definition.new_node(composed_closure_type);
+
+    // Graph-level minimal region:
+    //
+    //   captured_value -- defer ----------------.
+    //                                           compose --> composed closure
+    //   free_n         -- name.indexed-u64-id --'
+    //
+    // `closure_region` records both leaf edge inputs:
+    //
+    //   [captured_value, free_n]
+    //
+    // The generated closure body, however, only has one contextual source in
+    // its declaration-side type maps: the `free_n` leaf appearing in object
+    // types. Correct conversion must still make the generated `name.closure.*`
+    // use site agree with its declaration. The current conversion wires both
+    // leaf inputs into `name.closure.mixed.*`, while the declaration expects
+    // one source, reproducing the "connected > declared" failure shape.
+    definition.new_edge(op("defer"), (vec![captured_value], vec![deferred]));
+    definition.new_edge(op("name.indexed-u64-id"), (vec![free_n], vec![named]));
+    definition.new_edge(op("compose"), (vec![deferred, named], vec![composed]));
+    definition.sources = vec![free_n, captured_value];
+    definition.targets = vec![composed];
+
+    let converted = convert(&op("mixed"), &definition, &[composed]).expect("conversion succeeds");
+    let generated = converted
+        .closures
+        .first()
+        .expect("conversion should generate a closure body");
+    let declared_context = generated_closure_context_arity_for_test(&generated.term, 1);
+    let name_edge_sources = converted
+        .definition
+        .hypergraph
+        .edges
+        .iter()
+        .zip(&converted.definition.hypergraph.adjacency)
+        .find(|(operation, _)| operation.as_str().starts_with("name.closure.mixed."))
+        .map(|(_, edge)| edge.sources.len())
+        .expect("converted definition should contain generated closure name edge");
+
+    assert_eq!(
+        name_edge_sources, declared_context,
+        "generated closure-name use-site source count must match the declaration context"
+    );
+}
+
+#[test]
 fn convert_parallel_regions_with_crossed_node_and_edge_order() {
     let bool_value = obj("val", vec![obj("bool", vec![])]);
     let unit = obj("1", vec![]);
@@ -872,6 +988,66 @@ fn assert_operation_count(term: &metacat::theory::Term, operation: &str, expecte
         .filter(|actual| actual.as_str() == operation)
         .count();
     assert_eq!(actual, expected, "operation count for `{operation}`");
+}
+
+fn name_closure_boundary_mismatches(
+    arrows: &std::collections::BTreeMap<Operation, metacat::theory::TheoryArrow>,
+    body: &metacat::theory::Term,
+) -> Vec<(String, usize, usize)> {
+    body.hypergraph
+        .edges
+        .iter()
+        .zip(&body.hypergraph.adjacency)
+        .filter_map(|(operation, edge)| {
+            if !operation.as_str().starts_with("name.closure.") {
+                return None;
+            }
+            let declared = arrows
+                .get(operation)
+                .expect("generated name closure declaration should exist")
+                .type_maps
+                .0
+                .targets
+                .len();
+            let connected = edge.sources.len();
+            (connected != declared).then(|| (operation.to_string(), connected, declared))
+        })
+        .collect()
+}
+
+fn generated_closure_context_arity_for_test(
+    term: &AnnotatedTerm,
+    ambient_context_arity: usize,
+) -> usize {
+    let source_types = interface_types(term, &term.sources);
+    let target_types = interface_types(term, &term.targets);
+    if object_leaf_indices(&source_types).is_empty()
+        && object_leaf_indices(&target_types).is_empty()
+    {
+        0
+    } else {
+        ambient_context_arity
+    }
+}
+
+fn object_leaf_indices(objects: &[Obj]) -> Vec<usize> {
+    let mut indices = Vec::new();
+    for object in objects {
+        collect_object_leaf_indices(object, &mut indices);
+    }
+    indices
+}
+
+fn collect_object_leaf_indices(object: &Obj, indices: &mut Vec<usize>) {
+    match object {
+        Tree::Empty => {}
+        Tree::Leaf(index, _) => indices.push(*index),
+        Tree::Node(_, _, children) => {
+            for child in children {
+                collect_object_leaf_indices(child, indices);
+            }
+        }
+    }
 }
 
 fn obj(name: &str, children: Vec<Obj>) -> Obj {

@@ -475,6 +475,11 @@ mod tests {
             .collect()
     }
 
+    fn assert_closure_forgotten_boundaries(term: &AnnotatedTerm, source: &[Obj], target: &[Obj]) {
+        assert_eq!(source_types(term), closure_forgotten_boundaries(source));
+        assert_eq!(target_types(term), closure_forgotten_boundaries(target));
+    }
+
     #[test]
     fn regular_operations_are_wrapped_in_flatteners() {
         let a = object("A");
@@ -622,11 +627,79 @@ mod tests {
             vec![product(product(a, b), c), product(d, e)],
         );
 
-        let mapped = map_name_operation(theory, "f", &[], &[closure]);
+        let mapped = map_name_operation(theory, "f", &[], std::slice::from_ref(&closure));
 
         assert_eq!(mapped.hypergraph.edges, vec![op("*.intro"), op("f")]);
         assert_eq!(mapped.sources.len(), 0);
-        assert_eq!(mapped.targets.len(), 5);
+        assert_eq!(
+            target_types(&mapped),
+            closure_forgotten_boundaries(std::slice::from_ref(&closure))
+        );
+    }
+
+    #[test]
+    fn mapped_generators_use_closure_forgotten_boundaries() {
+        let a0 = object("A0");
+        let a1 = object("A1");
+        let b0 = object("B0");
+        let b1 = object("B1");
+        let c = object("C");
+        let d = object("D");
+        let closure0 = Tree::Node(op(FN_HOM_TYPE), 0, vec![a0.clone(), b0.clone()]);
+        let closure1 = Tree::Node(op(FN_HOM_TYPE), 0, vec![b0.clone(), c.clone()]);
+        let closure2 = Tree::Node(op(FN_HOM_TYPE), 0, vec![a1.clone(), b1.clone()]);
+
+        assert_closure_forgotten_boundaries(
+            &map_non_cmc_operation(
+                &op("f"),
+                &[product(closure0.clone(), d.clone())],
+                &[c.clone()],
+            ),
+            &[product(closure0.clone(), d.clone())],
+            &[c.clone()],
+        );
+
+        assert_closure_forgotten_boundaries(
+            &map_copy_closure_operation(
+                std::slice::from_ref(&closure0),
+                &[closure0.clone(), closure0.clone()],
+            ),
+            std::slice::from_ref(&closure0),
+            &[closure0.clone(), closure0.clone()],
+        );
+
+        assert_closure_forgotten_boundaries(
+            &map_compose(&[closure0.clone(), closure1.clone()]),
+            &[closure0.clone(), closure1.clone()],
+            &[Tree::Node(op(FN_HOM_TYPE), 0, vec![a0.clone(), c.clone()])],
+        );
+
+        assert_closure_forgotten_boundaries(
+            &map_tensor(&[closure0.clone(), closure2.clone()]),
+            &[closure0.clone(), closure2],
+            &[Tree::Node(
+                op(FN_HOM_TYPE),
+                0,
+                vec![product(a0.clone(), a1), product(b0, b1)],
+            )],
+        );
+
+        let function = Tree::Node(
+            op(VALUE_TYPE),
+            0,
+            vec![Tree::Node(
+                op(FN_REF_TYPE),
+                0,
+                vec![product(closure1.clone(), d.clone()), c.clone()],
+            )],
+        );
+        let lifted = Tree::Node(op(FN_HOM_TYPE), 0, vec![product(closure1, d), c]);
+
+        assert_closure_forgotten_boundaries(
+            &map_lift(&[function.clone()], std::slice::from_ref(&lifted)),
+            &[function],
+            &[lifted],
+        );
     }
 
     #[test]

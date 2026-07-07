@@ -155,9 +155,13 @@ fn deferred_bool_id_closure_converts_through_each_stage() {
     // Check converted definition has type
     //         X ● (X * A -> B)
     // val(bool) ● (val(bool) * 1 -> val(bool))
+    //
+    // The captured bool value is part of the runtime environment only. It is
+    // not a context parameter for the generated closure name, so conversion
+    // should not create an unused copy branch for `name.closure.*`.
     assert_converted_definition(
         &converted.definition,
-        5,
+        4,
         vec![obj("val", vec![obj("bool", vec![])])],
         vec![
             obj("val", vec![obj("bool", vec![])]),
@@ -173,12 +177,12 @@ fn deferred_bool_id_closure_converts_through_each_stage() {
             .hypergraph
             .edges
             .iter()
-            .any(|operation| operation.as_str()
-                == format!(
+            .all(|operation| operation.as_str()
+                != format!(
                     "{GENERATED_COPY_PREFIX}closure.run-bool-id.{}.0",
                     original_target.0
                 )),
-        "converted definition should split the captured environment before naming the closure"
+        "environment-only captures should not be copied to the generated closure name"
     );
 
     // Verify that original definition uses the *name* of the closure conversion
@@ -365,6 +369,90 @@ fn converted_closure_name_keeps_free_variable_input() {
         name_edge.targets,
         vec![converted_definition.targets[1]],
         "generated closure name should only produce the function pointer"
+    );
+}
+
+#[test]
+fn converted_closure_body_compacts_nonzero_context_leaf() {
+    // Build the same shape as `converted_closure_name_keeps_free_variable_input`,
+    // but make the original context leaf non-zero:
+    //
+    //   original definition context:
+    //
+    //     Leaf(2) -- name.manual-ix-n-to-u64 --> (ix Leaf(2) => u64)
+    //
+    // Closure conversion creates two related views:
+    //
+    //   generated closure body declaration:
+    //
+    //     Leaf(0), val(ix Leaf(0)) -> val(u64)
+    //
+    //   replacement inside the original definition:
+    //
+    //     Leaf(2) -- copy --------------------> environment
+    //             \
+    //              `--> name.closure.* -------> function pointer
+    //
+    // The generated `closure.*` declaration uses a compact local context, but
+    // the converted original body still connects the original contextual wire.
+    let original_n = Tree::Leaf(2, ());
+    let compact_n = Tree::Leaf(0, ());
+    let original_index_value = obj("val", vec![obj("ix", vec![original_n.clone()])]);
+    let compact_index_value = obj("val", vec![obj("ix", vec![compact_n.clone()])]);
+    let u64_value = obj("val", vec![obj("u64", vec![])]);
+    let producer_closure_type = obj(
+        FN_HOM_TYPE,
+        vec![original_index_value.clone(), u64_value.clone()],
+    );
+
+    let mut definition = AnnotatedTerm::empty();
+    let free_n = definition.new_node(original_n.clone());
+    let closure = definition.new_node(producer_closure_type);
+
+    definition.new_edge(op("name.manual-ix-n-to-u64"), (vec![free_n], vec![closure]));
+    definition.sources = vec![free_n];
+    definition.targets = vec![closure];
+
+    let converted =
+        convert(&op("reduce-nonzero"), &definition, &[closure]).expect("conversion should succeed");
+    let generated_closure = converted
+        .closures
+        .first()
+        .expect("conversion should generate a closure body");
+
+    assert_eq!(
+        generated_closure.context.original_leaf_by_compact_leaf,
+        vec![2],
+        "closure context should map compact Leaf(0) back to original Leaf(2)"
+    );
+    assert_eq!(
+        interface_types(&generated_closure.term, &generated_closure.term.sources),
+        vec![compact_n, compact_index_value],
+        "generated closure body boundary should use compact Leaf(0), not original Leaf(2)"
+    );
+
+    let name_edge = converted
+        .definition
+        .hypergraph
+        .edges
+        .iter()
+        .zip(&converted.definition.hypergraph.adjacency)
+        .find(|(operation, _)| {
+            operation
+                .as_str()
+                .starts_with("name.closure.reduce-nonzero.")
+        })
+        .map(|(_, edge)| edge)
+        .expect("converted definition should generate a closure name edge");
+
+    assert_eq!(
+        name_edge
+            .sources
+            .iter()
+            .map(|node| converted.definition.hypergraph.nodes[node.0].clone())
+            .collect::<Vec<_>>(),
+        vec![original_n],
+        "generated closure name use-site should consume the original contextual wire"
     );
 }
 

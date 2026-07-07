@@ -25,7 +25,7 @@ const CONVERTED_PRIMITIVES: &[(&str, &str)] = &[
 
 type Obj = Tree<(), Operation>;
 
-struct ClosureNameBoundary {
+struct GeneratedClosureNameDeclaration {
     operation: Operation,
     declared_sources: usize,
     declaration_source_type_map: Hexpr,
@@ -134,15 +134,9 @@ fn update_definition_arrow(
     arrows.insert(definition_name.clone(), arrow);
 
     for closure in converted.closures {
-        let name_boundary = insert_closure_arrows(
-            syntax,
-            theory_id,
-            arrows,
-            definition_name,
-            ambient_context_arity,
-            closure,
-        )?;
-        assert_generated_closure_name_boundary(
+        let name_boundary =
+            insert_closure_arrows(syntax, theory_id, arrows, definition_name, closure)?;
+        assert_generated_closure_name_use_matches_declaration(
             theory_id,
             definition_name,
             &converted_definition,
@@ -153,11 +147,11 @@ fn update_definition_arrow(
     Ok(())
 }
 
-fn assert_generated_closure_name_boundary(
+fn assert_generated_closure_name_use_matches_declaration(
     theory_id: &TheoryId,
     definition_name: &Operation,
     definition: &AnnotatedTerm,
-    name_boundary: &ClosureNameBoundary,
+    declaration: &GeneratedClosureNameDeclaration,
 ) {
     for (edge_index, (operation, edge)) in definition
         .hypergraph
@@ -165,16 +159,16 @@ fn assert_generated_closure_name_boundary(
         .iter()
         .zip(&definition.hypergraph.adjacency)
         .enumerate()
-        .filter(|(_, (operation, _))| *operation == &name_boundary.operation)
+        .filter(|(_, (operation, _))| *operation == &declaration.operation)
     {
         let connected_sources = edge.sources.len();
-        let declared_sources = name_boundary.declared_sources;
+        let declared_sources = declaration.declared_sources;
         assert_eq!(
             connected_sources,
             declared_sources,
             "closure conversion generated an inconsistent closure-name boundary in `{theory_id}.{definition_name}` at edge e{edge_index}: operation `{operation}` is connected to {connected_sources} source wire(s), but its declaration expects {declared_sources}. connected source types: [{}]. declared source type map: `{}`.",
             objects_to_hexpr(&interface_types(definition, &edge.sources)),
-            name_boundary.declaration_source_type_map,
+            declaration.declaration_source_type_map,
         );
     }
 }
@@ -226,13 +220,12 @@ fn insert_closure_arrows(
     theory_id: &TheoryId,
     arrows: &mut BTreeMap<Operation, TheoryArrow>,
     definition_name: &Operation,
-    ambient_context_arity: usize,
     closure: ConvertedClosure,
-) -> Result<ClosureNameBoundary, ConvertTheoryError> {
+) -> Result<GeneratedClosureNameDeclaration, ConvertTheoryError> {
     let closure_name = closure.name(definition_name);
     let raw_closure = RawTheoryArrow {
         name: closure_name.clone(),
-        type_maps: type_maps_for_term(&closure.term, ambient_context_arity),
+        type_maps: type_maps_for_term(&closure.term, closure.context.arity()),
         definition: Some(term_to_hexpr(&closure.term)),
     };
     let closure_type_maps = interpret_type_maps(syntax, &raw_closure.type_maps)?;
@@ -248,7 +241,7 @@ fn insert_closure_arrows(
 
     let raw_name = name_symbols::name_arrow(syntax, &theory_id.0, &raw_closure)?;
     let name_type_maps = interpret_type_maps(syntax, &raw_name.type_maps)?;
-    let name_boundary = ClosureNameBoundary {
+    let name_boundary = GeneratedClosureNameDeclaration {
         operation: raw_name.name.clone(),
         declared_sources: name_type_maps.0.targets.len(),
         declaration_source_type_map: raw_name.type_maps.0.clone(),

@@ -47,6 +47,10 @@ pub enum ConvertTheoryError {
         "typechecked node label count mismatch for definition `{definition}` in theory `{theory}`"
     )]
     NodeLabelCountMismatch { theory: String, definition: String },
+    #[error(
+        "closure conversion requires closure-boundary definitions to be inlined first; `{theory}.{definition}` still has a closure on its global interface"
+    )]
+    ClosureOnGlobalInterface { theory: String, definition: String },
     #[error(transparent)]
     Convert(#[from] ConvertError),
     #[error(transparent)]
@@ -78,6 +82,14 @@ pub fn convert_theory(
         .ok_or_else(|| ConvertTheoryError::MissingSyntaxTheory(syntax.to_string()))?;
     let theory_definition_types = definition_types.get(theory_id);
 
+    // Region construction assumes closure-typed global interfaces have already
+    // been inlined, so every closure passed to a converted primitive is built
+    // locally from `defer`, `name.*`, and CMC closure combinators. If a helper
+    // returning a closure is still a global call here, the region boundary is no
+    // longer delimited by `defer`/`name.*` leaves and replacement wiring cannot
+    // recover the required environment/name inputs.
+    reject_closure_global_interfaces(theory_id, arrows)?;
+
     let mut converted_arrows = arrows.clone();
     for (definition_name, arrow) in arrows {
         if arrow.definition.is_none() {
@@ -105,6 +117,28 @@ pub fn convert_theory(
         syntax: syntax.clone(),
         arrows: converted_arrows,
     })
+}
+
+fn reject_closure_global_interfaces(
+    theory_id: &TheoryId,
+    arrows: &BTreeMap<Operation, TheoryArrow>,
+) -> Result<(), ConvertTheoryError> {
+    for (definition_name, arrow) in arrows {
+        if arrow.definition.is_none() {
+            continue;
+        }
+
+        if contains_closure_type_map(&arrow.type_maps.0)
+            || contains_closure_type_map(&arrow.type_maps.1)
+        {
+            return Err(ConvertTheoryError::ClosureOnGlobalInterface {
+                theory: theory_id.to_string(),
+                definition: definition_name.to_string(),
+            });
+        }
+    }
+
+    Ok(())
 }
 
 fn update_definition_arrow(
@@ -325,6 +359,14 @@ fn type_maps_for_term(term: &AnnotatedTerm, ambient_context_arity: usize) -> (He
         objects_to_hexpr_in_context(&source_types, ambient_context_arity),
         objects_to_hexpr_in_context(&target_types, ambient_context_arity),
     )
+}
+
+fn contains_closure_type_map(type_map: &Term) -> bool {
+    type_map
+        .hypergraph
+        .edges
+        .iter()
+        .any(|op| op.as_str() == FN_HOM_TYPE)
 }
 
 fn objects_to_hexpr_in_context(objects: &[Obj], ambient_context_arity: usize) -> Hexpr {

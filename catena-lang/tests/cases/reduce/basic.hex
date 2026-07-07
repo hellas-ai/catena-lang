@@ -18,18 +18,28 @@
   {[.acc value]} u64.add
 ))
 
-# Sum zero elements using source-level reduce. The length witness is `u64.zero`,
-# so runtime execution should return the zero input without entering the loop.
+# Sum elements using source-level reduce. The caller supplies an ascribed length
+# value; when it is zero, runtime execution should return the zero input without
+# entering the loop.
+(def program sum-u64-reduce-with-len :
+  ([n.] ({[.n] u64} :))
+  ->
+  ([n.] (u64 val))
+= ([n.]
+  ([.n] :.ty [reduce-len producer-len.]
+    {
+      const.u64.0x0000000000000000
+      (name.u64.add-reduce lift)
+      ([.producer-len] name.u64.one-at lift)
+      [.reduce-len]
+    }
+    reduce
+  )
+))
+
+# Nullary empty-sum wrapper using the zero length witness.
 (def program sum-empty-u64-reduce :
   []
   ->
   (u64 val)
-= (
-  {
-    const.u64.0x0000000000000000
-    (name.u64.add-reduce lift)
-    ((u64.zero :.param) name.u64.one-at lift)
-    u64.zero
-  }
-  reduce
-))
+= (u64.zero sum-u64-reduce-with-len))

@@ -345,11 +345,15 @@ fn insert_name_metavar(
     original_leaf: usize,
     name_metavar: NodeId,
 ) {
-    let previous = name_metavars_by_original_leaf.insert(original_leaf, name_metavar);
-    assert!(
-        previous.is_none(),
-        "closure conversion found duplicate top-level context leaf {original_leaf} in closure-region inputs"
-    );
+    // A closure region can mention the same top-level context leaf through multiple boundary
+    // wires. In `matmul-f32-inner`, for example, `b-for-product`, `b-for-unit`, and
+    // `b-for-identity` are separate region inputs but all refer to the same top-level `b` leaf.
+    // The generated `name.*` operation only has one metavariable for that leaf, so keep the first
+    // representative here. The duplicated runtime/type wires still remain in the closure
+    // environment; this only deduplicates the name operation's context interface.
+    name_metavars_by_original_leaf
+        .entry(original_leaf)
+        .or_insert(name_metavar);
 }
 
 fn copy_metavar_for_environment_and_name(

@@ -936,7 +936,6 @@ fn theory_conversion_converts_reduce_closure_arguments() {
 }
 
 #[test]
-#[ignore = "covered by a smaller closure-name ambient-context boundary regression"]
 fn theory_conversion_declares_context_dependent_copy_arrows() {
     let (theory_set, definition_types) = theories_with(
         r#"
@@ -968,7 +967,6 @@ fn theory_conversion_declares_context_dependent_copy_arrows() {
 }
 
 #[test]
-#[ignore = "covered by a smaller closure-name ambient-context boundary regression"]
 fn theory_conversion_generates_diagonal_view_closure_with_shared_context() {
     let (theory_set, definition_types) = theories_with(
         r#"

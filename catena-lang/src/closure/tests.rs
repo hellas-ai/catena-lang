@@ -583,6 +583,68 @@ fn theory_conversion_declares_deferred_value_capture_name_boundary() {
 }
 
 #[test]
+fn theory_conversion_declares_mixed_runtime_and_freevar_name_boundary() {
+    let (theory_set, definition_types) = theories_with(
+        r#"
+        (def program u64.id-for-n :
+          ([n.] (u64 val))
+          ->
+          ([n.] (u64 val))
+        = ([x.] [.x]))
+
+        (def program if-mixed-runtime-freevar :
+          ([n.] {({[.n] u64} :) (u64 val) (bool val)})
+          ->
+          ([n.] (u64 val))
+        = ([n x b.]
+          ([.n] :.ty [runtime-n closure-n.]
+            {
+              ({([.x] defer) ([.closure-n] name.u64.id-for-n lift)} compose)
+              ([.runtime-n] :.forget defer)
+              [.b]
+              unit.intro
+            }
+            bool.if
+          )
+        ))
+        "#,
+    );
+    let program = TheoryId(op("program"));
+
+    // End-to-end boundary regression for a single closure region whose leaves
+    // include both a runtime value and a free/contextual parameter:
+    //
+    //   x         -- defer ----------------.
+    //                                      compose --> branch closure
+    //   closure-n -- name.u64.id-for-n ----'
+    //
+    // Closure conversion must declare the generated `name.closure.*` operation
+    // with the same source boundary that its converted use-site connects.
+    // `ClosureNameBoundaryMismatch` is a conversion bug, so this should succeed.
+    let converted =
+        convert_theory(&theory_set, &definition_types, &program).expect("theory should convert");
+    let Theory::Theory { arrows, .. } = converted else {
+        panic!("program should be a theory");
+    };
+
+    let if_mixed = arrows
+        .get(&op("if-mixed-runtime-freevar"))
+        .expect("converted original definition should exist");
+    let if_mixed_body = if_mixed
+        .definition
+        .as_ref()
+        .expect("converted original definition should have a body");
+
+    assert_operation_count(if_mixed_body, "bool.ifc", 1);
+    assert_operation_count(if_mixed_body, "bool.if", 0);
+    assert!(if_mixed_body.hypergraph.edges.iter().any(|operation| {
+        operation
+            .as_str()
+            .starts_with("name.closure.if-mixed-runtime-freevar.")
+    }));
+}
+
+#[test]
 fn convert_parallel_regions_with_crossed_node_and_edge_order() {
     let bool_value = obj("val", vec![obj("bool", vec![])]);
     let unit = obj("1", vec![]);

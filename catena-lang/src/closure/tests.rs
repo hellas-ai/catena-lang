@@ -155,9 +155,13 @@ fn deferred_bool_id_closure_converts_through_each_stage() {
     // Check converted definition has type
     //         X ● (X * A -> B)
     // val(bool) ● (val(bool) * 1 -> val(bool))
+    //
+    // The captured bool value is part of the runtime environment only. It is
+    // not a context parameter for the generated closure name, so conversion
+    // should not create an unused copy branch for `name.closure.*`.
     assert_converted_definition(
         &converted.definition,
-        5,
+        4,
         vec![obj("val", vec![obj("bool", vec![])])],
         vec![
             obj("val", vec![obj("bool", vec![])]),
@@ -173,12 +177,12 @@ fn deferred_bool_id_closure_converts_through_each_stage() {
             .hypergraph
             .edges
             .iter()
-            .any(|operation| operation.as_str()
-                == format!(
+            .all(|operation| operation.as_str()
+                != format!(
                     "{GENERATED_COPY_PREFIX}closure.run-bool-id.{}.0",
                     original_target.0
                 )),
-        "converted definition should split the captured environment before naming the closure"
+        "environment-only captures should not be copied to the generated closure name"
     );
 
     // Verify that original definition uses the *name* of the closure conversion
@@ -369,6 +373,90 @@ fn converted_closure_name_keeps_free_variable_input() {
 }
 
 #[test]
+fn converted_closure_body_compacts_nonzero_context_leaf() {
+    // Build the same shape as `converted_closure_name_keeps_free_variable_input`,
+    // but make the original context leaf non-zero:
+    //
+    //   original definition context:
+    //
+    //     Leaf(2) -- name.manual-ix-n-to-u64 --> (ix Leaf(2) => u64)
+    //
+    // Closure conversion creates two related views:
+    //
+    //   generated closure body declaration:
+    //
+    //     Leaf(0), val(ix Leaf(0)) -> val(u64)
+    //
+    //   replacement inside the original definition:
+    //
+    //     Leaf(2) -- copy --------------------> environment
+    //             \
+    //              `--> name.closure.* -------> function pointer
+    //
+    // The generated `closure.*` declaration uses a compact local context, but
+    // the converted original body still connects the original contextual wire.
+    let original_n = Tree::Leaf(2, ());
+    let compact_n = Tree::Leaf(0, ());
+    let original_index_value = obj("val", vec![obj("ix", vec![original_n.clone()])]);
+    let compact_index_value = obj("val", vec![obj("ix", vec![compact_n.clone()])]);
+    let u64_value = obj("val", vec![obj("u64", vec![])]);
+    let producer_closure_type = obj(
+        FN_HOM_TYPE,
+        vec![original_index_value.clone(), u64_value.clone()],
+    );
+
+    let mut definition = AnnotatedTerm::empty();
+    let free_n = definition.new_node(original_n.clone());
+    let closure = definition.new_node(producer_closure_type);
+
+    definition.new_edge(op("name.manual-ix-n-to-u64"), (vec![free_n], vec![closure]));
+    definition.sources = vec![free_n];
+    definition.targets = vec![closure];
+
+    let converted =
+        convert(&op("reduce-nonzero"), &definition, &[closure]).expect("conversion should succeed");
+    let generated_closure = converted
+        .closures
+        .first()
+        .expect("conversion should generate a closure body");
+
+    assert_eq!(
+        generated_closure.context.original_leaf_by_compact_leaf,
+        vec![2],
+        "closure context should map compact Leaf(0) back to original Leaf(2)"
+    );
+    assert_eq!(
+        interface_types(&generated_closure.term, &generated_closure.term.sources),
+        vec![compact_n, compact_index_value],
+        "generated closure body boundary should use compact Leaf(0), not original Leaf(2)"
+    );
+
+    let name_edge = converted
+        .definition
+        .hypergraph
+        .edges
+        .iter()
+        .zip(&converted.definition.hypergraph.adjacency)
+        .find(|(operation, _)| {
+            operation
+                .as_str()
+                .starts_with("name.closure.reduce-nonzero.")
+        })
+        .map(|(_, edge)| edge)
+        .expect("converted definition should generate a closure name edge");
+
+    assert_eq!(
+        name_edge
+            .sources
+            .iter()
+            .map(|node| converted.definition.hypergraph.nodes[node.0].clone())
+            .collect::<Vec<_>>(),
+        vec![original_n],
+        "generated closure name use-site should consume the original contextual wire"
+    );
+}
+
+#[test]
 fn theory_conversion_converts_if_closure_arguments() {
     let (theory_set, definition_types) = theories_with(
         r#"
@@ -523,6 +611,200 @@ fn theory_conversion_converts_if_id_neg_example_end_to_end() {
             "converted if-id-neg should refer to {name_closure_name}"
         );
     }
+}
+
+#[test]
+fn theory_conversion_declares_deferred_value_capture_name_boundary() {
+    let (theory_set, definition_types) = theories_with(
+        r#"
+        (def program if-capture-bool :
+          {(bool val) (bool val)}
+          ->
+          (bool val)
+        = ([b x.]
+          {([.x] defer) (bool.f defer) [.b] unit.intro}
+          bool.if
+        ))
+        "#,
+    );
+    let program = TheoryId(op("program"));
+
+    // This checks the declaration/use-site invariant for generated closure-name
+    // operations after converting two simple `defer` branches passed to
+    // `bool.if`.
+    //
+    // Source shape:
+    //
+    //   x      -- defer --------.
+    //                         bool.if
+    //   bool.f -- defer --------'
+    //
+    // Each converted branch contains a generated name edge:
+    //
+    //   source wires connected to name.closure.if-capture-bool.*
+    //   ==
+    //   source boundary declared by name.closure.if-capture-bool.*
+    //
+    // `ClosureNameBoundaryMismatch` means closure conversion emitted an
+    // ill-typed converted graph, so this regression should fail if that happens.
+    let converted =
+        convert_theory(&theory_set, &definition_types, &program).expect("theory should convert");
+    let Theory::Theory { arrows, .. } = converted else {
+        panic!("program should be a theory");
+    };
+
+    let if_capture = arrows
+        .get(&op("if-capture-bool"))
+        .expect("converted original definition should exist");
+    let if_capture_body = if_capture
+        .definition
+        .as_ref()
+        .expect("converted original definition should have a body");
+
+    assert_operation_count(if_capture_body, "bool.ifc", 1);
+    assert_operation_count(if_capture_body, "bool.if", 0);
+    assert!(if_capture_body.hypergraph.edges.iter().any(|operation| {
+        operation
+            .as_str()
+            .starts_with("name.closure.if-capture-bool.")
+    }));
+}
+
+#[test]
+fn theory_conversion_declares_mixed_runtime_and_freevar_name_boundary() {
+    let (theory_set, definition_types) = theories_with(
+        r#"
+        (def program u64.id-for-n :
+          ([n.] (u64 val))
+          ->
+          ([n.] (u64 val))
+        = ([x.] [.x]))
+
+        (def program if-mixed-runtime-freevar :
+          ([n.] {({[.n] u64} :) (u64 val) (bool val)})
+          ->
+          ([n.] (u64 val))
+        = ([n x b.]
+          ([.n] :.ty [runtime-n closure-n.]
+            {
+              ({([.x] defer) ([.closure-n] name.u64.id-for-n lift)} compose)
+              ([.runtime-n] :.forget defer)
+              [.b]
+              unit.intro
+            }
+            bool.if
+          )
+        ))
+        "#,
+    );
+    let program = TheoryId(op("program"));
+
+    // End-to-end boundary regression for a single closure region whose leaves
+    // include both a runtime value and a free/contextual parameter:
+    //
+    //   x         -- defer ----------------.
+    //                                      compose --> branch closure
+    //   closure-n -- name.u64.id-for-n ----'
+    //
+    // Closure conversion must declare the generated `name.closure.*` operation
+    // with the same source boundary that its converted use-site connects.
+    // `ClosureNameBoundaryMismatch` is a conversion bug, so this should succeed.
+    let converted =
+        convert_theory(&theory_set, &definition_types, &program).expect("theory should convert");
+    let Theory::Theory { arrows, .. } = converted else {
+        panic!("program should be a theory");
+    };
+
+    let if_mixed = arrows
+        .get(&op("if-mixed-runtime-freevar"))
+        .expect("converted original definition should exist");
+    let if_mixed_body = if_mixed
+        .definition
+        .as_ref()
+        .expect("converted original definition should have a body");
+
+    assert_operation_count(if_mixed_body, "bool.ifc", 1);
+    assert_operation_count(if_mixed_body, "bool.if", 0);
+    assert!(if_mixed_body.hypergraph.edges.iter().any(|operation| {
+        operation
+            .as_str()
+            .starts_with("name.closure.if-mixed-runtime-freevar.")
+    }));
+}
+
+#[test]
+fn theory_conversion_supplies_ambient_metavar_to_closed_accumulator_closure_name() {
+    let (theory_set, definition_types) = theories_with(
+        r#"
+        (def program u64.one-at :
+          ([n.] ([.n] ix val))
+          ->
+          ([n.] (u64 val))
+        = ([i.] u64.one))
+
+        (def program reduce-with-closed-add :
+          ([n.] ({[.n] u64} :))
+          ->
+          ([n.] (u64 val))
+        = ([len.]
+          ([.len] :.ty [reduce-len producer-len.]
+            {
+              const.u64.0x0000000000000000
+              (name.u64.add lift)
+              ([.producer-len] name.u64.one-at lift)
+              [.reduce-len]
+            }
+            reduce
+          )
+        ))
+        "#,
+    );
+    let program = TheoryId(op("program"));
+
+    // End-to-end regression for a closure region that is operationally closed
+    // but whose type still depends on the original definition's ambient `n`.
+    //
+    // The accumulator closure passed to `reduce` is just a lifted name:
+    //
+    //   name.u64.add --> lift --> accumulator closure
+    //
+    // It has no closure-region leaf inputs:
+    //
+    //   [] --> accumulator closure
+    //
+    // The original definition has ambient `n`, and generated closure type maps
+    // now always inherit that ambient context. Therefore the generated closure
+    // name is non-nullary:
+    //
+    //   n --> name.closure.reduce-with-closed-add.* --> function pointer
+    //
+    // The current replacement graph only uses region leaf inputs for
+    // `name.closure.*`, so for the closed branch it connects no sources:
+    //
+    //   [] --> name.closure.reduce-with-closed-add.* --> function pointer
+    //
+    // This should eventually succeed by supplying the required ambient metavar.
+    let converted =
+        convert_theory(&theory_set, &definition_types, &program).expect("theory should convert");
+    let Theory::Theory { arrows, .. } = converted else {
+        panic!("program should be a theory");
+    };
+
+    let reduce = arrows
+        .get(&op("reduce-with-closed-add"))
+        .expect("converted original definition should exist");
+    let reduce_body = reduce
+        .definition
+        .as_ref()
+        .expect("converted original definition should have a body");
+
+    assert_operation_count(reduce_body, "reducec", 1);
+    assert_operation_count(reduce_body, "reduce", 0);
+    assert!(reduce_body.hypergraph.edges.iter().any(|operation| {
+        operation
+            .as_str()
+            .starts_with("name.closure.reduce-with-closed-add.")
+    }));
 }
 
 #[test]

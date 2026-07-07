@@ -25,6 +25,12 @@ const CONVERTED_PRIMITIVES: &[(&str, &str)] = &[
 
 type Obj = Tree<(), Operation>;
 
+struct GeneratedClosureNameDeclaration {
+    operation: Operation,
+    declared_sources: usize,
+    declaration_source_type_map: Hexpr,
+}
+
 #[derive(Debug, Error)]
 pub enum ConvertTheoryError {
     #[error("missing theory `{0}`")]
@@ -124,21 +130,47 @@ fn update_definition_arrow(
     insert_copy_arrows(syntax, arrows, &converted_definition, ambient_context_arity)?;
     let mut arrow = original.clone();
     arrow.raw = raw;
-    arrow.definition = Some(converted_definition.map_nodes(|_| ()));
+    arrow.definition = Some(converted_definition.clone().map_nodes(|_| ()));
     arrows.insert(definition_name.clone(), arrow);
 
     for closure in converted.closures {
-        insert_closure_arrows(
-            syntax,
+        let name_boundary =
+            insert_closure_arrows(syntax, theory_id, arrows, definition_name, closure)?;
+        assert_generated_closure_name_use_matches_declaration(
             theory_id,
-            arrows,
             definition_name,
-            ambient_context_arity,
-            closure,
-        )?;
+            &converted_definition,
+            &name_boundary,
+        );
     }
 
     Ok(())
+}
+
+fn assert_generated_closure_name_use_matches_declaration(
+    theory_id: &TheoryId,
+    definition_name: &Operation,
+    definition: &AnnotatedTerm,
+    declaration: &GeneratedClosureNameDeclaration,
+) {
+    for (edge_index, (operation, edge)) in definition
+        .hypergraph
+        .edges
+        .iter()
+        .zip(&definition.hypergraph.adjacency)
+        .enumerate()
+        .filter(|(_, (operation, _))| *operation == &declaration.operation)
+    {
+        let connected_sources = edge.sources.len();
+        let declared_sources = declaration.declared_sources;
+        assert_eq!(
+            connected_sources,
+            declared_sources,
+            "closure conversion generated an inconsistent closure-name boundary in `{theory_id}.{definition_name}` at edge e{edge_index}: operation `{operation}` is connected to {connected_sources} source wire(s), but its declaration expects {declared_sources}. connected source types: [{}]. declared source type map: `{}`.",
+            objects_to_hexpr(&interface_types(definition, &edge.sources)),
+            declaration.declaration_source_type_map,
+        );
+    }
 }
 
 fn insert_copy_arrows(
@@ -188,13 +220,12 @@ fn insert_closure_arrows(
     theory_id: &TheoryId,
     arrows: &mut BTreeMap<Operation, TheoryArrow>,
     definition_name: &Operation,
-    ambient_context_arity: usize,
     closure: ConvertedClosure,
-) -> Result<(), ConvertTheoryError> {
+) -> Result<GeneratedClosureNameDeclaration, ConvertTheoryError> {
     let closure_name = closure.name(definition_name);
     let raw_closure = RawTheoryArrow {
         name: closure_name.clone(),
-        type_maps: type_maps_for_term(&closure.term, ambient_context_arity),
+        type_maps: type_maps_for_term(&closure.term, closure.context.arity()),
         definition: Some(term_to_hexpr(&closure.term)),
     };
     let closure_type_maps = interpret_type_maps(syntax, &raw_closure.type_maps)?;
@@ -210,6 +241,11 @@ fn insert_closure_arrows(
 
     let raw_name = name_symbols::name_arrow(syntax, &theory_id.0, &raw_closure)?;
     let name_type_maps = interpret_type_maps(syntax, &raw_name.type_maps)?;
+    let name_boundary = GeneratedClosureNameDeclaration {
+        operation: raw_name.name.clone(),
+        declared_sources: name_type_maps.0.targets.len(),
+        declaration_source_type_map: raw_name.type_maps.0.clone(),
+    };
     arrows.insert(
         raw_name.name.clone(),
         TheoryArrow {
@@ -220,7 +256,7 @@ fn insert_closure_arrows(
         },
     );
 
-    Ok(())
+    Ok(name_boundary)
 }
 
 fn typed_definition(
@@ -285,28 +321,10 @@ fn converted_primitive(operation: &Operation) -> Option<&'static str> {
 fn type_maps_for_term(term: &AnnotatedTerm, ambient_context_arity: usize) -> (Hexpr, Hexpr) {
     let source_types = interface_types(term, &term.sources);
     let target_types = interface_types(term, &term.targets);
-    let context_arity = closure_context_arity(&source_types, &target_types, ambient_context_arity);
     (
-        objects_to_hexpr_in_context(&source_types, context_arity),
-        objects_to_hexpr_in_context(&target_types, context_arity),
+        objects_to_hexpr_in_context(&source_types, ambient_context_arity),
+        objects_to_hexpr_in_context(&target_types, ambient_context_arity),
     )
-}
-
-fn closure_context_arity(
-    source_types: &[Obj],
-    target_types: &[Obj],
-    ambient_context_arity: usize,
-) -> usize {
-    // Temporary precision hack: closed generated closures must stay nullary.
-    // Otherwise an `n`-indexed caller would make their generated `name.*`
-    // declarations expect `n`, while the replacement graph has no such input.
-    // Non-closed closures keep the broad ambient context until we remap sparse
-    // original leaf indices into a dense local context.
-    if leaf_indices(source_types).is_empty() && leaf_indices(target_types).is_empty() {
-        0
-    } else {
-        ambient_context_arity
-    }
 }
 
 fn objects_to_hexpr_in_context(objects: &[Obj], ambient_context_arity: usize) -> Hexpr {

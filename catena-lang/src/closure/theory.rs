@@ -58,19 +58,6 @@ pub enum ConvertTheoryError {
     },
     #[error("generated type maps have incompatible domains")]
     TypeMapDomainMismatch,
-    #[error(
-        "closure conversion generated an inconsistent closure-name boundary in `{theory}.{definition}` at edge e{edge}: operation `{operation}` is connected to {connected_sources} source wire(s), but its declaration expects {declared_sources}. connected source types: [{connected_source_types}]. declared source type map: `{declaration_source_type_map}`."
-    )]
-    ClosureNameBoundaryMismatch {
-        theory: String,
-        definition: String,
-        operation: String,
-        edge: usize,
-        connected_sources: usize,
-        declared_sources: usize,
-        connected_source_types: String,
-        declaration_source_type_map: Hexpr,
-    },
 }
 
 pub fn convert_theory(
@@ -155,23 +142,23 @@ fn update_definition_arrow(
             ambient_context_arity,
             closure,
         )?;
-        validate_generated_closure_name_boundary(
+        assert_generated_closure_name_boundary(
             theory_id,
             definition_name,
             &converted_definition,
             &name_boundary,
-        )?;
+        );
     }
 
     Ok(())
 }
 
-fn validate_generated_closure_name_boundary(
+fn assert_generated_closure_name_boundary(
     theory_id: &TheoryId,
     definition_name: &Operation,
     definition: &AnnotatedTerm,
     name_boundary: &ClosureNameBoundary,
-) -> Result<(), ConvertTheoryError> {
+) {
     for (edge_index, (operation, edge)) in definition
         .hypergraph
         .edges
@@ -182,24 +169,14 @@ fn validate_generated_closure_name_boundary(
     {
         let connected_sources = edge.sources.len();
         let declared_sources = name_boundary.declared_sources;
-        if connected_sources == declared_sources {
-            continue;
-        }
-
-        return Err(ConvertTheoryError::ClosureNameBoundaryMismatch {
-            theory: theory_id.to_string(),
-            definition: definition_name.to_string(),
-            operation: operation.to_string(),
-            edge: edge_index,
+        assert_eq!(
             connected_sources,
             declared_sources,
-            connected_source_types: objects_to_hexpr(&interface_types(definition, &edge.sources))
-                .to_string(),
-            declaration_source_type_map: name_boundary.declaration_source_type_map.clone(),
-        });
+            "closure conversion generated an inconsistent closure-name boundary in `{theory_id}.{definition_name}` at edge e{edge_index}: operation `{operation}` is connected to {connected_sources} source wire(s), but its declaration expects {declared_sources}. connected source types: [{}]. declared source type map: `{}`.",
+            objects_to_hexpr(&interface_types(definition, &edge.sources)),
+            name_boundary.declaration_source_type_map,
+        );
     }
-
-    Ok(())
 }
 
 fn insert_copy_arrows(

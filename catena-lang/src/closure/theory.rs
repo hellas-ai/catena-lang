@@ -25,6 +25,12 @@ const CONVERTED_PRIMITIVES: &[(&str, &str)] = &[
 
 type Obj = Tree<(), Operation>;
 
+struct ClosureNameBoundary {
+    operation: Operation,
+    declared_sources: usize,
+    declaration_source_type_map: Hexpr,
+}
+
 #[derive(Debug, Error)]
 pub enum ConvertTheoryError {
     #[error("missing theory `{0}`")]
@@ -52,6 +58,19 @@ pub enum ConvertTheoryError {
     },
     #[error("generated type maps have incompatible domains")]
     TypeMapDomainMismatch,
+    #[error(
+        "closure conversion generated an inconsistent closure-name boundary in `{theory}.{definition}` at edge e{edge}: operation `{operation}` is connected to {connected_sources} source wire(s), but its declaration expects {declared_sources}. connected source types: [{connected_source_types}]. declared source type map: `{declaration_source_type_map}`."
+    )]
+    ClosureNameBoundaryMismatch {
+        theory: String,
+        definition: String,
+        operation: String,
+        edge: usize,
+        connected_sources: usize,
+        declared_sources: usize,
+        connected_source_types: String,
+        declaration_source_type_map: Hexpr,
+    },
 }
 
 pub fn convert_theory(
@@ -124,11 +143,11 @@ fn update_definition_arrow(
     insert_copy_arrows(syntax, arrows, &converted_definition, ambient_context_arity)?;
     let mut arrow = original.clone();
     arrow.raw = raw;
-    arrow.definition = Some(converted_definition.map_nodes(|_| ()));
+    arrow.definition = Some(converted_definition.clone().map_nodes(|_| ()));
     arrows.insert(definition_name.clone(), arrow);
 
     for closure in converted.closures {
-        insert_closure_arrows(
+        let name_boundary = insert_closure_arrows(
             syntax,
             theory_id,
             arrows,
@@ -136,6 +155,48 @@ fn update_definition_arrow(
             ambient_context_arity,
             closure,
         )?;
+        validate_generated_closure_name_boundary(
+            theory_id,
+            definition_name,
+            &converted_definition,
+            &name_boundary,
+        )?;
+    }
+
+    Ok(())
+}
+
+fn validate_generated_closure_name_boundary(
+    theory_id: &TheoryId,
+    definition_name: &Operation,
+    definition: &AnnotatedTerm,
+    name_boundary: &ClosureNameBoundary,
+) -> Result<(), ConvertTheoryError> {
+    for (edge_index, (operation, edge)) in definition
+        .hypergraph
+        .edges
+        .iter()
+        .zip(&definition.hypergraph.adjacency)
+        .enumerate()
+        .filter(|(_, (operation, _))| *operation == &name_boundary.operation)
+    {
+        let connected_sources = edge.sources.len();
+        let declared_sources = name_boundary.declared_sources;
+        if connected_sources == declared_sources {
+            continue;
+        }
+
+        return Err(ConvertTheoryError::ClosureNameBoundaryMismatch {
+            theory: theory_id.to_string(),
+            definition: definition_name.to_string(),
+            operation: operation.to_string(),
+            edge: edge_index,
+            connected_sources,
+            declared_sources,
+            connected_source_types: objects_to_hexpr(&interface_types(definition, &edge.sources))
+                .to_string(),
+            declaration_source_type_map: name_boundary.declaration_source_type_map.clone(),
+        });
     }
 
     Ok(())
@@ -190,7 +251,7 @@ fn insert_closure_arrows(
     definition_name: &Operation,
     ambient_context_arity: usize,
     closure: ConvertedClosure,
-) -> Result<(), ConvertTheoryError> {
+) -> Result<ClosureNameBoundary, ConvertTheoryError> {
     let closure_name = closure.name(definition_name);
     let raw_closure = RawTheoryArrow {
         name: closure_name.clone(),
@@ -210,6 +271,11 @@ fn insert_closure_arrows(
 
     let raw_name = name_symbols::name_arrow(syntax, &theory_id.0, &raw_closure)?;
     let name_type_maps = interpret_type_maps(syntax, &raw_name.type_maps)?;
+    let name_boundary = ClosureNameBoundary {
+        operation: raw_name.name.clone(),
+        declared_sources: name_type_maps.0.targets.len(),
+        declaration_source_type_map: raw_name.type_maps.0.clone(),
+    };
     arrows.insert(
         raw_name.name.clone(),
         TheoryArrow {
@@ -220,7 +286,7 @@ fn insert_closure_arrows(
         },
     );
 
-    Ok(())
+    Ok(name_boundary)
 }
 
 fn typed_definition(

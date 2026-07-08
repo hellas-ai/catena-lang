@@ -457,6 +457,51 @@ fn converted_closure_body_compacts_nonzero_context_leaf() {
 }
 
 #[test]
+fn converted_closure_accepts_duplicate_metavar_region_inputs() {
+    let n = Tree::Leaf(0, ());
+    let u64_value = obj("val", vec![obj("u64", vec![])]);
+    let closure_type = obj(FN_HOM_TYPE, vec![u64_value.clone(), u64_value]);
+
+    let mut definition = AnnotatedTerm::empty();
+    let left_n = definition.new_node(n.clone());
+    let right_n = definition.new_node(n.clone());
+    let left_named = definition.new_node(closure_type.clone());
+    let right_named = definition.new_node(closure_type.clone());
+    let composed = definition.new_node(closure_type);
+
+    definition.new_edge(
+        op("name.manual-u64-id-for-n"),
+        (vec![left_n], vec![left_named]),
+    );
+    definition.new_edge(
+        op("name.manual-u64-id-for-n"),
+        (vec![right_n], vec![right_named]),
+    );
+    definition.new_edge(op("compose"), (vec![left_named, right_named], vec![composed]));
+    definition.sources = vec![left_n, right_n];
+    definition.targets = vec![composed];
+
+    // Minimal duplicate-metavar region:
+    //
+    //   left_n  : Leaf(0) -- name.manual-u64-id-for-n --.
+    //                                                   compose --> closure
+    //   right_n : Leaf(0) -- name.manual-u64-id-for-n --'
+    //
+    // The two region inputs are different wires, but both represent the same
+    // contextual parameter. The generated closure body needs only one compact
+    // context input:
+    //
+    //   Leaf(0), (Leaf(0) * Leaf(0)), val(u64) -> val(u64)
+    //
+    // and `name.closure.*` should receive one source for Leaf(0). This should
+    // succeed by choosing a consistent representative. Today replacement
+    // construction fails because it sees both copied wires and does not know
+    // which one to connect to `name.closure.*`.
+    convert(&op("duplicate-metavar"), &definition, &[composed])
+        .expect("closure conversion should accept duplicate contextual region inputs");
+}
+
+#[test]
 fn theory_conversion_converts_if_closure_arguments() {
     let (theory_set, definition_types) = theories_with(
         r#"

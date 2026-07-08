@@ -16,7 +16,7 @@ use thiserror::Error;
 use crate::{
     check::{AnnotatedTerm, DefinitionTypes},
     nonstrict::{to_flatteners, to_unflatteners, unpack_packed_object},
-    prefixes::{GENERATED_COPY_PREFIX, NAME_PREFIX},
+    prefixes::{GENERATED_CONTEXT_PREFIX, NAME_PREFIX},
     report::TheoryTermMap,
     stdlib::constants::{
         COMPOSE, DEFER, EVAL, FN_HOM_TYPE, FN_REF_TYPE, LIFT, PRODUCT_TYPE, RUN, TENSOR, UNIT_TYPE,
@@ -99,8 +99,8 @@ impl Functor<Obj, Arr, Obj, Arr> for ForgetClosures<'_> {
             return map_name_operation(self.theory, name, source, target);
         }
 
-        if a.as_str().starts_with(GENERATED_COPY_PREFIX) {
-            return map_copy_closure_operation(source, target);
+        if a.as_str().starts_with(GENERATED_CONTEXT_PREFIX) {
+            return map_context_projection_operation(source, target);
         }
 
         match a.as_str() {
@@ -156,15 +156,27 @@ fn typed_definition(
 ////////////////////////////////////////////////////////////////////////////////
 /// Action of forget_closures on generating operations
 
-fn map_copy_closure_operation(source: &[Obj], target: &[Obj]) -> OpenHypergraph<Obj, Arr> {
+fn map_context_projection_operation(source: &[Obj], target: &[Obj]) -> OpenHypergraph<Obj, Arr> {
     let mapped_source = map_objects(source);
     let mapped_target = map_objects(target);
-    assert_eq!(
-        mapped_target,
-        [mapped_source.clone(), mapped_source.clone()].concat(),
-        "copy.closure.* should duplicate its source boundary"
+    assert!(
+        mapped_target.starts_with(&mapped_source),
+        "context.closure.* should preserve the region inputs as its environment outputs"
     );
-    duplicate_outputs(&mapped_source)
+
+    let mut result = OpenHypergraph::identity(mapped_source.clone());
+    let extra_targets = mapped_target[mapped_source.len()..]
+        .iter()
+        .map(|object| {
+            mapped_source
+                .iter()
+                .position(|source_object| source_object == object)
+                .map(NodeId)
+                .unwrap_or_else(|| result.new_node(object.clone()))
+        })
+        .collect::<Vec<_>>();
+    result.targets.extend(extra_targets);
+    result
 }
 
 // name.* operations map to the original operation, plus packers, with input wires 'bent around'

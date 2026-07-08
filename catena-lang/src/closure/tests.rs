@@ -15,7 +15,7 @@ use crate::{
         theory::convert_theory,
     },
     elaborate::elaborate,
-    prefixes::{GENERATED_CONTEXT_PREFIX, GENERATED_COPY_PREFIX},
+    prefixes::GENERATED_CONTEXT_PREFIX,
     stdlib::{
         self,
         constants::{FN_HOM_TYPE, PRODUCT_TYPE, UNIT_TYPE},
@@ -171,20 +171,6 @@ fn deferred_bool_id_closure_converts_through_each_stage() {
             ),
         ],
     );
-    assert!(
-        converted
-            .definition
-            .hypergraph
-            .edges
-            .iter()
-            .all(|operation| operation.as_str()
-                != format!(
-                    "{GENERATED_COPY_PREFIX}closure.run-bool-id.{}.0",
-                    original_target.0
-                )),
-        "environment-only captures should not be copied to the generated closure name"
-    );
-
     // Verify that original definition uses the *name* of the closure conversion
     assert!(
         converted
@@ -534,8 +520,8 @@ fn theory_conversion_converts_if_closure_arguments() {
             .hypergraph
             .edges
             .iter()
-            .all(|operation| !operation.as_str().starts_with(GENERATED_COPY_PREFIX)),
-        "old copy.closure.* operations should not be generated before codegen"
+            .all(|operation| !operation.as_str().starts_with(GENERATED_CONTEXT_PREFIX)),
+        "context.closure.* should be erased before codegen"
     );
 
     let Theory::Theory { arrows, .. } = converted else {

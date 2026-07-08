@@ -167,16 +167,27 @@ fn map_context_projection_operation(source: &[Obj], target: &[Obj]) -> OpenHyper
     let mut result = OpenHypergraph::identity(mapped_source.clone());
     let extra_targets = mapped_target[mapped_source.len()..]
         .iter()
-        .map(|object| {
-            mapped_source
-                .iter()
-                .position(|source_object| source_object == object)
-                .map(NodeId)
-                .unwrap_or_else(|| result.new_node(object.clone()))
-        })
+        .map(|object| context_leaf_target(&mapped_source, &mut result, object))
         .collect::<Vec<_>>();
     result.targets.extend(extra_targets);
     result
+}
+
+fn context_leaf_target(
+    mapped_source: &[Obj],
+    result: &mut OpenHypergraph<Obj, Arr>,
+    object: &Obj,
+) -> NodeId {
+    assert!(
+        matches!(object, Tree::Leaf(_, _)),
+        "context.closure.* extra outputs should only be context leaves for name.closure.*"
+    );
+
+    mapped_source
+        .iter()
+        .position(|source_object| source_object == object)
+        .map(NodeId)
+        .unwrap_or_else(|| result.new_node(object.clone()))
 }
 
 // name.* operations map to the original operation, plus packers, with input wires 'bent around'

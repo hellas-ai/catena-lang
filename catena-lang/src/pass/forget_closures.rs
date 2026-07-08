@@ -157,8 +157,8 @@ fn typed_definition(
 /// Action of forget_closures on generating operations
 
 fn map_context_projection_operation(source: &[Obj], target: &[Obj]) -> OpenHypergraph<Obj, Arr> {
-    let mapped_source = map_objects(source);
-    let mapped_target = map_objects(target);
+    let mapped_source = closure_forgotten_boundaries(source);
+    let mapped_target = closure_forgotten_boundaries(target);
     assert!(
         mapped_target.starts_with(&mapped_source),
         "context.closure.* should preserve the region inputs as its environment outputs"
@@ -682,13 +682,14 @@ mod tests {
             &[c.clone()],
         );
 
+        let context = Tree::Leaf(0, ());
         assert_closure_forgotten_boundaries(
-            &map_copy_closure_operation(
-                std::slice::from_ref(&closure0),
-                &[closure0.clone(), closure0.clone()],
+            &map_context_projection_operation(
+                &[context.clone(), closure0.clone()],
+                &[context.clone(), closure0.clone(), context.clone()],
             ),
-            std::slice::from_ref(&closure0),
-            &[closure0.clone(), closure0.clone()],
+            &[context.clone(), closure0.clone()],
+            &[context, closure0.clone(), Tree::Leaf(0, ())],
         );
 
         assert_closure_forgotten_boundaries(

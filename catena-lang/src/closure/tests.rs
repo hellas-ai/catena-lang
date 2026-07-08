@@ -733,6 +733,72 @@ fn theory_conversion_declares_mixed_runtime_and_freevar_name_boundary() {
 }
 
 #[test]
+fn theory_conversion_defers_indexed_value_without_explicit_context_input() {
+    let (theory_set, definition_types) = theories_with(
+        r#"
+        (def program if-defer-index :
+          ([n.] {([.n] ix val) (bool val)})
+          ->
+          ([n.] ([.n] ix val))
+        = ([i b.]
+          {([.i] defer) ([.i] defer) [.b] unit.intro}
+          bool.if
+        ))
+        "#,
+    );
+    let program = TheoryId(op("program"));
+
+    // Minimal regression for deferring a wire whose type depends on ambient
+    // context, while that context is not itself a region input.
+    //
+    // Original body:
+    //
+    //   i : val(ix n) -- defer --.
+    //                            bool.if --> val(ix n)
+    //   i : val(ix n) -- defer --'
+    //   b : val(bool) -----------'
+    //   unit.intro --------------'
+    //
+    // Each defer region has only the runtime wire `i` as a leaf input:
+    //
+    //   region leaf inputs: [i : val(ix n)]
+    //
+    // But the generated closure body boundary still mentions `n` through the
+    // deferred value type:
+    //
+    //   closure.if-defer-index.* : val(ix n), 1 -> val(ix n)
+    //
+    // Therefore the generated name declaration is context-dependent:
+    //
+    //   n -> name.closure.if-defer-index.* -> function pointer
+    //
+    // This should succeed. Today it fails because replacement construction can
+    // only supply `name.closure.*` inputs from top-level region leaf inputs, and
+    // here `n` occurs inside the type of `i` rather than as a separate leaf wire.
+    let converted =
+        convert_theory(&theory_set, &definition_types, &program).expect("theory should convert");
+    let Theory::Theory { arrows, .. } = converted else {
+        panic!("program should be a theory");
+    };
+
+    let if_defer_index = arrows
+        .get(&op("if-defer-index"))
+        .expect("converted original definition should exist");
+    let if_defer_index_body = if_defer_index
+        .definition
+        .as_ref()
+        .expect("converted original definition should have a body");
+
+    assert_operation_count(if_defer_index_body, "bool.ifc", 1);
+    assert_operation_count(if_defer_index_body, "bool.if", 0);
+    assert!(if_defer_index_body.hypergraph.edges.iter().any(|operation| {
+        operation
+            .as_str()
+            .starts_with("name.closure.if-defer-index.")
+    }));
+}
+
+#[test]
 fn theory_conversion_supplies_ambient_metavar_to_closed_accumulator_closure_name() {
     let (theory_set, definition_types) = theories_with(
         r#"

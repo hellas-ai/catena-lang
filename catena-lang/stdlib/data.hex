@@ -95,6 +95,11 @@
   (arr u64.zero : [] -> ({0 u64} :))
   (arr u64.one  : [] -> (u64 val))
   (arr u64.add  : {(u64 val) (u64 val)} -> (u64 val))
+  (arr u64.sub  : {(u64 val) (u64 val)} -> (u64 val))
+  (arr u64.ne   : {(u64 val) (u64 val)} -> (bool val))
+  (arr u64.lt   : {(u64 val) (u64 val)} -> (bool val))
+  (arr u64.lte  : {(u64 val) (u64 val)} -> (bool val))
+  (arr u64.gte  : {(u64 val) (u64 val)} -> (bool val))
   (arr u64.mul  : {(u64 val) (u64 val)} -> (u64 val))
   (arr u64.select : {(bool val) (u64 val) (u64 val)} -> (u64 val))
 

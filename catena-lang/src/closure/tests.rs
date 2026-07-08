@@ -15,7 +15,7 @@ use crate::{
         theory::convert_theory,
     },
     elaborate::elaborate,
-    prefixes::GENERATED_COPY_PREFIX,
+    prefixes::{GENERATED_CONTEXT_PREFIX, GENERATED_COPY_PREFIX},
     stdlib::{
         self,
         constants::{FN_HOM_TYPE, PRODUCT_TYPE, UNIT_TYPE},
@@ -158,10 +158,10 @@ fn deferred_bool_id_closure_converts_through_each_stage() {
     //
     // The captured bool value is part of the runtime environment only. It is
     // not a context parameter for the generated closure name, so conversion
-    // should not create an unused copy branch for `name.closure.*`.
+    // should not create an unused generated context branch for `name.closure.*`.
     assert_converted_definition(
         &converted.definition,
-        4,
+        5,
         vec![obj("val", vec![obj("bool", vec![])])],
         vec![
             obj("val", vec![obj("bool", vec![])]),
@@ -332,7 +332,7 @@ fn converted_closure_name_keeps_free_variable_input() {
 
     let converted_hexpr = crate::hexpr::term_to_hexpr(&converted_definition);
     let expected_converted: Hexpr = format!(
-        "([w0 . ] ([ . w0] {GENERATED_COPY_PREFIX}closure.reduce-n.1.0 [w1 w2 . ]) \
+        "([w0 . ] ([ . w0] {GENERATED_CONTEXT_PREFIX}closure.reduce-n.1 [w1 w2 . ]) \
          ([ . w2] name.closure.reduce-n.1 [w3 . ]) [ . w1 w3])"
     )
     .as_str()
@@ -340,8 +340,7 @@ fn converted_closure_name_keeps_free_variable_input() {
     .expect("expected converted definition Hexpr should parse");
     assert_eq!(
         converted_hexpr, expected_converted,
-        "closure conversion should split n, keep one copy as the environment, \
-         and pass the other copy to the generated closure name"
+        "closure conversion should project n to the environment and to the generated closure name"
     );
 
     let name_edge = converted_definition
@@ -389,7 +388,7 @@ fn converted_closure_body_compacts_nonzero_context_leaf() {
     //
     //   replacement inside the original definition:
     //
-    //     Leaf(2) -- copy --------------------> environment
+    //     Leaf(2) -- context -----------------> environment
     //             \
     //              `--> name.closure.* -------> function pointer
     //
@@ -477,7 +476,10 @@ fn converted_closure_accepts_duplicate_metavar_region_inputs() {
         op("name.manual-u64-id-for-n"),
         (vec![right_n], vec![right_named]),
     );
-    definition.new_edge(op("compose"), (vec![left_named, right_named], vec![composed]));
+    definition.new_edge(
+        op("compose"),
+        (vec![left_named, right_named], vec![composed]),
+    );
     definition.sources = vec![left_n, right_n];
     definition.targets = vec![composed];
 
@@ -533,7 +535,7 @@ fn theory_conversion_converts_if_closure_arguments() {
             .edges
             .iter()
             .all(|operation| !operation.as_str().starts_with(GENERATED_COPY_PREFIX)),
-        "copy.closure.* should be erased before codegen"
+        "old copy.closure.* operations should not be generated before codegen"
     );
 
     let Theory::Theory { arrows, .. } = converted else {
@@ -782,11 +784,11 @@ fn theory_conversion_defers_indexed_value_without_explicit_context_input() {
     let (theory_set, definition_types) = theories_with(
         r#"
         (def program if-defer-index :
-          ([n.] {([.n] ix val) (bool val)})
+          ([n.] {([.n] ix val) ([.n] ix val) (bool val)})
           ->
           ([n.] ([.n] ix val))
-        = ([i b.]
-          {([.i] defer) ([.i] defer) [.b] unit.intro}
+        = ([i j b.]
+          {([.i] defer) ([.j] defer) [.b] unit.intro}
           bool.if
         ))
         "#,
@@ -800,7 +802,7 @@ fn theory_conversion_defers_indexed_value_without_explicit_context_input() {
     //
     //   i : val(ix n) -- defer --.
     //                            bool.if --> val(ix n)
-    //   i : val(ix n) -- defer --'
+    //   j : val(ix n) -- defer --'
     //   b : val(bool) -----------'
     //   unit.intro --------------'
     //
@@ -836,11 +838,17 @@ fn theory_conversion_defers_indexed_value_without_explicit_context_input() {
 
     assert_operation_count(if_defer_index_body, "bool.ifc", 1);
     assert_operation_count(if_defer_index_body, "bool.if", 0);
-    assert!(if_defer_index_body.hypergraph.edges.iter().any(|operation| {
-        operation
-            .as_str()
-            .starts_with("name.closure.if-defer-index.")
-    }));
+    assert!(
+        if_defer_index_body
+            .hypergraph
+            .edges
+            .iter()
+            .any(|operation| {
+                operation
+                    .as_str()
+                    .starts_with("name.closure.if-defer-index.")
+            })
+    );
 }
 
 #[test]
@@ -1047,7 +1055,7 @@ fn theory_conversion_converts_reduce_closure_arguments() {
 }
 
 #[test]
-fn theory_conversion_declares_context_dependent_copy_arrows() {
+fn theory_conversion_declares_context_dependent_context_arrows() {
     let (theory_set, definition_types) = theories_with(
         r#"
         (def program diagonal-view :
@@ -1074,7 +1082,7 @@ fn theory_conversion_declares_context_dependent_copy_arrows() {
     let program = TheoryId(op("program"));
 
     convert_theory(&theory_set, &definition_types, &program)
-        .expect("generated copy arrows with n-dependent types should share the ambient context");
+        .expect("generated context arrows with n-dependent types should share the ambient context");
 }
 
 #[test]

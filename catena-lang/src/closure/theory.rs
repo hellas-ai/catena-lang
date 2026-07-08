@@ -13,7 +13,7 @@ use crate::{
     closure::convert::{ConvertError, Converted, ConvertedClosure, convert},
     elaborate::{ElaborateError, name_symbols},
     hexpr::{objects_to_hexpr, term_to_hexpr},
-    prefixes::{GENERATED_COPY_PREFIX, GENERATED_VARIABLE_PREFIX},
+    prefixes::{GENERATED_CONTEXT_PREFIX, GENERATED_VARIABLE_PREFIX},
     stdlib::constants::FN_HOM_TYPE,
 };
 
@@ -127,7 +127,7 @@ fn update_definition_arrow(
     );
     let ambient_context_arity = original.type_maps.0.sources.len();
 
-    insert_copy_arrows(syntax, arrows, &converted_definition, ambient_context_arity)?;
+    insert_context_arrows(syntax, arrows, &converted_definition, ambient_context_arity)?;
     let mut arrow = original.clone();
     arrow.raw = raw;
     arrow.definition = Some(converted_definition.clone().map_nodes(|_| ()));
@@ -173,7 +173,7 @@ fn assert_generated_closure_name_use_matches_declaration(
     }
 }
 
-fn insert_copy_arrows(
+fn insert_context_arrows(
     syntax: &Theory,
     arrows: &mut BTreeMap<Operation, TheoryArrow>,
     definition: &AnnotatedTerm,
@@ -184,29 +184,29 @@ fn insert_copy_arrows(
         .edges
         .iter()
         .zip(&definition.hypergraph.adjacency)
-        .filter(|(operation, _)| operation.as_str().starts_with(GENERATED_COPY_PREFIX))
+        .filter(|(operation, _)| operation.as_str().starts_with(GENERATED_CONTEXT_PREFIX))
     {
-        let raw_copy = RawTheoryArrow {
+        let raw_context = RawTheoryArrow {
             name: operation.clone(),
             type_maps: (
-                objects_to_hexpr_in_context(
+                boundary_objects_to_hexpr_in_context(
                     &interface_types(definition, &edge.sources),
                     ambient_context_arity,
                 ),
-                objects_to_hexpr_in_context(
+                boundary_objects_to_hexpr_in_context(
                     &interface_types(definition, &edge.targets),
                     ambient_context_arity,
                 ),
             ),
             definition: None,
         };
-        let copy_type_maps = interpret_type_maps(syntax, &raw_copy.type_maps)?;
+        let context_type_maps = interpret_type_maps(syntax, &raw_context.type_maps)?;
         arrows.insert(
             operation.clone(),
             TheoryArrow {
                 name: operation.clone(),
-                raw: raw_copy,
-                type_maps: copy_type_maps,
+                raw: raw_context,
+                type_maps: context_type_maps,
                 definition: None,
             },
         );
@@ -347,6 +347,16 @@ fn objects_to_hexpr_in_context(objects: &[Obj], ambient_context_arity: usize) ->
         },
         objects_to_hexpr(objects),
     ])
+}
+
+fn boundary_objects_to_hexpr_in_context(objects: &[Obj], ambient_context_arity: usize) -> Hexpr {
+    if objects.is_empty() {
+        return Hexpr::Frobenius {
+            sources: context_vars(ambient_context_arity),
+            targets: vec![],
+        };
+    }
+    objects_to_hexpr_in_context(objects, ambient_context_arity)
 }
 
 fn leaf_indices(objects: &[Obj]) -> Vec<usize> {

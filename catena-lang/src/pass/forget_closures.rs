@@ -88,7 +88,7 @@ struct ForgetClosures<'a> {
 
 impl Functor<Obj, Arr, Obj, Arr> for ForgetClosures<'_> {
     fn map_object(&self, o: &Obj) -> impl ExactSizeIterator<Item = Obj> {
-        expand_object(o).into_iter()
+        closure_forgotten_boundary(o).into_iter()
     }
 
     fn map_operation(&self, a: &Arr, source: &[Obj], target: &[Obj]) -> OpenHypergraph<Obj, Arr> {
@@ -104,7 +104,7 @@ impl Functor<Obj, Arr, Obj, Arr> for ForgetClosures<'_> {
         }
 
         match a.as_str() {
-            DEFER | RUN => OpenHypergraph::identity(map_objects(source)),
+            DEFER | RUN => OpenHypergraph::identity(closure_forgotten_boundaries(source)),
             COMPOSE => map_compose(source),
             TENSOR => map_tensor(source),
             LIFT => map_lift(source, target),
@@ -157,8 +157,8 @@ fn typed_definition(
 /// Action of forget_closures on generating operations
 
 fn map_copy_closure_operation(source: &[Obj], target: &[Obj]) -> OpenHypergraph<Obj, Arr> {
-    let mapped_source = map_objects(source);
-    let mapped_target = map_objects(target);
+    let mapped_source = closure_forgotten_boundaries(source);
+    let mapped_target = closure_forgotten_boundaries(target);
     assert_eq!(
         mapped_target,
         [mapped_source.clone(), mapped_source.clone()].concat(),
@@ -187,12 +187,12 @@ fn map_name_operation(
         .expect("name.* should refer to an arrow in the current theory");
     let operation_source = unpack_packed_object(domain, arrow.type_maps.0.targets.len());
     let operation_target = unpack_packed_object(codomain, arrow.type_maps.1.targets.len());
-    let domain = map_objects(&operation_source);
+    let domain = closure_forgotten_boundaries(&operation_source);
 
     let cup = if source.is_empty() {
         cup(&domain)
     } else {
-        let mapped_source = map_objects(source);
+        let mapped_source = closure_forgotten_boundaries(source);
         assert_eq!(
             mapped_source, domain,
             "non-nullary name.* currently expects its source wires to match the closure domain"
@@ -209,13 +209,11 @@ fn map_name_operation(
 // Defines the action of forget_closures on non-CMC operations f:
 // unflatten ; f ; flatten
 fn map_non_cmc_operation(a: &Arr, source: &[Obj], target: &[Obj]) -> AnnotatedTerm {
-    let unflatten = to_unflatteners(source);
-    let operation = OpenHypergraph::singleton(
-        a.clone(),
-        forget_closures_in_objects(source),
-        forget_closures_in_objects(target),
-    );
-    let flatten = to_flatteners(target);
+    let source = closure_erased_operation_objects(source);
+    let target = closure_erased_operation_objects(target);
+    let unflatten = closure_forgotten_unflatteners(&source);
+    let operation = OpenHypergraph::singleton(a.clone(), source, target.clone());
+    let flatten = closure_forgotten_flatteners(&target);
 
     unflatten
         .compose(&operation)
@@ -230,10 +228,10 @@ fn map_compose(source: &[Obj]) -> OpenHypergraph<Obj, Arr> {
     let (a, b0) = closure_parts(lhs).expect("compose lhs should be closure-typed");
     let (b1, c) = closure_parts(rhs).expect("compose rhs should be closure-typed");
 
-    let a = expand_object(a);
-    let b0 = expand_object(b0);
-    let b1 = expand_object(b1);
-    let c = expand_object(c);
+    let a = closure_forgotten_boundary(a);
+    let b0 = closure_forgotten_boundary(b0);
+    let b1 = closure_forgotten_boundary(b1);
+    let c = closure_forgotten_boundary(c);
     assert_eq!(b0, b1, "compose intermediate object should agree");
 
     OpenHypergraph::identity(a)
@@ -248,10 +246,10 @@ fn map_tensor(source: &[Obj]) -> OpenHypergraph<Obj, Arr> {
     let (a0, b0) = closure_parts(lhs).expect("tensor lhs should be closure-typed");
     let (a1, b1) = closure_parts(rhs).expect("tensor rhs should be closure-typed");
 
-    let a0 = expand_object(a0);
-    let b0 = expand_object(b0);
-    let a1 = expand_object(a1);
-    let b1 = expand_object(b1);
+    let a0 = closure_forgotten_boundary(a0);
+    let b0 = closure_forgotten_boundary(b0);
+    let a1 = closure_forgotten_boundary(a1);
+    let b1 = closure_forgotten_boundary(b1);
 
     let mut result =
         OpenHypergraph::identity([a0.clone(), b0.clone(), a1.clone(), b1.clone()].concat());
@@ -288,7 +286,7 @@ fn map_lift(source: &[Obj], target: &[Obj]) -> OpenHypergraph<Obj, Arr> {
         "lift codomain should be preserved"
     );
 
-    let domain = expand_object(fn_domain);
+    let domain = closure_forgotten_boundary(fn_domain);
     let function_pointer = vec![function_type.clone()];
 
     let prepare = cup(&domain).tensor(&OpenHypergraph::identity(function_pointer.clone()));
@@ -307,37 +305,83 @@ fn map_lift(source: &[Obj], target: &[Obj]) -> OpenHypergraph<Obj, Arr> {
 ////////////////////////////////////////////////////////////////////////////////
 /// Action of forget_closures on generating objects
 
-fn expand_object(o: &Obj) -> Vec<Obj> {
+/// Interpret an object on the external boundary of the forget-closures functor.
+fn closure_forgotten_boundary(o: &Obj) -> Vec<Obj> {
     match o {
         Tree::Empty => vec![],
         Tree::Leaf(_, _) => vec![o.clone()],
         Tree::Node(op, _, children) if op.as_str() == UNIT_TYPE && children.is_empty() => vec![],
-        Tree::Node(op, _, children) if op.as_str() == PRODUCT_TYPE => {
-            children.iter().flat_map(expand_object).collect()
-        }
-        Tree::Node(op, _, children) if op.as_str() == FN_HOM_TYPE => {
-            children.iter().flat_map(expand_object).collect()
-        }
+        Tree::Node(op, _, children) if op.as_str() == PRODUCT_TYPE => children
+            .iter()
+            .flat_map(closure_forgotten_boundary)
+            .collect(),
+        Tree::Node(op, _, children) if op.as_str() == FN_HOM_TYPE => children
+            .iter()
+            .flat_map(closure_forgotten_boundary)
+            .collect(),
         _ => vec![o.clone()],
     }
 }
 
-fn map_objects(objects: &[Obj]) -> Vec<Obj> {
-    objects.iter().flat_map(expand_object).collect()
+fn closure_forgotten_boundaries(objects: &[Obj]) -> Vec<Obj> {
+    objects
+        .iter()
+        .flat_map(closure_forgotten_boundary)
+        .collect()
 }
 
-fn forget_closures_in_object(object: &Obj) -> Vec<Obj> {
+/// Interpret objects at a non-CMC operation boundary, preserving product shape where needed so
+/// product flatteners can adapt from/to the fully closure-forgotten boundary.
+fn closure_erased_operation_objects(objects: &[Obj]) -> Vec<Obj> {
+    objects
+        .iter()
+        .flat_map(closure_erased_operation_object)
+        .collect()
+}
+
+fn closure_erased_operation_object(object: &Obj) -> Vec<Obj> {
     match object {
+        Tree::Node(operation, _, children) if operation.as_str() == PRODUCT_TYPE => {
+            let [left, right] = children.as_slice() else {
+                panic!("product object should have exactly two children");
+            };
+            vec![Tree::Node(
+                op(PRODUCT_TYPE),
+                0,
+                vec![
+                    pack_closure_erased_operation_objects(left),
+                    pack_closure_erased_operation_objects(right),
+                ],
+            )]
+        }
         Tree::Node(op, _, children) if op.as_str() == FN_HOM_TYPE => children
             .iter()
-            .flat_map(forget_closures_in_object)
+            .flat_map(closure_erased_operation_object)
             .collect(),
         _ => vec![object.clone()],
     }
 }
 
-fn forget_closures_in_objects(objects: &[Obj]) -> Vec<Obj> {
-    objects.iter().flat_map(forget_closures_in_object).collect()
+fn pack_closure_erased_operation_objects(object: &Obj) -> Obj {
+    pack_objects(&closure_erased_operation_object(object))
+}
+
+fn pack_objects(objects: &[Obj]) -> Obj {
+    match objects {
+        [] => Tree::Node(op(UNIT_TYPE), 0, vec![]),
+        [only] => only.clone(),
+        [head, tail @ ..] => {
+            Tree::Node(op(PRODUCT_TYPE), 0, vec![head.clone(), pack_objects(tail)])
+        }
+    }
+}
+
+fn closure_forgotten_unflatteners(objects: &[Obj]) -> AnnotatedTerm {
+    to_unflatteners(objects)
+}
+
+fn closure_forgotten_flatteners(objects: &[Obj]) -> AnnotatedTerm {
+    to_flatteners(objects)
 }
 
 fn closure_parts(o: &Obj) -> Option<(&Obj, &Obj)> {
@@ -431,6 +475,11 @@ mod tests {
             .collect()
     }
 
+    fn assert_closure_forgotten_boundaries(term: &AnnotatedTerm, source: &[Obj], target: &[Obj]) {
+        assert_eq!(source_types(term), closure_forgotten_boundaries(source));
+        assert_eq!(target_types(term), closure_forgotten_boundaries(target));
+    }
+
     #[test]
     fn regular_operations_are_wrapped_in_flatteners() {
         let a = object("A");
@@ -502,6 +551,45 @@ mod tests {
     }
 
     #[test]
+    fn regular_operation_adapter_forgets_closures_nested_under_products() {
+        let ix = object("Ix");
+        let f32 = object("F32");
+        let arg = object("Arg");
+        let out = object("Out");
+        let closure = Tree::Node(op(FN_HOM_TYPE), 0, vec![ix.clone(), f32.clone()]);
+        let source = vec![product(closure, arg.clone())];
+
+        let mapped = map_non_cmc_operation(&op("f"), &source, std::slice::from_ref(&out));
+        let operation_index = mapped
+            .hypergraph
+            .edges
+            .iter()
+            .position(|operation| operation.as_str() == "f")
+            .expect("adapter should contain the original operation");
+        let operation = &mapped.hypergraph.adjacency[operation_index];
+
+        assert_eq!(source_types(&mapped), vec![ix.clone(), f32.clone(), arg]);
+        assert_eq!(target_types(&mapped), vec![out.clone()]);
+        assert_eq!(
+            operation
+                .sources
+                .iter()
+                .map(|node| mapped.hypergraph.nodes[node.0].clone())
+                .collect::<Vec<_>>(),
+            vec![product(product(ix, f32), object("Arg"))],
+            "f should see closure-erased objects with product shape preserved"
+        );
+        assert_eq!(
+            operation
+                .targets
+                .iter()
+                .map(|node| mapped.hypergraph.nodes[node.0].clone())
+                .collect::<Vec<_>>(),
+            vec![out]
+        );
+    }
+
+    #[test]
     fn named_operation_uses_declared_arity_to_restore_product_arguments() {
         let raw = RawTheorySet::from_text(
             r#"
@@ -539,11 +627,79 @@ mod tests {
             vec![product(product(a, b), c), product(d, e)],
         );
 
-        let mapped = map_name_operation(theory, "f", &[], &[closure]);
+        let mapped = map_name_operation(theory, "f", &[], std::slice::from_ref(&closure));
 
         assert_eq!(mapped.hypergraph.edges, vec![op("*.intro"), op("f")]);
         assert_eq!(mapped.sources.len(), 0);
-        assert_eq!(mapped.targets.len(), 5);
+        assert_eq!(
+            target_types(&mapped),
+            closure_forgotten_boundaries(std::slice::from_ref(&closure))
+        );
+    }
+
+    #[test]
+    fn mapped_generators_use_closure_forgotten_boundaries() {
+        let a0 = object("A0");
+        let a1 = object("A1");
+        let b0 = object("B0");
+        let b1 = object("B1");
+        let c = object("C");
+        let d = object("D");
+        let closure0 = Tree::Node(op(FN_HOM_TYPE), 0, vec![a0.clone(), b0.clone()]);
+        let closure1 = Tree::Node(op(FN_HOM_TYPE), 0, vec![b0.clone(), c.clone()]);
+        let closure2 = Tree::Node(op(FN_HOM_TYPE), 0, vec![a1.clone(), b1.clone()]);
+
+        assert_closure_forgotten_boundaries(
+            &map_non_cmc_operation(
+                &op("f"),
+                &[product(closure0.clone(), d.clone())],
+                &[c.clone()],
+            ),
+            &[product(closure0.clone(), d.clone())],
+            &[c.clone()],
+        );
+
+        assert_closure_forgotten_boundaries(
+            &map_copy_closure_operation(
+                std::slice::from_ref(&closure0),
+                &[closure0.clone(), closure0.clone()],
+            ),
+            std::slice::from_ref(&closure0),
+            &[closure0.clone(), closure0.clone()],
+        );
+
+        assert_closure_forgotten_boundaries(
+            &map_compose(&[closure0.clone(), closure1.clone()]),
+            &[closure0.clone(), closure1.clone()],
+            &[Tree::Node(op(FN_HOM_TYPE), 0, vec![a0.clone(), c.clone()])],
+        );
+
+        assert_closure_forgotten_boundaries(
+            &map_tensor(&[closure0.clone(), closure2.clone()]),
+            &[closure0.clone(), closure2],
+            &[Tree::Node(
+                op(FN_HOM_TYPE),
+                0,
+                vec![product(a0.clone(), a1), product(b0, b1)],
+            )],
+        );
+
+        let function = Tree::Node(
+            op(VALUE_TYPE),
+            0,
+            vec![Tree::Node(
+                op(FN_REF_TYPE),
+                0,
+                vec![product(closure1.clone(), d.clone()), c.clone()],
+            )],
+        );
+        let lifted = Tree::Node(op(FN_HOM_TYPE), 0, vec![product(closure1, d), c]);
+
+        assert_closure_forgotten_boundaries(
+            &map_lift(&[function.clone()], std::slice::from_ref(&lifted)),
+            &[function],
+            &[lifted],
+        );
     }
 
     #[test]
@@ -577,6 +733,40 @@ mod tests {
         assert_eq!(
             mapped.hypergraph.nodes[eval.sources[0].0], domain,
             "eval's first input should remain one packed object"
+        );
+    }
+
+    #[test]
+    fn lift_domain_with_nested_closure_composes_against_eval_adapter_boundary() {
+        let ix = object("Ix");
+        let f32 = object("F32");
+        let arg = object("Arg");
+        let out = object("Out");
+        let closure = Tree::Node(op(FN_HOM_TYPE), 0, vec![ix.clone(), f32.clone()]);
+        let domain = product(product(closure.clone(), closure), arg);
+        let function = Tree::Node(
+            op(VALUE_TYPE),
+            0,
+            vec![Tree::Node(
+                op(FN_REF_TYPE),
+                0,
+                vec![domain.clone(), out.clone()],
+            )],
+        );
+        let lifted = Tree::Node(op(FN_HOM_TYPE), 0, vec![domain, out]);
+
+        let mapped = map_lift(&[function], &[lifted]);
+
+        assert_eq!(
+            target_types(&mapped),
+            vec![
+                ix.clone(),
+                f32.clone(),
+                ix,
+                f32,
+                object("Arg"),
+                object("Out")
+            ]
         );
     }
 }

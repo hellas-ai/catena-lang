@@ -78,6 +78,86 @@ fn two_times_two() -> anyhow::Result<()> {
 }
 
 #[test]
+fn u64_sub_basic() -> anyhow::Result<()> {
+    let runtime = runtime_with(
+        r#"
+        (def program sub-basic : [] -> (u64 val) = (
+          {u64.one u64.one}
+          u64.add
+          [two.]
+          {[.two] u64.one}
+          u64.sub
+        ))
+        "#,
+    )?;
+
+    let [result] = runtime.exec("sub-basic", [])?;
+    let Value::U64(result) = result else {
+        anyhow::bail!("sub-basic returned non-u64 value: {result:?}");
+    };
+
+    assert_eq!(result, 1);
+    Ok(())
+}
+
+#[test]
+fn u64_cmp_ops_test() -> anyhow::Result<()> {
+    let runtime = runtime_with(
+        r#"
+        (def program u64-ne-test : [] -> (bool val) = (
+          {[.]
+            (const.u64.0x0000000000000002 [lhs.])
+            (const.u64.0x0000000000000003 [rhs.])
+            ([.lhs rhs] u64.ne [result.])
+            [.result]
+          }
+        ))
+        (def program u64-lt-test : [] -> (bool val) = (
+          {[.]
+            (const.u64.0x0000000000000002 [lhs.])
+            (const.u64.0x0000000000000003 [rhs.])
+            ([.lhs rhs] u64.lt [result.])
+            [.result]
+          }
+        ))
+        (def program u64-lte-test : [] -> (bool val) = (
+          {[.]
+            (const.u64.0x0000000000000002 [lhs.])
+            (const.u64.0x0000000000000003 [rhs.])
+            ([.lhs rhs] u64.lte [result.])
+            [.result]
+          }
+        ))
+        (def program u64-gte-test : [] -> (bool val) = (
+          {[.]
+            (const.u64.0x0000000000000002 [lhs.])
+            (const.u64.0x0000000000000003 [rhs.])
+            ([.lhs rhs] u64.gte [result.])
+            [.result]
+          }
+        ))
+        "#,
+    )?;
+
+    for (name, expected) in [
+        ("u64-ne-test", 1_u8),
+        ("u64-lt-test", 1_u8),
+        ("u64-lte-test", 1_u8),
+        ("u64-gte-test", 0_u8),
+    ] {
+        let [result] = runtime.exec(name, [])?;
+        let Value::Bool(result) = result else {
+            anyhow::bail!("{name} returned non-bool value: {result:?}");
+        };
+        assert_eq!(
+            result, expected,
+            "{name} returned {result}, expected {expected}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn two_times_two_u32() -> anyhow::Result<()> {
     let runtime = runtime_with(
         r#"

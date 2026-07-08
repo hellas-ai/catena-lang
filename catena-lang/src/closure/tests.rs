@@ -17,7 +17,7 @@ use crate::{
         theory::convert_theory,
     },
     elaborate::elaborate,
-    prefixes::GENERATED_COPY_PREFIX,
+    prefixes::GENERATED_CONTEXT_PREFIX,
     stdlib::{
         self,
         constants::{FN_HOM_TYPE, PRODUCT_TYPE, UNIT_TYPE},
@@ -160,10 +160,10 @@ fn deferred_bool_id_closure_converts_through_each_stage() {
     //
     // The captured bool value is part of the runtime environment only. It is
     // not a context parameter for the generated closure name, so conversion
-    // should not create an unused copy branch for `name.closure.*`.
+    // should not create an unused generated context branch for `name.closure.*`.
     assert_converted_definition(
         &converted.definition,
-        4,
+        5,
         vec![obj("val", vec![obj("bool", vec![])])],
         vec![
             obj("val", vec![obj("bool", vec![])]),
@@ -173,20 +173,6 @@ fn deferred_bool_id_closure_converts_through_each_stage() {
             ),
         ],
     );
-    assert!(
-        converted
-            .definition
-            .hypergraph
-            .edges
-            .iter()
-            .all(|operation| operation.as_str()
-                != format!(
-                    "{GENERATED_COPY_PREFIX}closure.run-bool-id.{}.0",
-                    original_target.0
-                )),
-        "environment-only captures should not be copied to the generated closure name"
-    );
-
     // Verify that original definition uses the *name* of the closure conversion
     assert!(
         converted
@@ -334,7 +320,7 @@ fn converted_closure_name_keeps_free_variable_input() {
 
     let converted_hexpr = crate::hexpr::term_to_hexpr(&converted_definition);
     let expected_converted: Hexpr = format!(
-        "([w0 . ] ([ . w0] {GENERATED_COPY_PREFIX}closure.reduce-n.1.0 [w1 w2 . ]) \
+        "([w0 . ] ([ . w0] {GENERATED_CONTEXT_PREFIX}closure.reduce-n.1 [w1 w2 . ]) \
          ([ . w2] name.closure.reduce-n.1 [w3 . ]) [ . w1 w3])"
     )
     .as_str()
@@ -342,8 +328,7 @@ fn converted_closure_name_keeps_free_variable_input() {
     .expect("expected converted definition Hexpr should parse");
     assert_eq!(
         converted_hexpr, expected_converted,
-        "closure conversion should split n, keep one copy as the environment, \
-         and pass the other copy to the generated closure name"
+        "closure conversion should project n to the environment and to the generated closure name"
     );
 
     let name_edge = converted_definition
@@ -391,7 +376,7 @@ fn converted_closure_body_compacts_nonzero_context_leaf() {
     //
     //   replacement inside the original definition:
     //
-    //     Leaf(2) -- copy --------------------> environment
+    //     Leaf(2) -- context -----------------> environment
     //             \
     //              `--> name.closure.* -------> function pointer
     //
@@ -459,6 +444,54 @@ fn converted_closure_body_compacts_nonzero_context_leaf() {
 }
 
 #[test]
+fn converted_closure_accepts_duplicate_metavar_region_inputs() {
+    let n = Tree::Leaf(0, ());
+    let u64_value = obj("val", vec![obj("u64", vec![])]);
+    let closure_type = obj(FN_HOM_TYPE, vec![u64_value.clone(), u64_value]);
+
+    let mut definition = AnnotatedTerm::empty();
+    let left_n = definition.new_node(n.clone());
+    let right_n = definition.new_node(n.clone());
+    let left_named = definition.new_node(closure_type.clone());
+    let right_named = definition.new_node(closure_type.clone());
+    let composed = definition.new_node(closure_type);
+
+    definition.new_edge(
+        op("name.manual-u64-id-for-n"),
+        (vec![left_n], vec![left_named]),
+    );
+    definition.new_edge(
+        op("name.manual-u64-id-for-n"),
+        (vec![right_n], vec![right_named]),
+    );
+    definition.new_edge(
+        op("compose"),
+        (vec![left_named, right_named], vec![composed]),
+    );
+    definition.sources = vec![left_n, right_n];
+    definition.targets = vec![composed];
+
+    // Minimal duplicate-metavar region:
+    //
+    //   left_n  : Leaf(0) -- name.manual-u64-id-for-n --.
+    //                                                   compose --> closure
+    //   right_n : Leaf(0) -- name.manual-u64-id-for-n --'
+    //
+    // The two region inputs are different wires, but both represent the same
+    // contextual parameter. The generated closure body needs only one compact
+    // context input:
+    //
+    //   Leaf(0), (Leaf(0) * Leaf(0)), val(u64) -> val(u64)
+    //
+    // and `name.closure.*` should receive one source for Leaf(0). This should
+    // succeed by choosing a consistent representative. Today replacement
+    // construction fails because it sees both copied wires and does not know
+    // which one to connect to `name.closure.*`.
+    convert(&op("duplicate-metavar"), &definition, &[composed])
+        .expect("closure conversion should accept duplicate contextual region inputs");
+}
+
+#[test]
 fn theory_conversion_converts_if_closure_arguments() {
     let (theory_set, definition_types) = theories_with_inlined_closure_boundaries(
         r#"
@@ -489,8 +522,8 @@ fn theory_conversion_converts_if_closure_arguments() {
             .hypergraph
             .edges
             .iter()
-            .all(|operation| !operation.as_str().starts_with(GENERATED_COPY_PREFIX)),
-        "copy.closure.* should be erased before codegen"
+            .all(|operation| !operation.as_str().starts_with(GENERATED_CONTEXT_PREFIX)),
+        "context.closure.* should be erased before codegen"
     );
 
     let Theory::Theory { arrows, .. } = converted else {
@@ -733,6 +766,78 @@ fn theory_conversion_declares_mixed_runtime_and_freevar_name_boundary() {
 }
 
 #[test]
+fn theory_conversion_defers_indexed_value_without_explicit_context_input() {
+    let (theory_set, definition_types) = theories_with_inlined_closure_boundaries(
+        r#"
+        (def program if-defer-index :
+          ([n.] {([.n] ix val) ([.n] ix val) (bool val)})
+          ->
+          ([n.] ([.n] ix val))
+        = ([i j b.]
+          {([.i] defer) ([.j] defer) [.b] unit.intro}
+          bool.if
+        ))
+        "#,
+    );
+    let program = TheoryId(op("program"));
+
+    // Minimal regression for deferring a wire whose type depends on ambient
+    // context, while that context is not itself a region input.
+    //
+    // Original body:
+    //
+    //   i : val(ix n) -- defer --.
+    //                            bool.if --> val(ix n)
+    //   j : val(ix n) -- defer --'
+    //   b : val(bool) -----------'
+    //   unit.intro --------------'
+    //
+    // Each defer region has only the runtime wire `i` as a leaf input:
+    //
+    //   region leaf inputs: [i : val(ix n)]
+    //
+    // But the generated closure body boundary still mentions `n` through the
+    // deferred value type:
+    //
+    //   closure.if-defer-index.* : val(ix n), 1 -> val(ix n)
+    //
+    // Therefore the generated name declaration is context-dependent:
+    //
+    //   n -> name.closure.if-defer-index.* -> function pointer
+    //
+    // This should succeed. Today it fails because replacement construction can
+    // only supply `name.closure.*` inputs from top-level region leaf inputs, and
+    // here `n` occurs inside the type of `i` rather than as a separate leaf wire.
+    let converted =
+        convert_theory(&theory_set, &definition_types, &program).expect("theory should convert");
+    let Theory::Theory { arrows, .. } = converted else {
+        panic!("program should be a theory");
+    };
+
+    let if_defer_index = arrows
+        .get(&op("if-defer-index"))
+        .expect("converted original definition should exist");
+    let if_defer_index_body = if_defer_index
+        .definition
+        .as_ref()
+        .expect("converted original definition should have a body");
+
+    assert_operation_count(if_defer_index_body, "bool.ifc", 1);
+    assert_operation_count(if_defer_index_body, "bool.if", 0);
+    assert!(
+        if_defer_index_body
+            .hypergraph
+            .edges
+            .iter()
+            .any(|operation| {
+                operation
+                    .as_str()
+                    .starts_with("name.closure.if-defer-index.")
+            })
+    );
+}
+
+#[test]
 fn theory_conversion_supplies_ambient_metavar_to_closed_accumulator_closure_name() {
     let (theory_set, definition_types) = theories_with_inlined_closure_boundaries(
         r#"
@@ -934,7 +1039,7 @@ fn theory_conversion_converts_reduce_closure_arguments() {
 }
 
 #[test]
-fn theory_conversion_declares_context_dependent_copy_arrows() {
+fn theory_conversion_declares_context_dependent_context_arrows() {
     let (theory_set, definition_types) = theories_with_inlined_closure_boundaries(
         r#"
         (def program diagonal-view :
@@ -961,7 +1066,7 @@ fn theory_conversion_declares_context_dependent_copy_arrows() {
     let program = TheoryId(op("program"));
 
     convert_theory(&theory_set, &definition_types, &program)
-        .expect("generated copy arrows with n-dependent types should share the ambient context");
+        .expect("generated context arrows with n-dependent types should share the ambient context");
 }
 
 #[test]

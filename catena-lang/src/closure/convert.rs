@@ -13,7 +13,7 @@ use crate::{
         region::{ClosureRegion, ClosureRegionError, closure_region},
         rewrite::{RewriteRegionError, rewrite_region},
     },
-    prefixes::{GENERATED_COPY_PREFIX, NAME_PREFIX},
+    prefixes::{GENERATED_CONTEXT_PREFIX, NAME_PREFIX},
     stdlib::constants::{
         FN_HOM_TYPE, FN_REF_TYPE, PRODUCT_INTRO, PRODUCT_TYPE, UNIT_INTRO, UNIT_TYPE, VALUE_TYPE,
     },
@@ -90,12 +90,6 @@ impl ClosureContext {
             .enumerate()
             .map(|(local, original)| (original, local))
             .collect()
-    }
-
-    fn requires_original_leaf(&self, original_leaf: usize) -> bool {
-        self.original_leaf_by_compact_leaf
-            .iter()
-            .any(|required| *required == original_leaf)
     }
 
     fn name_sources_from_original_metavars(
@@ -260,40 +254,15 @@ fn replacement_region(
         .map(|wire| replacement.new_node(definition.hypergraph.nodes[wire.0].clone()))
         .collect::<Vec<_>>();
 
-    // Build environment components and collect generated-name metavars.
-    // Every leaf input contributes to the runtime environment. Only top-level metavar leaves required by the closure context also feed `name.closure.*`.
-    //
-    //   x: val ----------------------------> environment component
-    //
-    //   n: Leaf(2) -- copy.closure.*.i ----> environment component
-    //              \
-    //               `----------------------> name metavar for original Leaf(2)
-    let mut environment_components = Vec::new();
-    let mut name_metavars_by_original_leaf = BTreeMap::new();
-    for (index, source) in sources.iter().copied().enumerate() {
-        if let Some(original_leaf) = top_level_metavar_leaf(&replacement, source)
-            && context.requires_original_leaf(original_leaf)
-        {
-            let (environment_component, name_metavar) = copy_metavar_for_environment_and_name(
-                &mut replacement,
-                definition_name,
-                closure_name_wire,
-                index,
-                source,
-            );
-            environment_components.push(environment_component);
-            insert_name_metavar(
-                &mut name_metavars_by_original_leaf,
-                original_leaf,
-                name_metavar,
-            );
-            continue;
-        }
+    let (environment_components, name_context_outputs) = build_context_projection_arrow(
+        &mut replacement,
+        definition_name,
+        closure_name_wire,
+        &sources,
+        context,
+    );
 
-        environment_components.push(source);
-    }
-
-    // Order the collected name metavars using the closure context.
+    // Order the generated name-context wires using the closure context.
     //
     //   context.original_leaf_by_compact_leaf = [2, 5]
     //
@@ -305,13 +274,18 @@ fn replacement_region(
     // so the `name.closure.*` source list is ordered as:
     //
     //   [metavar for original Leaf(2), metavar for original Leaf(5)]
+    let name_metavars_by_original_leaf = context
+        .original_leaf_by_compact_leaf
+        .iter()
+        .copied()
+        .zip(name_context_outputs)
+        .collect::<BTreeMap<_, _>>();
     let name_sources = context.name_sources_from_original_metavars(&name_metavars_by_original_leaf);
     assert_eq!(
         name_sources.len(),
         context.arity(),
         "generated closure name inputs should match compact closure context arity"
     );
-
     // Pack the environment, create the function-pointer node, and connect the
     // generated closure name.
     //
@@ -340,44 +314,51 @@ fn replacement_region(
     replacement
 }
 
-fn insert_name_metavar(
-    name_metavars_by_original_leaf: &mut BTreeMap<usize, NodeId>,
-    original_leaf: usize,
-    name_metavar: NodeId,
-) {
-    // A closure region can mention the same top-level context leaf through multiple boundary
-    // wires. In `matmul-f32-inner`, for example, `b-for-product`, `b-for-unit`, and
-    // `b-for-identity` are separate region inputs but all refer to the same top-level `b` leaf.
-    // The generated `name.*` operation only has one metavariable for that leaf, so keep the first
-    // representative here. The duplicated runtime/type wires still remain in the closure
-    // environment; this only deduplicates the name operation's context interface.
-    name_metavars_by_original_leaf
-        .entry(original_leaf)
-        .or_insert(name_metavar);
-}
-
-fn copy_metavar_for_environment_and_name(
+fn build_context_projection_arrow(
     replacement: &mut AnnotatedTerm,
     definition_name: &Operation,
     closure_name_wire: NodeId,
-    index: usize,
-    source: NodeId,
-) -> (NodeId, NodeId) {
-    let source_type = replacement.hypergraph.nodes[source.0].clone();
-    let environment_component = replacement.new_node(source_type.clone());
-    let name_metavar = replacement.new_node(source_type);
+    sources: &[NodeId],
+    context: &ClosureContext,
+) -> (Vec<NodeId>, Vec<NodeId>) {
+    // Build one generated context projection for this closure region.
+    //
+    //   region inputs ---- __catena_context.closure.* ----> environment components
+    //                                                   \
+    //                                                    `-> name-context wires
+    //
+    // If the generated closure name has no context, the second output group is
+    // empty. The generated arrow still describes how region inputs become the
+    // environment components used by the explicit closure representation.
+    //
+    // The generated arrow's type map describes how context variables needed by
+    // `name.closure.*` are obtained from the region-input boundary. This covers
+    // both cases that per-input copies could not express:
+    //
+    //   i : val(ix n) -------------> env i
+    //                  \
+    //                   `----------> n
+    //
+    //   n : Leaf(0) ---------------> env n
+    //   n : Leaf(0) ---------------> env n
+    //                  \
+    //                   `----------> one representative n
+    let environment_components = sources
+        .iter()
+        .map(|source| replacement.new_node(replacement.hypergraph.nodes[source.0].clone()))
+        .collect::<Vec<_>>();
+    let name_context_outputs = context
+        .original_leaf_by_compact_leaf
+        .iter()
+        .map(|original| replacement.new_node(Tree::Leaf(*original, ())))
+        .collect::<Vec<_>>();
+    let mut context_targets = environment_components.clone();
+    context_targets.extend(name_context_outputs.iter().copied());
     replacement.new_edge(
-        copy_operation(definition_name, closure_name_wire, index),
-        (vec![source], vec![environment_component, name_metavar]),
+        context_operation(definition_name, closure_name_wire),
+        (sources.to_vec(), context_targets),
     );
-    (environment_component, name_metavar)
-}
-
-fn top_level_metavar_leaf(replacement: &AnnotatedTerm, source: NodeId) -> Option<usize> {
-    match &replacement.hypergraph.nodes[source.0] {
-        Tree::Leaf(original, _) => Some(*original),
-        _ => None,
-    }
+    (environment_components, name_context_outputs)
 }
 
 fn packed_environment_target(
@@ -484,13 +465,13 @@ fn name_operation(definition_name: &Operation, closure_wire: NodeId) -> Operatio
     .expect("generated name operation should parse")
 }
 
-fn copy_operation(definition_name: &Operation, closure_wire: NodeId, index: usize) -> Operation {
+fn context_operation(definition_name: &Operation, closure_wire: NodeId) -> Operation {
     format!(
-        "{GENERATED_COPY_PREFIX}closure.{}.{}.{}",
-        definition_name, closure_wire.0, index
+        "{GENERATED_CONTEXT_PREFIX}closure.{}.{}",
+        definition_name, closure_wire.0
     )
     .parse()
-    .expect("generated copy operation should parse")
+    .expect("generated context operation should parse")
 }
 
 fn closure_parts(object: &Obj) -> Option<(&Obj, &Obj)> {

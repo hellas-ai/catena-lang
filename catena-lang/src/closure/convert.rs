@@ -254,42 +254,12 @@ fn replacement_region(
         .map(|wire| replacement.new_node(definition.hypergraph.nodes[wire.0].clone()))
         .collect::<Vec<_>>();
 
-    // Build one generated context projection for this closure region.
-    //
-    //   region inputs ---- __catena_context.closure.* ----> environment components
-    //                                                   \
-    //                                                    `-> name-context wires
-    //
-    // If the generated closure name has no context, the second output group is
-    // empty. The generated arrow still describes how region inputs become the
-    // environment components used by the explicit closure representation.
-    //
-    // The generated arrow's type map describes how context variables needed by
-    // `name.closure.*` are obtained from the region-input boundary. This covers
-    // both cases that per-input copies could not express:
-    //
-    //   i : val(ix n) -------------> env i
-    //                  \
-    //                   `----------> n
-    //
-    //   n : Leaf(0) ---------------> env n
-    //   n : Leaf(0) ---------------> env n
-    //                  \
-    //                   `----------> one representative n
-    let environment_components = sources
-        .iter()
-        .map(|source| replacement.new_node(replacement.hypergraph.nodes[source.0].clone()))
-        .collect::<Vec<_>>();
-    let name_context_outputs = context
-        .original_leaf_by_compact_leaf
-        .iter()
-        .map(|original| replacement.new_node(Tree::Leaf(*original, ())))
-        .collect::<Vec<_>>();
-    let mut context_targets = environment_components.clone();
-    context_targets.extend(name_context_outputs.iter().copied());
-    replacement.new_edge(
-        context_operation(definition_name, closure_name_wire),
-        (sources.clone(), context_targets),
+    let (environment_components, name_context_outputs) = build_context_projection_arrow(
+        &mut replacement,
+        definition_name,
+        closure_name_wire,
+        &sources,
+        context,
     );
 
     // Order the generated name-context wires using the closure context.
@@ -343,6 +313,53 @@ fn replacement_region(
     replacement.sources = sources;
     replacement.targets = vec![environment, function_pointer];
     replacement
+}
+
+fn build_context_projection_arrow(
+    replacement: &mut AnnotatedTerm,
+    definition_name: &Operation,
+    closure_name_wire: NodeId,
+    sources: &[NodeId],
+    context: &ClosureContext,
+) -> (Vec<NodeId>, Vec<NodeId>) {
+    // Build one generated context projection for this closure region.
+    //
+    //   region inputs ---- __catena_context.closure.* ----> environment components
+    //                                                   \
+    //                                                    `-> name-context wires
+    //
+    // If the generated closure name has no context, the second output group is
+    // empty. The generated arrow still describes how region inputs become the
+    // environment components used by the explicit closure representation.
+    //
+    // The generated arrow's type map describes how context variables needed by
+    // `name.closure.*` are obtained from the region-input boundary. This covers
+    // both cases that per-input copies could not express:
+    //
+    //   i : val(ix n) -------------> env i
+    //                  \
+    //                   `----------> n
+    //
+    //   n : Leaf(0) ---------------> env n
+    //   n : Leaf(0) ---------------> env n
+    //                  \
+    //                   `----------> one representative n
+    let environment_components = sources
+        .iter()
+        .map(|source| replacement.new_node(replacement.hypergraph.nodes[source.0].clone()))
+        .collect::<Vec<_>>();
+    let name_context_outputs = context
+        .original_leaf_by_compact_leaf
+        .iter()
+        .map(|original| replacement.new_node(Tree::Leaf(*original, ())))
+        .collect::<Vec<_>>();
+    let mut context_targets = environment_components.clone();
+    context_targets.extend(name_context_outputs.iter().copied());
+    replacement.new_edge(
+        context_operation(definition_name, closure_name_wire),
+        (sources.to_vec(), context_targets),
+    );
+    (environment_components, name_context_outputs)
 }
 
 fn packed_environment_target(

@@ -127,7 +127,12 @@ fn update_definition_arrow(
     );
     let ambient_context_arity = original.type_maps.0.sources.len();
 
-    insert_context_arrows(syntax, arrows, &converted_definition, ambient_context_arity)?;
+    declare_context_arrows_from_use_sites(
+        syntax,
+        arrows,
+        &converted_definition,
+        ambient_context_arity,
+    )?;
     let mut arrow = original.clone();
     arrow.raw = raw;
     arrow.definition = Some(converted_definition.clone().map_nodes(|_| ()));
@@ -173,39 +178,42 @@ fn assert_generated_closure_name_use_matches_declaration(
     }
 }
 
-fn insert_context_arrows(
+fn declare_context_arrows_from_use_sites(
     syntax: &Theory,
     arrows: &mut BTreeMap<Operation, TheoryArrow>,
     definition: &AnnotatedTerm,
     ambient_context_arity: usize,
 ) -> Result<(), ConvertTheoryError> {
-    for (operation, edge) in definition
+    for (context_operation, context_use_site) in definition
         .hypergraph
         .edges
         .iter()
         .zip(&definition.hypergraph.adjacency)
         .filter(|(operation, _)| operation.as_str().starts_with(GENERATED_CONTEXT_PREFIX))
     {
-        let raw_context = RawTheoryArrow {
-            name: operation.clone(),
+        // The replacement graph is the source of truth for generated context
+        // arrow boundaries: declare each operation from the concrete use-site
+        // that closure conversion inserted into the converted definition.
+        let raw_context_declaration = RawTheoryArrow {
+            name: context_operation.clone(),
             type_maps: (
                 boundary_objects_to_hexpr_in_context(
-                    &interface_types(definition, &edge.sources),
+                    &interface_types(definition, &context_use_site.sources),
                     ambient_context_arity,
                 ),
                 boundary_objects_to_hexpr_in_context(
-                    &interface_types(definition, &edge.targets),
+                    &interface_types(definition, &context_use_site.targets),
                     ambient_context_arity,
                 ),
             ),
             definition: None,
         };
-        let context_type_maps = interpret_type_maps(syntax, &raw_context.type_maps)?;
+        let context_type_maps = interpret_type_maps(syntax, &raw_context_declaration.type_maps)?;
         arrows.insert(
-            operation.clone(),
+            context_operation.clone(),
             TheoryArrow {
-                name: operation.clone(),
-                raw: raw_context,
+                name: context_operation.clone(),
+                raw: raw_context_declaration,
                 type_maps: context_type_maps,
                 definition: None,
             },

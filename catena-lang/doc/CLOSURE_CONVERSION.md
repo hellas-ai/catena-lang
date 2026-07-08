@@ -70,7 +70,7 @@ So, ...
     if (A => B) ● (A => B) ● Bool ● A -> B
 
     # ... lowers to 'ifc'
-    ifc (X, X ● A => B) ● (Y, Y ● A => B) ● Bool ● A -> B
+    ifc (X, X ● A -> B) ● (Y, Y ● A -> B) ● Bool ● A -> B
 
     materialize : (Ix n => A) (n : u64) -> buf cap.own A
     materializec : (X, X ● Ix n -> A) (n : u64) -> buf cap.own A

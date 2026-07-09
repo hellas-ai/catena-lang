@@ -1,0 +1,86 @@
+(def program u64.one-at :
+  ([n.] ([.n] ix val))
+  ->
+  ([n.] (u64 val))
+= ([i.] u64.one))
+
+(def program index-id :
+  ([n.] ([.n] ix val))
+  ->
+  ([n.] ([.n] ix val))
+= ([i.] [.i]))
+
+(def program index-with-unit :
+  ([n.] ([.n] ix val))
+  ->
+  ([n.] {1 ([.n] ix val)} *)
+= ([i.] {unit.intro [.i]} *.intro))
+
+# The producer takes another closure and the reduce-provided index.
+# It builds a nullary closure that calls the input closure on that index, then
+# runs the nullary closure:
+#
+#   i -- defer --.
+#               compose -> 1 => u64 -> run
+#   f ----------'
+#
+# where:
+#
+#   f : ix n => u64
+#   i : ix n
+#
+# This is the interesting nested case: reduce supplies the index to a producer,
+# and the producer uses that index to build a new closure from a captured input
+# closure.
+(def program producer-builds-and-runs-closure :
+  ([n.] {({([.n] ix val) (u64 val)} =>) ([.n] ix val)})
+  ->
+  ([n.] (u64 val))
+= ([f i.]
+  {([.i] defer) [.f]}
+  compose
+  run
+))
+
+# Specialize producer-builds-and-runs-closure by partially applying the first
+# argument, f = name.u64.one-at lift.
+#
+#   ix n
+#     |
+#   index-with-unit              : ix n -> 1 * ix n
+#     |
+#   (defer f) tensor index-id    : 1 * ix n -> (ix n => u64) * ix n
+#     |
+#   producer-builds-and-runs...  : (ix n => u64) * ix n -> u64
+#
+# The resulting producer closure is:
+#
+#   ix n => u64
+#
+# This example currently exposes a checker panic:
+#
+#   missing arrow in theory
+#
+# before the report writer can emit checked/converted SVGs.
+(def program reduce-producer-builds-and-runs-closure :
+  ({[n] u64} :)
+  ->
+  ([n.] (u64 val))
+= ([len.]
+  {
+    const.u64.0x0000000000000000
+    (name.u64.add lift)
+    ({
+      ({
+        (([.len] :.param) name.index-with-unit lift)
+        ({
+          (([.len] :.param) name.u64.one-at lift defer)
+          (([.len] :.param) name.index-id lift)
+        } tensor)
+      } compose)
+      (([.len] :.param) name.producer-builds-and-runs-closure lift)
+    } compose)
+    [.len]
+  }
+  reduce
+))

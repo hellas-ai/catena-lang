@@ -63,26 +63,23 @@
   )
 ))
 
-(def program matmul-f32-bind-dot-product-operands :
+(def program matmul-f32-dot-product-producer :
   ([b.] {
     [.b]
     [.b]
+    [.b]
     ({({([.b] ix val) (f32 val)} =>) ({([.b] ix val) (f32 val)} =>)} *)
-    ({({
-      ({({([.b] ix val) (f32 val)} =>) ({([.b] ix val) (f32 val)} =>)} *)
-      ([.b] ix val)
-    } *) (f32 val)} =>)
   })
   ->
   ([b.] ({([.b] ix val) (f32 val)} =>))
-= ([b-for-unit b-for-identity operands term-at.]
+= ([b-for-unit b-for-identity b-for-product operands.]
   ([.b-for-unit] name.matmul-f32-ix-unit-left-intro lift [unit-left.])
   ({
     ([.operands] defer)
     ([.b-for-identity] name.matmul-f32-ix-identity lift)
   } tensor [capture.])
   ({[.unit-left capture]} compose [input-with-capture.])
-  ({[.input-with-capture] [.term-at]} compose)
+  ({[.input-with-capture] ([.b-for-product] name.matmul-f32-product-at lift)} compose)
 ))
 
 (def program matmul-f32-inner :
@@ -98,10 +95,10 @@
     ({
       [.b-for-unit]
       [.b-for-identity]
+      [.b-for-product]
       ({[.lhs] [.rhs]} *.intro)
-      ([.b-for-product] name.matmul-f32-product-at lift)
     }
-    matmul-f32-bind-dot-product-operands [product-at.]
+    matmul-f32-dot-product-producer [product-at.]
     {
       (const.u32.0x00000000 u32.bitcast-f32)
       (name.matmul.f32.add-reduce lift)

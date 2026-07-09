@@ -194,6 +194,38 @@ fn deferred_bool_id_closure_converts_through_each_stage() {
 }
 
 #[test]
+fn defer_of_closure_converts_captured_closure_environment() {
+    let definition = annotated_program_definition(
+        r#"
+        (def program f32.id : (f32 val) -> (f32 val) = [x])
+        (def program defer-f32-id-closure :
+          []
+          ->
+          ({1 ({(f32 val) (f32 val)} =>)} =>)
+        = (
+          name.f32.id
+          lift
+          defer
+        ))
+        "#,
+        "defer-f32-id-closure",
+    );
+    let original_target = definition.targets[0];
+
+    let converted = convert(&op("defer-f32-id-closure"), &definition, &[original_target])
+        .expect("defer should accept a closure value as its captured environment");
+
+    assert!(
+        converted
+            .closures
+            .iter()
+            .flat_map(|closure| interface_types(&closure.term, &closure.term.sources))
+            .all(|object| !is_closure_type(&object)),
+        "closure conversion should recursively convert closure-typed values captured by defer"
+    );
+}
+
+#[test]
 fn closure_body_unpacker_reproduces_product_typed_environment_wires() {
     let width = obj("width", vec![]);
     let buffer = obj("buffer", vec![]);

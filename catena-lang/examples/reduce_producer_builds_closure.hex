@@ -1,3 +1,10 @@
+(theory program type {
+  (arr producer-len-copies :
+    ([n.] [.n])
+    ->
+    ([n.] {[.n] [.n] [.n] [.n]}))
+})
+
 (def program u64.one-at :
   ([n.] ([.n] ix val))
   ->
@@ -45,6 +52,22 @@
 # Specialize producer-builds-and-runs-closure by partially applying the first
 # argument, f = name.u64.one-at lift.
 #
+# The length parameter is split once with :.ty:
+#
+#   len -- :.ty --> reduce-len, producer-len
+#
+# reduce-len remains the typed length passed to reduce. producer-len is then
+# copied by producer-len-copies so every parameterized function pointer gets its
+# own erased length input:
+#
+#   producer-len -- producer-len-copies
+#       |              |            |             |
+#   with-unit-len  one-at-len  index-id-len  producer-fn-len
+#
+# This keeps the definition graph monogamous for closure conversion while
+# avoiding separate independent parameter paths from repeated ([.len] :.param)
+# uses.
+#
 #   ix n
 #     |
 #   index-with-unit              : ix n -> 1 * ix n
@@ -57,30 +80,32 @@
 #
 #   ix n => u64
 #
-# This example currently exposes a checker panic:
-#
-#   missing arrow in theory
-#
-# before the report writer can emit checked/converted SVGs.
+# producer-len-copies is type-only plumbing. It creates no runtime GPU code; it
+# only gives closure conversion distinct type inputs where sharing would
+# otherwise confuse boundary rewriting.
 (def program reduce-producer-builds-and-runs-closure :
   ({[n] u64} :)
   ->
   ([n.] (u64 val))
 = ([len.]
-  {
-    const.u64.0x0000000000000000
-    (name.u64.add lift)
-    ({
-      ({
-        (([.len] :.param) name.index-with-unit lift)
+  ([.len] :.ty [reduce-len producer-len.]
+    ([.producer-len] producer-len-copies [with-unit-len one-at-len index-id-len producer-fn-len.]
+      {
+        const.u64.0x0000000000000000
+        (name.u64.add lift)
         ({
-          (([.len] :.param) name.u64.one-at lift defer)
-          (([.len] :.param) name.index-id lift)
-        } tensor)
-      } compose)
-      (([.len] :.param) name.producer-builds-and-runs-closure lift)
-    } compose)
-    [.len]
-  }
-  reduce
+          ({
+            ([.with-unit-len] name.index-with-unit lift)
+            ({
+              ([.one-at-len] name.u64.one-at lift defer)
+              ([.index-id-len] name.index-id lift)
+            } tensor)
+          } compose)
+          ([.producer-fn-len] name.producer-builds-and-runs-closure lift)
+        } compose)
+        [.reduce-len]
+      }
+      reduce
+    )
+  )
 ))

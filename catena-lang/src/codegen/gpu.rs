@@ -331,6 +331,7 @@ fn render_assignment(
         op if op.starts_with(CONST_U32_PREFIX) => {
             render_int_const(out, assignment, CONST_U32_PREFIX, "U")?
         }
+        _op if is_erased_only_assignment(assignment) => {}
         op => {
             return Err(GpuRenderError::UnsupportedOp(
                 op.parse().unwrap_or_else(|_| assignment.op.clone()),
@@ -338,6 +339,17 @@ fn render_assignment(
         }
     }
     Ok(())
+}
+
+fn is_erased_only_assignment(assignment: &GpuAssign) -> bool {
+    assignment
+        .inputs
+        .iter()
+        .all(|value| matches!(value, GpuValue::Var(var) if runtime_type(var).is_none()))
+        && assignment
+            .outputs
+            .iter()
+            .all(|var| runtime_type(var).is_none())
 }
 
 fn render_assert(out: &mut String, assignment: &GpuAssign) -> Result<(), GpuRenderError> {
@@ -1031,6 +1043,35 @@ mod tests {
         assert!(source.contains("uint64_t x1;"));
         assert!(source.contains("    x1 = x0;\n"));
         assert!(!source.contains("uint64_t x2;"));
+    }
+
+    #[test]
+    fn erased_only_helper_assignment_renders_as_noop() {
+        let input = erased_var(0, "x0");
+        let output_a = erased_var(1, "x1");
+        let output_b = erased_var(2, "x2");
+        let module = GpuModule {
+            name: "program_type_helper".to_string(),
+            source_name: Some(op("type-helper")),
+            entry: GpuFunction {
+                name: "program_type_helper".to_string(),
+                sources: Vec::new(),
+                targets: Vec::new(),
+                assignments: vec![GpuAssign {
+                    op: op("type-helper"),
+                    input_sizes: vec![1],
+                    output_sizes: vec![1, 1],
+                    call_symbol: None,
+                    inputs: vec![GpuValue::Var(input)],
+                    outputs: vec![output_a, output_b],
+                }],
+            },
+        };
+
+        let source = render_module(&module, GpuDialect::Hip).unwrap();
+
+        assert!(source.contains("void program_type_helper()"));
+        assert!(!source.contains("type-helper"));
     }
 
     #[test]

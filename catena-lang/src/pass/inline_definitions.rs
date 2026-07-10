@@ -10,8 +10,6 @@ use open_hypergraphs::lax::{
 };
 use thiserror::Error;
 
-use crate::prefixes::NAME_PREFIX;
-
 pub type Term = OpenHypergraph<(), Operation>;
 
 #[derive(Debug, Error)]
@@ -77,7 +75,17 @@ pub fn run(
 
         for definition_name in selected {
             arrows.remove(definition_name);
-            arrows.remove(&name_operation(definition_name));
+            // Do not remove `name.f` when inlining `f`.
+            //
+            // A direct `f` edge is a call and can be replaced with `f`'s body.
+            // A `name.f` edge is a function pointer value. The inline pass does
+            // not rewrite those uses, so removing `name.f` here would leave
+            // dangling operation references in callers that lift/pass `f`.
+            //
+            // Once we have a representation for inlining function pointer uses,
+            // this can be revisited together with that rewrite.
+            // In other words, do not remove `format!("name.{definition_name}")`.
+            // arrows.remove(&name_operation(definition_name));
         }
     }
 
@@ -166,12 +174,6 @@ fn selected_dependencies(term: &Term, selected: &BTreeSet<Operation>) -> BTreeSe
         .collect()
 }
 
-fn name_operation(definition_name: &Operation) -> Operation {
-    format!("{NAME_PREFIX}{definition_name}")
-        .parse()
-        .expect("generated name operation should parse")
-}
-
 fn inline_term(
     theory_id: &TheoryId,
     definition_name: &Operation,
@@ -241,7 +243,10 @@ mod tests {
         };
 
         assert!(!arrows.contains_key(&"mk-closure".parse().unwrap()));
-        assert!(!arrows.contains_key(&"name.mk-closure".parse().unwrap()));
+        assert!(
+            arrows.contains_key(&"name.mk-closure".parse().unwrap()),
+            "name.* is a function pointer value, not a direct call; keep it unless those uses are rewritten"
+        );
         let use_closure = arrows
             .get(&"use-closure".parse().unwrap())
             .and_then(|arrow| arrow.definition.as_ref())

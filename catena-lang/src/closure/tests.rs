@@ -1104,6 +1104,135 @@ fn theory_conversion_declares_context_dependent_context_arrows() {
 }
 
 #[test]
+fn theory_conversion_declares_context_arrows_with_call_site_existentials() {
+    let raw_theories = RawTheorySet::from_texts(stdlib::sources().chain([r#"
+        (def program len-copies :
+          ([n.] ({[.n] u64} :))
+          ->
+          ([n.] {({[.n] u64} :) ({[.n] u64} :)})
+        = ([len.]
+          ([.len] :.ty [copy-a _param-a.]
+            ([.copy-a] :.ty [copy-b _param-b.]
+              {[.copy-a] [.copy-b]}
+            )
+          )
+        ))
+
+        (def program reader-len-copies :
+          ([n.] ({[.n] u64} :))
+          ->
+          ([n.] {[.n] [.n] [.n]})
+        = ([len.]
+          ([.len] :.ty [copy-a param-a.]
+            ([.copy-a] :.ty [copy-b param-b.]
+              ([.copy-b] :.ty [_copy-c param-c.]
+                {[.param-a] [.param-b] [.param-c]}
+              )
+            )
+          )
+        ))
+
+        (def program u64.buf-at :
+          ([n.] {
+            ({cap.ref [.n] u64} buf val)
+            ([.n] ix val)
+          })
+          ->
+          ([n.] (u64 val))
+        = ([input i.]
+          {[.i input]} ix
+        ))
+
+        (def program index-id :
+          ([n.] ([.n] ix val))
+          ->
+          ([n.] ([.n] ix val))
+        = ([i.] [.i]))
+
+        (def program index-with-unit :
+          ([n.] ([.n] ix val))
+          ->
+          ([n.] {1 ([.n] ix val)} *)
+        = ([i.] {unit.intro [.i]} *.intro))
+
+        (def program u64.buf-reader :
+          ([n.] {
+            ({[.n] u64} :)
+            ({cap.ref [.n] u64} buf val)
+          })
+          ->
+          ([n.] ({([.n] ix val) (u64 val)} =>))
+        = ([len input.]
+          ([.len] reader-len-copies [with-unit-len index-id-len buf-at-len.]
+            {
+              ({
+                ([.with-unit-len] name.index-with-unit lift)
+                ({
+                  ([.input] defer)
+                  ([.index-id-len] name.index-id lift)
+                } tensor)
+              } compose)
+              ([.buf-at-len] name.u64.buf-at lift)
+            }
+            compose
+          )
+        ))
+
+        (def program reduce-buf-reader-closure-from-mem :
+          ([n.] (cap.ref mem))
+          ->
+          ([n.] (u64 val))
+        = (
+          mem.cast.u64
+          [len input.]
+            ([.len] len-copies [reduce-len producer-len.]
+              {
+                const.u64.0x0000000000000000
+                (name.u64.add lift)
+                ({[.producer-len] [.input]} u64.buf-reader)
+                [.reduce-len]
+              }
+              reduce
+            )
+        ))
+        "#]))
+    .expect("test theories should parse");
+    let program = TheoryId(op("program"));
+
+    let report = crate::compile::compile(raw_theories).expect("compile should succeed");
+    let theory_set = report
+        .theory_set
+        .expect("compile report should contain the converted theory set");
+    let theory = theory_set
+        .theories
+        .get(&program)
+        .expect("program theory should exist");
+    let Theory::Theory { arrows, .. } = theory else {
+        panic!("program should be a theory");
+    };
+
+    let context_arrow = arrows
+        .iter()
+        .find(|(operation, arrow)| {
+            operation.as_str().starts_with(&format!(
+                "{GENERATED_CONTEXT_PREFIX}closure.reduce-buf-reader-closure-from-mem."
+            )) && arrow.raw.type_maps.0.to_string().contains("buf")
+        })
+        .map(|(_, arrow)| arrow)
+        .expect("converted producer closure should declare a buffer-dependent context arrow");
+
+    assert_eq!(
+        context_arrow.type_maps.0.sources.len(),
+        1,
+        "the generated context arrow should compact the call-site existential length into one local context variable"
+    );
+    assert_eq!(
+        context_arrow.type_maps.0.sources, context_arrow.type_maps.1.sources,
+        "generated context arrow source and target maps should share the compact local context"
+    );
+}
+
+#[test]
 fn theory_conversion_generates_diagonal_view_closure_with_shared_context() {
     let (theory_set, definition_types) = theories_with(
         r#"

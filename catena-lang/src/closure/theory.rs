@@ -125,14 +125,8 @@ fn update_definition_arrow(
         original.type_maps.1.sources.len(),
         "closure conversion expects original arrow type maps to share one context"
     );
-    let ambient_context_arity = original.type_maps.0.sources.len();
 
-    declare_context_arrows_from_use_sites(
-        syntax,
-        arrows,
-        &converted_definition,
-        ambient_context_arity,
-    )?;
+    declare_context_arrows_from_use_sites(syntax, arrows, &converted_definition)?;
     let mut arrow = original.clone();
     arrow.raw = raw;
     arrow.definition = Some(converted_definition.clone().map_nodes(|_| ()));
@@ -182,7 +176,6 @@ fn declare_context_arrows_from_use_sites(
     syntax: &Theory,
     arrows: &mut BTreeMap<Operation, TheoryArrow>,
     definition: &AnnotatedTerm,
-    ambient_context_arity: usize,
 ) -> Result<(), ConvertTheoryError> {
     for (context_operation, context_use_site) in definition
         .hypergraph
@@ -194,17 +187,21 @@ fn declare_context_arrows_from_use_sites(
         // The replacement graph is the source of truth for generated context
         // arrow boundaries: declare each operation from the concrete use-site
         // that closure conversion inserted into the converted definition.
+        //
+        // The concrete boundary may mention leaves that are available at the
+        // call site but are not part of the outer arrow's declared context,
+        // such as existential type variables introduced by `mem.cast.*`.
+        // Declare the generated arrow with its own compact local context and
+        // let the use site instantiate it with those concrete leaves.
+        let source_types = interface_types(definition, &context_use_site.sources);
+        let target_types = interface_types(definition, &context_use_site.targets);
+        let (source_types, target_types, context_arity) =
+            compact_context_arrow_boundary(source_types, target_types);
         let raw_context_declaration = RawTheoryArrow {
             name: context_operation.clone(),
             type_maps: (
-                boundary_objects_to_hexpr_in_context(
-                    &interface_types(definition, &context_use_site.sources),
-                    ambient_context_arity,
-                ),
-                boundary_objects_to_hexpr_in_context(
-                    &interface_types(definition, &context_use_site.targets),
-                    ambient_context_arity,
-                ),
+                boundary_objects_to_hexpr_in_context(&source_types, context_arity),
+                boundary_objects_to_hexpr_in_context(&target_types, context_arity),
             ),
             definition: None,
         };
@@ -221,6 +218,37 @@ fn declare_context_arrows_from_use_sites(
     }
 
     Ok(())
+}
+
+fn compact_context_arrow_boundary(
+    source_types: Vec<Obj>,
+    target_types: Vec<Obj>,
+) -> (Vec<Obj>, Vec<Obj>, usize) {
+    let original_leaves = source_types
+        .iter()
+        .chain(&target_types)
+        .flat_map(|object| {
+            let mut leaves = Vec::new();
+            collect_leaf_indices(object, &mut leaves);
+            leaves
+        })
+        .collect::<BTreeSet<_>>();
+    let compact_leaf_by_original_leaf = original_leaves
+        .iter()
+        .copied()
+        .enumerate()
+        .map(|(compact, original)| (original, compact))
+        .collect::<BTreeMap<_, _>>();
+    let context_arity = compact_leaf_by_original_leaf.len();
+    let compact_sources = source_types
+        .into_iter()
+        .map(|object| relabel_object_context(object, &compact_leaf_by_original_leaf))
+        .collect();
+    let compact_targets = target_types
+        .into_iter()
+        .map(|object| relabel_object_context(object, &compact_leaf_by_original_leaf))
+        .collect();
+    (compact_sources, compact_targets, context_arity)
 }
 
 fn insert_closure_arrows(
@@ -384,6 +412,30 @@ fn collect_leaf_indices(object: &Obj, indices: &mut Vec<usize>) {
                 collect_leaf_indices(child, indices);
             }
         }
+    }
+}
+
+fn relabel_object_context(
+    object: Obj,
+    compact_leaf_by_original_leaf: &BTreeMap<usize, usize>,
+) -> Obj {
+    match object {
+        Tree::Empty => Tree::Empty,
+        Tree::Leaf(original, annotation) => {
+            let compact = compact_leaf_by_original_leaf
+                .get(&original)
+                .copied()
+                .expect("object leaf should have been collected before relabeling");
+            Tree::Leaf(compact, annotation)
+        }
+        Tree::Node(operation, annotation, children) => Tree::Node(
+            operation,
+            annotation,
+            children
+                .into_iter()
+                .map(|child| relabel_object_context(child, compact_leaf_by_original_leaf))
+                .collect(),
+        ),
     }
 }
 

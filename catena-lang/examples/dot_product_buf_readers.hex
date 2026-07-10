@@ -1,0 +1,166 @@
+(def program len-copies4 :
+  ([n.] ({[.n] u64} :))
+  ->
+  ([n.] {
+    ({[.n] u64} :)
+    ({[.n] u64} :)
+    ({[.n] u64} :)
+    ({[.n] u64} :)
+  })
+= ([len.]
+  ([.len] :.ty [copy-a _param-a.]
+    ([.copy-a] :.ty [copy-b _param-b.]
+      ([.copy-b] :.ty [copy-c _param-c.]
+        ([.copy-c] :.ty [copy-d _param-d.]
+          {[.copy-a] [.copy-b] [.copy-c] [.copy-d]}
+        )
+      )
+    )
+  )
+))
+
+(def program reader-len-copies :
+  ([n.] ({[.n] u64} :))
+  ->
+  ([n.] {[.n] [.n] [.n]})
+= ([len.]
+  ([.len] :.ty [copy-a param-a.]
+    ([.copy-a] :.ty [copy-b param-b.]
+      ([.copy-b] :.ty [_copy-c param-c.]
+        {[.param-a] [.param-b] [.param-c]}
+      )
+    )
+  )
+))
+
+(def program len-param :
+  ([n.] ({[.n] u64} :))
+  ->
+  ([n.] [.n])
+= ([len.]
+  ([.len] :.ty [_copy param.]
+    [.param]
+  )
+))
+
+(def program f32.buf-at :
+  ([n.] {
+    ({cap.ref [.n] f32} buf val)
+    ([.n] ix val)
+  })
+  ->
+  ([n.] (f32 val))
+= ([input i.]
+  {[.i input]} ix
+))
+
+(def program index-id :
+  ([n.] ([.n] ix val))
+  ->
+  ([n.] ([.n] ix val))
+= ([i.] [.i]))
+
+(def program index-copy :
+  ([n.] ([.n] ix val))
+  ->
+  ([n.] {([.n] ix val) ([.n] ix val)})
+= ([i.] {[.i] [.i]}))
+
+(def program index-with-unit :
+  ([n.] ([.n] ix val))
+  ->
+  ([n.] {1 ([.n] ix val)} *)
+= ([i.] {unit.intro [.i]} *.intro))
+
+# Return an indexed reader closure for an f32 buffer.
+#
+#   f32.buf-reader : (n : u64) * buf ref n f32 -> (ix n => f32)
+#
+# The caller receives a closure from an ordinary arrow call. The caller does not
+# build this closure by directly deferring the buffer at the reduce call site.
+(def program f32.buf-reader :
+  ([n.] {
+    ({[.n] u64} :)
+    ({cap.ref [.n] f32} buf val)
+  })
+  ->
+  ([n.] ({([.n] ix val) (f32 val)} =>))
+= ([len input.]
+  ([.len] reader-len-copies [with-unit-len index-id-len buf-at-len.]
+    {
+      ({
+        ([.with-unit-len] name.index-with-unit lift)
+        ({
+          ([.input] defer)
+          ([.index-id-len] name.index-id lift)
+        } tensor)
+      } compose)
+      ([.buf-at-len] name.f32.buf-at lift)
+    }
+    compose
+  )
+))
+
+# Combine two buffer-reader closures into one dot-product producer closure.
+#
+# The returned producer is built by composing closures:
+#
+#   ix n
+#     |
+#   index-copy
+#     |
+#   left-reader tensor right-reader
+#     |
+#   f32.mul
+#
+# This is the important case for the closure-conversion redesign: individual
+# reader closures are not directly fed to `defer` at the dot-product call site,
+# and they are not hidden inside a product fed to `defer` either.
+(def program f32.dot-reader :
+  ([n.] {
+    ({[.n] u64} :)
+    ({([.n] ix val) (f32 val)} =>)
+    ({([.n] ix val) (f32 val)} =>)
+  })
+  ->
+  ([n.] ({([.n] ix val) (f32 val)} =>))
+= {[len left-reader right-reader.]
+  ([.len] len-param [copy-param.])
+  ({
+    ({
+      ([.copy-param] name.index-copy lift)
+      ({[.left-reader] [.right-reader]} tensor)
+    } compose)
+    (name.f32.mul lift)
+  } compose)
+})
+
+# Dot product of two same-length f32 buffers.
+#
+#   left-reader  = f32.buf-reader(len, left)
+#   right-reader = f32.buf-reader(len, right)
+#   producer     = f32.dot-reader(len, left-reader, right-reader)
+#   reduce(0.0, f32.add, producer, len)
+(def program dot-product-buf-readers :
+  ([n.] {
+    ({[.n] u64} :)
+    ({cap.ref [.n] f32} buf val)
+    ({cap.ref [.n] f32} buf val)
+  })
+  ->
+  ([n.] (f32 val))
+= ([len left right.]
+  ([.len] len-copies4 [reduce-len left-reader-len right-reader-len dot-reader-len.]
+    {
+      (const.u32.0x00000000 u32.bitcast-f32)
+      (name.f32.add lift)
+      ({
+        [.dot-reader-len]
+        ({[.left-reader-len] [.left]} f32.buf-reader)
+        ({[.right-reader-len] [.right]} f32.buf-reader)
+      } f32.dot-reader)
+      [.reduce-len]
+    }
+    reduce
+  )
+))

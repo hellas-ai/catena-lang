@@ -10,21 +10,3 @@
   (arr *.intro : [a b] -> *)
   (arr *.elim : * -> [a b])
 })
-
-(def program identity :
-  [a]
-  ->
-  [a]
-= ([x.] [.x]))
-
-(def program with-left-unit :
-  [a]
-  ->
-  ({1 [a]} *)
-= ([x.] {unit.intro [.x]} *.intro))
-
-(def program with-right-unit :
-  [a]
-  ->
-  ({[a] 1} *)
-= ([x.] {[.x] unit.intro} *.intro))

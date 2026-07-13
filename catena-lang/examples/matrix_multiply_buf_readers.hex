@@ -446,7 +446,7 @@
     ({cap.ref ({[.k] [.m]} *) f32} buf val)
   })
   ->
-  ([n m k.] (cap.own mem))
+  ([n m k.] ({cap.own ({[.n] [.m]} *) f32} buf val))
 = ([n-len m-len k-len nk-len km-len nm-len left right.]
   ([.n-len] len-copies2 [env-n-len producer-n-len.]
     ([.m-len] len-copies2 [env-m-len producer-m-len.]
@@ -454,27 +454,21 @@
         ([.producer-n-len] len-param [producer-n.]
           ([.producer-m-len] len-param [producer-m.]
             ([.producer-k-len] len-param [producer-k.]
-              ([.nm-len] len-copies2 [buf-len materialize-len.]
-                {
-                  [.buf-len]
-                  ({
-                    ({[.env-n-len]
-                      ({[.env-m-len]
-                        ({[.env-k-len]
-                          ({[.nk-len]
-                            ({[.km-len]
-                              ({[.left] [.right]} *.intro)
-                            } *.intro)
-                          } *.intro)
+              ({
+                ({[.env-n-len]
+                  ({[.env-m-len]
+                    ({[.env-k-len]
+                      ({[.nk-len]
+                        ({[.km-len]
+                          ({[.left] [.right]} *.intro)
                         } *.intro)
                       } *.intro)
                     } *.intro)
-                    ({[.producer-n] [.producer-m] [.producer-k]} name.matmul-output-producer)
-                    [.materialize-len]
-                  } materializec)
-                }
-                buf.to-mem
-              )
+                  } *.intro)
+                } *.intro)
+                ({[.producer-n] [.producer-m] [.producer-k]} name.matmul-output-producer)
+                [.nm-len]
+              } materializec)
             )
           )
         )

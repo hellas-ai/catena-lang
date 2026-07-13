@@ -211,3 +211,63 @@ impl RegionBuilder {
         Region { nodes, edges }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn closure_region_stops_at_shared_producer_output() {
+        let mut definition = AnnotatedTerm::empty();
+        let seed = definition.new_node(obj("seed", vec![]));
+        let outside_copy = definition.new_node(obj("u64", vec![]));
+        let closure_arg = definition.new_node(obj("u64", vec![]));
+        let closure = definition.new_node(obj(
+            FN_HOM_TYPE,
+            vec![obj("u64", vec![]), obj("u64", vec![])],
+        ));
+        let outside_result = definition.new_node(obj("u64", vec![]));
+
+        let split = definition.new_edge(
+            op("split-len"),
+            (vec![seed], vec![outside_copy, closure_arg]),
+        );
+        let build_closure =
+            definition.new_edge(op("build-closure"), (vec![closure_arg], vec![closure]));
+        definition.new_edge(op("use-outside-copy"), (vec![outside_copy], vec![outside_result]));
+        definition.sources = vec![seed];
+        definition.targets = vec![closure, outside_result];
+
+        let [region] = closure_region(&definition, &[closure])
+            .expect("closure region discovery should succeed")
+            .try_into()
+            .expect("expected one closure region");
+
+        assert_eq!(
+            region.leaf_inputs,
+            vec![closure_arg],
+            "the closure argument produced by a shared split should become a region boundary input"
+        );
+        assert_eq!(
+            region.edges,
+            vec![build_closure],
+            "the split producer should stay outside the closure region because another output is used outside"
+        );
+        assert!(
+            !region.nodes.contains(&outside_copy),
+            "the outside split output should not be deleted with the closure region"
+        );
+        assert!(
+            !region.edges.contains(&split),
+            "shared producer edge should not be absorbed into the closure region"
+        );
+    }
+
+    fn obj(name: &str, children: Vec<Obj>) -> Obj {
+        Tree::Node(op(name), 0, children)
+    }
+
+    fn op(name: &str) -> Operation {
+        name.parse().expect("test operation should parse")
+    }
+}

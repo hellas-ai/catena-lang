@@ -162,13 +162,13 @@
   ([n m.] {([.n] ix val) ([.m] ix val)} *)
   ->
   ([n m.] {([.n] ix val) ([.m] ix val)} *)
-= f32.matmul.identity)
+= ([ij.] [.ij]))
 
 (def program f32.matmul.matrix-index-with-unit :
   ([n m.] {([.n] ix val) ([.m] ix val)} *)
   ->
   ([n m.] {1 ({([.n] ix val) ([.m] ix val)} *)} *)
-= f32.matmul.with-left-unit)
+= ([ij.] {unit.intro [.ij]} *.intro))
 
 (def program f32.matmul.buf-at :
   ([n.] {

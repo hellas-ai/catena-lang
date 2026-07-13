@@ -81,7 +81,11 @@ pub fn render_module(module: &GpuModule, dialect: GpuDialect) -> Result<String, 
     let mut out = String::new();
     out.push_str(&render_gpu_prelude(dialect));
     out.push('\n');
-    render_module_body(&mut out, module, dialect)?;
+    let mut host_only_functions = HashSet::new();
+    if function_is_directly_host_only(&module.entry) {
+        host_only_functions.insert(module.entry.name.clone());
+    }
+    render_module_body(&mut out, module, dialect, &host_only_functions)?;
     Ok(out)
 }
 
@@ -93,16 +97,22 @@ pub fn render_modules(
     let mut out = String::new();
     out.push_str(&render_gpu_prelude(dialect));
     out.push('\n');
+    let host_only_functions = host_only_function_names(modules);
 
     for module in modules.values() {
-        render_function_decl(&mut out, &module.entry, dialect)?;
+        render_function_decl(
+            &mut out,
+            &module.entry,
+            dialect,
+            host_only_functions.contains(&module.entry.name),
+        )?;
     }
     if !modules.is_empty() {
         out.push('\n');
     }
 
     for module in modules.values() {
-        render_module_body(&mut out, module, dialect)?;
+        render_module_body(&mut out, module, dialect, &host_only_functions)?;
         out.push('\n');
     }
 
@@ -113,6 +123,7 @@ fn render_module_body(
     out: &mut String,
     module: &GpuModule,
     dialect: GpuDialect,
+    host_only_functions: &HashSet<String>,
 ) -> Result<(), GpuRenderError> {
     // Materialization is represented in the dataflow body as one assignment, but GPU codegen needs an
     // auxiliary `__global__` kernel in addition to the host wrapper function.
@@ -135,7 +146,12 @@ fn render_module_body(
     }
 
     // The entry function is the ordinary host-callable wrapper for this definition.
-    render_function(out, &module.entry, dialect)?;
+    render_function(
+        out,
+        &module.entry,
+        dialect,
+        host_only_functions.contains(&module.entry.name),
+    )?;
     Ok(())
 }
 
@@ -143,13 +159,14 @@ fn render_function_decl(
     out: &mut String,
     function: &GpuFunction,
     dialect: GpuDialect,
+    host_only: bool,
 ) -> Result<(), GpuRenderError> {
-    if function_is_host_only(function) {
+    if host_only {
         out.push_str(&format!("#ifndef {}\n", dialect.device_compile_guard()));
     }
-    out.push_str(&function_signature(function)?);
+    out.push_str(&function_signature(function, host_only)?);
     out.push_str(";\n");
-    if function_is_host_only(function) {
+    if host_only {
         out.push_str("#endif\n");
     }
     Ok(())
@@ -159,11 +176,12 @@ fn render_function(
     out: &mut String,
     function: &GpuFunction,
     dialect: GpuDialect,
+    host_only: bool,
 ) -> Result<(), GpuRenderError> {
-    if function_is_host_only(function) {
+    if host_only {
         out.push_str(&format!("#ifndef {}\n", dialect.device_compile_guard()));
     }
-    out.push_str(&function_signature(function)?);
+    out.push_str(&function_signature(function, host_only)?);
     out.push_str(" {\n");
     let mut declared = function
         .sources
@@ -190,21 +208,49 @@ fn render_function(
     }
     out.push_str("    return;\n");
     out.push_str("}\n");
-    if function_is_host_only(function) {
+    if host_only {
         out.push_str("#endif\n");
     }
     Ok(())
 }
 
-fn function_is_host_only(function: &GpuFunction) -> bool {
+fn function_is_directly_host_only(function: &GpuFunction) -> bool {
     function
         .assignments
         .iter()
         .any(|assignment| matches!(assignment.op.as_str(), "gpu.materialize" | "materializec"))
 }
 
-fn function_signature(function: &GpuFunction) -> Result<String, GpuRenderError> {
-    let qualifier = if function_is_host_only(function) {
+fn host_only_function_names(modules: &GpuModuleMap) -> HashSet<String> {
+    let mut host_only = modules
+        .values()
+        .filter(|module| function_is_directly_host_only(&module.entry))
+        .map(|module| module.entry.name.clone())
+        .collect::<HashSet<_>>();
+
+    loop {
+        let mut changed = false;
+        for module in modules.values() {
+            if host_only.contains(&module.entry.name) {
+                continue;
+            }
+            if module.entry.assignments.iter().any(|assignment| {
+                assignment
+                    .call_symbol
+                    .as_ref()
+                    .is_some_and(|symbol| host_only.contains(symbol))
+            }) {
+                changed |= host_only.insert(module.entry.name.clone());
+            }
+        }
+        if !changed {
+            return host_only;
+        }
+    }
+}
+
+fn function_signature(function: &GpuFunction, host_only: bool) -> Result<String, GpuRenderError> {
+    let qualifier = if host_only {
         "__host__ "
     } else {
         "__host__ __device__ "

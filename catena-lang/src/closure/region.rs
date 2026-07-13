@@ -74,8 +74,13 @@ fn closure_region_with_connectivity(
         });
     }
 
-    let Region { nodes, edges } = build_closure_region(definition, &connectivity, closure_wire)?;
-    let leaf_inputs = leaf_inputs(definition, &edges);
+    let Region {
+        nodes,
+        edges,
+        boundary_inputs,
+    } = build_closure_region(definition, &connectivity, closure_wire)?;
+    let mut leaf_inputs = leaf_inputs(definition, &edges);
+    leaf_inputs.extend(boundary_inputs);
     Ok(ClosureRegion {
         closure_wire,
         closure_type: closure_type.clone(),
@@ -117,7 +122,13 @@ fn build_closure_region(
 
         for source in &hyperedge.sources {
             if let Some(&source_producer) = connectivity.producer_by_wire.get(&source.0) {
-                pending.push_back(source_producer);
+                if producer_targets_are_inside_region(definition, source_producer, &region) {
+                    pending.push_back(source_producer);
+                } else {
+                    region.insert_boundary_input(*source);
+                }
+            } else {
+                region.insert_boundary_input(*source);
             }
         }
     }
@@ -127,6 +138,17 @@ fn build_closure_region(
 
 fn is_region_leaf(operation: &Operation) -> bool {
     operation.as_str() == DEFER || operation.as_str().starts_with(NAME_PREFIX)
+}
+
+fn producer_targets_are_inside_region(
+    definition: &AnnotatedTerm,
+    producer: EdgeId,
+    region: &RegionBuilder,
+) -> bool {
+    definition.hypergraph.adjacency[producer.0]
+        .targets
+        .iter()
+        .all(|target| region.contains_node(*target))
 }
 
 fn leaf_inputs(definition: &AnnotatedTerm, edges: &[EdgeId]) -> Vec<NodeId> {
@@ -168,11 +190,13 @@ impl Connectivity {
 struct Region {
     nodes: Vec<NodeId>,
     edges: Vec<EdgeId>,
+    boundary_inputs: Vec<NodeId>,
 }
 
 struct RegionBuilder {
     nodes: Vec<bool>,
     edges: Vec<bool>,
+    boundary_inputs: Vec<NodeId>,
 }
 
 impl RegionBuilder {
@@ -180,6 +204,7 @@ impl RegionBuilder {
         Self {
             nodes: vec![false; definition.hypergraph.nodes.len()],
             edges: vec![false; definition.hypergraph.edges.len()],
+            boundary_inputs: Vec::new(),
         }
     }
 
@@ -195,6 +220,20 @@ impl RegionBuilder {
         }
     }
 
+    fn insert_boundary_input(&mut self, node: NodeId) {
+        if !self
+            .boundary_inputs
+            .iter()
+            .any(|boundary_input| *boundary_input == node)
+        {
+            self.boundary_inputs.push(node);
+        }
+    }
+
+    fn contains_node(&self, node: NodeId) -> bool {
+        self.nodes[node.0]
+    }
+
     fn finish(self) -> Region {
         let nodes = self
             .nodes
@@ -208,7 +247,11 @@ impl RegionBuilder {
             .enumerate()
             .filter_map(|(index, present)| present.then_some(EdgeId(index)))
             .collect();
-        Region { nodes, edges }
+        Region {
+            nodes,
+            edges,
+            boundary_inputs: self.boundary_inputs,
+        }
     }
 }
 

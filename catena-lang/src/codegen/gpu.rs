@@ -81,11 +81,12 @@ pub fn render_module(module: &GpuModule, dialect: GpuDialect) -> Result<String, 
     let mut out = String::new();
     out.push_str(&render_gpu_prelude(dialect));
     out.push('\n');
-    let mut host_only_functions = HashSet::new();
-    if function_is_directly_host_only(&module.entry) {
-        host_only_functions.insert(module.entry.name.clone());
-    }
-    render_module_body(&mut out, module, dialect, &host_only_functions)?;
+    let placement = if function_directly_requires_host(&module.entry) {
+        GpuFunctionPlacement::HostOnly
+    } else {
+        GpuFunctionPlacement::HostAndDevice
+    };
+    render_module_body(&mut out, module, dialect, placement)?;
     Ok(out)
 }
 
@@ -97,14 +98,14 @@ pub fn render_modules(
     let mut out = String::new();
     out.push_str(&render_gpu_prelude(dialect));
     out.push('\n');
-    let host_only_functions = host_only_function_names(modules);
+    let placements = function_placements(modules);
 
     for module in modules.values() {
         render_function_decl(
             &mut out,
             &module.entry,
             dialect,
-            host_only_functions.contains(&module.entry.name),
+            function_placement(&placements, &module.entry.name),
         )?;
     }
     if !modules.is_empty() {
@@ -112,7 +113,12 @@ pub fn render_modules(
     }
 
     for module in modules.values() {
-        render_module_body(&mut out, module, dialect, &host_only_functions)?;
+        render_module_body(
+            &mut out,
+            module,
+            dialect,
+            function_placement(&placements, &module.entry.name),
+        )?;
         out.push('\n');
     }
 
@@ -123,7 +129,7 @@ fn render_module_body(
     out: &mut String,
     module: &GpuModule,
     dialect: GpuDialect,
-    host_only_functions: &HashSet<String>,
+    placement: GpuFunctionPlacement,
 ) -> Result<(), GpuRenderError> {
     // Materialization is represented in the dataflow body as one assignment, but GPU codegen needs an
     // auxiliary `__global__` kernel in addition to the host wrapper function.
@@ -146,12 +152,7 @@ fn render_module_body(
     }
 
     // The entry function is the ordinary host-callable wrapper for this definition.
-    render_function(
-        out,
-        &module.entry,
-        dialect,
-        host_only_functions.contains(&module.entry.name),
-    )?;
+    render_function(out, &module.entry, dialect, placement)?;
     Ok(())
 }
 
@@ -159,14 +160,14 @@ fn render_function_decl(
     out: &mut String,
     function: &GpuFunction,
     dialect: GpuDialect,
-    host_only: bool,
+    placement: GpuFunctionPlacement,
 ) -> Result<(), GpuRenderError> {
-    if host_only {
+    if placement.is_host_only() {
         out.push_str(&format!("#ifndef {}\n", dialect.device_compile_guard()));
     }
-    out.push_str(&function_signature(function, host_only)?);
+    out.push_str(&function_signature(function, placement)?);
     out.push_str(";\n");
-    if host_only {
+    if placement.is_host_only() {
         out.push_str("#endif\n");
     }
     Ok(())
@@ -176,12 +177,12 @@ fn render_function(
     out: &mut String,
     function: &GpuFunction,
     dialect: GpuDialect,
-    host_only: bool,
+    placement: GpuFunctionPlacement,
 ) -> Result<(), GpuRenderError> {
-    if host_only {
+    if placement.is_host_only() {
         out.push_str(&format!("#ifndef {}\n", dialect.device_compile_guard()));
     }
-    out.push_str(&function_signature(function, host_only)?);
+    out.push_str(&function_signature(function, placement)?);
     out.push_str(" {\n");
     let mut declared = function
         .sources
@@ -208,52 +209,90 @@ fn render_function(
     }
     out.push_str("    return;\n");
     out.push_str("}\n");
-    if host_only {
+    if placement.is_host_only() {
         out.push_str("#endif\n");
     }
     Ok(())
 }
 
-fn function_is_directly_host_only(function: &GpuFunction) -> bool {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GpuFunctionPlacement {
+    HostOnly,
+    HostAndDevice,
+}
+
+impl GpuFunctionPlacement {
+    fn is_host_only(self) -> bool {
+        matches!(self, Self::HostOnly)
+    }
+}
+
+fn function_directly_requires_host(function: &GpuFunction) -> bool {
     function
         .assignments
         .iter()
         .any(|assignment| matches!(assignment.op.as_str(), "gpu.materialize" | "materializec"))
 }
 
-fn host_only_function_names(modules: &GpuModuleMap) -> HashSet<String> {
-    let mut host_only = modules
+fn function_placements(modules: &GpuModuleMap) -> BTreeMap<String, GpuFunctionPlacement> {
+    let mut placements = modules
         .values()
-        .filter(|module| function_is_directly_host_only(&module.entry))
-        .map(|module| module.entry.name.clone())
-        .collect::<HashSet<_>>();
+        .map(|module| {
+            let placement = if function_directly_requires_host(&module.entry) {
+                GpuFunctionPlacement::HostOnly
+            } else {
+                GpuFunctionPlacement::HostAndDevice
+            };
+            (module.entry.name.clone(), placement)
+        })
+        .collect::<BTreeMap<_, _>>();
 
     loop {
         let mut changed = false;
         for module in modules.values() {
-            if host_only.contains(&module.entry.name) {
+            if function_placement(&placements, &module.entry.name).is_host_only() {
                 continue;
             }
-            if module.entry.assignments.iter().any(|assignment| {
-                assignment
-                    .call_symbol
-                    .as_ref()
-                    .is_some_and(|symbol| host_only.contains(symbol))
-            }) {
-                changed |= host_only.insert(module.entry.name.clone());
+            if function_calls_host_only(&module.entry, &placements) {
+                placements.insert(module.entry.name.clone(), GpuFunctionPlacement::HostOnly);
+                changed = true;
             }
         }
         if !changed {
-            return host_only;
+            return placements;
         }
     }
 }
 
-fn function_signature(function: &GpuFunction, host_only: bool) -> Result<String, GpuRenderError> {
-    let qualifier = if host_only {
-        "__host__ "
-    } else {
-        "__host__ __device__ "
+fn function_calls_host_only(
+    function: &GpuFunction,
+    placements: &BTreeMap<String, GpuFunctionPlacement>,
+) -> bool {
+    function.assignments.iter().any(|assignment| {
+        assignment
+            .call_symbol
+            .as_ref()
+            .is_some_and(|symbol| function_placement(placements, symbol).is_host_only())
+    })
+}
+
+fn function_placement(
+    placements: &BTreeMap<String, GpuFunctionPlacement>,
+    function_name: &str,
+) -> GpuFunctionPlacement {
+    placements
+        .get(function_name)
+        .copied()
+        .unwrap_or(GpuFunctionPlacement::HostAndDevice)
+}
+
+fn function_signature(
+    function: &GpuFunction,
+    placement: GpuFunctionPlacement,
+) -> Result<String, GpuRenderError> {
+    let qualifier = match placement {
+        GpuFunctionPlacement::HostOnly => "__host__ ",
+        GpuFunctionPlacement::HostAndDevice => "__host__ __device__ ",
     };
     let mut signature = format!("extern \"C\" {qualifier}void {}(", function.name);
     let mut params = Vec::new();

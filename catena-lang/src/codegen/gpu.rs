@@ -7,7 +7,7 @@ use crate::codegen::{
     GpuAssign, GpuDialect, GpuFunction, GpuModule, GpuModuleMap, GpuValue, GpuVar,
     components::value_expr,
     lower_types::CType,
-    ops::{ifc, materializec, reducec},
+    ops::{ifc, materializec, reducec, row_major},
     prelude::render_gpu_prelude,
     render_utils::{c_type, invalid_inputs, invalid_outputs, param_decl},
     runtime_type,
@@ -354,9 +354,9 @@ fn render_assignment(
         "f32.bitcast-u32" => render_f32_bitcast_u32(out, assignment)?,
         "ix.zero" => render_ix_zero(out, assignment)?,
         "ix" => render_ix(out, assignment)?,
-        "row-major-index" => render_row_major_index(out, assignment)?,
-        "row-major-row" => render_row_major_row(out, assignment)?,
-        "row-major-col" => render_row_major_col(out, assignment)?,
+        "row-major-index" => row_major::render_index(out, assignment)?,
+        "row-major-row" => row_major::render_row(out, assignment)?,
+        "row-major-col" => row_major::render_col(out, assignment)?,
         "eval" => render_eval(out, assignment)?,
         "reducec" => reducec::render(out, assignment)?,
         "gpu.materialize" => render_materialize_call(out, function, assignment, dialect)?,
@@ -805,66 +805,6 @@ fn render_ix(out: &mut String, assignment: &GpuAssign) -> Result<(), GpuRenderEr
     Ok(())
 }
 
-fn render_row_major_index(out: &mut String, assignment: &GpuAssign) -> Result<(), GpuRenderError> {
-    let inputs = runtime_inputs(assignment);
-    let [cols, row, col] = inputs.as_slice() else {
-        return Err(invalid_inputs(assignment, 3));
-    };
-    let [output] = assignment.outputs.as_slice() else {
-        return Err(invalid_outputs(assignment, 1));
-    };
-    out.push_str(&format!(
-        "    {} = {} * {} + {};\n",
-        output.name,
-        value_expr(row),
-        value_expr(cols),
-        value_expr(col)
-    ));
-    Ok(())
-}
-
-fn render_row_major_row(out: &mut String, assignment: &GpuAssign) -> Result<(), GpuRenderError> {
-    let inputs = runtime_inputs(assignment);
-    let [cols, flat] = inputs.as_slice() else {
-        return Err(invalid_inputs(assignment, 2));
-    };
-    let [output] = assignment.outputs.as_slice() else {
-        return Err(invalid_outputs(assignment, 1));
-    };
-    out.push_str(&format!(
-        "    {} = {} / {};\n",
-        output.name,
-        value_expr(flat),
-        value_expr(cols)
-    ));
-    Ok(())
-}
-
-fn render_row_major_col(out: &mut String, assignment: &GpuAssign) -> Result<(), GpuRenderError> {
-    let inputs = runtime_inputs(assignment);
-    let [cols, flat] = inputs.as_slice() else {
-        return Err(invalid_inputs(assignment, 2));
-    };
-    let [output] = assignment.outputs.as_slice() else {
-        return Err(invalid_outputs(assignment, 1));
-    };
-    out.push_str(&format!(
-        "    {} = {} % {};\n",
-        output.name,
-        value_expr(flat),
-        value_expr(cols)
-    ));
-    Ok(())
-}
-
-fn runtime_inputs(assignment: &GpuAssign) -> Vec<&GpuValue> {
-    assignment
-        .inputs
-        .iter()
-        .filter(|value| matches!(value, GpuValue::Var(var) if runtime_type(var).is_some()))
-        .collect()
-}
-
 fn render_call(
     out: &mut String,
     symbol: &str,
@@ -951,9 +891,9 @@ fn render_primitive_eval(
     match target.as_str() {
         "f32.add" => render_binary(out, &primitive, "+")?,
         "f32.mul" => render_binary(out, &primitive, "*")?,
-        "row-major-index" => render_row_major_index(out, &primitive)?,
-        "row-major-row" => render_row_major_row(out, &primitive)?,
-        "row-major-col" => render_row_major_col(out, &primitive)?,
+        "row-major-index" => row_major::render_index(out, &primitive)?,
+        "row-major-row" => row_major::render_row(out, &primitive)?,
+        "row-major-col" => row_major::render_col(out, &primitive)?,
         _ => return Ok(false),
     }
     Ok(true)
@@ -1299,7 +1239,7 @@ mod tests {
         let value = var(0, "x0", CType::U64);
         let module = GpuModule {
             name: "program_index_copy".to_string(),
-            source_name: Some(op("index-copy")),
+            source_name: Some(op("ix.copy")),
             entry: GpuFunction {
                 name: "program_index_copy".to_string(),
                 sources: vec![value.clone()],

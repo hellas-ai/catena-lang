@@ -135,37 +135,6 @@
   )
 ))
 
-(theory program type {
-  # External matrix-layout layer.
-  #
-  # These arrows hide flattened-matrix address arithmetic. They map logical
-  # matrix coordinates to the flat index consumed by a full-buffer reader.
-  (arr row-major-index :
-    ([n k.] {
-      ({[.k] u64} :)
-      ({([.n] ix val) ([.k] ix val)} *)
-    })
-    ->
-    ([n k.] (({[.n] [.k]} *) ix val)))
-
-  (arr row-major-row :
-    ([n m.] {
-      ({[.m] u64} :)
-      (({[.n] [.m]} *) ix val)
-    })
-    ->
-    ([n m.] ([.n] ix val)))
-
-  (arr row-major-col :
-    ([n m.] {
-      ({[.m] u64} :)
-      (({[.n] [.m]} *) ix val)
-    })
-    ->
-    ([n m.] ([.m] ix val)))
-
-})
-
 (def program f32.buf-at :
   ([n.] {
     ({cap.ref [.n] f32} buf val)
@@ -182,12 +151,6 @@
   ->
   ([n.] ([.n] ix val))
 = ([i.] [.i]))
-
-(def program index-copy :
-  ([n.] ([.n] ix val))
-  ->
-  ([n.] {([.n] ix val) ([.n] ix val)})
-= ([i.] {[.i] [.i]}))
 
 (def program index-with-unit :
   ([n.] ([.n] ix val))
@@ -332,7 +295,7 @@
     ([.copy-len] len-param [copy-param.]
       ({
         ({
-          ([.copy-param] name.index-copy lift)
+          ([.copy-param] name.ix.copy lift)
           ({
             ({[.n-len] [.left-k-len] [.left-reader] [.row]} f32.matrix-row-reader)
             ({[.right-k-len] [.m-len] [.right-reader] [.col]} f32.matrix-col-reader)
@@ -445,7 +408,7 @@
           ([.env-rest-c] *.elim [nk-len env-rest-d.]
             ([.env-rest-d] *.elim [km-len buffers.]
               ([.buffers] *.elim [left right.]
-                ([.out-i] index-copy [row-i col-i.]
+                ([.out-i] ix.copy [row-i col-i.]
                   ({[.row-stride] [.row-i]} row-major-row [row.]
                     ({[.col-stride] [.col-i]} row-major-col [col.]
                       ({[.n-len] [.cell-m-len] [.k-len] [.nk-len] [.km-len] [.left] [.right] [.row] [.col]} matmul-cell-buf-readers)

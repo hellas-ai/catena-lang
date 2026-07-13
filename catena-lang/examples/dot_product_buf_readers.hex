@@ -60,12 +60,6 @@
   ([n.] ([.n] ix val))
 = ([i.] [.i]))
 
-(def program index-copy :
-  ([n.] ([.n] ix val))
-  ->
-  ([n.] {([.n] ix val) ([.n] ix val)})
-= ([i.] {[.i] [.i]}))
-
 (def program index-with-unit :
   ([n.] ([.n] ix val))
   ->
@@ -107,7 +101,7 @@
 #
 #   ix n
 #     |
-#   index-copy
+#   ix.copy
 #     |
 #   left-reader tensor right-reader
 #     |
@@ -128,7 +122,7 @@
   ([.len] len-param [copy-param.])
   ({
     ({
-      ([.copy-param] name.index-copy lift)
+      ([.copy-param] name.ix.copy lift)
       ({[.left-reader] [.right-reader]} tensor)
     } compose)
     (name.f32.mul lift)

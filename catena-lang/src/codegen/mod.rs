@@ -7,6 +7,7 @@
 mod components;
 pub mod fn_ptrs;
 pub mod gpu;
+mod gpu_placement;
 pub mod lower_types;
 mod ops;
 mod prelude;

@@ -164,11 +164,11 @@
   ([n.] {([.n] ix val) 1} *)
 = ([i.] {[.i] unit.intro} *.intro))
 
-# Return an indexed reader closure for an f32 buffer.
+# Return an indexed view closure for an f32 buffer.
 #
 # This is the only place where a buffer is captured by a closure. The captured
 # value is an ordinary buffer value, not a closure.
-(def program f32.buf-reader :
+(def program f32.buf.view :
   ([n.] {
     ({[.n] u64} :)
     ({cap.ref [.n] f32} buf val)
@@ -191,10 +191,10 @@
   )
 ))
 
-# Fix the row of a row-major matrix reader:
+# Build a row view from a row-major matrix view:
 #
-#   row-reader(A, row) = lambda k. A[row,k]
-(def program f32.matrix-row-reader :
+#   row-view(A, i) = lambda k. A[i,k]
+(def program f32.row-major.row-view :
   ([n k.] {
     ({[.n] u64} :)
     ({[.k] u64} :)
@@ -203,7 +203,7 @@
   })
   ->
   ([n k.] ({([.k] ix val) (f32 val)} =>))
-= ([n-len k-len reader row.]
+= ([n-len k-len matrix-view i.]
   ([.n-len] len-param [n-param.]
     ([.k-len] len-copies5 [outer-unit-len stride-len pair-unit-len id-len index-k-len.]
       ([.index-k-len] len-param [index-k-param.]
@@ -216,7 +216,7 @@
                 ({
                   (([.pair-unit-len] :.param) name.index-with-unit lift)
                   ({
-                    ([.row] defer)
+                    ([.i] defer)
                     (([.id-len] :.param) name.index-id lift)
                   } tensor)
                 } compose)
@@ -224,17 +224,17 @@
             } compose)
             ({[.n-param] [.index-k-param]} name.row-major-index lift)
           } compose)
-          [.reader]
+          [.matrix-view]
         } compose)
       )
     )
   )
 ))
 
-# Fix the column of a row-major matrix reader:
+# Build a column view from a row-major matrix view:
 #
-#   col-reader(B, col) = lambda k. B[k,col]
-(def program f32.matrix-col-reader :
+#   col-view(B, j) = lambda k. B[k,j]
+(def program f32.row-major.col-view :
   ([k m.] {
     ({[.k] u64} :)
     ({[.m] u64} :)
@@ -243,7 +243,7 @@
   })
   ->
   ([k m.] ({([.k] ix val) (f32 val)} =>))
-= ([k-len m-len reader col.]
+= ([k-len m-len matrix-view j.]
   ([.m-len] :.ty [stride-len m-param.]
     ([.k-len] len-copies4 [outer-unit-len pair-unit-len id-len index-k-len.]
       ([.index-k-len] len-param [index-k-param.]
@@ -257,14 +257,14 @@
                   (([.pair-unit-len] :.param) name.index-with-unit-right lift)
                   ({
                     (([.id-len] :.param) name.index-id lift)
-                    ([.col] defer)
+                    ([.j] defer)
                   } tensor)
                 } compose)
               } tensor)
             } compose)
             ({[.index-k-param] [.m-param]} name.row-major-index lift)
           } compose)
-          [.reader]
+          [.matrix-view]
         } compose)
       )
     )
@@ -275,10 +275,10 @@
 #
 #   lambda k. A[i,k] * B[k,j]
 #
-# The flat buffer readers are closures. They are composed with matrix-index
+# The flat matrix views are closures. They are composed with row/column view
 # closures and tensored as closures; they are never passed to `defer` or
 # `*.intro`.
-(def program f32.matmul-k-reader :
+(def program f32.matmul.k-product :
   ([n m k.] {
     ({[.n] u64} :)
     ({[.m] u64} :)
@@ -290,15 +290,15 @@
   })
   ->
   ([n m k.] ({([.k] ix val) (f32 val)} =>))
-= ([n-len m-len k-len left-reader right-reader row col.]
-  ([.k-len] len-copies3 [copy-len left-k-len right-k-len.]
+= ([n-len m-len k-len a-view b-view i j.]
+  ([.k-len] len-copies3 [copy-len a-k-len b-k-len.]
     ([.copy-len] len-param [copy-param.]
       ({
         ({
           ([.copy-param] name.ix.copy lift)
           ({
-            ({[.n-len] [.left-k-len] [.left-reader] [.row]} f32.matrix-row-reader)
-            ({[.right-k-len] [.m-len] [.right-reader] [.col]} f32.matrix-col-reader)
+            ({[.n-len] [.a-k-len] [.a-view] [.i]} f32.row-major.row-view)
+            ({[.b-k-len] [.m-len] [.b-view] [.j]} f32.row-major.col-view)
           } tensor)
         } compose)
         (name.f32.mul lift)
@@ -307,15 +307,15 @@
   )
 ))
 
-# Compute one matrix-multiply output cell from already-built matrix readers.
+# Compute one matrix-multiply output cell from already-built matrix views.
 #
 # This is the inner `reduce` over k:
 #
 #   reduce(+, map(lambda k. A[i,k] * B[k,j], k), 0)
 #
 # The original buffers are no longer visible here. They can only be accessed by
-# running the reader closures.
-(def program matmul-cell-readers :
+# running the view closures.
+(def program f32.matmul.cell-dot :
   ([n m k.] {
     ({[.n] u64} :)
     ({[.m] u64} :)
@@ -327,12 +327,12 @@
   })
   ->
   ([n m k.] (f32 val))
-= ([n-len m-len k-len left-reader right-reader row col.]
+= ([n-len m-len k-len a-view b-view i j.]
   ([.k-len] len-copies2 [reduce-len producer-len.]
     {
       (const.u32.0x00000000 u32.bitcast-f32)
       (name.f32.add lift)
-      ({[.n-len] [.m-len] [.producer-len] [.left-reader] [.right-reader] [.row] [.col]} f32.matmul-k-reader)
+      ({[.n-len] [.m-len] [.producer-len] [.a-view] [.b-view] [.i] [.j]} f32.matmul.k-product)
       [.reduce-len]
     }
     reduce
@@ -341,15 +341,15 @@
 
 # Matrix multiplication cell from buffers.
 #
-# The buffer layer immediately turns each flat matrix buffer into a reader
+# The buffer layer immediately turns each flat matrix buffer into a view
 # closure:
 #
-#   left-buffer  -> ix (n*k) => f32
-#   right-buffer -> ix (k*m) => f32
+#   A-buffer -> ix (n*k) => f32
+#   B-buffer -> ix (k*m) => f32
 #
 # After those conversions, the cell computation receives only closures and
 # indices. It does not manipulate the original buffers directly.
-(def program matmul-cell-buf-readers :
+(def program f32.matmul.cell-dot-from-bufs :
   ([n m k.] {
     ({[.n] u64} :)
     ({[.m] u64} :)
@@ -363,19 +363,19 @@
   })
   ->
   ([n m k.] (f32 val))
-= ([n-len m-len k-len nk-len km-len left right row col.]
+= ([n-len m-len k-len nk-len km-len a b i j.]
   ({
     [.n-len]
     [.m-len]
     [.k-len]
-    ({[.nk-len] [.left]} f32.buf-reader)
-    ({[.km-len] [.right]} f32.buf-reader)
-    [.row]
-    [.col]
-  } matmul-cell-readers)
+    ({[.nk-len] [.a]} f32.buf.view)
+    ({[.km-len] [.b]} f32.buf.view)
+    [.i]
+    [.j]
+  } f32.matmul.cell-dot)
 ))
 
-(def program matmul-output-producer :
+(def program f32.matmul.cell-at-flat-index :
   ([n m k.] {
     ({
       ({[.n] u64} :)
@@ -400,18 +400,18 @@
   })
   ->
   ([n m k.] (f32 val))
-= ([env out-i.]
+= ([env flat-c.]
   ([.env] *.elim [n-len env-rest-a.]
     ([.env-rest-a] *.elim [m-len env-rest-b.]
-      ([.m-len] len-copies3 [cell-m-len row-stride col-stride.]
+      ([.m-len] len-copies3 [cell-m-len output-cols-for-row output-cols-for-col.]
         ([.env-rest-b] *.elim [k-len env-rest-c.]
           ([.env-rest-c] *.elim [nk-len env-rest-d.]
             ([.env-rest-d] *.elim [km-len buffers.]
-              ([.buffers] *.elim [left right.]
-                ([.out-i] ix.copy [row-i col-i.]
-                  ({[.row-stride] [.row-i]} row-major-row [row.]
-                    ({[.col-stride] [.col-i]} row-major-col [col.]
-                      ({[.n-len] [.cell-m-len] [.k-len] [.nk-len] [.km-len] [.left] [.right] [.row] [.col]} matmul-cell-buf-readers)
+              ([.buffers] *.elim [a b.]
+                ([.flat-c] ix.copy [flat-for-row flat-for-col.]
+                  ({[.output-cols-for-row] [.flat-for-row]} row-major-row [i.]
+                    ({[.output-cols-for-col] [.flat-for-col]} row-major-col [j.]
+                      ({[.n-len] [.cell-m-len] [.k-len] [.nk-len] [.km-len] [.a] [.b] [.i] [.j]} f32.matmul.cell-dot-from-bufs)
                     )
                   )
                 )
@@ -427,14 +427,14 @@
 # Full matrix multiplication from flat buffers.
 #
 # The output is materialized over the flattened n*m result space. The producer
-# maps each flat output index to (row, col), then computes:
+# maps each flat output index to (i, j), then computes:
 #
-#   sum_k A[row,k] * B[k,col]
+#   sum_k A[i,k] * B[k,j]
 #
-# The materialize environment contains ordinary lengths and buffers. Reader
+# The materialize environment contains ordinary lengths and buffers. View
 # closures are built inside the producer so we do not pack closures with
 # `*.intro` or pass closures through `defer`.
-(def program matmul-buf-readers :
+(def program f32.matmul.row-major-bufs :
   ([n m k.] {
     ({[.n] u64} :)
     ({[.m] u64} :)
@@ -447,7 +447,7 @@
   })
   ->
   ([n m k.] ({cap.own ({[.n] [.m]} *) f32} buf val))
-= ([n-len m-len k-len nk-len km-len nm-len left right.]
+= ([n-len m-len k-len nk-len km-len nm-len a b.]
   ([.n-len] len-copies2 [env-n-len producer-n-len.]
     ([.m-len] len-copies2 [env-m-len producer-m-len.]
       ([.k-len] len-copies2 [env-k-len producer-k-len.]
@@ -460,13 +460,13 @@
                     ({[.env-k-len]
                       ({[.nk-len]
                         ({[.km-len]
-                          ({[.left] [.right]} *.intro)
+                          ({[.a] [.b]} *.intro)
                         } *.intro)
                       } *.intro)
                     } *.intro)
                   } *.intro)
                 } *.intro)
-                ({[.producer-n] [.producer-m] [.producer-k]} name.matmul-output-producer)
+                ({[.producer-n] [.producer-m] [.producer-k]} name.f32.matmul.cell-at-flat-index)
                 [.nm-len]
               } materializec)
             )

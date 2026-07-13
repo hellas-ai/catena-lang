@@ -81,12 +81,12 @@ pub fn render_module(module: &GpuModule, dialect: GpuDialect) -> Result<String, 
     let mut out = String::new();
     out.push_str(&render_gpu_prelude(dialect));
     out.push('\n');
-    let placement = if function_directly_requires_host(&module.entry) {
-        GpuFunctionPlacement::HostOnly
-    } else {
-        GpuFunctionPlacement::HostAndDevice
-    };
-    render_module_body(&mut out, module, dialect, placement)?;
+    render_module_body(
+        &mut out,
+        module,
+        dialect,
+        direct_function_placement(&module.entry),
+    )?;
     Ok(out)
 }
 
@@ -235,45 +235,58 @@ fn function_directly_requires_host(function: &GpuFunction) -> bool {
 }
 
 fn function_placements(modules: &GpuModuleMap) -> BTreeMap<String, GpuFunctionPlacement> {
-    let mut placements = modules
+    let callers_by_callee = callers_by_callee(modules);
+    let mut host_only = modules
+        .values()
+        .filter(|module| function_directly_requires_host(&module.entry))
+        .map(|module| module.entry.name.clone())
+        .collect::<HashSet<_>>();
+    let mut frontier = host_only.iter().cloned().collect::<Vec<_>>();
+
+    while let Some(host_only_callee) = frontier.pop() {
+        if let Some(callers) = callers_by_callee.get(host_only_callee.as_str()) {
+            for caller in callers {
+                if host_only.insert(caller.clone()) {
+                    frontier.push(caller.clone());
+                }
+            }
+        }
+    }
+
+    modules
         .values()
         .map(|module| {
-            let placement = if function_directly_requires_host(&module.entry) {
+            let placement = if host_only.contains(&module.entry.name) {
                 GpuFunctionPlacement::HostOnly
             } else {
                 GpuFunctionPlacement::HostAndDevice
             };
             (module.entry.name.clone(), placement)
         })
-        .collect::<BTreeMap<_, _>>();
-
-    loop {
-        let mut changed = false;
-        for module in modules.values() {
-            if function_placement(&placements, &module.entry.name).is_host_only() {
-                continue;
-            }
-            if function_calls_host_only(&module.entry, &placements) {
-                placements.insert(module.entry.name.clone(), GpuFunctionPlacement::HostOnly);
-                changed = true;
-            }
-        }
-        if !changed {
-            return placements;
-        }
-    }
+        .collect()
 }
 
-fn function_calls_host_only(
-    function: &GpuFunction,
-    placements: &BTreeMap<String, GpuFunctionPlacement>,
-) -> bool {
-    function.assignments.iter().any(|assignment| {
-        assignment
-            .call_symbol
-            .as_ref()
-            .is_some_and(|symbol| function_placement(placements, symbol).is_host_only())
-    })
+fn callers_by_callee(modules: &GpuModuleMap) -> BTreeMap<&str, Vec<String>> {
+    let mut callers = BTreeMap::<&str, Vec<String>>::new();
+    for module in modules.values() {
+        for assignment in &module.entry.assignments {
+            if let Some(callee) = assignment.call_symbol.as_deref() {
+                callers
+                    .entry(callee)
+                    .or_default()
+                    .push(module.entry.name.clone());
+            }
+        }
+    }
+    callers
+}
+
+fn direct_function_placement(function: &GpuFunction) -> GpuFunctionPlacement {
+    if function_directly_requires_host(function) {
+        GpuFunctionPlacement::HostOnly
+    } else {
+        GpuFunctionPlacement::HostAndDevice
+    }
 }
 
 fn function_placement(

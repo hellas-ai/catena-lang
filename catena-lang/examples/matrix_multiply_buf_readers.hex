@@ -1,0 +1,304 @@
+(def program len-split5 :
+  ([n.] ({[.n] u64} :))
+  ->
+  ([n.] {
+    ({[.n] u64} :)
+    ({[.n] u64} :)
+    ({[.n] u64} :)
+    ({[.n] u64} :)
+    ({[.n] u64} :)
+    [.n]
+  })
+= ([len.]
+  ([.len] :.ty [copy-a param.]
+    ([.copy-a] :.ty [copy-b _param-b.]
+      ([.copy-b] :.ty [copy-c _param-c.]
+        ([.copy-c] :.ty [copy-d _param-d.]
+          ([.copy-d] :.ty [copy-e _param-e.]
+            {[.copy-a] [.copy-b] [.copy-c] [.copy-d] [.copy-e] [.param]}
+          )
+        )
+      )
+    )
+  )
+))
+
+(def program len-copies7 :
+  ([n.] ({[.n] u64} :))
+  ->
+  ([n.] {
+    ({[.n] u64} :)
+    ({[.n] u64} :)
+    ({[.n] u64} :)
+    ({[.n] u64} :)
+    ({[.n] u64} :)
+    ({[.n] u64} :)
+    ({[.n] u64} :)
+  })
+= ([len.]
+  ([.len] :.ty [copy-a _param-a.]
+    ([.copy-a] :.ty [copy-b _param-b.]
+      ([.copy-b] :.ty [copy-c _param-c.]
+        ([.copy-c] :.ty [copy-d _param-d.]
+          ([.copy-d] :.ty [copy-e _param-e.]
+            ([.copy-e] :.ty [copy-f _param-f.]
+              ([.copy-f] :.ty [copy-g _param-g.]
+                {[.copy-a] [.copy-b] [.copy-c] [.copy-d] [.copy-e] [.copy-f] [.copy-g]}
+              )
+            )
+          )
+        )
+      )
+    )
+  )
+))
+
+(def program len-copies2 :
+  ([n.] ({[.n] u64} :))
+  ->
+  ([n.] {
+    ({[.n] u64} :)
+    ({[.n] u64} :)
+  })
+= ([len.]
+  ([.len] len-split5 [copy-a copy-b unused-a unused-b unused-c _param.]
+    [.copy-a copy-b]
+  )
+))
+
+(def program len-param :
+  ([n.] ({[.n] u64} :))
+  ->
+  ([n.] [.n])
+= ([len.]
+  ([.len] len-split5 [unused-a unused-b unused-c unused-d unused-e param.]
+    [.param]
+  )
+))
+
+(def program reader-len-copies :
+  ([n.] ({[.n] u64} :))
+  ->
+  ([n.] {[.n] [.n] [.n]})
+= ([len.]
+  ([.len] :.ty [copy-a param-a.]
+    ([.copy-a] :.ty [copy-b param-b.]
+      ([.copy-b] :.ty [_copy-c param-c.]
+        {[.param-a] [.param-b] [.param-c]}
+      )
+    )
+  )
+))
+
+(theory program type {
+  # External matrix-layout layer.
+  #
+  # These arrows hide flattened-matrix address arithmetic. They map logical
+  # matrix coordinates to the flat index consumed by a full-buffer reader.
+  (arr matrix-left-index : {[n k.]
+    ({([.n] ix val) ([.k] ix val)} *)
+  } -> ([n k.] (({[.n] [.k]} *) ix val)))
+
+  (arr matrix-right-index : {[k m.]
+    ({([.k] ix val) ([.m] ix val)} *)
+  } -> ([k m.] (({[.k] [.m]} *) ix val)))
+
+})
+
+(def program f32.buf-at :
+  ([n.] {
+    ({cap.ref [.n] f32} buf val)
+    ([.n] ix val)
+  })
+  ->
+  ([n.] (f32 val))
+= ([input i.]
+  {[.i input]} ix
+))
+
+(def program index-id :
+  ([n.] ([.n] ix val))
+  ->
+  ([n.] ([.n] ix val))
+= ([i.] [.i]))
+
+(def program index-copy :
+  ([n.] ([.n] ix val))
+  ->
+  ([n.] {([.n] ix val) ([.n] ix val)})
+= ([i.] {[.i] [.i]}))
+
+(def program index-with-unit :
+  ([n.] ([.n] ix val))
+  ->
+  ([n.] {1 ([.n] ix val)} *)
+= ([i.] {unit.intro [.i]} *.intro))
+
+(def program index-with-unit-right :
+  ([n.] ([.n] ix val))
+  ->
+  ([n.] {([.n] ix val) 1} *)
+= ([i.] {[.i] unit.intro} *.intro))
+
+# Return an indexed reader closure for an f32 buffer.
+#
+# This is the only place where a buffer is captured by a closure. The captured
+# value is an ordinary buffer value, not a closure.
+(def program f32.buf-reader :
+  ([n.] {
+    ({[.n] u64} :)
+    ({cap.ref [.n] f32} buf val)
+  })
+  ->
+  ([n.] ({([.n] ix val) (f32 val)} =>))
+= ([len input.]
+  ([.len] reader-len-copies [with-unit-len index-id-len buf-at-len.]
+    {
+      ({
+        ([.with-unit-len] name.index-with-unit lift)
+        ({
+          ([.input] defer)
+          ([.index-id-len] name.index-id lift)
+        } tensor)
+      } compose)
+      ([.buf-at-len] name.f32.buf-at lift)
+    }
+    compose
+  )
+))
+
+# Build the reduce producer for one selected matrix cell:
+#
+#   lambda k. A[i,k] * B[k,j]
+#
+# The flat buffer readers are closures. They are composed with matrix-index
+# closures and tensored as closures; they are never passed to `defer` or
+# `*.intro`.
+(def program f32.matmul-k-reader :
+  ([n m k.] {
+    ({[.n] u64} :)
+    ({[.m] u64} :)
+    ({[.k] u64} :)
+    ({(({[.n] [.k]} *) ix val) (f32 val)} =>)
+    ({(({[.k] [.m]} *) ix val) (f32 val)} =>)
+    ([.n] ix val)
+    ([.m] ix val)
+  })
+  ->
+  ([n m k.] ({([.k] ix val) (f32 val)} =>))
+= ([n-len m-len k-len left-reader right-reader row col.]
+  ([.n-len] len-param [n-param.]
+    ([.m-len] len-param [m-param.]
+      ([.k-len] len-copies7 [copy-len left-unit-len left-id-len left-index-k-len right-unit-len right-id-len right-index-k-len.]
+        ([.copy-len] len-param [copy-param.]
+          ([.left-index-k-len] len-param [left-index-k-param.]
+            ([.right-index-k-len] len-param [right-index-k-param.]
+              ({
+                ({
+                  ([.copy-param] name.index-copy lift)
+                  ({
+                    ({
+                      ({
+                        ({
+                          (([.left-unit-len] :.param) name.index-with-unit lift)
+                          ({
+                            ([.row] defer)
+                            (([.left-id-len] :.param) name.index-id lift)
+                          } tensor)
+                        } compose)
+                        ({[.n-param] [.left-index-k-param]} name.matrix-left-index lift)
+                      } compose)
+                      [.left-reader]
+                    } compose)
+                    ({
+                      ({
+                        ({
+                          (([.right-unit-len] :.param) name.index-with-unit-right lift)
+                          ({
+                            (([.right-id-len] :.param) name.index-id lift)
+                            ([.col] defer)
+                          } tensor)
+                        } compose)
+                        ({[.right-index-k-param] [.m-param]} name.matrix-right-index lift)
+                      } compose)
+                      [.right-reader]
+                    } compose)
+                  } tensor)
+                } compose)
+                (name.f32.mul lift)
+              } compose)
+            )
+          )
+        )
+      )
+    )
+  )
+))
+
+# Compute one matrix-multiply output cell from already-built matrix readers.
+#
+# This is the inner `reduce` over k:
+#
+#   reduce(+, map(lambda k. A[i,k] * B[k,j], k), 0)
+#
+# The original buffers are no longer visible here. They can only be accessed by
+# running the reader closures.
+(def program matmul-cell-readers :
+  ([n m k.] {
+    ({[.n] u64} :)
+    ({[.m] u64} :)
+    ({[.k] u64} :)
+    ({(({[.n] [.k]} *) ix val) (f32 val)} =>)
+    ({(({[.k] [.m]} *) ix val) (f32 val)} =>)
+    ([.n] ix val)
+    ([.m] ix val)
+  })
+  ->
+  ([n m k.] (f32 val))
+= ([n-len m-len k-len left-reader right-reader row col.]
+  ([.k-len] len-copies2 [reduce-len producer-len.]
+    {
+      (const.u32.0x00000000 u32.bitcast-f32)
+      (name.f32.add lift)
+      ({[.n-len] [.m-len] [.producer-len] [.left-reader] [.right-reader] [.row] [.col]} f32.matmul-k-reader)
+      [.reduce-len]
+    }
+    reduce
+  )
+))
+
+# Matrix multiplication cell from buffers.
+#
+# The buffer layer immediately turns each flat matrix buffer into a reader
+# closure:
+#
+#   left-buffer  -> ix (n*k) => f32
+#   right-buffer -> ix (k*m) => f32
+#
+# After those conversions, the cell computation receives only closures and
+# indices. It does not manipulate the original buffers directly.
+(def program matmul-buf-readers :
+  ([n m k.] {
+    ({[.n] u64} :)
+    ({[.m] u64} :)
+    ({[.k] u64} :)
+    ({({[.n] [.k]} *) u64} :)
+    ({({[.k] [.m]} *) u64} :)
+    ({cap.ref ({[.n] [.k]} *) f32} buf val)
+    ({cap.ref ({[.k] [.m]} *) f32} buf val)
+    ([.n] ix val)
+    ([.m] ix val)
+  })
+  ->
+  ([n m k.] (f32 val))
+= ([n-len m-len k-len nk-len km-len left right row col.]
+  ({
+    [.n-len]
+    [.m-len]
+    [.k-len]
+    ({[.nk-len] [.left]} f32.buf-reader)
+    ({[.km-len] [.right]} f32.buf-reader)
+    [.row]
+    [.col]
+  } matmul-cell-readers)
+))

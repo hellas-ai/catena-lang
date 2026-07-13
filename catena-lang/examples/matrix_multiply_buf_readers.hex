@@ -66,6 +66,51 @@
   )
 ))
 
+(def program len-copies3 :
+  ([n.] ({[.n] u64} :))
+  ->
+  ([n.] {
+    ({[.n] u64} :)
+    ({[.n] u64} :)
+    ({[.n] u64} :)
+  })
+= ([len.]
+  ([.len] len-split5 [copy-a copy-b copy-c unused-a unused-b _param.]
+    {[.copy-a] [.copy-b] [.copy-c]}
+  )
+))
+
+(def program len-copies4 :
+  ([n.] ({[.n] u64} :))
+  ->
+  ([n.] {
+    ({[.n] u64} :)
+    ({[.n] u64} :)
+    ({[.n] u64} :)
+    ({[.n] u64} :)
+  })
+= ([len.]
+  ([.len] len-split5 [copy-a copy-b copy-c copy-d unused-a _param.]
+    {[.copy-a] [.copy-b] [.copy-c] [.copy-d]}
+  )
+))
+
+(def program len-copies5 :
+  ([n.] ({[.n] u64} :))
+  ->
+  ([n.] {
+    ({[.n] u64} :)
+    ({[.n] u64} :)
+    ({[.n] u64} :)
+    ({[.n] u64} :)
+    ({[.n] u64} :)
+  })
+= ([len.]
+  ([.len] len-split5 [copy-a copy-b copy-c copy-d copy-e _param.]
+    {[.copy-a] [.copy-b] [.copy-c] [.copy-d] [.copy-e]}
+  )
+))
+
 (def program len-param :
   ([n.] ({[.n] u64} :))
   ->
@@ -95,13 +140,29 @@
   #
   # These arrows hide flattened-matrix address arithmetic. They map logical
   # matrix coordinates to the flat index consumed by a full-buffer reader.
-  (arr matrix-left-index : {[n k.]
-    ({([.n] ix val) ([.k] ix val)} *)
-  } -> ([n k.] (({[.n] [.k]} *) ix val)))
+  (arr row-major-index :
+    ([n k.] {
+      ({[.k] u64} :)
+      ({([.n] ix val) ([.k] ix val)} *)
+    })
+    ->
+    ([n k.] (({[.n] [.k]} *) ix val)))
 
-  (arr matrix-right-index : {[k m.]
-    ({([.k] ix val) ([.m] ix val)} *)
-  } -> ([k m.] (({[.k] [.m]} *) ix val)))
+  (arr row-major-row :
+    ([n m.] {
+      ({[.m] u64} :)
+      (({[.n] [.m]} *) ix val)
+    })
+    ->
+    ([n m.] ([.n] ix val)))
+
+  (arr row-major-col :
+    ([n m.] {
+      ({[.m] u64} :)
+      (({[.n] [.m]} *) ix val)
+    })
+    ->
+    ([n m.] ([.m] ix val)))
 
 })
 
@@ -167,6 +228,86 @@
   )
 ))
 
+# Fix the row of a row-major matrix reader:
+#
+#   row-reader(A, row) = lambda k. A[row,k]
+(def program f32.matrix-row-reader :
+  ([n k.] {
+    ({[.n] u64} :)
+    ({[.k] u64} :)
+    ({(({[.n] [.k]} *) ix val) (f32 val)} =>)
+    ([.n] ix val)
+  })
+  ->
+  ([n k.] ({([.k] ix val) (f32 val)} =>))
+= ([n-len k-len reader row.]
+  ([.n-len] len-param [n-param.]
+    ([.k-len] len-copies5 [outer-unit-len stride-len pair-unit-len id-len index-k-len.]
+      ([.index-k-len] len-param [index-k-param.]
+        ({
+          ({
+            ({
+              (([.outer-unit-len] :.param) name.index-with-unit lift)
+              ({
+                ([.stride-len] defer)
+                ({
+                  (([.pair-unit-len] :.param) name.index-with-unit lift)
+                  ({
+                    ([.row] defer)
+                    (([.id-len] :.param) name.index-id lift)
+                  } tensor)
+                } compose)
+              } tensor)
+            } compose)
+            ({[.n-param] [.index-k-param]} name.row-major-index lift)
+          } compose)
+          [.reader]
+        } compose)
+      )
+    )
+  )
+))
+
+# Fix the column of a row-major matrix reader:
+#
+#   col-reader(B, col) = lambda k. B[k,col]
+(def program f32.matrix-col-reader :
+  ([k m.] {
+    ({[.k] u64} :)
+    ({[.m] u64} :)
+    ({(({[.k] [.m]} *) ix val) (f32 val)} =>)
+    ([.m] ix val)
+  })
+  ->
+  ([k m.] ({([.k] ix val) (f32 val)} =>))
+= ([k-len m-len reader col.]
+  ([.m-len] :.ty [stride-len m-param.]
+    ([.k-len] len-copies4 [outer-unit-len pair-unit-len id-len index-k-len.]
+      ([.index-k-len] len-param [index-k-param.]
+        ({
+          ({
+            ({
+              (([.outer-unit-len] :.param) name.index-with-unit lift)
+              ({
+                ([.stride-len] defer)
+                ({
+                  (([.pair-unit-len] :.param) name.index-with-unit-right lift)
+                  ({
+                    (([.id-len] :.param) name.index-id lift)
+                    ([.col] defer)
+                  } tensor)
+                } compose)
+              } tensor)
+            } compose)
+            ({[.index-k-param] [.m-param]} name.row-major-index lift)
+          } compose)
+          [.reader]
+        } compose)
+      )
+    )
+  )
+))
+
 # Build the reduce producer for one selected matrix cell:
 #
 #   lambda k. A[i,k] * B[k,j]
@@ -187,50 +328,18 @@
   ->
   ([n m k.] ({([.k] ix val) (f32 val)} =>))
 = ([n-len m-len k-len left-reader right-reader row col.]
-  ([.n-len] len-param [n-param.]
-    ([.m-len] len-param [m-param.]
-      ([.k-len] len-copies7 [copy-len left-unit-len left-id-len left-index-k-len right-unit-len right-id-len right-index-k-len.]
-        ([.copy-len] len-param [copy-param.]
-          ([.left-index-k-len] len-param [left-index-k-param.]
-            ([.right-index-k-len] len-param [right-index-k-param.]
-              ({
-                ({
-                  ([.copy-param] name.index-copy lift)
-                  ({
-                    ({
-                      ({
-                        ({
-                          (([.left-unit-len] :.param) name.index-with-unit lift)
-                          ({
-                            ([.row] defer)
-                            (([.left-id-len] :.param) name.index-id lift)
-                          } tensor)
-                        } compose)
-                        ({[.n-param] [.left-index-k-param]} name.matrix-left-index lift)
-                      } compose)
-                      [.left-reader]
-                    } compose)
-                    ({
-                      ({
-                        ({
-                          (([.right-unit-len] :.param) name.index-with-unit-right lift)
-                          ({
-                            (([.right-id-len] :.param) name.index-id lift)
-                            ([.col] defer)
-                          } tensor)
-                        } compose)
-                        ({[.right-index-k-param] [.m-param]} name.matrix-right-index lift)
-                      } compose)
-                      [.right-reader]
-                    } compose)
-                  } tensor)
-                } compose)
-                (name.f32.mul lift)
-              } compose)
-            )
-          )
-        )
-      )
+  ([.k-len] len-copies3 [copy-len left-k-len right-k-len.]
+    ([.copy-len] len-param [copy-param.]
+      ({
+        ({
+          ([.copy-param] name.index-copy lift)
+          ({
+            ({[.n-len] [.left-k-len] [.left-reader] [.row]} f32.matrix-row-reader)
+            ({[.right-k-len] [.m-len] [.right-reader] [.col]} f32.matrix-col-reader)
+          } tensor)
+        } compose)
+        (name.f32.mul lift)
+      } compose)
     )
   )
 ))
@@ -277,7 +386,7 @@
 #
 # After those conversions, the cell computation receives only closures and
 # indices. It does not manipulate the original buffers directly.
-(def program matmul-buf-readers :
+(def program matmul-cell-buf-readers :
   ([n m k.] {
     ({[.n] u64} :)
     ({[.m] u64} :)
@@ -301,4 +410,112 @@
     [.row]
     [.col]
   } matmul-cell-readers)
+))
+
+(def program matmul-output-producer :
+  ([n m k.] {
+    ({
+      ({[.n] u64} :)
+      ({
+        ({[.m] u64} :)
+        ({
+          ({[.k] u64} :)
+          ({
+            ({({[.n] [.k]} *) u64} :)
+            ({
+              ({({[.k] [.m]} *) u64} :)
+              ({
+                ({cap.ref ({[.n] [.k]} *) f32} buf val)
+                ({cap.ref ({[.k] [.m]} *) f32} buf val)
+              } *)
+            } *)
+          } *)
+        } *)
+      } *)
+    } *)
+    (({[.n] [.m]} *) ix val)
+  })
+  ->
+  ([n m k.] (f32 val))
+= ([env out-i.]
+  ([.env] *.elim [n-len env-rest-a.]
+    ([.env-rest-a] *.elim [m-len env-rest-b.]
+      ([.m-len] len-copies3 [cell-m-len row-stride col-stride.]
+        ([.env-rest-b] *.elim [k-len env-rest-c.]
+          ([.env-rest-c] *.elim [nk-len env-rest-d.]
+            ([.env-rest-d] *.elim [km-len buffers.]
+              ([.buffers] *.elim [left right.]
+                ([.out-i] index-copy [row-i col-i.]
+                  ({[.row-stride] [.row-i]} row-major-row [row.]
+                    ({[.col-stride] [.col-i]} row-major-col [col.]
+                      ({[.n-len] [.cell-m-len] [.k-len] [.nk-len] [.km-len] [.left] [.right] [.row] [.col]} matmul-cell-buf-readers)
+                    )
+                  )
+                )
+              )
+            )
+          )
+        )
+      )
+    )
+  )
+))
+
+# Full matrix multiplication from flat buffers.
+#
+# The output is materialized over the flattened n*m result space. The producer
+# maps each flat output index to (row, col), then computes:
+#
+#   sum_k A[row,k] * B[k,col]
+#
+# The materialize environment contains ordinary lengths and buffers. Reader
+# closures are built inside the producer so we do not pack closures with
+# `*.intro` or pass closures through `defer`.
+(def program matmul-buf-readers :
+  ([n m k.] {
+    ({[.n] u64} :)
+    ({[.m] u64} :)
+    ({[.k] u64} :)
+    ({({[.n] [.k]} *) u64} :)
+    ({({[.k] [.m]} *) u64} :)
+    ({({[.n] [.m]} *) u64} :)
+    ({cap.ref ({[.n] [.k]} *) f32} buf val)
+    ({cap.ref ({[.k] [.m]} *) f32} buf val)
+  })
+  ->
+  ([n m k.] (cap.own mem))
+= ([n-len m-len k-len nk-len km-len nm-len left right.]
+  ([.n-len] len-copies2 [env-n-len producer-n-len.]
+    ([.m-len] len-copies2 [env-m-len producer-m-len.]
+      ([.k-len] len-copies2 [env-k-len producer-k-len.]
+        ([.producer-n-len] len-param [producer-n.]
+          ([.producer-m-len] len-param [producer-m.]
+            ([.producer-k-len] len-param [producer-k.]
+              ([.nm-len] len-copies2 [buf-len materialize-len.]
+                {
+                  [.buf-len]
+                  ({
+                    ({[.env-n-len]
+                      ({[.env-m-len]
+                        ({[.env-k-len]
+                          ({[.nk-len]
+                            ({[.km-len]
+                              ({[.left] [.right]} *.intro)
+                            } *.intro)
+                          } *.intro)
+                        } *.intro)
+                      } *.intro)
+                    } *.intro)
+                    ({[.producer-n] [.producer-m] [.producer-k]} name.matmul-output-producer)
+                    [.materialize-len]
+                  } materializec)
+                }
+                buf.to-mem
+              )
+            )
+          )
+        )
+      )
+    )
+  )
 ))

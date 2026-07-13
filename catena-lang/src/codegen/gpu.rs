@@ -321,6 +321,9 @@ fn render_assignment(
         "f32.bitcast-u32" => render_f32_bitcast_u32(out, assignment)?,
         "ix.zero" => render_ix_zero(out, assignment)?,
         "ix" => render_ix(out, assignment)?,
+        "row-major-index" => render_row_major_index(out, assignment)?,
+        "row-major-row" => render_row_major_row(out, assignment)?,
+        "row-major-col" => render_row_major_col(out, assignment)?,
         "eval" => render_eval(out, assignment)?,
         "reducec" => reducec::render(out, assignment)?,
         "gpu.materialize" => render_materialize_call(out, function, assignment, dialect)?,
@@ -769,6 +772,66 @@ fn render_ix(out: &mut String, assignment: &GpuAssign) -> Result<(), GpuRenderEr
     Ok(())
 }
 
+fn render_row_major_index(out: &mut String, assignment: &GpuAssign) -> Result<(), GpuRenderError> {
+    let inputs = runtime_inputs(assignment);
+    let [cols, row, col] = inputs.as_slice() else {
+        return Err(invalid_inputs(assignment, 3));
+    };
+    let [output] = assignment.outputs.as_slice() else {
+        return Err(invalid_outputs(assignment, 1));
+    };
+    out.push_str(&format!(
+        "    {} = {} * {} + {};\n",
+        output.name,
+        value_expr(row),
+        value_expr(cols),
+        value_expr(col)
+    ));
+    Ok(())
+}
+
+fn render_row_major_row(out: &mut String, assignment: &GpuAssign) -> Result<(), GpuRenderError> {
+    let inputs = runtime_inputs(assignment);
+    let [cols, flat] = inputs.as_slice() else {
+        return Err(invalid_inputs(assignment, 2));
+    };
+    let [output] = assignment.outputs.as_slice() else {
+        return Err(invalid_outputs(assignment, 1));
+    };
+    out.push_str(&format!(
+        "    {} = {} / {};\n",
+        output.name,
+        value_expr(flat),
+        value_expr(cols)
+    ));
+    Ok(())
+}
+
+fn render_row_major_col(out: &mut String, assignment: &GpuAssign) -> Result<(), GpuRenderError> {
+    let inputs = runtime_inputs(assignment);
+    let [cols, flat] = inputs.as_slice() else {
+        return Err(invalid_inputs(assignment, 2));
+    };
+    let [output] = assignment.outputs.as_slice() else {
+        return Err(invalid_outputs(assignment, 1));
+    };
+    out.push_str(&format!(
+        "    {} = {} % {};\n",
+        output.name,
+        value_expr(flat),
+        value_expr(cols)
+    ));
+    Ok(())
+}
+
+fn runtime_inputs(assignment: &GpuAssign) -> Vec<&GpuValue> {
+    assignment
+        .inputs
+        .iter()
+        .filter(|value| matches!(value, GpuValue::Var(var) if runtime_type(var).is_some()))
+        .collect()
+}
+
 fn render_call(
     out: &mut String,
     symbol: &str,
@@ -1072,6 +1135,63 @@ mod tests {
 
         assert!(source.contains("void program_type_helper()"));
         assert!(!source.contains("type-helper"));
+    }
+
+    #[test]
+    fn row_major_layout_operations_render_index_arithmetic() {
+        let cols = var(0, "cols", CType::U64);
+        let row = var(1, "row", CType::U64);
+        let col = var(2, "col", CType::U64);
+        let flat = var(3, "flat", CType::U64);
+        let recovered_row = var(4, "recovered_row", CType::U64);
+        let recovered_col = var(5, "recovered_col", CType::U64);
+        let erased = erased_var(6, "shape");
+        let module = GpuModule {
+            name: "program_row_major".to_string(),
+            source_name: Some(op("row-major-test")),
+            entry: GpuFunction {
+                name: "program_row_major".to_string(),
+                sources: vec![cols.clone(), row.clone(), col.clone()],
+                targets: vec![flat.clone(), recovered_row.clone(), recovered_col.clone()],
+                assignments: vec![
+                    GpuAssign {
+                        op: op("row-major-index"),
+                        input_sizes: vec![1, 2],
+                        output_sizes: vec![1],
+                        call_symbol: None,
+                        inputs: vec![
+                            GpuValue::Var(cols.clone()),
+                            GpuValue::Var(erased),
+                            GpuValue::Var(row),
+                            GpuValue::Var(col),
+                        ],
+                        outputs: vec![flat.clone()],
+                    },
+                    GpuAssign {
+                        op: op("row-major-row"),
+                        input_sizes: vec![1, 1],
+                        output_sizes: vec![1],
+                        call_symbol: None,
+                        inputs: vec![GpuValue::Var(cols.clone()), GpuValue::Var(flat.clone())],
+                        outputs: vec![recovered_row],
+                    },
+                    GpuAssign {
+                        op: op("row-major-col"),
+                        input_sizes: vec![1, 1],
+                        output_sizes: vec![1],
+                        call_symbol: None,
+                        inputs: vec![GpuValue::Var(cols), GpuValue::Var(flat)],
+                        outputs: vec![recovered_col],
+                    },
+                ],
+            },
+        };
+
+        let source = render_module(&module, GpuDialect::Hip).unwrap();
+
+        assert!(source.contains("    flat = row * cols + col;\n"));
+        assert!(source.contains("    recovered_row = flat / cols;\n"));
+        assert!(source.contains("    recovered_col = flat % cols;\n"));
     }
 
     #[test]

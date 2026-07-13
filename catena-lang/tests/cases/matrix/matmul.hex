@@ -1,0 +1,48 @@
+(def program matmul-2x2-via-mem :
+  ([n m k.] {
+    (cap.ref mem)
+    (cap.ref mem)
+    ({[.n] u64} :)
+    ({[.m] u64} :)
+    ({[.k] u64} :)
+    ({({[.n] [.k]} *) u64} :)
+    ({({[.k] [.m]} *) u64} :)
+    ({({[.n] [.m]} *) u64} :)
+  })
+  ->
+  ([n m k.] (cap.own mem))
+= ([a-mem b-mem n-len m-len k-len nk-len km-len nm-len.]
+  ([.a-mem] mem.cast.f32 [actual-nk-len a-raw.]
+    ([.b-mem] mem.cast.f32 [actual-km-len b-raw.]
+      ([.nk-len actual-nk-len] u64.eq [a-len-eq if-a-len-eq _if-a-len-ne.]
+        ([.km-len actual-km-len] u64.eq [b-len-eq if-b-len-eq _if-b-len-ne.]
+          ({
+            [.a-len-eq]
+            [.if-a-len-eq]
+          } assert-then [a-same-length.]
+            ({
+              [.b-len-eq]
+              [.if-b-len-eq]
+            } assert-then [b-same-length.]
+              ({[.a-raw] [.a-same-length]} buf.f32.cast-same-length [a.]
+                ({[.b-raw] [.b-same-length]} buf.f32.cast-same-length [b.]
+                  ({
+                    [.n-len]
+                    [.m-len]
+                    [.k-len]
+                    [.nk-len]
+                    [.km-len]
+                    [.nm-len]
+                    [.a]
+                    [.b]
+                  } f32.matmul.row-major-bufs [result.]
+                    {[.nm-len] [.result]} buf.to-mem)
+                )
+              )
+            )
+          )
+        )
+      )
+    )
+  )
+))

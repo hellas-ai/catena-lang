@@ -565,6 +565,23 @@ fn theory_conversion_converts_if_closure_arguments() {
 }
 
 #[test]
+#[should_panic(expected = "closure conversion requires closure-boundary definitions to be inlined first")]
+fn theory_conversion_panics_on_uninlined_closure_boundary_definitions() {
+    let (theory_set, definition_types) = theories_with(
+        r#"
+        (def program f32.id : (f32 val) -> (f32 val) = [x])
+        (def program if-id-neg : {(bool val) (f32 val)} -> (f32 val) = ([b x.]
+          {(name.f32.id lift) (name.f32.neg lift) [.b] [.x]} bool.if
+        ))
+        "#,
+    );
+    let program = TheoryId(op("program"));
+
+    convert_theory(&theory_set, &definition_types, &program)
+        .expect("closure conversion should not recover from skipped boundary inlining");
+}
+
+#[test]
 fn theory_conversion_converts_if_id_neg_example_end_to_end() {
     let (theory_set, definition_types) = theories_with_inlined_closure_boundaries(
         r#"

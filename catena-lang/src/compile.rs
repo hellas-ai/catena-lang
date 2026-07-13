@@ -31,10 +31,6 @@ pub enum CompileError {
     Load(#[from] metacat::theory::LoadError),
     #[error(transparent)]
     Check(#[from] CheckError),
-    #[error(
-        "definition `{theory}.{definition}` has closure type `=>` on its global interface; linear closure types are only allowed adjacent to CMC operations"
-    )]
-    ClosureOnGlobalInterface { theory: String, definition: String },
     #[error(transparent)]
     ClosureConversion(#[from] ConvertTheoryError),
     #[error(transparent)]
@@ -106,8 +102,6 @@ fn compile_into(report: &mut CompileReport) -> Result<(), CompileError> {
     };
     report.definition_types = Some(definition_types.clone());
 
-    reject_closure_global_interfaces(&theory_set)?;
-
     let theory_set = convert_closures(&theory_set, &definition_types)?;
     report.theory_set = Some(theory_set.clone());
 
@@ -158,31 +152,6 @@ fn convert_closures(
         converted.theories.insert(theory_id, theory);
     }
     Ok(converted)
-}
-
-fn reject_closure_global_interfaces(theory_set: &TheorySet) -> Result<(), CompileError> {
-    for (theory_id, theory) in &theory_set.theories {
-        let Theory::Theory { arrows, .. } = theory else {
-            continue;
-        };
-
-        for (definition_name, arrow) in arrows {
-            if arrow.definition.is_none() {
-                continue;
-            }
-
-            if contains_closure_type_map(&arrow.type_maps.0)
-                || contains_closure_type_map(&arrow.type_maps.1)
-            {
-                return Err(CompileError::ClosureOnGlobalInterface {
-                    theory: theory_id.to_string(),
-                    definition: definition_name.to_string(),
-                });
-            }
-        }
-    }
-
-    Ok(())
 }
 
 fn closure_boundary_definitions(theory_set: &TheorySet) -> BTreeMap<TheoryId, BTreeSet<Operation>> {

@@ -64,21 +64,6 @@
   )
 ))
 
-(def program f32.matmul.len-copies4 :
-  ([n.] ({[.n] u64} :))
-  ->
-  ([n.] {
-    ({[.n] u64} :)
-    ({[.n] u64} :)
-    ({[.n] u64} :)
-    ({[.n] u64} :)
-  })
-= ([len.]
-  ([.len] f32.matmul.len-split5 [copy-a copy-b copy-c copy-d unused-a _param.]
-    {[.copy-a] [.copy-b] [.copy-c] [.copy-d]}
-  )
-))
-
 (def program f32.matmul.len-copies6 :
   ([n.] ({[.n] u64} :))
   ->
@@ -98,25 +83,54 @@
   )
 ))
 
-(def program f32.matmul.len-param :
+(def program f32.matmul.len-copies2-param :
   ([n.] ({[.n] u64} :))
   ->
-  ([n.] [.n])
+  ([n.] {
+    ({[.n] u64} :)
+    ({[.n] u64} :)
+    [.n]
+  })
 = ([len.]
-  ([.len] f32.matmul.len-split5 [unused-a unused-b unused-c unused-d unused-e param.]
-    [.param]
+  ([.len] f32.matmul.len-split5 [copy-a copy-b unused-a unused-b unused-c param.]
+    {[.copy-a] [.copy-b] [.param]}
   )
 ))
 
-(def program f32.matmul.reader-len-copies :
+(def program f32.matmul.len-copy-param :
+  ([n.] ({[.n] u64} :))
+  ->
+  ([n.] {({[.n] u64} :) [.n]})
+= ([len.]
+  ([.len] f32.matmul.len-copies2-param [copy unused param.]
+    {[.copy] [.param]}
+  )
+))
+
+(def program f32.matmul.len-params3 :
   ([n.] ({[.n] u64} :))
   ->
   ([n.] {[.n] [.n] [.n]})
 = ([len.]
+  ([.len] f32.matmul.len-copy-params3 [unused param-a param-b param-c.]
+    {[.param-a] [.param-b] [.param-c]}
+  )
+))
+
+(def program f32.matmul.len-copy-params3 :
+  ([n.] ({[.n] u64} :))
+  ->
+  ([n.] {
+    ({[.n] u64} :)
+    [.n]
+    [.n]
+    [.n]
+  })
+= ([len.]
   ([.len] :.ty [copy-a param-a.]
     ([.copy-a] :.ty [copy-b param-b.]
-      ([.copy-b] :.ty [_copy-c param-c.]
-        {[.param-a] [.param-b] [.param-c]}
+      ([.copy-b] :.ty [copy-c param-c.]
+        {[.copy-c] [.param-a] [.param-b] [.param-c]}
       )
     )
   )
@@ -190,7 +204,7 @@
   ->
   ([n.] ({([.n] ix val) (f32 val)} =>))
 = ([len input.]
-  ([.len] f32.matmul.reader-len-copies [with-unit-len index-id-len buf-at-len.]
+  ([.len] f32.matmul.len-params3 [with-unit-len index-id-len buf-at-len.]
     {
       ({
         ([.with-unit-len] name.f32.matmul.index-with-unit lift)
@@ -216,33 +230,21 @@
   ->
   ([n m.] ({({([.n] ix val) ([.m] ix val)} *) (f32 val)} =>))
 = ([n-len m-len flat-view.]
-  ([.n-len] f32.matmul.len-copies3 [with-unit-n-len id-n-len index-n-len.]
-    ([.with-unit-n-len] f32.matmul.len-param [with-unit-n-param.]
-      ([.id-n-len] f32.matmul.len-param [id-n-param.]
-        ([.index-n-len] f32.matmul.len-param [index-n-param.]
-          ([.m-len] f32.matmul.len-copies4 [stride-len with-unit-m-len id-m-len index-m-len.]
-            ([.with-unit-m-len] f32.matmul.len-param [with-unit-m-param.]
-              ([.id-m-len] f32.matmul.len-param [id-m-param.]
-                ([.index-m-len] f32.matmul.len-param [index-m-param.]
-                  ({
-                    ({
-                      ({
-                        ({[.with-unit-n-param] [.with-unit-m-param]} name.f32.matmul.matrix-index-with-unit lift)
-                        ({
-                          ([.stride-len] defer)
-                          ({[.id-n-param] [.id-m-param]} name.f32.matmul.matrix-index-id lift)
-                        } tensor)
-                      } compose)
-                      ({[.index-n-param] [.index-m-param]} name.row-major-index lift)
-                    } compose)
-                    [.flat-view]
-                  } compose)
-                )
-              )
-            )
-          )
-        )
-      )
+  ([.n-len] f32.matmul.len-params3 [with-unit-n-param id-n-param index-n-param.]
+    ([.m-len] f32.matmul.len-copy-params3 [stride-len with-unit-m-param id-m-param index-m-param.]
+      ({
+        ({
+          ({
+            ({[.with-unit-n-param] [.with-unit-m-param]} name.f32.matmul.matrix-index-with-unit lift)
+            ({
+              ([.stride-len] defer)
+              ({[.id-n-param] [.id-m-param]} name.f32.matmul.matrix-index-id lift)
+            } tensor)
+          } compose)
+          ({[.index-n-param] [.index-m-param]} name.row-major-index lift)
+        } compose)
+        [.flat-view]
+      } compose)
     )
   )
 ))
@@ -340,19 +342,17 @@
   ->
   ([n m k.] ({([.k] ix val) (f32 val)} =>))
 = ([k-len a-view b-view i j.]
-  ([.k-len] f32.matmul.len-copies3 [copy-len a-k-len b-k-len.]
-    ([.copy-len] f32.matmul.len-param [copy-param.]
+  ([.k-len] f32.matmul.len-copies2-param [a-k-len b-k-len copy-param.]
+    ({
       ({
+        ([.copy-param] name.ix.copy lift)
         ({
-          ([.copy-param] name.ix.copy lift)
-          ({
-            ({[.a-k-len] [.a-view] [.i]} f32.matrix.row-view)
-            ({[.b-k-len] [.b-view] [.j]} f32.matrix.col-view)
-          } tensor)
-        } compose)
-        (name.f32.mul lift)
+          ({[.a-k-len] [.a-view] [.i]} f32.matrix.row-view)
+          ({[.b-k-len] [.b-view] [.j]} f32.matrix.col-view)
+        } tensor)
       } compose)
-    )
+      (name.f32.mul lift)
+    } compose)
   )
 ))
 
@@ -518,15 +518,13 @@
   ->
   ([n.] ({cap.own ({[.n] [.n]} *) f32} buf val))
 = ([n-len nn-len a.]
-  ([.n-len] f32.matmul.len-copies2 [env-n-len producer-n-len.]
+  ([.n-len] f32.matmul.len-copy-param [env-n-len producer-n.]
     ([.nn-len] f32.matmul.len-copies2 [env-nn-len output-len.]
-      ([.producer-n-len] f32.matmul.len-param [producer-n.]
-        ({
-          ({[.env-n-len] ({[.env-nn-len] [.a]} *.intro)} *.intro)
-          ([.producer-n] name.f32.matmul.row-major.right-identity-at)
-          [.output-len]
-        } materializec)
-      )
+      ({
+        ({[.env-n-len] ({[.env-nn-len] [.a]} *.intro)} *.intro)
+        ([.producer-n] name.f32.matmul.row-major.right-identity-at)
+        [.output-len]
+      } materializec)
     )
   )
 ))
@@ -540,15 +538,13 @@
   ->
   ([n.] ({cap.own ({[.n] [.n]} *) f32} buf val))
 = ([n-len nn-len a.]
-  ([.n-len] f32.matmul.len-copies2 [env-n-len producer-n-len.]
+  ([.n-len] f32.matmul.len-copy-param [env-n-len producer-n.]
     ([.nn-len] f32.matmul.len-copies2 [env-nn-len output-len.]
-      ([.producer-n-len] f32.matmul.len-param [producer-n.]
-        ({
-          ({[.env-n-len] ({[.env-nn-len] [.a]} *.intro)} *.intro)
-          ([.producer-n] name.f32.matmul.row-major.left-identity-at)
-          [.output-len]
-        } materializec)
-      )
+      ({
+        ({[.env-n-len] ({[.env-nn-len] [.a]} *.intro)} *.intro)
+        ([.producer-n] name.f32.matmul.row-major.left-identity-at)
+        [.output-len]
+      } materializec)
     )
   )
 ))
@@ -568,30 +564,24 @@
   ->
   ([n m k.] ({cap.own ({[.n] [.m]} *) f32} buf val))
 = ([n-len m-len k-len nk-len km-len nm-len a b.]
-  ([.n-len] f32.matmul.len-copies2 [env-n-len producer-n-len.]
-    ([.m-len] f32.matmul.len-copies2 [env-m-len producer-m-len.]
-      ([.k-len] f32.matmul.len-copies2 [env-k-len producer-k-len.]
-        ([.producer-n-len] f32.matmul.len-param [producer-n.]
-          ([.producer-m-len] f32.matmul.len-param [producer-m.]
-            ([.producer-k-len] f32.matmul.len-param [producer-k.]
-              ({
-                ({[.env-n-len]
-                  ({[.env-m-len]
-                    ({[.env-k-len]
-                      ({[.nk-len]
-                        ({[.km-len]
-                          ({[.a] [.b]} *.intro)
-                        } *.intro)
-                      } *.intro)
-                    } *.intro)
+  ([.n-len] f32.matmul.len-copy-param [env-n-len producer-n.]
+    ([.m-len] f32.matmul.len-copy-param [env-m-len producer-m.]
+      ([.k-len] f32.matmul.len-copy-param [env-k-len producer-k.]
+        ({
+          ({[.env-n-len]
+            ({[.env-m-len]
+              ({[.env-k-len]
+                ({[.nk-len]
+                  ({[.km-len]
+                    ({[.a] [.b]} *.intro)
                   } *.intro)
                 } *.intro)
-                ({[.producer-n] [.producer-m] [.producer-k]} name.f32.matmul.cell-at-flat-index)
-                [.nm-len]
-              } materializec)
-            )
-          )
-        )
+              } *.intro)
+            } *.intro)
+          } *.intro)
+          ({[.producer-n] [.producer-m] [.producer-k]} name.f32.matmul.cell-at-flat-index)
+          [.nm-len]
+        } materializec)
       )
     )
   )

@@ -23,36 +23,6 @@
   )
 ))
 
-(def program len-copies7 :
-  ([n.] ({[.n] u64} :))
-  ->
-  ([n.] {
-    ({[.n] u64} :)
-    ({[.n] u64} :)
-    ({[.n] u64} :)
-    ({[.n] u64} :)
-    ({[.n] u64} :)
-    ({[.n] u64} :)
-    ({[.n] u64} :)
-  })
-= ([len.]
-  ([.len] :.ty [copy-a _param-a.]
-    ([.copy-a] :.ty [copy-b _param-b.]
-      ([.copy-b] :.ty [copy-c _param-c.]
-        ([.copy-c] :.ty [copy-d _param-d.]
-          ([.copy-d] :.ty [copy-e _param-e.]
-            ([.copy-e] :.ty [copy-f _param-f.]
-              ([.copy-f] :.ty [copy-g _param-g.]
-                {[.copy-a] [.copy-b] [.copy-c] [.copy-d] [.copy-e] [.copy-f] [.copy-g]}
-              )
-            )
-          )
-        )
-      )
-    )
-  )
-))
-
 (def program len-copies2 :
   ([n.] ({[.n] u64} :))
   ->
@@ -92,22 +62,6 @@
 = ([len.]
   ([.len] len-split5 [copy-a copy-b copy-c copy-d unused-a _param.]
     {[.copy-a] [.copy-b] [.copy-c] [.copy-d]}
-  )
-))
-
-(def program len-copies5 :
-  ([n.] ({[.n] u64} :))
-  ->
-  ([n.] {
-    ({[.n] u64} :)
-    ({[.n] u64} :)
-    ({[.n] u64} :)
-    ({[.n] u64} :)
-    ({[.n] u64} :)
-  })
-= ([len.]
-  ([.len] len-split5 [copy-a copy-b copy-c copy-d copy-e _param.]
-    {[.copy-a] [.copy-b] [.copy-c] [.copy-d] [.copy-e]}
   )
 ))
 

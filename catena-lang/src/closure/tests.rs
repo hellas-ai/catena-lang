@@ -571,9 +571,12 @@ fn theory_conversion_converts_if_closure_arguments() {
 fn theory_conversion_panics_on_uninlined_closure_boundary_definitions() {
     let (theory_set, definition_types) = theories_with(
         r#"
-        (def program f32.id : (f32 val) -> (f32 val) = [x])
-        (def program if-id-neg : {(bool val) (f32 val)} -> (f32 val) = ([b x.]
-          {(name.f32.id lift) (name.f32.neg lift) [.b] [.x]} bool.if
+        (def program run-bool-id : (bool val) -> ({1 (bool val)} =>) = (
+          {[x] bool.t}
+          bool.and
+          bool.not
+          {defer (name.bool.id lift)}
+          compose
         ))
         "#,
     );

@@ -164,6 +164,18 @@
   ([n.] {([.n] ix val) 1} *)
 = ([i.] {[.i] unit.intro} *.intro))
 
+(def program matrix-index-id :
+  ([n m.] {([.n] ix val) ([.m] ix val)} *)
+  ->
+  ([n m.] {([.n] ix val) ([.m] ix val)} *)
+= ([ij.] [.ij]))
+
+(def program matrix-index-with-unit :
+  ([n m.] {([.n] ix val) ([.m] ix val)} *)
+  ->
+  ([n m.] {1 ({([.n] ix val) ([.m] ix val)} *)} *)
+= ([ij.] {unit.intro [.ij]} *.intro))
+
 # Return an indexed view closure for an f32 buffer.
 #
 # This is the only place where a buffer is captured by a closure. The captured
@@ -191,83 +203,98 @@
   )
 ))
 
-# Build a row view from a row-major matrix view:
+# Adapt a flat row-major view into an abstract matrix view:
 #
-#   row-view(A, i) = lambda k. A[i,k]
-(def program f32.row-major.row-view :
-  ([n k.] {
+#   matrix-view(A) = lambda (i,j). A[row-major-index(cols, i, j)]
+(def program f32.row-major.matrix-view :
+  ([n m.] {
     ({[.n] u64} :)
-    ({[.k] u64} :)
-    ({(({[.n] [.k]} *) ix val) (f32 val)} =>)
-    ([.n] ix val)
+    ({[.m] u64} :)
+    ({(({[.n] [.m]} *) ix val) (f32 val)} =>)
   })
   ->
-  ([n k.] ({([.k] ix val) (f32 val)} =>))
-= ([n-len k-len matrix-view i.]
-  ([.n-len] len-param [n-param.]
-    ([.k-len] len-copies5 [outer-unit-len stride-len pair-unit-len id-len index-k-len.]
-      ([.index-k-len] len-param [index-k-param.]
-        ({
-          ({
-            ({
-              (([.outer-unit-len] :.param) name.index-with-unit lift)
-              ({
-                ([.stride-len] defer)
-                ({
-                  (([.pair-unit-len] :.param) name.index-with-unit lift)
+  ([n m.] ({({([.n] ix val) ([.m] ix val)} *) (f32 val)} =>))
+= ([n-len m-len flat-view.]
+  ([.n-len] len-copies3 [with-unit-n-len id-n-len index-n-len.]
+    ([.with-unit-n-len] len-param [with-unit-n-param.]
+      ([.id-n-len] len-param [id-n-param.]
+        ([.index-n-len] len-param [index-n-param.]
+          ([.m-len] len-copies4 [stride-len with-unit-m-len id-m-len index-m-len.]
+            ([.with-unit-m-len] len-param [with-unit-m-param.]
+              ([.id-m-len] len-param [id-m-param.]
+                ([.index-m-len] len-param [index-m-param.]
                   ({
-                    ([.i] defer)
-                    (([.id-len] :.param) name.index-id lift)
-                  } tensor)
-                } compose)
-              } tensor)
-            } compose)
-            ({[.n-param] [.index-k-param]} name.row-major-index lift)
-          } compose)
-          [.matrix-view]
-        } compose)
+                    ({
+                      ({
+                        ({[.with-unit-n-param] [.with-unit-m-param]} name.matrix-index-with-unit lift)
+                        ({
+                          ([.stride-len] defer)
+                          ({[.id-n-param] [.id-m-param]} name.matrix-index-id lift)
+                        } tensor)
+                      } compose)
+                      ({[.index-n-param] [.index-m-param]} name.row-major-index lift)
+                    } compose)
+                    [.flat-view]
+                  } compose)
+                )
+              )
+            )
+          )
+        )
       )
     )
   )
 ))
 
-# Build a column view from a row-major matrix view:
+# Build a row view from an abstract matrix view:
+#
+#   row-view(A, i) = lambda k. A[i,k]
+(def program f32.matrix.row-view :
+  ([n k.] {
+    ({[.k] u64} :)
+    ({({([.n] ix val) ([.k] ix val)} *) (f32 val)} =>)
+    ([.n] ix val)
+  })
+  ->
+  ([n k.] ({([.k] ix val) (f32 val)} =>))
+= ([k-len matrix-view i.]
+  ([.k-len] len-copies2 [unit-len id-len.]
+    ({
+      ({
+        (([.unit-len] :.param) name.index-with-unit lift)
+        ({
+          ([.i] defer)
+          (([.id-len] :.param) name.index-id lift)
+        } tensor)
+      } compose)
+      [.matrix-view]
+    } compose)
+  )
+))
+
+# Build a column view from an abstract matrix view:
 #
 #   col-view(B, j) = lambda k. B[k,j]
-(def program f32.row-major.col-view :
+(def program f32.matrix.col-view :
   ([k m.] {
     ({[.k] u64} :)
-    ({[.m] u64} :)
-    ({(({[.k] [.m]} *) ix val) (f32 val)} =>)
+    ({({([.k] ix val) ([.m] ix val)} *) (f32 val)} =>)
     ([.m] ix val)
   })
   ->
   ([k m.] ({([.k] ix val) (f32 val)} =>))
-= ([k-len m-len matrix-view j.]
-  ([.m-len] :.ty [stride-len m-param.]
-    ([.k-len] len-copies4 [outer-unit-len pair-unit-len id-len index-k-len.]
-      ([.index-k-len] len-param [index-k-param.]
+= ([k-len matrix-view j.]
+  ([.k-len] len-copies2 [unit-len id-len.]
+    ({
+      ({
+        (([.unit-len] :.param) name.index-with-unit-right lift)
         ({
-          ({
-            ({
-              (([.outer-unit-len] :.param) name.index-with-unit lift)
-              ({
-                ([.stride-len] defer)
-                ({
-                  (([.pair-unit-len] :.param) name.index-with-unit-right lift)
-                  ({
-                    (([.id-len] :.param) name.index-id lift)
-                    ([.j] defer)
-                  } tensor)
-                } compose)
-              } tensor)
-            } compose)
-            ({[.index-k-param] [.m-param]} name.row-major-index lift)
-          } compose)
-          [.matrix-view]
-        } compose)
-      )
-    )
+          (([.id-len] :.param) name.index-id lift)
+          ([.j] defer)
+        } tensor)
+      } compose)
+      [.matrix-view]
+    } compose)
   )
 ))
 
@@ -275,30 +302,28 @@
 #
 #   lambda k. A[i,k] * B[k,j]
 #
-# The flat matrix views are closures. They are composed with row/column view
-# closures and tensored as closures; they are never passed to `defer` or
-# `*.intro`.
+# The matrix views are layout-agnostic closures. They are composed with
+# row/column view closures and tensored as closures; they are never passed to
+# `defer` or `*.intro`.
 (def program f32.matmul.k-product :
   ([n m k.] {
-    ({[.n] u64} :)
-    ({[.m] u64} :)
     ({[.k] u64} :)
-    ({(({[.n] [.k]} *) ix val) (f32 val)} =>)
-    ({(({[.k] [.m]} *) ix val) (f32 val)} =>)
+    ({({([.n] ix val) ([.k] ix val)} *) (f32 val)} =>)
+    ({({([.k] ix val) ([.m] ix val)} *) (f32 val)} =>)
     ([.n] ix val)
     ([.m] ix val)
   })
   ->
   ([n m k.] ({([.k] ix val) (f32 val)} =>))
-= ([n-len m-len k-len a-view b-view i j.]
+= ([k-len a-view b-view i j.]
   ([.k-len] len-copies3 [copy-len a-k-len b-k-len.]
     ([.copy-len] len-param [copy-param.]
       ({
         ({
           ([.copy-param] name.ix.copy lift)
           ({
-            ({[.n-len] [.a-k-len] [.a-view] [.i]} f32.row-major.row-view)
-            ({[.b-k-len] [.m-len] [.b-view] [.j]} f32.row-major.col-view)
+            ({[.a-k-len] [.a-view] [.i]} f32.matrix.row-view)
+            ({[.b-k-len] [.b-view] [.j]} f32.matrix.col-view)
           } tensor)
         } compose)
         (name.f32.mul lift)
@@ -317,64 +342,37 @@
 # running the view closures.
 (def program f32.matmul.cell-dot :
   ([n m k.] {
-    ({[.n] u64} :)
-    ({[.m] u64} :)
     ({[.k] u64} :)
-    ({(({[.n] [.k]} *) ix val) (f32 val)} =>)
-    ({(({[.k] [.m]} *) ix val) (f32 val)} =>)
+    ({({([.n] ix val) ([.k] ix val)} *) (f32 val)} =>)
+    ({({([.k] ix val) ([.m] ix val)} *) (f32 val)} =>)
     ([.n] ix val)
     ([.m] ix val)
   })
   ->
   ([n m k.] (f32 val))
-= ([n-len m-len k-len a-view b-view i j.]
+= ([k-len a-view b-view i j.]
   ([.k-len] len-copies2 [reduce-len producer-len.]
     {
       (const.u32.0x00000000 u32.bitcast-f32)
       (name.f32.add lift)
-      ({[.n-len] [.m-len] [.producer-len] [.a-view] [.b-view] [.i] [.j]} f32.matmul.k-product)
+      ({[.producer-len] [.a-view] [.b-view] [.i] [.j]} f32.matmul.k-product)
       [.reduce-len]
     }
     reduce
   )
 ))
 
-# Matrix multiplication cell from buffers.
+# Matrix multiplication cell from a flat output index.
 #
-# The buffer layer immediately turns each flat matrix buffer into a view
-# closure:
+# This is the only adapter between row-major buffers and the abstract matrix
+# multiplication layer:
 #
-#   A-buffer -> ix (n*k) => f32
-#   B-buffer -> ix (k*m) => f32
+#   flat-c -> (i,j)
+#   A-buffer -> (i,k) => A[i,k]
+#   B-buffer -> (k,j) => B[k,j]
 #
-# After those conversions, the cell computation receives only closures and
-# indices. It does not manipulate the original buffers directly.
-(def program f32.matmul.cell-dot-from-bufs :
-  ([n m k.] {
-    ({[.n] u64} :)
-    ({[.m] u64} :)
-    ({[.k] u64} :)
-    ({({[.n] [.k]} *) u64} :)
-    ({({[.k] [.m]} *) u64} :)
-    ({cap.ref ({[.n] [.k]} *) f32} buf val)
-    ({cap.ref ({[.k] [.m]} *) f32} buf val)
-    ([.n] ix val)
-    ([.m] ix val)
-  })
-  ->
-  ([n m k.] (f32 val))
-= ([n-len m-len k-len nk-len km-len a b i j.]
-  ({
-    [.n-len]
-    [.m-len]
-    [.k-len]
-    ({[.nk-len] [.a]} f32.buf.view)
-    ({[.km-len] [.b]} f32.buf.view)
-    [.i]
-    [.j]
-  } f32.matmul.cell-dot)
-))
-
+# After those conversions, `f32.matmul.cell-dot` receives only abstract matrix
+# views and indices.
 (def program f32.matmul.cell-at-flat-index :
   ([n m k.] {
     ({
@@ -403,15 +401,23 @@
 = ([env flat-c.]
   ([.env] *.elim [n-len env-rest-a.]
     ([.env-rest-a] *.elim [m-len env-rest-b.]
-      ([.m-len] len-copies3 [cell-m-len output-cols-for-row output-cols-for-col.]
+      ([.m-len] len-copies3 [b-m-len output-cols-for-row output-cols-for-col.]
         ([.env-rest-b] *.elim [k-len env-rest-c.]
-          ([.env-rest-c] *.elim [nk-len env-rest-d.]
-            ([.env-rest-d] *.elim [km-len buffers.]
-              ([.buffers] *.elim [a b.]
-                ([.flat-c] ix.copy [flat-for-row flat-for-col.]
-                  ({[.output-cols-for-row] [.flat-for-row]} row-major-row [i.]
-                    ({[.output-cols-for-col] [.flat-for-col]} row-major-col [j.]
-                      ({[.n-len] [.cell-m-len] [.k-len] [.nk-len] [.km-len] [.a] [.b] [.i] [.j]} f32.matmul.cell-dot-from-bufs)
+          ([.k-len] len-copies3 [cell-k-len a-k-len b-k-len.]
+            ([.env-rest-c] *.elim [nk-len env-rest-d.]
+              ([.env-rest-d] *.elim [km-len buffers.]
+                ([.buffers] *.elim [a b.]
+                  ([.flat-c] ix.copy [flat-for-row flat-for-col.]
+                    ({[.output-cols-for-row] [.flat-for-row]} row-major-row [i.]
+                      ({[.output-cols-for-col] [.flat-for-col]} row-major-col [j.]
+                        ({
+                          [.cell-k-len]
+                          ({[.n-len] [.a-k-len] ({[.nk-len] [.a]} f32.buf.view)} f32.row-major.matrix-view)
+                          ({[.b-k-len] [.b-m-len] ({[.km-len] [.b]} f32.buf.view)} f32.row-major.matrix-view)
+                          [.i]
+                          [.j]
+                        } f32.matmul.cell-dot)
+                      )
                     )
                   )
                 )

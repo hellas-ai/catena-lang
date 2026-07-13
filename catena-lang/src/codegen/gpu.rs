@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 
 use hexpr::Operation;
 use thiserror::Error;
@@ -181,8 +181,12 @@ fn render_function(
     }
 
     // Multiple outputs are returned by writing computed target wires into pointer parameters.
-    for result in &function.targets {
-        out.push_str(&format!("    *out_{} = {};\n", result.name, result.name));
+    for (result, output_param) in function
+        .targets
+        .iter()
+        .zip(output_param_names(&function.targets))
+    {
+        out.push_str(&format!("    *{output_param} = {};\n", result.name));
     }
     out.push_str("    return;\n");
     out.push_str("}\n");
@@ -212,12 +216,41 @@ fn function_signature(function: &GpuFunction) -> Result<String, GpuRenderError> 
     for source in &function.sources {
         params.push(param_decl(source, false)?);
     }
-    for target in &function.targets {
-        params.push(param_decl(target, true)?);
+    for (target, output_param) in function
+        .targets
+        .iter()
+        .zip(output_param_names(&function.targets))
+    {
+        let ty = runtime_type(target).ok_or_else(|| GpuRenderError::ErasedType(target.clone()))?;
+        params.push(format!("{} *{}", c_type(ty), output_param));
     }
     signature.push_str(&params.join(", "));
     signature.push(')');
     Ok(signature)
+}
+
+fn output_param_names(targets: &[GpuVar]) -> Vec<String> {
+    let counts = targets
+        .iter()
+        .fold(BTreeMap::<&str, usize>::new(), |mut counts, target| {
+            *counts.entry(target.name.as_str()).or_default() += 1;
+            counts
+        });
+    let mut seen = BTreeMap::<&str, usize>::new();
+    targets
+        .iter()
+        .map(|target| {
+            let name = target.name.as_str();
+            if counts[name] == 1 {
+                format!("out_{name}")
+            } else {
+                let index = seen.entry(name).or_default();
+                let output_name = format!("out_{name}_{index}");
+                *index += 1;
+                output_name
+            }
+        })
+        .collect()
 }
 
 fn render_assignment(
@@ -880,6 +913,11 @@ fn render_eval(out: &mut String, assignment: &GpuAssign) -> Result<(), GpuRender
     let Some((func, args)) = assignment.inputs.split_last() else {
         return Err(invalid_inputs(assignment, 1));
     };
+    if let GpuValue::FnSymbol(symbol) = func
+        && render_primitive_eval(out, assignment, &symbol.target, args)?
+    {
+        return Ok(());
+    }
     let mut call_args = args.iter().map(value_expr).collect::<Vec<_>>();
     call_args.extend(
         assignment
@@ -894,6 +932,31 @@ fn render_eval(out: &mut String, assignment: &GpuAssign) -> Result<(), GpuRender
         call_args.join(", ")
     ));
     Ok(())
+}
+
+fn render_primitive_eval(
+    out: &mut String,
+    assignment: &GpuAssign,
+    target: &Operation,
+    args: &[GpuValue],
+) -> Result<bool, GpuRenderError> {
+    let primitive = GpuAssign {
+        op: target.clone(),
+        input_sizes: Vec::new(),
+        output_sizes: assignment.output_sizes.clone(),
+        call_symbol: None,
+        inputs: args.to_vec(),
+        outputs: assignment.outputs.clone(),
+    };
+    match target.as_str() {
+        "f32.add" => render_binary(out, &primitive, "+")?,
+        "f32.mul" => render_binary(out, &primitive, "*")?,
+        "row-major-index" => render_row_major_index(out, &primitive)?,
+        "row-major-row" => render_row_major_row(out, &primitive)?,
+        "row-major-col" => render_row_major_col(out, &primitive)?,
+        _ => return Ok(false),
+    }
+    Ok(true)
 }
 
 fn render_materialize_kernel(
@@ -1192,6 +1255,67 @@ mod tests {
         assert!(source.contains("    flat = row * cols + col;\n"));
         assert!(source.contains("    recovered_row = flat / cols;\n"));
         assert!(source.contains("    recovered_col = flat % cols;\n"));
+    }
+
+    #[test]
+    fn eval_of_primitive_function_symbol_renders_inline() {
+        let cols = var(0, "cols", CType::U64);
+        let row = var(1, "row", CType::U64);
+        let col = var(2, "col", CType::U64);
+        let flat = var(3, "flat", CType::U64);
+        let module = GpuModule {
+            name: "program_eval_primitive".to_string(),
+            source_name: Some(op("eval-primitive-test")),
+            entry: GpuFunction {
+                name: "program_eval_primitive".to_string(),
+                sources: vec![cols.clone(), row.clone(), col.clone()],
+                targets: vec![flat.clone()],
+                assignments: vec![GpuAssign {
+                    op: op("eval"),
+                    input_sizes: vec![1, 1, 1, 0],
+                    output_sizes: vec![1],
+                    call_symbol: None,
+                    inputs: vec![
+                        GpuValue::Var(cols),
+                        GpuValue::Var(row),
+                        GpuValue::Var(col),
+                        GpuValue::FnSymbol(FnPtrSymbol {
+                            target: op("row-major-index"),
+                        }),
+                    ],
+                    outputs: vec![flat],
+                }],
+            },
+        };
+
+        let source = render_module(&module, GpuDialect::Hip).unwrap();
+
+        assert!(source.contains("    flat = row * cols + col;\n"));
+        assert!(!source.contains("program_row_major_index"));
+    }
+
+    #[test]
+    fn duplicate_target_nodes_get_distinct_output_parameter_names() {
+        let value = var(0, "x0", CType::U64);
+        let module = GpuModule {
+            name: "program_index_copy".to_string(),
+            source_name: Some(op("index-copy")),
+            entry: GpuFunction {
+                name: "program_index_copy".to_string(),
+                sources: vec![value.clone()],
+                targets: vec![value.clone(), value],
+                assignments: Vec::new(),
+            },
+        };
+
+        let source = render_module(&module, GpuDialect::Hip).unwrap();
+
+        assert!(source.contains(
+            "extern \"C\" __host__ __device__ void program_index_copy(uint64_t x0, uint64_t *out_x0_0, uint64_t *out_x0_1)"
+        ));
+        assert!(source.contains("    *out_x0_0 = x0;\n"));
+        assert!(source.contains("    *out_x0_1 = x0;\n"));
+        assert!(!source.contains("uint64_t *out_x0, uint64_t *out_x0"));
     }
 
     #[test]

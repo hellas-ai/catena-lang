@@ -42,7 +42,7 @@ impl ConvertedClosure {
         type_info: TypeInfo,
         context: ClosureContext,
     ) -> Self {
-        context.assert_term_boundary_uses_compact_leaves(&term);
+        context.assert_term_uses_compact_leaves(&term);
         Self {
             node,
             term,
@@ -66,6 +66,17 @@ pub struct ClosureContext {
 }
 
 impl ClosureContext {
+    fn from_term(term: &AnnotatedTerm) -> Self {
+        let mut leaves = BTreeSet::new();
+        for object in &term.hypergraph.nodes {
+            collect_leaf_indices(object, &mut leaves);
+        }
+        Self {
+            original_leaf_by_compact_leaf: leaves.into_iter().collect(),
+        }
+    }
+
+    #[cfg(test)]
     fn from_term_boundary(term: &AnnotatedTerm) -> Self {
         let mut leaves = BTreeSet::new();
         let boundary_types = interface_types(term, &term.sources)
@@ -117,16 +128,16 @@ impl ClosureContext {
             .clone()
             .map_nodes(|object| relabel_object_context(object, &compact_leaf_by_original_leaf));
 
-        self.assert_term_boundary_uses_compact_leaves(&relabeled);
+        self.assert_term_uses_compact_leaves(&relabeled);
 
         relabeled
     }
 
-    fn assert_term_boundary_uses_compact_leaves(&self, term: &AnnotatedTerm) {
+    fn assert_term_uses_compact_leaves(&self, term: &AnnotatedTerm) {
         assert_eq!(
-            ClosureContext::from_term_boundary(term).original_leaf_by_compact_leaf,
+            ClosureContext::from_term(term).original_leaf_by_compact_leaf,
             (0..self.arity()).collect::<Vec<_>>(),
-            "generated closure body boundary should use exactly Leaf(0)..Leaf(context_arity - 1) after context relabeling"
+            "generated closure body should use exactly Leaf(0)..Leaf(context_arity - 1) after context relabeling"
         );
     }
 }
@@ -187,7 +198,7 @@ pub fn convert(
             .expect("requested exactly one closure region");
         let extracted = extract_region(&rewritten, &region)?;
         let body = closure_body(&extracted)?;
-        let context = ClosureContext::from_term_boundary(&body);
+        let context = ClosureContext::from_term(&body);
         let body = context.relabel_term(&body);
         let type_info = type_info(&rewritten, &region)?;
         let replacement = replacement_region(
@@ -530,6 +541,7 @@ fn unit_type() -> Obj {
     Tree::Node(op(UNIT_TYPE), 0, vec![])
 }
 
+#[cfg(test)]
 fn interface_types<'a>(term: &'a AnnotatedTerm, interface: &[NodeId]) -> Vec<&'a Obj> {
     interface
         .iter()
@@ -632,7 +644,58 @@ mod tests {
             )],
             "boundary leaves should be relabeled according to the compact context"
         );
-        context.assert_term_boundary_uses_compact_leaves(&relabeled);
+        context.assert_term_uses_compact_leaves(&relabeled);
+    }
+
+    #[test]
+    fn closure_context_includes_metavars_used_by_internal_name_closure_wiring() {
+        let n = Tree::Leaf(0, ());
+        let m = Tree::Leaf(1, ());
+        let k = Tree::Leaf(2, ());
+        let f32_value = obj("val", vec![obj("f32", vec![])]);
+        let ix_n = obj("val", vec![obj("ix", vec![n.clone()])]);
+        let ix_m = obj("val", vec![obj("ix", vec![m.clone()])]);
+        let ix_k = obj("val", vec![obj("ix", vec![k.clone()])]);
+        let a_view = obj(
+            FN_HOM_TYPE,
+            vec![
+                obj(PRODUCT_TYPE, vec![ix_n.clone(), ix_k.clone()]),
+                f32_value.clone(),
+            ],
+        );
+        let b_view = obj(
+            FN_HOM_TYPE,
+            vec![
+                obj(PRODUCT_TYPE, vec![ix_k.clone(), ix_m.clone()]),
+                f32_value.clone(),
+            ],
+        );
+
+        let mut body = AnnotatedTerm::empty();
+        let environment = body.new_node(unit_type());
+        let k_argument = body.new_node(ix_k);
+        let a_view_wire = body.new_node(a_view);
+        let b_view_wire = body.new_node(b_view);
+        let row = body.new_node(ix_n);
+        let col = body.new_node(ix_m);
+        let result = body.new_node(f32_value);
+        body.new_edge(
+            op("uses-captured-matrix-views"),
+            (
+                vec![a_view_wire, b_view_wire, row, col, k_argument],
+                vec![result],
+            ),
+        );
+        body.sources = vec![environment, k_argument];
+        body.targets = vec![result];
+
+        let context = ClosureContext::from_term(&body);
+
+        assert_eq!(
+            context.original_leaf_by_compact_leaf,
+            vec![0, 1, 2],
+            "the generated name closure context should include n and m from captured view wiring, not only k from the public producer type"
+        );
     }
 
     fn obj(name: &str, children: Vec<Obj>) -> Obj {

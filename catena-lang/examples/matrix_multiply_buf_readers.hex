@@ -104,31 +104,31 @@
   ([n.] ([.n] ix val))
   ->
   ([n.] ([.n] ix val))
-= ([i.] [.i]))
+= identity)
 
 (def program index-with-unit :
   ([n.] ([.n] ix val))
   ->
   ([n.] {1 ([.n] ix val)} *)
-= ([i.] {unit.intro [.i]} *.intro))
+= with-left-unit)
 
 (def program index-with-unit-right :
   ([n.] ([.n] ix val))
   ->
   ([n.] {([.n] ix val) 1} *)
-= ([i.] {[.i] unit.intro} *.intro))
+= with-right-unit)
 
 (def program matrix-index-id :
   ([n m.] {([.n] ix val) ([.m] ix val)} *)
   ->
   ([n m.] {([.n] ix val) ([.m] ix val)} *)
-= ([ij.] [.ij]))
+= identity)
 
 (def program matrix-index-with-unit :
   ([n m.] {([.n] ix val) ([.m] ix val)} *)
   ->
   ([n m.] {1 ({([.n] ix val) ([.m] ix val)} *)} *)
-= ([ij.] {unit.intro [.ij]} *.intro))
+= with-left-unit)
 
 # Return an indexed view closure for an f32 buffer.
 #

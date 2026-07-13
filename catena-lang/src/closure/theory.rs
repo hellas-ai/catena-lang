@@ -13,7 +13,7 @@ use crate::{
     closure::convert::{ConvertError, Converted, ConvertedClosure, convert},
     elaborate::{ElaborateError, name_symbols},
     hexpr::{objects_to_hexpr, term_to_hexpr},
-    prefixes::{GENERATED_COPY_PREFIX, GENERATED_VARIABLE_PREFIX},
+    prefixes::{GENERATED_CONTEXT_PREFIX, GENERATED_VARIABLE_PREFIX},
     stdlib::constants::FN_HOM_TYPE,
 };
 
@@ -24,6 +24,12 @@ const CONVERTED_PRIMITIVES: &[(&str, &str)] = &[
 ];
 
 type Obj = Tree<(), Operation>;
+
+struct GeneratedClosureNameDeclaration {
+    operation: Operation,
+    declared_sources: usize,
+    declaration_source_type_map: Hexpr,
+}
 
 #[derive(Debug, Error)]
 pub enum ConvertTheoryError {
@@ -121,60 +127,94 @@ fn update_definition_arrow(
     );
     let ambient_context_arity = original.type_maps.0.sources.len();
 
-    insert_copy_arrows(syntax, arrows, &converted_definition, ambient_context_arity)?;
+    declare_context_arrows_from_use_sites(
+        syntax,
+        arrows,
+        &converted_definition,
+        ambient_context_arity,
+    )?;
     let mut arrow = original.clone();
     arrow.raw = raw;
-    arrow.definition = Some(converted_definition.map_nodes(|_| ()));
+    arrow.definition = Some(converted_definition.clone().map_nodes(|_| ()));
     arrows.insert(definition_name.clone(), arrow);
 
     for closure in converted.closures {
-        insert_closure_arrows(
-            syntax,
+        let name_boundary =
+            insert_closure_arrows(syntax, theory_id, arrows, definition_name, closure)?;
+        assert_generated_closure_name_use_matches_declaration(
             theory_id,
-            arrows,
             definition_name,
-            ambient_context_arity,
-            closure,
-        )?;
+            &converted_definition,
+            &name_boundary,
+        );
     }
 
     Ok(())
 }
 
-fn insert_copy_arrows(
+fn assert_generated_closure_name_use_matches_declaration(
+    theory_id: &TheoryId,
+    definition_name: &Operation,
+    definition: &AnnotatedTerm,
+    declaration: &GeneratedClosureNameDeclaration,
+) {
+    for (edge_index, (operation, edge)) in definition
+        .hypergraph
+        .edges
+        .iter()
+        .zip(&definition.hypergraph.adjacency)
+        .enumerate()
+        .filter(|(_, (operation, _))| *operation == &declaration.operation)
+    {
+        let connected_sources = edge.sources.len();
+        let declared_sources = declaration.declared_sources;
+        assert_eq!(
+            connected_sources,
+            declared_sources,
+            "closure conversion generated an inconsistent closure-name boundary in `{theory_id}.{definition_name}` at edge e{edge_index}: operation `{operation}` is connected to {connected_sources} source wire(s), but its declaration expects {declared_sources}. connected source types: [{}]. declared source type map: `{}`.",
+            objects_to_hexpr(&interface_types(definition, &edge.sources)),
+            declaration.declaration_source_type_map,
+        );
+    }
+}
+
+fn declare_context_arrows_from_use_sites(
     syntax: &Theory,
     arrows: &mut BTreeMap<Operation, TheoryArrow>,
     definition: &AnnotatedTerm,
     ambient_context_arity: usize,
 ) -> Result<(), ConvertTheoryError> {
-    for (operation, edge) in definition
+    for (context_operation, context_use_site) in definition
         .hypergraph
         .edges
         .iter()
         .zip(&definition.hypergraph.adjacency)
-        .filter(|(operation, _)| operation.as_str().starts_with(GENERATED_COPY_PREFIX))
+        .filter(|(operation, _)| operation.as_str().starts_with(GENERATED_CONTEXT_PREFIX))
     {
-        let raw_copy = RawTheoryArrow {
-            name: operation.clone(),
+        // The replacement graph is the source of truth for generated context
+        // arrow boundaries: declare each operation from the concrete use-site
+        // that closure conversion inserted into the converted definition.
+        let raw_context_declaration = RawTheoryArrow {
+            name: context_operation.clone(),
             type_maps: (
-                objects_to_hexpr_in_context(
-                    &interface_types(definition, &edge.sources),
+                boundary_objects_to_hexpr_in_context(
+                    &interface_types(definition, &context_use_site.sources),
                     ambient_context_arity,
                 ),
-                objects_to_hexpr_in_context(
-                    &interface_types(definition, &edge.targets),
+                boundary_objects_to_hexpr_in_context(
+                    &interface_types(definition, &context_use_site.targets),
                     ambient_context_arity,
                 ),
             ),
             definition: None,
         };
-        let copy_type_maps = interpret_type_maps(syntax, &raw_copy.type_maps)?;
+        let context_type_maps = interpret_type_maps(syntax, &raw_context_declaration.type_maps)?;
         arrows.insert(
-            operation.clone(),
+            context_operation.clone(),
             TheoryArrow {
-                name: operation.clone(),
-                raw: raw_copy,
-                type_maps: copy_type_maps,
+                name: context_operation.clone(),
+                raw: raw_context_declaration,
+                type_maps: context_type_maps,
                 definition: None,
             },
         );
@@ -188,13 +228,12 @@ fn insert_closure_arrows(
     theory_id: &TheoryId,
     arrows: &mut BTreeMap<Operation, TheoryArrow>,
     definition_name: &Operation,
-    ambient_context_arity: usize,
     closure: ConvertedClosure,
-) -> Result<(), ConvertTheoryError> {
+) -> Result<GeneratedClosureNameDeclaration, ConvertTheoryError> {
     let closure_name = closure.name(definition_name);
     let raw_closure = RawTheoryArrow {
         name: closure_name.clone(),
-        type_maps: type_maps_for_term(&closure.term, ambient_context_arity),
+        type_maps: type_maps_for_term(&closure.term, closure.context.arity()),
         definition: Some(term_to_hexpr(&closure.term)),
     };
     let closure_type_maps = interpret_type_maps(syntax, &raw_closure.type_maps)?;
@@ -210,6 +249,11 @@ fn insert_closure_arrows(
 
     let raw_name = name_symbols::name_arrow(syntax, &theory_id.0, &raw_closure)?;
     let name_type_maps = interpret_type_maps(syntax, &raw_name.type_maps)?;
+    let name_boundary = GeneratedClosureNameDeclaration {
+        operation: raw_name.name.clone(),
+        declared_sources: name_type_maps.0.targets.len(),
+        declaration_source_type_map: raw_name.type_maps.0.clone(),
+    };
     arrows.insert(
         raw_name.name.clone(),
         TheoryArrow {
@@ -220,7 +264,7 @@ fn insert_closure_arrows(
         },
     );
 
-    Ok(())
+    Ok(name_boundary)
 }
 
 fn typed_definition(
@@ -285,28 +329,10 @@ fn converted_primitive(operation: &Operation) -> Option<&'static str> {
 fn type_maps_for_term(term: &AnnotatedTerm, ambient_context_arity: usize) -> (Hexpr, Hexpr) {
     let source_types = interface_types(term, &term.sources);
     let target_types = interface_types(term, &term.targets);
-    let context_arity = closure_context_arity(&source_types, &target_types, ambient_context_arity);
     (
-        objects_to_hexpr_in_context(&source_types, context_arity),
-        objects_to_hexpr_in_context(&target_types, context_arity),
+        objects_to_hexpr_in_context(&source_types, ambient_context_arity),
+        objects_to_hexpr_in_context(&target_types, ambient_context_arity),
     )
-}
-
-fn closure_context_arity(
-    source_types: &[Obj],
-    target_types: &[Obj],
-    ambient_context_arity: usize,
-) -> usize {
-    // Temporary precision hack: closed generated closures must stay nullary.
-    // Otherwise an `n`-indexed caller would make their generated `name.*`
-    // declarations expect `n`, while the replacement graph has no such input.
-    // Non-closed closures keep the broad ambient context until we remap sparse
-    // original leaf indices into a dense local context.
-    if leaf_indices(source_types).is_empty() && leaf_indices(target_types).is_empty() {
-        0
-    } else {
-        ambient_context_arity
-    }
 }
 
 fn objects_to_hexpr_in_context(objects: &[Obj], ambient_context_arity: usize) -> Hexpr {
@@ -329,6 +355,16 @@ fn objects_to_hexpr_in_context(objects: &[Obj], ambient_context_arity: usize) ->
         },
         objects_to_hexpr(objects),
     ])
+}
+
+fn boundary_objects_to_hexpr_in_context(objects: &[Obj], ambient_context_arity: usize) -> Hexpr {
+    if objects.is_empty() {
+        return Hexpr::Frobenius {
+            sources: context_vars(ambient_context_arity),
+            targets: vec![],
+        };
+    }
+    objects_to_hexpr_in_context(objects, ambient_context_arity)
 }
 
 fn leaf_indices(objects: &[Obj]) -> Vec<usize> {

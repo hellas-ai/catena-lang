@@ -1,3 +1,5 @@
+use std::collections::{BTreeMap, BTreeSet};
+
 use hexpr::Operation;
 use metacat::tree::Tree;
 use open_hypergraphs::lax::NodeId;
@@ -11,7 +13,7 @@ use crate::{
         region::{ClosureRegion, ClosureRegionError, closure_region},
         rewrite::{RewriteRegionError, rewrite_region},
     },
-    prefixes::{GENERATED_COPY_PREFIX, NAME_PREFIX},
+    prefixes::{GENERATED_CONTEXT_PREFIX, NAME_PREFIX},
     stdlib::constants::{
         FN_HOM_TYPE, FN_REF_TYPE, PRODUCT_INTRO, PRODUCT_TYPE, UNIT_INTRO, UNIT_TYPE, VALUE_TYPE,
     },
@@ -30,11 +32,102 @@ pub struct ConvertedClosure {
     pub node: NodeId,
     pub term: AnnotatedTerm,
     pub type_info: TypeInfo,
+    pub context: ClosureContext,
 }
 
 impl ConvertedClosure {
+    fn new(
+        node: NodeId,
+        term: AnnotatedTerm,
+        type_info: TypeInfo,
+        context: ClosureContext,
+    ) -> Self {
+        context.assert_term_boundary_uses_compact_leaves(&term);
+        Self {
+            node,
+            term,
+            type_info,
+            context,
+        }
+    }
+
     pub fn name(&self, definition_name: &Operation) -> Operation {
         closure_operation(definition_name, self.node)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClosureContext {
+    /// Maps compact closure-context leaves back to their original definition leaves.
+    ///
+    /// Entry `original_leaf_by_compact_leaf[i] = j` means generated closure
+    /// body type `Leaf(i)` came from original definition context `Leaf(j)`.
+    pub original_leaf_by_compact_leaf: Vec<usize>,
+}
+
+impl ClosureContext {
+    fn from_term_boundary(term: &AnnotatedTerm) -> Self {
+        let mut leaves = BTreeSet::new();
+        let boundary_types = interface_types(term, &term.sources)
+            .into_iter()
+            .chain(interface_types(term, &term.targets));
+        for object in boundary_types {
+            collect_leaf_indices(object, &mut leaves);
+        }
+        Self {
+            original_leaf_by_compact_leaf: leaves.into_iter().collect(),
+        }
+    }
+
+    pub fn arity(&self) -> usize {
+        self.original_leaf_by_compact_leaf.len()
+    }
+
+    fn compact_leaf_by_original_leaf(&self) -> BTreeMap<usize, usize> {
+        self.original_leaf_by_compact_leaf
+            .iter()
+            .copied()
+            .enumerate()
+            .map(|(local, original)| (original, local))
+            .collect()
+    }
+
+    fn name_sources_from_original_metavars(
+        &self,
+        metavars_by_original_leaf: &BTreeMap<usize, NodeId>,
+    ) -> Vec<NodeId> {
+        self.original_leaf_by_compact_leaf
+            .iter()
+            .map(|original| {
+                metavars_by_original_leaf
+                    .get(original)
+                    .copied()
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "closure conversion could not connect generated closure name: closure body requires original context leaf {original}, but the closure-region inputs do not contain a top-level Leaf({original})"
+                        )
+                    })
+            })
+            .collect()
+    }
+
+    fn relabel_term(&self, term: &AnnotatedTerm) -> AnnotatedTerm {
+        let compact_leaf_by_original_leaf = self.compact_leaf_by_original_leaf();
+        let relabeled = term
+            .clone()
+            .map_nodes(|object| relabel_object_context(object, &compact_leaf_by_original_leaf));
+
+        self.assert_term_boundary_uses_compact_leaves(&relabeled);
+
+        relabeled
+    }
+
+    fn assert_term_boundary_uses_compact_leaves(&self, term: &AnnotatedTerm) {
+        assert_eq!(
+            ClosureContext::from_term_boundary(term).original_leaf_by_compact_leaf,
+            (0..self.arity()).collect::<Vec<_>>(),
+            "generated closure body boundary should use exactly Leaf(0)..Leaf(context_arity - 1) after context relabeling"
+        );
     }
 }
 
@@ -94,19 +187,23 @@ pub fn convert(
             .expect("requested exactly one closure region");
         let extracted = extract_region(&rewritten, &region)?;
         let body = closure_body(&extracted)?;
+        let context = ClosureContext::from_term_boundary(&body);
+        let body = context.relabel_term(&body);
         let type_info = type_info(&rewritten, &region)?;
         let replacement = replacement_region(
             definition_name,
             &rewritten,
             &region,
             &type_info,
+            &context,
             job.original_wire,
         );
-        closures.push(ConvertedClosure {
-            node: job.original_wire,
-            term: body,
+        closures.push(ConvertedClosure::new(
+            job.original_wire,
+            body,
             type_info,
-        });
+            context,
+        ));
 
         let rewrite = rewrite_region(&rewritten, &region, &replacement)?;
         pending = remap_pending_closures(pending, &rewrite.node_map)?;
@@ -145,20 +242,61 @@ fn replacement_region(
     definition: &AnnotatedTerm,
     region: &ClosureRegion,
     type_info: &TypeInfo,
+    context: &ClosureContext,
     closure_name_wire: NodeId,
 ) -> AnnotatedTerm {
     let mut replacement = AnnotatedTerm::empty();
+
+    // Expose the region leaf inputs as replacement sources.
     let sources = region
         .leaf_inputs
         .iter()
         .map(|wire| replacement.new_node(definition.hypergraph.nodes[wire.0].clone()))
         .collect::<Vec<_>>();
-    let (environment_components, name_sources) = split_sources_for_environment_and_name(
+
+    let (environment_components, name_context_outputs) = build_context_projection_arrow(
         &mut replacement,
         definition_name,
         closure_name_wire,
         &sources,
+        context,
     );
+
+    // Order the generated name-context wires using the closure context.
+    //
+    //   context.original_leaf_by_compact_leaf = [2, 5]
+    //
+    // means:
+    //
+    //   compact Leaf(0) expects original Leaf(2)
+    //   compact Leaf(1) expects original Leaf(5)
+    //
+    // so the `name.closure.*` source list is ordered as:
+    //
+    //   [metavar for original Leaf(2), metavar for original Leaf(5)]
+    let name_metavars_by_original_leaf = context
+        .original_leaf_by_compact_leaf
+        .iter()
+        .copied()
+        .zip(name_context_outputs)
+        .collect::<BTreeMap<_, _>>();
+    let name_sources = context.name_sources_from_original_metavars(&name_metavars_by_original_leaf);
+    assert_eq!(
+        name_sources.len(),
+        context.arity(),
+        "generated closure name inputs should match compact closure context arity"
+    );
+
+    // Pack the environment, create the function-pointer node, and connect the
+    // generated closure name.
+    //
+    //   environment components ----> packed environment
+    //
+    //   ordered name metavars -----> name.closure.* ----> function pointer
+    //
+    // replacement targets are:
+    //
+    //   [packed environment, function pointer]
     let environment = packed_environment_target(
         &mut replacement,
         &environment_components,
@@ -177,26 +315,51 @@ fn replacement_region(
     replacement
 }
 
-fn split_sources_for_environment_and_name(
+fn build_context_projection_arrow(
     replacement: &mut AnnotatedTerm,
     definition_name: &Operation,
     closure_name_wire: NodeId,
     sources: &[NodeId],
+    context: &ClosureContext,
 ) -> (Vec<NodeId>, Vec<NodeId>) {
-    sources
+    // Build one generated context projection for this closure region.
+    //
+    //   region inputs ---- __catena_context.closure.* ----> environment components
+    //                                                   \
+    //                                                    `-> name-context wires
+    //
+    // If the generated closure name has no context, the second output group is
+    // empty. The generated arrow still describes how region inputs become the
+    // environment components used by the explicit closure representation.
+    //
+    // The generated arrow's type map describes how context variables needed by
+    // `name.closure.*` are obtained from the region-input boundary. This covers
+    // both cases that per-input copies could not express:
+    //
+    //   i : val(ix n) -------------> env i
+    //                  \
+    //                   `----------> n
+    //
+    //   n : Leaf(0) ---------------> env n
+    //   n : Leaf(0) ---------------> env n
+    //                  \
+    //                   `----------> one representative n
+    let environment_components = sources
         .iter()
-        .enumerate()
-        .map(|(index, source)| {
-            let source_type = replacement.hypergraph.nodes[source.0].clone();
-            let environment_component = replacement.new_node(source_type.clone());
-            let name_source = replacement.new_node(source_type);
-            replacement.new_edge(
-                copy_operation(definition_name, closure_name_wire, index),
-                (vec![*source], vec![environment_component, name_source]),
-            );
-            (environment_component, name_source)
-        })
-        .unzip()
+        .map(|source| replacement.new_node(replacement.hypergraph.nodes[source.0].clone()))
+        .collect::<Vec<_>>();
+    let name_context_outputs = context
+        .original_leaf_by_compact_leaf
+        .iter()
+        .map(|original| replacement.new_node(Tree::Leaf(*original, ())))
+        .collect::<Vec<_>>();
+    let mut context_targets = environment_components.clone();
+    context_targets.extend(name_context_outputs.iter().copied());
+    replacement.new_edge(
+        context_operation(definition_name, closure_name_wire),
+        (sources.to_vec(), context_targets),
+    );
+    (environment_components, name_context_outputs)
 }
 
 fn packed_environment_target(
@@ -260,6 +423,34 @@ fn type_info(definition: &AnnotatedTerm, region: &ClosureRegion) -> Result<TypeI
     })
 }
 
+fn relabel_object_context(
+    object: Obj,
+    compact_leaf_by_original_leaf: &BTreeMap<usize, usize>,
+) -> Obj {
+    match object {
+        Tree::Empty => Tree::Empty,
+        Tree::Leaf(original, annotation) => {
+            let local = compact_leaf_by_original_leaf
+                .get(&original)
+                .copied()
+                .unwrap_or_else(|| {
+                    panic!(
+                        "closure conversion cannot relabel context leaf {original}: it is not part of the closure boundary context"
+                    )
+                });
+            Tree::Leaf(local, annotation)
+        }
+        Tree::Node(operation, annotation, children) => Tree::Node(
+            operation,
+            annotation,
+            children
+                .into_iter()
+                .map(|child| relabel_object_context(child, compact_leaf_by_original_leaf))
+                .collect(),
+        ),
+    }
+}
+
 fn closure_operation(definition_name: &Operation, closure_wire: NodeId) -> Operation {
     format!("closure.{}.{}", definition_name, closure_wire.0)
         .parse()
@@ -275,13 +466,13 @@ fn name_operation(definition_name: &Operation, closure_wire: NodeId) -> Operatio
     .expect("generated name operation should parse")
 }
 
-fn copy_operation(definition_name: &Operation, closure_wire: NodeId, index: usize) -> Operation {
+fn context_operation(definition_name: &Operation, closure_wire: NodeId) -> Operation {
     format!(
-        "{GENERATED_COPY_PREFIX}closure.{}.{}.{}",
-        definition_name, closure_wire.0, index
+        "{GENERATED_CONTEXT_PREFIX}closure.{}.{}",
+        definition_name, closure_wire.0
     )
     .parse()
-    .expect("generated copy operation should parse")
+    .expect("generated context operation should parse")
 }
 
 fn closure_parts(object: &Obj) -> Option<(&Obj, &Obj)> {
@@ -321,10 +512,130 @@ fn pack_object(objects: Vec<Obj>) -> Obj {
     }
 }
 
+fn collect_leaf_indices(object: &Obj, indices: &mut BTreeSet<usize>) {
+    match object {
+        Tree::Empty => {}
+        Tree::Leaf(index, _) => {
+            indices.insert(*index);
+        }
+        Tree::Node(_, _, children) => {
+            for child in children {
+                collect_leaf_indices(child, indices);
+            }
+        }
+    }
+}
+
 fn unit_type() -> Obj {
     Tree::Node(op(UNIT_TYPE), 0, vec![])
 }
 
+fn interface_types<'a>(term: &'a AnnotatedTerm, interface: &[NodeId]) -> Vec<&'a Obj> {
+    interface
+        .iter()
+        .map(|node| &term.hypergraph.nodes[node.0])
+        .collect()
+}
+
 fn op(name: &str) -> Operation {
     name.parse().expect("generated operation should parse")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn closure_context_collects_sorted_unique_boundary_leaves() {
+        let mut term = AnnotatedTerm::empty();
+        let source_a = term.new_node(Tree::Leaf(5, ()));
+        let source_b = term.new_node(obj("val", vec![obj("ix", vec![Tree::Leaf(2, ())])]));
+        let target = term.new_node(obj(
+            FN_HOM_TYPE,
+            vec![
+                obj("val", vec![obj("ix", vec![Tree::Leaf(5, ())])]),
+                obj("val", vec![obj("u64", vec![])]),
+            ],
+        ));
+        term.sources = vec![source_a, source_b];
+        term.targets = vec![target];
+
+        let context = ClosureContext::from_term_boundary(&term);
+
+        assert_eq!(
+            context.original_leaf_by_compact_leaf,
+            vec![2, 5],
+            "closure context should use sorted unique original leaves from source and target boundary types"
+        );
+        assert_eq!(context.arity(), 2);
+    }
+
+    #[test]
+    fn closure_context_is_nullary_when_boundary_has_no_leaves() {
+        let mut term = AnnotatedTerm::empty();
+        let source = term.new_node(obj("1", vec![]));
+        let target = term.new_node(obj("val", vec![obj("u64", vec![])]));
+        term.sources = vec![source];
+        term.targets = vec![target];
+
+        let context = ClosureContext::from_term_boundary(&term);
+
+        assert_eq!(context.original_leaf_by_compact_leaf, Vec::<usize>::new());
+        assert_eq!(context.arity(), 0);
+        assert!(context.compact_leaf_by_original_leaf().is_empty());
+    }
+
+    #[test]
+    fn closure_context_builds_reverse_compact_leaf_lookup() {
+        let context = ClosureContext {
+            original_leaf_by_compact_leaf: vec![2, 5],
+        };
+
+        assert_eq!(
+            context.compact_leaf_by_original_leaf(),
+            BTreeMap::from([(2, 0), (5, 1)]),
+            "reverse lookup should map original leaves to compact generated closure leaves"
+        );
+    }
+
+    #[test]
+    fn closure_context_relabels_term_boundary_to_compact_leaves() {
+        let mut term = AnnotatedTerm::empty();
+        let source = term.new_node(Tree::Leaf(5, ()));
+        let target = term.new_node(obj(
+            FN_HOM_TYPE,
+            vec![
+                obj("val", vec![obj("ix", vec![Tree::Leaf(2, ())])]),
+                obj("val", vec![obj("ix", vec![Tree::Leaf(5, ())])]),
+            ],
+        ));
+        term.sources = vec![source];
+        term.targets = vec![target];
+
+        let context = ClosureContext::from_term_boundary(&term);
+        let relabeled = context.relabel_term(&term);
+
+        assert_eq!(context.original_leaf_by_compact_leaf, vec![2, 5]);
+        assert_eq!(
+            interface_types(&relabeled, &relabeled.sources),
+            vec![&Tree::Leaf(1, ())],
+            "original Leaf(5) should become compact Leaf(1)"
+        );
+        assert_eq!(
+            interface_types(&relabeled, &relabeled.targets),
+            vec![&obj(
+                FN_HOM_TYPE,
+                vec![
+                    obj("val", vec![obj("ix", vec![Tree::Leaf(0, ())])]),
+                    obj("val", vec![obj("ix", vec![Tree::Leaf(1, ())])]),
+                ],
+            )],
+            "boundary leaves should be relabeled according to the compact context"
+        );
+        context.assert_term_boundary_uses_compact_leaves(&relabeled);
+    }
+
+    fn obj(name: &str, children: Vec<Obj>) -> Obj {
+        Tree::Node(op(name), 0, children)
+    }
 }

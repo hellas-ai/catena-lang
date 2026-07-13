@@ -565,7 +565,9 @@ fn theory_conversion_converts_if_closure_arguments() {
 }
 
 #[test]
-#[should_panic(expected = "closure conversion requires closure-boundary definitions to be inlined first")]
+#[should_panic(
+    expected = "closure conversion requires closure-boundary definitions to be inlined first"
+)]
 fn theory_conversion_panics_on_uninlined_closure_boundary_definitions() {
     let (theory_set, definition_types) = theories_with(
         r#"

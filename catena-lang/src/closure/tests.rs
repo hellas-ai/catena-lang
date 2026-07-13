@@ -1,6 +1,8 @@
+use std::collections::{BTreeMap, BTreeSet};
+
 use hexpr::{Hexpr, Operation};
 use metacat::{
-    theory::{RawTheorySet, Theory, TheoryId, TheorySet},
+    theory::{RawTheorySet, Term, Theory, TheoryId, TheorySet},
     tree::Tree,
 };
 use open_hypergraphs::lax::{NodeId, OpenHypergraph};
@@ -491,7 +493,7 @@ fn converted_closure_accepts_duplicate_metavar_region_inputs() {
 
 #[test]
 fn theory_conversion_converts_if_closure_arguments() {
-    let (theory_set, definition_types) = theories_with(
+    let (theory_set, definition_types) = theories_with_inlined_closure_boundaries(
         r#"
         (def program f32.id : (f32 val) -> (f32 val) = [x])
         (def program if-id-neg : {(bool val) (f32 val)} -> (f32 val) = ([b x.]
@@ -564,7 +566,7 @@ fn theory_conversion_converts_if_closure_arguments() {
 
 #[test]
 fn theory_conversion_converts_if_id_neg_example_end_to_end() {
-    let (theory_set, definition_types) = theories_with(
+    let (theory_set, definition_types) = theories_with_inlined_closure_boundaries(
         r#"
         (def program f32.id : (f32 val) -> (f32 val) = [x]) # specialised f32.id
         (def program if-id-neg : {(bool val) (f32 val)} -> (f32 val) = ([b x.]
@@ -648,7 +650,7 @@ fn theory_conversion_converts_if_id_neg_example_end_to_end() {
 
 #[test]
 fn theory_conversion_declares_deferred_value_capture_name_boundary() {
-    let (theory_set, definition_types) = theories_with(
+    let (theory_set, definition_types) = theories_with_inlined_closure_boundaries(
         r#"
         (def program if-capture-bool :
           {(bool val) (bool val)}
@@ -705,7 +707,7 @@ fn theory_conversion_declares_deferred_value_capture_name_boundary() {
 
 #[test]
 fn theory_conversion_declares_mixed_runtime_and_freevar_name_boundary() {
-    let (theory_set, definition_types) = theories_with(
+    let (theory_set, definition_types) = theories_with_inlined_closure_boundaries(
         r#"
         (def program u64.id-for-n :
           ([n.] (u64 val))
@@ -767,7 +769,7 @@ fn theory_conversion_declares_mixed_runtime_and_freevar_name_boundary() {
 
 #[test]
 fn theory_conversion_defers_indexed_value_without_explicit_context_input() {
-    let (theory_set, definition_types) = theories_with(
+    let (theory_set, definition_types) = theories_with_inlined_closure_boundaries(
         r#"
         (def program if-defer-index :
           ([n.] {([.n] ix val) ([.n] ix val) (bool val)})
@@ -839,7 +841,7 @@ fn theory_conversion_defers_indexed_value_without_explicit_context_input() {
 
 #[test]
 fn theory_conversion_supplies_ambient_metavar_to_closed_accumulator_closure_name() {
-    let (theory_set, definition_types) = theories_with(
+    let (theory_set, definition_types) = theories_with_inlined_closure_boundaries(
         r#"
         (def program u64.one-at :
           ([n.] ([.n] ix val))
@@ -972,7 +974,7 @@ fn convert_parallel_regions_with_crossed_node_and_edge_order() {
 
 #[test]
 fn theory_conversion_converts_reduce_closure_arguments() {
-    let (theory_set, definition_types) = theories_with(
+    let (theory_set, definition_types) = theories_with_inlined_closure_boundaries(
         r#"
         (def program u64.one-at :
           ([n.] ([.n] ix val))
@@ -1042,7 +1044,7 @@ fn theory_conversion_converts_reduce_closure_arguments() {
 
 #[test]
 fn theory_conversion_declares_context_dependent_context_arrows() {
-    let (theory_set, definition_types) = theories_with(
+    let (theory_set, definition_types) = theories_with_inlined_closure_boundaries(
         r#"
         (def program diagonal-view :
           ([n.] ([.n] ix val))
@@ -1073,7 +1075,7 @@ fn theory_conversion_declares_context_dependent_context_arrows() {
 
 #[test]
 fn theory_conversion_generates_diagonal_view_closure_with_shared_context() {
-    let (theory_set, definition_types) = theories_with(
+    let (theory_set, definition_types) = theories_with_inlined_closure_boundaries(
         r#"
         (def program diagonal-view :
           ([n.] ([.n] ix val))
@@ -1169,6 +1171,49 @@ fn theories_with(source: &'static str) -> (TheorySet, DefinitionTypes) {
     let theory_set = TheorySet::from_raw(elaborated).expect("test theories should load");
     let definition_types = check(&theory_set).expect("test theories should typecheck");
     (theory_set, definition_types)
+}
+
+fn theories_with_inlined_closure_boundaries(source: &'static str) -> (TheorySet, DefinitionTypes) {
+    let (theory_set, _) = theories_with(source);
+    let definitions_to_inline = closure_boundary_definitions(&theory_set);
+    let theory_set = crate::pass::inline_definitions::run(&theory_set, &definitions_to_inline)
+        .expect("closure-boundary definitions should inline");
+    let definition_types = check(&theory_set).expect("inlined theories should typecheck");
+    (theory_set, definition_types)
+}
+
+fn closure_boundary_definitions(theory_set: &TheorySet) -> BTreeMap<TheoryId, BTreeSet<Operation>> {
+    let mut output = BTreeMap::new();
+
+    for (theory_id, theory) in &theory_set.theories {
+        let Theory::Theory { arrows, .. } = theory else {
+            continue;
+        };
+
+        let definitions = arrows
+            .iter()
+            .filter_map(|(definition_name, arrow)| {
+                arrow.definition.as_ref()?;
+                (contains_closure_type_map(&arrow.type_maps.0)
+                    || contains_closure_type_map(&arrow.type_maps.1))
+                .then_some(definition_name.clone())
+            })
+            .collect::<BTreeSet<_>>();
+
+        if !definitions.is_empty() {
+            output.insert(theory_id.clone(), definitions);
+        }
+    }
+
+    output
+}
+
+fn contains_closure_type_map(type_map: &Term) -> bool {
+    type_map
+        .hypergraph
+        .edges
+        .iter()
+        .any(|op| op.as_str() == FN_HOM_TYPE)
 }
 
 fn annotated_program_definition(source: &'static str, definition: &str) -> AnnotatedTerm {

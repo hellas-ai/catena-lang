@@ -46,3 +46,63 @@
     )
   )
 ))
+
+(def program matmul-right-identity-2x2-via-mem :
+  ([n.] {
+    (cap.ref mem)
+    ({[.n] u64} :)
+    ({({[.n] [.n]} *) u64} :)
+  })
+  ->
+  ([n.] (cap.own mem))
+= ([a-mem n-len nn-len.]
+  ([.a-mem] mem.cast.f32 [actual-nn-len a-raw.]
+    ([.nn-len actual-nn-len] u64.eq [a-len-eq if-a-len-eq _if-a-len-ne.]
+      ({
+        [.a-len-eq]
+        [.if-a-len-eq]
+      } assert-then [a-same-length.]
+        ({[.a-raw] [.a-same-length]} buf.f32.cast-same-length [a.]
+          ([.nn-len] f32.matmul.len-copies2 [matmul-len output-len.]
+            ({
+              [.n-len]
+              [.matmul-len]
+              [.a]
+            } f32.matmul.row-major.right-identity [result.]
+              {[.output-len] [.result]} buf.to-mem)
+          )
+        )
+      )
+    )
+  )
+))
+
+(def program matmul-left-identity-2x2-via-mem :
+  ([n.] {
+    (cap.ref mem)
+    ({[.n] u64} :)
+    ({({[.n] [.n]} *) u64} :)
+  })
+  ->
+  ([n.] (cap.own mem))
+= ([a-mem n-len nn-len.]
+  ([.a-mem] mem.cast.f32 [actual-nn-len a-raw.]
+    ([.nn-len actual-nn-len] u64.eq [a-len-eq if-a-len-eq _if-a-len-ne.]
+      ({
+        [.a-len-eq]
+        [.if-a-len-eq]
+      } assert-then [a-same-length.]
+        ({[.a-raw] [.a-same-length]} buf.f32.cast-same-length [a.]
+          ([.nn-len] f32.matmul.len-copies2 [matmul-len output-len.]
+            ({
+              [.n-len]
+              [.matmul-len]
+              [.a]
+            } f32.matmul.row-major.left-identity [result.]
+              {[.output-len] [.result]} buf.to-mem)
+          )
+        )
+      )
+    )
+  )
+))

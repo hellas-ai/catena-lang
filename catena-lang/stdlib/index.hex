@@ -27,6 +27,11 @@
     ([i.] {[.i] [.i]})
   )
 
+  (arr ix.to-u64 :
+    ([n.] ([.n] ix val))
+    ->
+    ([n.] (u64 val)))
+
   # Row-major layout helpers for flattened matrix buffers.
   # row-major-index(cols, row, col) -> flat
   (arr row-major-index :

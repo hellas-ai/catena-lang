@@ -352,6 +352,7 @@ fn render_assignment(
         }
         "f32.round-to-u32" => render_f32_round_to_u32(out, assignment)?,
         "f32.bitcast-u32" => render_f32_bitcast_u32(out, assignment)?,
+        "ix.to-u64" => render_forget(out, assignment)?,
         "ix.zero" => render_ix_zero(out, assignment)?,
         "ix" => render_ix(out, assignment)?,
         "row-major-index" => row_major::render_index(out, assignment)?,

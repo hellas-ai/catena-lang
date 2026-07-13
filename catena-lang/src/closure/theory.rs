@@ -125,6 +125,7 @@ fn update_definition_arrow(
         original.type_maps.1.sources.len(),
         "closure conversion expects original arrow type maps to share one context"
     );
+    let ambient_context_arity = original.type_maps.0.sources.len();
 
     declare_context_arrows_from_use_sites(
         syntax,
@@ -220,37 +221,6 @@ fn declare_context_arrows_from_use_sites(
     }
 
     Ok(())
-}
-
-fn compact_context_arrow_boundary(
-    source_types: Vec<Obj>,
-    target_types: Vec<Obj>,
-) -> (Vec<Obj>, Vec<Obj>, usize) {
-    let original_leaves = source_types
-        .iter()
-        .chain(&target_types)
-        .flat_map(|object| {
-            let mut leaves = Vec::new();
-            collect_leaf_indices(object, &mut leaves);
-            leaves
-        })
-        .collect::<BTreeSet<_>>();
-    let compact_leaf_by_original_leaf = original_leaves
-        .iter()
-        .copied()
-        .enumerate()
-        .map(|(compact, original)| (original, compact))
-        .collect::<BTreeMap<_, _>>();
-    let context_arity = compact_leaf_by_original_leaf.len();
-    let compact_sources = source_types
-        .into_iter()
-        .map(|object| relabel_object_context(object, &compact_leaf_by_original_leaf))
-        .collect();
-    let compact_targets = target_types
-        .into_iter()
-        .map(|object| relabel_object_context(object, &compact_leaf_by_original_leaf))
-        .collect();
-    (compact_sources, compact_targets, context_arity)
 }
 
 fn insert_closure_arrows(
@@ -414,30 +384,6 @@ fn collect_leaf_indices(object: &Obj, indices: &mut Vec<usize>) {
                 collect_leaf_indices(child, indices);
             }
         }
-    }
-}
-
-fn relabel_object_context(
-    object: Obj,
-    compact_leaf_by_original_leaf: &BTreeMap<usize, usize>,
-) -> Obj {
-    match object {
-        Tree::Empty => Tree::Empty,
-        Tree::Leaf(original, annotation) => {
-            let compact = compact_leaf_by_original_leaf
-                .get(&original)
-                .copied()
-                .expect("object leaf should have been collected before relabeling");
-            Tree::Leaf(compact, annotation)
-        }
-        Tree::Node(operation, annotation, children) => Tree::Node(
-            operation,
-            annotation,
-            children
-                .into_iter()
-                .map(|child| relabel_object_context(child, compact_leaf_by_original_leaf))
-                .collect(),
-        ),
     }
 }
 

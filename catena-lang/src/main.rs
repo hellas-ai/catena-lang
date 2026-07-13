@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{fs, path::PathBuf};
 
 use clap::Parser;
 use metacat::theory::RawTheorySet;
@@ -15,7 +15,14 @@ struct Cli {
 
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
-    let raw_theories = RawTheorySet::from_files(cli.paths)?;
+    let sources = cli
+        .paths
+        .iter()
+        .map(fs::read_to_string)
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut all_sources: Vec<&str> = catena_lang::stdlib::sources().collect();
+    all_sources.extend(sources.iter().map(String::as_str));
+    let raw_theories = RawTheorySet::from_texts(all_sources)?;
     match catena_lang::compile::compile(raw_theories) {
         Ok(report) => {
             report.dump_to_dir(&cli.output_dir)?;

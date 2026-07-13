@@ -126,7 +126,16 @@ fn update_definition_arrow(
         "closure conversion expects original arrow type maps to share one context"
     );
 
+<<<<<<< HEAD
     declare_context_arrows_from_use_sites(syntax, arrows, &converted_definition)?;
+=======
+    declare_context_arrows_from_use_sites(
+        syntax,
+        arrows,
+        &converted_definition,
+        ambient_context_arity,
+    )?;
+>>>>>>> master
     let mut arrow = original.clone();
     arrow.raw = raw;
     arrow.definition = Some(converted_definition.clone().map_nodes(|_| ()));
@@ -149,6 +158,12 @@ fn update_definition_arrow(
 fn assert_generated_closure_name_use_matches_declaration(
     theory_id: &TheoryId,
     definition_name: &Operation,
+<<<<<<< HEAD
+    definition: &AnnotatedTerm,
+    declaration: &GeneratedClosureNameDeclaration,
+) {
+    for (edge_index, (operation, edge)) in definition
+=======
     definition: &AnnotatedTerm,
     declaration: &GeneratedClosureNameDeclaration,
 ) {
@@ -157,6 +172,34 @@ fn assert_generated_closure_name_use_matches_declaration(
         .edges
         .iter()
         .zip(&definition.hypergraph.adjacency)
+        .enumerate()
+        .filter(|(_, (operation, _))| *operation == &declaration.operation)
+    {
+        let connected_sources = edge.sources.len();
+        let declared_sources = declaration.declared_sources;
+        assert_eq!(
+            connected_sources,
+            declared_sources,
+            "closure conversion generated an inconsistent closure-name boundary in `{theory_id}.{definition_name}` at edge e{edge_index}: operation `{operation}` is connected to {connected_sources} source wire(s), but its declaration expects {declared_sources}. connected source types: [{}]. declared source type map: `{}`.",
+            objects_to_hexpr(&interface_types(definition, &edge.sources)),
+            declaration.declaration_source_type_map,
+        );
+    }
+}
+
+fn declare_context_arrows_from_use_sites(
+    syntax: &Theory,
+    arrows: &mut BTreeMap<Operation, TheoryArrow>,
+    definition: &AnnotatedTerm,
+    ambient_context_arity: usize,
+) -> Result<(), ConvertTheoryError> {
+    for (context_operation, context_use_site) in definition
+>>>>>>> master
+        .hypergraph
+        .edges
+        .iter()
+        .zip(&definition.hypergraph.adjacency)
+<<<<<<< HEAD
         .enumerate()
         .filter(|(_, (operation, _))| *operation == &declaration.operation)
     {
@@ -202,6 +245,24 @@ fn declare_context_arrows_from_use_sites(
             type_maps: (
                 boundary_objects_to_hexpr_in_context(&source_types, context_arity),
                 boundary_objects_to_hexpr_in_context(&target_types, context_arity),
+=======
+        .filter(|(operation, _)| operation.as_str().starts_with(GENERATED_CONTEXT_PREFIX))
+    {
+        // The replacement graph is the source of truth for generated context
+        // arrow boundaries: declare each operation from the concrete use-site
+        // that closure conversion inserted into the converted definition.
+        let raw_context_declaration = RawTheoryArrow {
+            name: context_operation.clone(),
+            type_maps: (
+                boundary_objects_to_hexpr_in_context(
+                    &interface_types(definition, &context_use_site.sources),
+                    ambient_context_arity,
+                ),
+                boundary_objects_to_hexpr_in_context(
+                    &interface_types(definition, &context_use_site.targets),
+                    ambient_context_arity,
+                ),
+>>>>>>> master
             ),
             definition: None,
         };

@@ -277,7 +277,10 @@ mod tests {
         );
         let build_closure =
             definition.new_edge(op("build-closure"), (vec![closure_arg], vec![closure]));
-        definition.new_edge(op("use-outside-copy"), (vec![outside_copy], vec![outside_result]));
+        definition.new_edge(
+            op("use-outside-copy"),
+            (vec![outside_copy], vec![outside_result]),
+        );
         definition.sources = vec![seed];
         definition.targets = vec![closure, outside_result];
 

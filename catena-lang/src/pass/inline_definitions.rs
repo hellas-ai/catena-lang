@@ -60,7 +60,14 @@ pub fn run(
 
         for (definition_name, arrow) in arrows.iter_mut() {
             if selected.contains(definition_name) {
-                arrow.definition = inline_bodies.get(definition_name).cloned();
+                // This definition may be retained if `name.{definition_name}`
+                // is still referenced. Keep its body consistent with the rest
+                // of the theory by storing the recursively inlined version.
+                let expanded_body = inline_bodies
+                    .get(definition_name)
+                    .expect("selected definition should have an inline body")
+                    .clone();
+                arrow.definition = Some(expanded_body);
                 continue;
             }
 

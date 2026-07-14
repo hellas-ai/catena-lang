@@ -164,7 +164,13 @@ fn dump_typed_stage_svg<A: Clone + fmt::Debug + fmt::Display + PartialEq>(
         )
     })?;
 
-    dump_typed_stage_hex(transformed, stage, definition_dir, edge_to_operation)
+    dump_typed_stage_hex(
+        transformed,
+        stage,
+        definition_dir,
+        edge_to_operation,
+        syntax_theory,
+    )
 }
 
 fn dump_untyped_stage_hex(
@@ -173,7 +179,7 @@ fn dump_untyped_stage_hex(
     definition_dir: &Path,
 ) -> io::Result<()> {
     let term = term.clone().map_nodes(|_| Tree::Empty);
-    write_stage_hex(&term, stage, definition_dir)
+    write_stage_hex(&term, stage, definition_dir, "")
 }
 
 fn dump_typed_stage_hex<A: Clone>(
@@ -181,24 +187,39 @@ fn dump_typed_stage_hex<A: Clone>(
     stage: &str,
     definition_dir: &Path,
     edge_to_operation: impl Fn(&A) -> Operation,
+    syntax_theory: &Theory,
 ) -> io::Result<()> {
+    let type_comments = type_comments(term, syntax_theory)?;
     let term = term.clone().map_edges(|edge| edge_to_operation(&edge));
-    write_stage_hex(&term, stage, definition_dir)
+    write_stage_hex(&term, stage, definition_dir, &type_comments)
 }
 
 fn write_stage_hex(
     term: &OpenHypergraph<metacat::tree::Tree<(), Operation>, Operation>,
     stage: &str,
     definition_dir: &Path,
+    prefix: &str,
 ) -> io::Result<()> {
     let hexpr = crate::hexpr::term_to_hexpr(term);
     let path = definition_dir.join(format!("{stage}.hex"));
-    fs::write(&path, format!("{hexpr}\n")).map_err(|error| {
+    fs::write(&path, format!("{prefix}{hexpr}\n")).map_err(|error| {
         io::Error::new(
             error.kind(),
             format!("failed to write {}: {error}", path.display()),
         )
     })
+}
+
+fn type_comments(
+    term: &OpenHypergraph<metacat::tree::Tree<(), Operation>, impl Clone>,
+    syntax_theory: &Theory,
+) -> io::Result<String> {
+    term.hypergraph
+        .nodes
+        .iter()
+        .enumerate()
+        .map(|(index, ty)| Ok(format!("# w{index} : {}\n", pretty_type(ty, syntax_theory)?)))
+        .collect()
 }
 
 fn render_check_result_svg(

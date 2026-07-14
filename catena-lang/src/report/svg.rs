@@ -6,7 +6,7 @@ use metacat::tree::Tree;
 use open_hypergraphs::lax::OpenHypergraph;
 use open_hypergraphs_dot::{Options, svg::to_svg_with};
 
-use crate::report::CompileReport;
+use crate::{pass::forget_closures::Region, report::CompileReport};
 
 /// Render a list of SVGs for each definition being compiled, one for each transformation phase.
 pub fn dump_svgs(report: &CompileReport, dir: &Path) -> io::Result<()> {
@@ -107,7 +107,7 @@ pub fn dump_svgs(report: &CompileReport, dir: &Path) -> io::Result<()> {
                 definition_name,
                 syntax_theory,
                 &definition_dir,
-                Operation::clone,
+                region_to_hexpr_operation,
             )?;
             dump_typed_stage_svg(
                 &report.boundary_sizes,
@@ -210,6 +210,13 @@ fn write_stage_hex(
     })
 }
 
+fn region_to_hexpr_operation(region: &Region<Operation>) -> Operation {
+    match region {
+        Region::Operation(operation) => operation.clone(),
+        Region::Closure => op("!closure"),
+    }
+}
+
 fn type_comments(
     term: &OpenHypergraph<metacat::tree::Tree<(), Operation>, impl Clone>,
     syntax_theory: &Theory,
@@ -218,8 +225,17 @@ fn type_comments(
         .nodes
         .iter()
         .enumerate()
-        .map(|(index, ty)| Ok(format!("# w{index} : {}\n", pretty_type(ty, syntax_theory)?)))
+        .map(|(index, ty)| {
+            Ok(format!(
+                "# w{index} : {}\n",
+                pretty_type(ty, syntax_theory)?
+            ))
+        })
         .collect()
+}
+
+fn op(name: &str) -> Operation {
+    name.parse().expect("generated operation should parse")
 }
 
 fn render_check_result_svg(

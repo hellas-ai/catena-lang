@@ -111,17 +111,16 @@ fn compile_into(report: &mut CompileReport) -> Result<(), CompileError> {
 
     return Err(CompileError::NotImplementedError);
 
-    #[allow(unreachable_code)]
-    let boundary_sizes = crate::pass::record_boundary_sizes::run(&forgotten_closures)?;
-    report.boundary_sizes = Some(boundary_sizes.clone());
-
-    let unpacked_products = crate::pass::unpack_products::run(&boundary_sizes)?;
-    report.unpacked_products = Some(unpacked_products.clone());
-
-    let gpu_modules = crate::codegen::codegen(&unpacked_products)?;
-    report.gpu_modules = Some(gpu_modules);
-
-    Ok(())
+    // let boundary_sizes = crate::pass::record_boundary_sizes::run(&forgotten_closures)?;
+    // report.boundary_sizes = Some(boundary_sizes.clone());
+    //
+    // let unpacked_products = crate::pass::unpack_products::run(&boundary_sizes)?;
+    // report.unpacked_products = Some(unpacked_products.clone());
+    //
+    // let gpu_modules = crate::codegen::codegen(&unpacked_products)?;
+    // report.gpu_modules = Some(gpu_modules);
+    //
+    // Ok(())
 }
 
 fn closure_boundary_definitions(theory_set: &TheorySet) -> BTreeMap<TheoryId, BTreeSet<Operation>> {

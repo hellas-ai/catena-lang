@@ -13,7 +13,7 @@ use std::collections::BTreeMap;
 
 use crate::check::{AnnotatedTerm, PartialDefinitionTypes};
 use crate::codegen::GpuModuleMap;
-use crate::pass::record_boundary_sizes::OperationWithBoundarySizes;
+use crate::pass::{forget_closures::Region, record_boundary_sizes::OperationWithBoundarySizes};
 
 /// Generic storage for per-theory, per-definition graph results produced by compiler passes.
 pub type TheoryTermMap<A = Operation> = BTreeMap<TheoryId, BTreeMap<Operation, AnnotatedTerm<A>>>;
@@ -24,7 +24,7 @@ pub struct CompileReport {
     pub theory_set: Option<TheorySet>,
     pub definition_types: Option<BTreeMap<TheoryId, BTreeMap<Operation, Vec<Tree<(), Operation>>>>>,
     pub partial_definition_types: Option<PartialDefinitionTypes>,
-    pub forgotten_closures: Option<TheoryTermMap>,
+    pub forgotten_closures: Option<TheoryTermMap<Region<Operation>>>,
     pub boundary_sizes: Option<TheoryTermMap<OperationWithBoundarySizes<Operation>>>,
     pub unpacked_products: Option<TheoryTermMap<OperationWithBoundarySizes<Operation>>>,
     pub gpu_modules: Option<GpuModuleMap>,

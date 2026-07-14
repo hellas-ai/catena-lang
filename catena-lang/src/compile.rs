@@ -6,7 +6,6 @@ use thiserror::Error;
 
 use crate::{
     check::{CheckError, partial_definition_types},
-    closure::theory::ConvertTheoryError,
     codegen::CodegenError,
     elaborate::ElaborateError,
     pass::{
@@ -35,8 +34,8 @@ pub enum CompileError {
         "definition `{theory}.{definition}` has closure type `=>` on its global interface; linear closure types are only allowed adjacent to CMC operations"
     )]
     ClosureOnGlobalInterface { theory: String, definition: String },
-    #[error(transparent)]
-    ClosureConversion(#[from] ConvertTheoryError),
+    #[error("compiler pipeline is temporarily incomplete")]
+    NotImplementedError,
     #[error(transparent)]
     InlineDefinitions(#[from] InlineDefinitionsError),
     #[error(transparent)]
@@ -106,27 +105,13 @@ fn compile_into(report: &mut CompileReport) -> Result<(), CompileError> {
     };
     report.definition_types = Some(definition_types.clone());
 
-    reject_closure_global_interfaces(&theory_set)?;
-
-    let theory_set = convert_closures(&theory_set, &definition_types)?;
-    report.theory_set = Some(theory_set.clone());
-
-    // TODO: we have to re-check because convert_closures adds new arrows to the theory.
-    // We need the full set of `definition_types`, so it's simpler just to re-check everything.
-    // But this is kinda slow! We only really need to *incrementally* check anything that changed.
-    let definition_types = match crate::check::check(&theory_set) {
-        Ok(definition_types) => definition_types,
-        Err(error) => {
-            report.partial_definition_types = partial_definition_types(&error);
-            return Err(error.into());
-        }
-    };
-    report.definition_types = Some(definition_types.clone());
-
     // Compute out closures by bending wires
     let forgotten_closures = crate::pass::forget_closures::run(&theory_set, &definition_types)?;
     report.forgotten_closures = Some(forgotten_closures.clone());
 
+    return Err(CompileError::NotImplementedError);
+
+    #[allow(unreachable_code)]
     let boundary_sizes = crate::pass::record_boundary_sizes::run(&forgotten_closures)?;
     report.boundary_sizes = Some(boundary_sizes.clone());
 
@@ -135,52 +120,6 @@ fn compile_into(report: &mut CompileReport) -> Result<(), CompileError> {
 
     let gpu_modules = crate::codegen::codegen(&unpacked_products)?;
     report.gpu_modules = Some(gpu_modules);
-
-    Ok(())
-}
-
-fn convert_closures(
-    theory_set: &TheorySet,
-    definition_types: &crate::check::DefinitionTypes,
-) -> Result<TheorySet, CompileError> {
-    let theory_ids = theory_set
-        .theories
-        .iter()
-        .filter_map(|(theory_id, theory)| {
-            matches!(theory, Theory::Theory { .. }).then_some(theory_id.clone())
-        })
-        .collect::<Vec<TheoryId>>();
-
-    let mut converted = theory_set.clone();
-    for theory_id in theory_ids {
-        let theory =
-            crate::closure::theory::convert_theory(theory_set, definition_types, &theory_id)?;
-        converted.theories.insert(theory_id, theory);
-    }
-    Ok(converted)
-}
-
-fn reject_closure_global_interfaces(theory_set: &TheorySet) -> Result<(), CompileError> {
-    for (theory_id, theory) in &theory_set.theories {
-        let Theory::Theory { arrows, .. } = theory else {
-            continue;
-        };
-
-        for (definition_name, arrow) in arrows {
-            if arrow.definition.is_none() {
-                continue;
-            }
-
-            if contains_closure_type_map(&arrow.type_maps.0)
-                || contains_closure_type_map(&arrow.type_maps.1)
-            {
-                return Err(CompileError::ClosureOnGlobalInterface {
-                    theory: theory_id.to_string(),
-                    definition: definition_name.to_string(),
-                });
-            }
-        }
-    }
 
     Ok(())
 }

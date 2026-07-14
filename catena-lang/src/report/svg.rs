@@ -2,6 +2,7 @@ use std::{fmt, fs, io, path::Path};
 
 use hexpr::Operation;
 use metacat::theory::{Theory, TheoryId};
+use metacat::tree::Tree;
 use open_hypergraphs::lax::OpenHypergraph;
 use open_hypergraphs_dot::{Options, svg::to_svg_with};
 
@@ -47,6 +48,7 @@ pub fn dump_svgs(report: &CompileReport, dir: &Path) -> io::Result<()> {
                     format!("failed to write {}: {error}", elaborated_path.display()),
                 )
             })?;
+            dump_untyped_stage_hex(term, "elaborated", &definition_dir)?;
 
             if let Some(node_types) = report
                 .definition_types
@@ -70,6 +72,7 @@ pub fn dump_svgs(report: &CompileReport, dir: &Path) -> io::Result<()> {
                         format!("failed to write {}: {error}", checked_path.display()),
                     )
                 })?;
+                dump_untyped_stage_hex(term, "checked", &definition_dir)?;
             }
 
             if let Some(node_types) = report
@@ -94,6 +97,7 @@ pub fn dump_svgs(report: &CompileReport, dir: &Path) -> io::Result<()> {
                         format!("failed to write {}: {error}", checked_path.display()),
                     )
                 })?;
+                dump_untyped_stage_hex(term, "check_partial", &definition_dir)?;
             }
 
             dump_typed_stage_svg(
@@ -103,6 +107,7 @@ pub fn dump_svgs(report: &CompileReport, dir: &Path) -> io::Result<()> {
                 definition_name,
                 syntax_theory,
                 &definition_dir,
+                Operation::clone,
             )?;
             dump_typed_stage_svg(
                 &report.boundary_sizes,
@@ -111,6 +116,7 @@ pub fn dump_svgs(report: &CompileReport, dir: &Path) -> io::Result<()> {
                 definition_name,
                 syntax_theory,
                 &definition_dir,
+                |op| op.operation.clone(),
             )?;
             dump_typed_stage_svg(
                 &report.unpacked_products,
@@ -119,6 +125,7 @@ pub fn dump_svgs(report: &CompileReport, dir: &Path) -> io::Result<()> {
                 definition_name,
                 syntax_theory,
                 &definition_dir,
+                |op| op.operation.clone(),
             )?;
         }
     }
@@ -133,6 +140,7 @@ fn dump_typed_stage_svg<A: Clone + fmt::Debug + fmt::Display + PartialEq>(
     definition_name: &Operation,
     syntax_theory: &Theory,
     definition_dir: &Path,
+    edge_to_operation: impl Fn(&A) -> Operation,
 ) -> io::Result<()> {
     let Some(transformed) = theories
         .as_ref()
@@ -150,6 +158,42 @@ fn dump_typed_stage_svg<A: Clone + fmt::Debug + fmt::Display + PartialEq>(
     })?;
     let path = definition_dir.join(format!("{stage}.svg"));
     fs::write(&path, svg).map_err(|error| {
+        io::Error::new(
+            error.kind(),
+            format!("failed to write {}: {error}", path.display()),
+        )
+    })?;
+
+    dump_typed_stage_hex(transformed, stage, definition_dir, edge_to_operation)
+}
+
+fn dump_untyped_stage_hex(
+    term: &OpenHypergraph<(), Operation>,
+    stage: &str,
+    definition_dir: &Path,
+) -> io::Result<()> {
+    let term = term.clone().map_nodes(|_| Tree::Empty);
+    write_stage_hex(&term, stage, definition_dir)
+}
+
+fn dump_typed_stage_hex<A: Clone>(
+    term: &OpenHypergraph<metacat::tree::Tree<(), Operation>, A>,
+    stage: &str,
+    definition_dir: &Path,
+    edge_to_operation: impl Fn(&A) -> Operation,
+) -> io::Result<()> {
+    let term = term.clone().map_edges(|edge| edge_to_operation(&edge));
+    write_stage_hex(&term, stage, definition_dir)
+}
+
+fn write_stage_hex(
+    term: &OpenHypergraph<metacat::tree::Tree<(), Operation>, Operation>,
+    stage: &str,
+    definition_dir: &Path,
+) -> io::Result<()> {
+    let hexpr = crate::hexpr::term_to_hexpr(term);
+    let path = definition_dir.join(format!("{stage}.hex"));
+    fs::write(&path, format!("{hexpr}\n")).map_err(|error| {
         io::Error::new(
             error.kind(),
             format!("failed to write {}: {error}", path.display()),

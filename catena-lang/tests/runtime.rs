@@ -1021,6 +1021,29 @@ fn slice_f32_test() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[test]
+fn argmax_f32_test() -> anyhow::Result<()> {
+    let runtime = runtime_with(NN_EXAMPLES)?;
+
+    for (input_values, expected) in [
+        (vec![5.0_f32], 0_u64),
+        (vec![1.0_f32, 2.0, 4.0], 2_u64),
+        (vec![4.0_f32, 2.0, 1.0], 0_u64),
+        (vec![1.0_f32, 7.0, 3.0, 2.0], 1_u64),
+        (vec![1.0_f32, 7.0, 7.0, 2.0], 1_u64),
+        (vec![3.0_f32, 3.0, 3.0], 0_u64),
+    ] {
+        let input = runtime.mem_f32(&input_values)?;
+        let [result] = runtime.exec("argmax-f32", [input])?;
+        let Value::U64(result) = result else {
+            anyhow::bail!("argmax-f32 returned non-u64 value: {result:?}");
+        };
+        assert_eq!(result, expected, "argmax-f32({input_values:?})");
+    }
+
+    Ok(())
+}
+
 #[path = "cases/reducec.rs"]
 mod reducec;
 

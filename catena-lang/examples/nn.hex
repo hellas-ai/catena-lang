@@ -307,3 +307,62 @@
   }
   buf.to-mem
 ))
+
+# Read one f32 element and pair it with its runtime position.
+(def program argmax-pair-at :
+  ([n.] {
+    ({cap.ref [.n] f32} buf val)
+    ([.n] ix val)
+  })
+  ->
+  ([n.] ({(u64 val) (f32 val)} *))
+= ([input i.]
+  ({[.i input]} ix [x-i.])
+  ([.i] ix.to-u64 [pos.])
+  ({[.pos] [.x-i]} *.intro [pair.])
+  [.pair]
+))
+
+# Choose the better of two (position, value) pairs, keeping the first on ties.
+(def program argmax-env :
+  {1 ({({(u64 val) (f32 val)} *) ({(u64 val) (f32 val)} *)} *)}
+  ->
+  ({(u64 val) (f32 val)} *)
+= ([env pair.]
+  ([.pair] *.elim [acc value.])
+  ([.acc] *.elim [acc-pos acc-max.])
+  ([.value] *.elim [value-pos value-max.])
+  {
+    ([.acc-max value-max] f32.gte [keep-acc.])
+    ([.keep-acc acc-pos value-pos] u64.select [result-pos.])
+    ([.keep-acc acc-max value-max] f32.select [result-max.])
+    ({[.result-pos] [.result-max]} *.intro [result.])
+    [.result]
+  }
+))
+
+# Argmax over an f32 buffer. Caller must provide a non-empty input.
+(def program argmax-f32 :
+  (cap.ref mem)
+  ->
+  (u64 val)
+= (
+  mem.cast.f32
+  [len input.]
+    {
+      ([.len] u64.assert-nz [nz-proof.])
+      ([.nz-proof] ix.zero [first-i.])
+      ({[.first-i input]} ix [first-x.])
+      ([.first-i] ix.to-u64 [first-pos.])
+      ({[.first-pos] [.first-x]} *.intro [init.])
+      ({
+        [.init]
+        unit.intro
+        name.argmax-env
+        ({[.input] (([.len] :.param) name.argmax-pair-at)})
+        [.len]
+      } reducec [result-pair.])
+      ([.result-pair] *.elim [result-pos _result-max.])
+      [.result-pos]
+    }
+))

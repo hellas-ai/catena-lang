@@ -140,16 +140,27 @@ fn closure2_examples_emit_expected_region_boundaries() -> anyhow::Result<()> {
 }
 
 #[test]
-fn closure2_packed_examples_generate_renderable_gpu_code() -> anyhow::Result<()> {
+fn closure2_product_examples_generate_renderable_gpu_code() -> anyhow::Result<()> {
     let report = compile_through_closure_conversion(include_str!("../examples/closure2.hex"))?;
     let modules = report
         .gpu_modules
         .as_ref()
         .ok_or_else(|| anyhow::anyhow!("closure2 examples did not reach GPU codegen"))?;
 
-    for (definition, operation, input_sizes) in [
-        ("closure2-packed-closure", "bool.and", vec![1, 1]),
-        ("closure2-packed-if", "bool.ifc", vec![1, 1, 1, 1, 1, 0]),
+    for (definition, operation, input_sizes, output_sizes) in [
+        ("closure2-packed-closure", "bool.and", vec![1, 1], vec![1]),
+        (
+            "closure2-packed-if",
+            "bool.ifc",
+            vec![1, 1, 1, 1, 1, 0],
+            vec![1],
+        ),
+        (
+            "closure2-tensored-if",
+            "bool.ifc",
+            vec![2, 1, 2, 1, 1, 0],
+            vec![2],
+        ),
     ] {
         let module = modules
             .values()
@@ -168,8 +179,8 @@ fn closure2_packed_examples_generate_renderable_gpu_code() -> anyhow::Result<()>
             .ok_or_else(|| anyhow::anyhow!("`{definition}` does not call `{operation}`"))?;
 
         anyhow::ensure!(assignment.input_sizes == input_sizes);
-        anyhow::ensure!(assignment.output_sizes == [1]);
-        anyhow::ensure!(assignment.outputs.len() == 1);
+        anyhow::ensure!(assignment.output_sizes == output_sizes);
+        anyhow::ensure!(assignment.outputs.len() == assignment.output_sizes.iter().sum());
         render_module(module, GpuDialect::Hip)?;
     }
 

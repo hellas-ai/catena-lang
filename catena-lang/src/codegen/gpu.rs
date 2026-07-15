@@ -48,6 +48,20 @@ pub enum GpuRenderError {
         expected: usize,
         actual: usize,
     },
+    #[error("operation `{op}` expected {expected} output components, found {actual}")]
+    InvalidOutputComponentCount {
+        op: Operation,
+        expected: usize,
+        actual: usize,
+    },
+    #[error(
+        "operation `{op}` output sizes account for {expected} flattened outputs, but assignment has {actual}"
+    )]
+    InvalidFlattenedOutputCount {
+        op: Operation,
+        expected: usize,
+        actual: usize,
+    },
     #[error(
         "operation `{op}` expected {expected} {description} in input component `{component}`, found {actual}"
     )]

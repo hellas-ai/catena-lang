@@ -29,7 +29,8 @@ pub enum InlineDefinitionsError {
 }
 
 /// Return a copy of `theory_set` where every selected definition is inlined into
-/// definitions that use it, and selected definitions are removed from their theories.
+/// definitions that use it. A selected definition and its `name.*` declaration
+/// are removed only when neither remains referenced after inlining.
 ///
 /// Dependencies are resolved bottom-up, so if an inlined definition uses another
 /// selected definition, its collected inline body already contains that expansion.
@@ -43,7 +44,6 @@ pub fn run(
         if selected.is_empty() {
             continue;
         }
-
         let theory = theory_set
             .theories
             .get(theory_id)
@@ -60,6 +60,14 @@ pub fn run(
 
         for (definition_name, arrow) in arrows.iter_mut() {
             if selected.contains(definition_name) {
+                // This definition may be retained if `name.{definition_name}`
+                // is still referenced. Keep its body consistent with the rest
+                // of the theory by storing the recursively inlined version.
+                let expanded_body = inline_bodies
+                    .get(definition_name)
+                    .expect("selected definition should have an inline body")
+                    .clone();
+                arrow.definition = Some(expanded_body);
                 continue;
             }
 
@@ -74,14 +82,59 @@ pub fn run(
                 &inline_bodies,
             )?);
         }
+    }
 
+    // A direct use of a selected definition has now been replaced by its body,
+    // but `name.f` is a first-class reference and is deliberately not mapped by
+    // the graph functor above. Keep both `f` and `name.f` whenever either still
+    // occurs in an inlined definition.
+    let retained = definitions_to_inline
+        .iter()
+        .flat_map(|(theory_id, selected)| {
+            selected.iter().filter_map(|definition_name| {
+                let name = name_operation(definition_name);
+                operation_is_referenced(&output, definition_name, &name)
+                    .then_some((theory_id.clone(), definition_name.clone()))
+            })
+        })
+        .collect::<BTreeSet<_>>();
+
+    for (theory_id, selected) in definitions_to_inline {
+        if selected.is_empty() {
+            continue;
+        }
+        let Some(Theory::Theory { arrows, .. }) = output.theories.get_mut(theory_id) else {
+            unreachable!("selected theory was validated during inlining");
+        };
         for definition_name in selected {
-            arrows.remove(definition_name);
-            arrows.remove(&name_operation(definition_name));
+            if !retained.contains(&(theory_id.clone(), definition_name.clone())) {
+                arrows.remove(definition_name);
+                arrows.remove(&name_operation(definition_name));
+            }
         }
     }
 
     Ok(output)
+}
+
+fn operation_is_referenced(
+    theory_set: &TheorySet,
+    definition: &Operation,
+    name: &Operation,
+) -> bool {
+    theory_set.theories.values().any(|theory| {
+        let Theory::Theory { arrows, .. } = theory else {
+            return false;
+        };
+        arrows.values().any(|arrow| {
+            arrow.definition.as_ref().is_some_and(|body| {
+                body.hypergraph
+                    .edges
+                    .iter()
+                    .any(|operation| operation == definition || operation == name)
+            })
+        })
+    })
 }
 
 fn collect_inline_bodies(
@@ -300,6 +353,41 @@ mod tests {
                 .edges
                 .iter()
                 .any(|operation| operation.as_str() == "defer")
+        );
+    }
+
+    #[test]
+    fn retains_selected_definition_and_name_when_name_is_still_referenced() {
+        let theory_set = theory_set(
+            r#"
+            (def program mk-closure : (f32 val) -> ({1 (f32 val)} =>) = defer)
+            (def program use-named-closure : (f32 val) -> (f32 val) =
+              ({defer (name.mk-closure lift)} compose run run))
+            "#,
+        );
+        let selected = selected_program_definitions(["mk-closure"]);
+
+        let output = run(&theory_set, &selected).expect("inline pass should succeed");
+        let program = output
+            .theories
+            .get(&TheoryId("program".parse().unwrap()))
+            .expect("program theory should exist");
+        let Theory::Theory { arrows, .. } = program else {
+            panic!("program should be a user theory");
+        };
+
+        assert!(arrows.contains_key(&"mk-closure".parse().unwrap()));
+        assert!(arrows.contains_key(&"name.mk-closure".parse().unwrap()));
+        let use_named_closure = arrows
+            .get(&"use-named-closure".parse().unwrap())
+            .and_then(|arrow| arrow.definition.as_ref())
+            .expect("use-named-closure should remain defined");
+        assert!(
+            use_named_closure
+                .hypergraph
+                .edges
+                .iter()
+                .any(|operation| operation.as_str() == "name.mk-closure")
         );
     }
 

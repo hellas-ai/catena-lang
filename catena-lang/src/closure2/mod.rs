@@ -28,17 +28,19 @@ pub mod replace;
 #[derive(Debug, Clone)]
 pub struct Conversion {
     /// Closure-forgotten graph on which conversion operates.
-    pub input: TheoryTermMap<Region<Operation>>,
+    pub closure_forgotten_definitions: TheoryTermMap<Region<Operation>>,
     /// Regions discovered in the closure-forgotten input.
     pub regions: region::ClosureRegionMap,
     /// Theory after inserting the generated `closure.*` and `name.closure.*` arrows.
-    pub definitions: TheorySet,
-    /// Checked node labels for `definitions`, including generated closure bodies.
-    pub definition_types: DefinitionTypes,
+    pub generated_theory: TheorySet,
+    /// Independently checked node labels for `generated_theory`.
+    pub generated_types: DefinitionTypes,
+    /// Typed runtime functions cut out of the discovered regions.
+    pub generated_functions: TheoryTermMap,
     /// Replacement graph before erasing context projections, retained for debugging.
-    pub replacements: TheoryTermMap,
+    pub rewritten_definitions: TheoryTermMap,
     /// Final context-free closure-converted definitions used by downstream passes.
-    pub terms: TheoryTermMap,
+    pub runtime_functions: TheoryTermMap,
     /// Debug theory containing replaced definitions and context declarations.
     pub replacement_theory: TheorySet,
 }
@@ -59,16 +61,6 @@ pub enum ConversionError {
     ReplaceClosures(#[from] replace::ReplaceClosuresError),
     #[error(transparent)]
     EraseContexts(#[from] context::EraseContextsError),
-    #[error("missing checked generated closure `{theory}.{definition}`")]
-    MissingGeneratedClosureTypes { theory: String, definition: String },
-    #[error("checked label count mismatch for generated closure `{theory}.{definition}`")]
-    GeneratedClosureLabelCount { theory: String, definition: String },
-    #[error("failed to quotient generated closure `{theory}.{definition}`: {error}")]
-    GeneratedClosureQuotient {
-        theory: String,
-        definition: String,
-        error: String,
-    },
 }
 
 /// Closure-convert graphs produced by `forget_closures` as one compiler pass.
@@ -81,60 +73,29 @@ pub fn run(
     forgotten: &TheoryTermMap<Region<Operation>>,
 ) -> Result<Conversion, ConversionError> {
     let regions = region::run(forgotten)?;
-    let definitions = definition::run(theory_set, forgotten, &regions)?;
-    let definition_types =
-        crate::check::check(&definitions).map_err(|error| ConversionError::CheckDefinitions {
+    let definition::DefinedClosures {
+        generated_theory,
+        generated_functions,
+        definitions,
+    } = definition::run(theory_set, forgotten, &regions)?;
+    let generated_types = crate::check::check(&generated_theory).map_err(|error| {
+        ConversionError::CheckDefinitions {
             partial_definition_types: partial_definition_types(&error),
             error,
-        })?;
-    let replacement = replace::run(&definitions, forgotten, &regions)?;
-    let mut replacements = replacement.terms;
-
-    for (theory_id, theory) in &definitions.theories {
-        let metacat::theory::Theory::Theory { arrows, .. } = theory else {
-            continue;
-        };
-        let checked = definition_types.get(theory_id);
-        let output = replacements.entry(theory_id.clone()).or_default();
-        for (operation, arrow) in arrows {
-            if !operation.as_str().starts_with("closure.") {
-                continue;
-            }
-            let Some(mut body) = arrow.definition.clone() else {
-                continue;
-            };
-            body.quotient()
-                .map_err(|error| ConversionError::GeneratedClosureQuotient {
-                    theory: theory_id.to_string(),
-                    definition: operation.to_string(),
-                    error: format!("{error:?}"),
-                })?;
-            let labels = checked
-                .and_then(|definitions| definitions.get(operation))
-                .cloned()
-                .ok_or_else(|| ConversionError::MissingGeneratedClosureTypes {
-                    theory: theory_id.to_string(),
-                    definition: operation.to_string(),
-                })?;
-            let body = body.with_nodes(|_| labels).ok_or_else(|| {
-                ConversionError::GeneratedClosureLabelCount {
-                    theory: theory_id.to_string(),
-                    definition: operation.to_string(),
-                }
-            })?;
-            output.insert(operation.clone(), body);
         }
-    }
-
-    let terms = context::erase(&replacements)?;
+    })?;
+    let replacement = replace::run(&generated_theory, &definitions, &regions)?;
+    let rewritten_definitions = replacement.terms;
+    let runtime_functions = context::erase(&rewritten_definitions)?;
 
     Ok(Conversion {
-        input: forgotten.clone(),
+        closure_forgotten_definitions: forgotten.clone(),
         regions,
-        definitions,
-        definition_types,
-        replacements,
-        terms,
+        generated_theory,
+        generated_types,
+        generated_functions,
+        rewritten_definitions,
+        runtime_functions,
         replacement_theory: replacement.theory_set,
     })
 }

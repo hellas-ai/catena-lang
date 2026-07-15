@@ -108,7 +108,7 @@ fn compile_into(report: &mut CompileReport) -> Result<(), CompileError> {
         .closure_conversion
         .as_ref()
         .expect("closure conversion was just recorded")
-        .terms;
+        .runtime_functions;
     let boundary_sizes = crate::pass::record_boundary_sizes::run(converted_terms)?;
     report.boundary_sizes = Some(boundary_sizes.clone());
 

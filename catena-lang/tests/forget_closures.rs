@@ -74,7 +74,7 @@ fn closure2_examples_emit_expected_region_boundaries() -> anyhow::Result<()> {
     let definitions = report
         .closure_conversion
         .as_ref()
-        .map(|conversion| &conversion.input)
+        .map(|conversion| &conversion.closure_forgotten_definitions)
         .and_then(|theories| theories.get(&program))
         .ok_or_else(|| anyhow::anyhow!("forget_closures did not emit the program theory"))?;
 
@@ -118,7 +118,7 @@ fn closure2_finds_named_and_captured_regions() -> anyhow::Result<()> {
     let definitions = report
         .closure_conversion
         .as_ref()
-        .map(|conversion| &conversion.input)
+        .map(|conversion| &conversion.closure_forgotten_definitions)
         .and_then(|theories| theories.get(&TheoryId(op("program"))))
         .ok_or_else(|| anyhow::anyhow!("forget_closures did not emit the program theory"))?;
 
@@ -154,7 +154,7 @@ fn closure2_builds_closure_and_name_arrows() -> anyhow::Result<()> {
     let generated = report
         .closure_conversion
         .as_ref()
-        .map(|conversion| &conversion.definitions)
+        .map(|conversion| &conversion.generated_theory)
         .ok_or_else(|| anyhow::anyhow!("missing generated closure definitions"))?;
     let Theory::Theory { arrows, .. } = generated
         .theories
@@ -215,7 +215,7 @@ fn closure2_replacement_uses_generated_name_boundaries() -> anyhow::Result<()> {
     let definitions = report
         .closure_conversion
         .as_ref()
-        .map(|conversion| &conversion.replacements)
+        .map(|conversion| &conversion.rewritten_definitions)
         .and_then(|theories| theories.get(&theory_id))
         .ok_or_else(|| anyhow::anyhow!("missing replaced program definitions"))?;
     let Theory::Theory { arrows, .. } = report
@@ -230,7 +230,7 @@ fn closure2_replacement_uses_generated_name_boundaries() -> anyhow::Result<()> {
     let final_definitions = report
         .closure_conversion
         .as_ref()
-        .map(|conversion| &conversion.terms)
+        .map(|conversion| &conversion.runtime_functions)
         .and_then(|theories| theories.get(&theory_id))
         .ok_or_else(|| anyhow::anyhow!("missing final converted program definitions"))?;
 

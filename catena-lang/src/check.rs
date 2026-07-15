@@ -11,8 +11,10 @@ use metacat::{
 use open_hypergraphs::lax::OpenHypergraph;
 use thiserror::Error;
 
-/// A definition graph whose nodes are annotated with their computed object types.
-pub type AnnotatedTerm<A = Operation> = OpenHypergraph<Tree<(), Operation>, A>;
+/// A definition graph whose nodes carry their computed object types.
+pub type TypedTerm<A = Operation> = OpenHypergraph<Tree<(), Operation>, A>;
+/// Backwards-compatible name used by the original closure conversion.
+pub type AnnotatedTerm<A = Operation> = TypedTerm<A>;
 pub type DefinitionTypes = BTreeMap<TheoryId, BTreeMap<Operation, Vec<Tree<(), Operation>>>>;
 pub type PartialDefinitionTypes =
     BTreeMap<TheoryId, BTreeMap<Operation, Vec<Option<Tree<(), Operation>>>>>;

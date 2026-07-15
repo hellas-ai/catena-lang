@@ -108,7 +108,7 @@ pub fn dump_svgs(report: &CompileReport, dir: &Path) -> io::Result<()> {
                 &report
                     .closure_conversion
                     .as_ref()
-                    .map(|conversion| conversion.input.clone()),
+                    .map(|conversion| conversion.closure_forgotten_definitions.clone()),
                 "forget_closures",
                 theory_id,
                 definition_name,
@@ -157,7 +157,7 @@ fn dump_closure_conversion_trace(
     definition_dir: &Path,
 ) -> io::Result<()> {
     let Some(term) = conversion
-        .input
+        .closure_forgotten_definitions
         .get(theory_id)
         .and_then(|definitions| definitions.get(definition_name))
     else {
@@ -175,7 +175,7 @@ fn dump_closure_conversion_trace(
     }
 
     dump_typed_stage_svg(
-        &Some(conversion.input.clone()),
+        &Some(conversion.closure_forgotten_definitions.clone()),
         "closure_conversion_00_input",
         theory_id,
         definition_name,
@@ -193,24 +193,10 @@ fn dump_closure_conversion_trace(
         )
     })?;
 
-    let generated_theory = conversion
-        .definitions
-        .theories
+    let generated_bodies = conversion
+        .generated_functions
         .get(theory_id)
-        .ok_or_else(|| invalid_data(format!("missing generated theory `{theory_id}`")))?;
-    let Theory::Theory {
-        arrows: generated_arrows,
-        ..
-    } = generated_theory
-    else {
-        return Err(invalid_data(format!(
-            "generated theory `{theory_id}` is not a user theory"
-        )));
-    };
-    let generated_types = conversion
-        .definition_types
-        .get(theory_id)
-        .ok_or_else(|| invalid_data(format!("missing generated types for `{theory_id}`")))?;
+        .ok_or_else(|| invalid_data(format!("missing converted theory `{theory_id}`")))?;
     let mut index_document = format!(
         "# Closure conversion: `{theory_id}.{definition_name}`\n\n\
          1. [Closure-forgotten input](closure_conversion_00_input.svg) \
@@ -238,27 +224,11 @@ fn dump_closure_conversion_trace(
         })?;
 
         let closure_name = closure_operation(definition_name, region.closure);
-        let closure_arrow = generated_arrows
+        let closure_body = generated_bodies
             .get(&closure_name)
             .ok_or_else(|| invalid_data(format!("missing generated closure `{closure_name}`")))?;
-        let mut closure_body = closure_arrow
-            .definition
-            .clone()
-            .ok_or_else(|| invalid_data(format!("`{closure_name}` has no body")))?;
-        closure_body.quotient().map_err(|error| {
-            invalid_data(format!(
-                "failed to quotient generated closure `{closure_name}`: {error:?}"
-            ))
-        })?;
-        let labels = generated_types
-            .get(&closure_name)
-            .cloned()
-            .ok_or_else(|| invalid_data(format!("missing checked labels for `{closure_name}`")))?;
-        let closure_body = closure_body
-            .with_nodes(|_| labels)
-            .ok_or_else(|| invalid_data(format!("label count mismatch for `{closure_name}`")))?;
         let closure_stage = format!("closure_conversion_20_closure_{index}");
-        let closure_svg = render_typed_svg(&closure_body, syntax_theory)?;
+        let closure_svg = render_typed_svg(closure_body, syntax_theory)?;
         let closure_path = definition_dir.join(format!("{closure_stage}.svg"));
         fs::write(&closure_path, closure_svg).map_err(|error| {
             io::Error::new(
@@ -267,7 +237,7 @@ fn dump_closure_conversion_trace(
             )
         })?;
         dump_typed_stage_hex(
-            &closure_body,
+            closure_body,
             &closure_stage,
             definition_dir,
             |operation| operation.clone(),
@@ -283,7 +253,7 @@ fn dump_closure_conversion_trace(
     }
 
     dump_typed_stage_svg(
-        &Some(conversion.replacements.clone()),
+        &Some(conversion.rewritten_definitions.clone()),
         "closure_conversion_30_replacement",
         theory_id,
         definition_name,
@@ -296,7 +266,7 @@ fn dump_closure_conversion_trace(
          ([hex](closure_conversion_30_replacement.hex))\n",
     );
     dump_typed_stage_svg(
-        &Some(conversion.terms.clone()),
+        &Some(conversion.runtime_functions.clone()),
         "closure_conversion_40_output",
         theory_id,
         definition_name,

@@ -14,7 +14,7 @@ use open_hypergraphs::lax::{EdgeId, Hyperedge, NodeId};
 use thiserror::Error;
 
 use crate::{
-    check::AnnotatedTerm,
+    check::TypedTerm,
     closure2::{
         definition::closure_operation,
         region::{ClosureRegion, ClosureRegionMap, find_regions},
@@ -122,12 +122,10 @@ pub fn run(
                     definition: definition_name.to_string(),
                 }
             })?;
-            let definition_regions = discovered.get(definition_name).ok_or_else(|| {
-                ReplaceClosuresError::MissingDefinition {
-                    theory: theory_id.to_string(),
-                    definition: definition_name.to_string(),
-                }
-            })?;
+            let definition_regions = discovered
+                .get(definition_name)
+                .map(Vec::as_slice)
+                .unwrap_or_default();
             if definition_regions.is_empty() {
                 replaced_definitions
                     .insert(definition_name.clone(), unwrap_operations(term.clone())?);
@@ -449,7 +447,7 @@ fn remap_node(node_map: &[Option<usize>], node: NodeId) -> Result<NodeId, Replac
         .ok_or(ReplaceClosuresError::DeletedBoundaryNode { node: node.0 })
 }
 
-fn unwrap_operations(term: RegionTerm) -> Result<AnnotatedTerm, ReplaceClosuresError> {
+fn unwrap_operations(term: RegionTerm) -> Result<TypedTerm, ReplaceClosuresError> {
     if term
         .hypergraph
         .edges
@@ -464,7 +462,7 @@ fn unwrap_operations(term: RegionTerm) -> Result<AnnotatedTerm, ReplaceClosuresE
     }))
 }
 
-fn rewrite_converted_primitives(term: &mut AnnotatedTerm) {
+fn rewrite_converted_primitives(term: &mut TypedTerm) {
     for operation in &mut term.hypergraph.edges {
         if let Some((_, converted)) = CONVERTED_PRIMITIVES
             .iter()
@@ -481,7 +479,7 @@ fn rewrite_converted_primitives(term: &mut AnnotatedTerm) {
 /// labels determine the flattened boundary. A closure nested under products
 /// therefore has to propagate its new packed `(environment * pointer)` type
 /// through the surrounding intro/elim chain first.
-fn normalize_structural_types(term: &mut AnnotatedTerm) {
+fn normalize_structural_types(term: &mut TypedTerm) {
     let iterations = term.hypergraph.edges.len().max(1);
     for _ in 0..iterations {
         let mut changed = false;
@@ -561,7 +559,7 @@ fn product_type(left: Obj, right: Obj) -> Obj {
     )
 }
 
-fn remove_stale_unit_edges(term: &mut AnnotatedTerm) {
+fn remove_stale_unit_edges(term: &mut TypedTerm) {
     let stale = term
         .hypergraph
         .edges
@@ -610,7 +608,7 @@ fn is_unit_type(object: &Obj) -> bool {
 fn declare_context_arrows(
     syntax: &Theory,
     arrows: &mut BTreeMap<Operation, TheoryArrow>,
-    definition: &AnnotatedTerm,
+    definition: &TypedTerm,
     ambient_context_arity: usize,
 ) -> Result<(), ReplaceClosuresError> {
     for (operation, boundary) in definition
@@ -740,7 +738,7 @@ fn compact_type_map_leaves(
     }
 }
 
-fn node_types(term: &AnnotatedTerm, nodes: &[NodeId]) -> Vec<Obj> {
+fn node_types(term: &TypedTerm, nodes: &[NodeId]) -> Vec<Obj> {
     nodes
         .iter()
         .map(|node| term.hypergraph.nodes[node.0].clone())

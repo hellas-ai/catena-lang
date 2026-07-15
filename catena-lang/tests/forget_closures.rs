@@ -1,7 +1,5 @@
 use catena_lang::{
-    closure2::region::find_regions,
-    compile::{CompileError, compile},
-    pass::forget_closures::Region,
+    closure2::region::find_regions, compile::compile, pass::forget_closures::Region,
     report::CompileReport,
 };
 use hexpr::Operation;
@@ -21,21 +19,14 @@ const STDLIB: &[&str] = &[
 
 fn compile_through_closure_conversion(source: &str) -> anyhow::Result<CompileReport> {
     let raw = RawTheorySet::from_texts(STDLIB.iter().copied().chain([source]))?;
-    let report = match compile(raw) {
-        Ok(report) => report,
-        Err(failure) if matches!(failure.cause, CompileError::NotImplementedError) => {
-            failure.report
-        }
-        Err(failure) => return Err(failure.into()),
-    };
-    anyhow::ensure!(
-        report.forgotten_closures.is_some(),
-        "compile stopped before forget_closures completed"
-    );
+    let report = compile(raw)?;
     anyhow::ensure!(
         report.closure_conversion.is_some(),
         "compile stopped before closure conversion completed"
     );
+    anyhow::ensure!(report.boundary_sizes.is_some());
+    anyhow::ensure!(report.unpacked_products.is_some());
+    anyhow::ensure!(report.gpu_modules.is_some());
     Ok(report)
 }
 
@@ -81,8 +72,9 @@ fn closure2_examples_emit_expected_region_boundaries() -> anyhow::Result<()> {
     let report = compile_through_closure_conversion(include_str!("../examples/closure2.hex"))?;
     let program = TheoryId(op("program"));
     let definitions = report
-        .forgotten_closures
+        .closure_conversion
         .as_ref()
+        .map(|conversion| &conversion.input)
         .and_then(|theories| theories.get(&program))
         .ok_or_else(|| anyhow::anyhow!("forget_closures did not emit the program theory"))?;
 
@@ -124,8 +116,9 @@ fn closure2_examples_emit_expected_region_boundaries() -> anyhow::Result<()> {
 fn closure2_finds_named_and_captured_regions() -> anyhow::Result<()> {
     let report = compile_through_closure_conversion(include_str!("../examples/closure2.hex"))?;
     let definitions = report
-        .forgotten_closures
+        .closure_conversion
         .as_ref()
+        .map(|conversion| &conversion.input)
         .and_then(|theories| theories.get(&TheoryId(op("program"))))
         .ok_or_else(|| anyhow::anyhow!("forget_closures did not emit the program theory"))?;
 
@@ -200,6 +193,18 @@ fn closure2_builds_closure_and_name_arrows() -> anyhow::Result<()> {
     }
 
     catena_lang::check::check(generated)?;
+    anyhow::ensure!(
+        report
+            .gpu_modules
+            .as_ref()
+            .is_some_and(|modules| modules.values().any(|module| {
+                module
+                    .source_name
+                    .as_ref()
+                    .is_some_and(|name| name.as_str().starts_with("closure."))
+            })),
+        "generated closure bodies should reach GPU codegen"
+    );
     Ok(())
 }
 
@@ -216,12 +221,18 @@ fn closure2_replacement_uses_generated_name_boundaries() -> anyhow::Result<()> {
     let Theory::Theory { arrows, .. } = report
         .closure_conversion
         .as_ref()
-        .map(|conversion| &conversion.theory_set)
+        .map(|conversion| &conversion.replacement_theory)
         .and_then(|theories| theories.theories.get(&theory_id))
         .ok_or_else(|| anyhow::anyhow!("missing replaced program theory"))?
     else {
         anyhow::bail!("program should be a user theory");
     };
+    let final_definitions = report
+        .closure_conversion
+        .as_ref()
+        .map(|conversion| &conversion.terms)
+        .and_then(|theories| theories.get(&theory_id))
+        .ok_or_else(|| anyhow::anyhow!("missing final converted program definitions"))?;
 
     for definition in ["closure2-named-if", "closure2-captured-if"] {
         let term = definitions
@@ -264,6 +275,12 @@ fn closure2_replacement_uses_generated_name_boundaries() -> anyhow::Result<()> {
             );
         }
     }
+    anyhow::ensure!(final_definitions.values().all(|term| {
+        term.hypergraph
+            .edges
+            .iter()
+            .all(|operation| !operation.as_str().starts_with("__catena_context."))
+    }));
     Ok(())
 }
 

@@ -35,8 +35,6 @@ pub enum CompileError {
         "definition `{theory}.{definition}` has closure type `=>` on its global interface; linear closure types are only allowed adjacent to CMC operations"
     )]
     ClosureOnGlobalInterface { theory: String, definition: String },
-    #[error("compiler pipeline is temporarily incomplete")]
-    NotImplementedError,
     #[error(transparent)]
     InlineDefinitions(#[from] InlineDefinitionsError),
     #[error(transparent)]
@@ -102,40 +100,25 @@ fn compile_into(report: &mut CompileReport) -> Result<(), CompileError> {
 
     // Compute out closures by bending wires
     let forgotten_closures = crate::pass::forget_closures::run(&theory_set, &definition_types)?;
-    report.forgotten_closures = Some(forgotten_closures.clone());
 
-    let closure_conversion = match crate::closure2::run(&theory_set, &forgotten_closures) {
-        Ok(conversion) => conversion,
-        Err(error @ ConversionError::CheckDefinitions(_)) => {
-            let ConversionError::CheckDefinitions(check_error) = &error else {
-                unreachable!("matched generated-definition check error")
-            };
-            report.partial_definition_types = partial_definition_types(check_error);
-            return Err(error.into());
-        }
-        Err(error) => return Err(error.into()),
-    };
-    report.definition_types = Some(closure_conversion.definition_types.clone());
-    report.theory_set = Some(closure_conversion.definitions.clone());
+    let closure_conversion = crate::closure2::run(&theory_set, &forgotten_closures)?;
     report.closure_conversion = Some(closure_conversion);
 
-    return Err(CompileError::NotImplementedError);
+    let converted_terms = &report
+        .closure_conversion
+        .as_ref()
+        .expect("closure conversion was just recorded")
+        .terms;
+    let boundary_sizes = crate::pass::record_boundary_sizes::run(converted_terms)?;
+    report.boundary_sizes = Some(boundary_sizes.clone());
 
-    // TODO:
-    //  1. Uncomment remaining phases below
+    let unpacked_products = crate::pass::unpack_products::run(&boundary_sizes)?;
+    report.unpacked_products = Some(unpacked_products.clone());
 
-    // let boundary_sizes = crate::pass::record_boundary_sizes::run(
-    //     &report.closure_conversion.as_ref().unwrap().replacements,
-    // )?;
-    // report.boundary_sizes = Some(boundary_sizes.clone());
-    //
-    // let unpacked_products = crate::pass::unpack_products::run(&boundary_sizes)?;
-    // report.unpacked_products = Some(unpacked_products.clone());
-    //
-    // let gpu_modules = crate::codegen::codegen(&unpacked_products)?;
-    // report.gpu_modules = Some(gpu_modules);
-    //
-    // Ok(())
+    let gpu_modules = crate::codegen::codegen(&unpacked_products)?;
+    report.gpu_modules = Some(gpu_modules);
+
+    Ok(())
 }
 
 fn closure_boundary_definitions(theory_set: &TheorySet) -> BTreeMap<TheoryId, BTreeSet<Operation>> {

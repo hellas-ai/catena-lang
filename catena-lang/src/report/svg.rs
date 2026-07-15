@@ -7,7 +7,7 @@ use open_hypergraphs::lax::{NodeId, OpenHypergraph};
 use open_hypergraphs_dot::{Options, svg::to_svg_with};
 
 use crate::{
-    closure2::{definition::closure_operation, region::ClosureRegion},
+    closure2::{Conversion, definition::closure_operation, region::ClosureRegion},
     pass::forget_closures::{Region, RegionTerm},
     report::CompileReport,
 };
@@ -105,7 +105,10 @@ pub fn dump_svgs(report: &CompileReport, dir: &Path) -> io::Result<()> {
             }
 
             dump_typed_stage_svg(
-                &report.forgotten_closures,
+                &report
+                    .closure_conversion
+                    .as_ref()
+                    .map(|conversion| conversion.input.clone()),
                 "forget_closures",
                 theory_id,
                 definition_name,
@@ -113,13 +116,15 @@ pub fn dump_svgs(report: &CompileReport, dir: &Path) -> io::Result<()> {
                 &definition_dir,
                 region_to_hexpr_operation,
             )?;
-            dump_closure_conversion_trace(
-                report,
-                theory_id,
-                definition_name,
-                syntax_theory,
-                &definition_dir,
-            )?;
+            if let Some(conversion) = &report.closure_conversion {
+                dump_closure_conversion_trace(
+                    conversion,
+                    theory_id,
+                    definition_name,
+                    syntax_theory,
+                    &definition_dir,
+                )?;
+            }
             dump_typed_stage_svg(
                 &report.boundary_sizes,
                 "boundary_sizes",
@@ -145,19 +150,15 @@ pub fn dump_svgs(report: &CompileReport, dir: &Path) -> io::Result<()> {
 }
 
 fn dump_closure_conversion_trace(
-    report: &CompileReport,
+    conversion: &Conversion,
     theory_id: &TheoryId,
     definition_name: &Operation,
     syntax_theory: &Theory,
     definition_dir: &Path,
 ) -> io::Result<()> {
-    let Some(conversion) = &report.closure_conversion else {
-        return Ok(());
-    };
-    let Some(term) = report
-        .forgotten_closures
-        .as_ref()
-        .and_then(|theories| theories.get(theory_id))
+    let Some(term) = conversion
+        .input
+        .get(theory_id)
         .and_then(|definitions| definitions.get(definition_name))
     else {
         return Ok(());
@@ -174,7 +175,7 @@ fn dump_closure_conversion_trace(
     }
 
     dump_typed_stage_svg(
-        &report.forgotten_closures,
+        &Some(conversion.input.clone()),
         "closure_conversion_00_input",
         theory_id,
         definition_name,
@@ -283,7 +284,7 @@ fn dump_closure_conversion_trace(
 
     dump_typed_stage_svg(
         &Some(conversion.replacements.clone()),
-        "closure_conversion_30_output",
+        "closure_conversion_30_replacement",
         theory_id,
         definition_name,
         syntax_theory,
@@ -291,8 +292,21 @@ fn dump_closure_conversion_trace(
         |operation| operation.clone(),
     )?;
     index_document.push_str(
-        "3. [Replacement output](closure_conversion_30_output.svg) \
-         ([hex](closure_conversion_30_output.hex))\n",
+        "3. [Replacement with context projections](closure_conversion_30_replacement.svg) \
+         ([hex](closure_conversion_30_replacement.hex))\n",
+    );
+    dump_typed_stage_svg(
+        &Some(conversion.terms.clone()),
+        "closure_conversion_40_output",
+        theory_id,
+        definition_name,
+        syntax_theory,
+        definition_dir,
+        |operation| operation.clone(),
+    )?;
+    index_document.push_str(
+        "4. [Final context-free output](closure_conversion_40_output.svg) \
+         ([hex](closure_conversion_40_output.hex))\n",
     );
     let index_path = definition_dir.join("closure_conversion.md");
     fs::write(&index_path, index_document).map_err(|error| {

@@ -37,7 +37,7 @@ type IfcParts<'a> = (
     Component<'a>,
     &'a GpuValue,
     &'a GpuValue,
-    &'a GpuValue,
+    Component<'a>,
 );
 
 fn parts(assignment: &GpuAssign) -> Result<IfcParts<'_>, GpuRenderError> {
@@ -56,9 +56,6 @@ fn parts(assignment: &GpuAssign) -> Result<IfcParts<'_>, GpuRenderError> {
         .map_err(|error| invalid_component_count(assignment, "false_fn", error.actual))?;
     let flag = single_value(flag)
         .map_err(|error| invalid_component_count(assignment, "flag", error.actual))?;
-    let argument = single_value(argument)
-        .map_err(|error| invalid_component_count(assignment, "argument", error.actual))?;
-
     Ok((true_env, true_fn, false_env, false_fn, flag, argument))
 }
 
@@ -76,10 +73,11 @@ fn invalid_component_count(
     }
 }
 
-fn call_args(environment: Component<'_>, argument: &GpuValue, output: &str) -> Vec<String> {
+fn call_args(environment: Component<'_>, argument: Component<'_>, output: &str) -> Vec<String> {
     runtime_values(environment)
         .map(value_expr)
-        .chain([value_expr(argument), format!("&{output}")])
+        .chain(runtime_values(argument).map(value_expr))
+        .chain([format!("&{output}")])
         .collect()
 }
 
@@ -135,5 +133,33 @@ mod tests {
 
         assert!(out.contains("program_true(argument, &output)"));
         assert!(out.contains("program_false(argument, &output)"));
+    }
+
+    #[test]
+    fn zero_sized_arguments_are_valid_components() {
+        let assignment = GpuAssign {
+            op: op("bool.ifc"),
+            input_sizes: vec![1, 1, 1, 1, 1, 0],
+            output_sizes: vec![1],
+            call_symbol: None,
+            inputs: vec![
+                var(0, "true_env"),
+                fn_symbol("true"),
+                var(1, "false_env"),
+                fn_symbol("false"),
+                var(2, "flag"),
+            ],
+            outputs: vec![GpuVar {
+                node: NodeId(3),
+                name: "output".to_string(),
+                lowered: LoweredType::Runtime(CType::Bool),
+            }],
+        };
+
+        let mut out = String::new();
+        render(&mut out, &assignment).unwrap();
+
+        assert!(out.contains("program_true(true_env, &output)"));
+        assert!(out.contains("program_false(false_env, &output)"));
     }
 }

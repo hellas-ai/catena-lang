@@ -5,15 +5,21 @@
 //! from the domain to the codomain.  Sources needed by that slice but produced
 //! outside it form the captured environment.
 
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 
+use hexpr::Operation;
+use metacat::theory::TheoryId;
 use open_hypergraphs::lax::{EdgeId, NodeId};
 use thiserror::Error;
 
 use crate::{
     pass::forget_closures::{Region, RegionTerm},
     prefixes::NAME_PREFIX,
+    report::TheoryTermMap,
 };
+
+/// Discovered regions grouped by theory and definition.
+pub type ClosureRegionMap = BTreeMap<TheoryId, BTreeMap<Operation, Vec<ClosureRegion>>>;
 
 /// A delimited closure body inside a graph produced by `forget_closures`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -44,6 +50,20 @@ pub enum FindRegionError {
         sources: usize,
         targets: usize,
     },
+}
+
+/// Discover closure regions for every forgotten definition in a compiler stage.
+pub fn run(terms: &TheoryTermMap<Region<Operation>>) -> Result<ClosureRegionMap, FindRegionError> {
+    terms
+        .iter()
+        .map(|(theory, definitions)| {
+            let regions = definitions
+                .iter()
+                .map(|(definition, term)| Ok((definition.clone(), find_regions(term)?)))
+                .collect::<Result<BTreeMap<_, _>, FindRegionError>>()?;
+            Ok((theory.clone(), regions))
+        })
+        .collect()
 }
 
 /// Find every closure region in marker-edge order.

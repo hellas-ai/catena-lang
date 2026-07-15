@@ -6,6 +6,7 @@ use thiserror::Error;
 
 use crate::{
     check::{CheckError, partial_definition_types},
+    closure2::region::FindRegionError,
     codegen::CodegenError,
     elaborate::ElaborateError,
     pass::{
@@ -40,6 +41,8 @@ pub enum CompileError {
     InlineDefinitions(#[from] InlineDefinitionsError),
     #[error(transparent)]
     ForgetClosures(#[from] ForgetClosuresError),
+    #[error(transparent)]
+    FindClosureRegions(#[from] FindRegionError),
     #[error(transparent)]
     Pass(#[from] PassError),
     #[error(transparent)]
@@ -100,6 +103,9 @@ fn compile_into(report: &mut CompileReport) -> Result<(), CompileError> {
     // Compute out closures by bending wires
     let forgotten_closures = crate::pass::forget_closures::run(&theory_set, &definition_types)?;
     report.forgotten_closures = Some(forgotten_closures.clone());
+
+    let closure_regions = crate::closure2::region::run(&forgotten_closures)?;
+    report.closure_regions = Some(closure_regions);
 
     return Err(CompileError::NotImplementedError);
 

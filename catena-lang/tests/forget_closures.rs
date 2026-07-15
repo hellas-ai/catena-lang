@@ -1,4 +1,5 @@
 use catena_lang::{
+    closure2::region::find_regions,
     compile::{CompileError, compile},
     pass::forget_closures::Region,
     report::CompileReport,
@@ -30,6 +31,10 @@ fn compile_through_forget_closures(source: &str) -> anyhow::Result<CompileReport
     anyhow::ensure!(
         report.forgotten_closures.is_some(),
         "compile stopped before forget_closures completed"
+    );
+    anyhow::ensure!(
+        report.closure_regions.is_some(),
+        "compile stopped before closure region discovery completed"
     );
     Ok(report)
 }
@@ -92,12 +97,7 @@ fn closure2_examples_emit_expected_region_boundaries() -> anyhow::Result<()> {
         let term = definitions
             .get(&op(definition))
             .ok_or_else(|| anyhow::anyhow!("missing forgotten definition `{definition}`"))?;
-        let actual_regions = term
-            .hypergraph
-            .edges
-            .iter()
-            .filter(|edge| matches!(edge, Region::Closure))
-            .count();
+        let actual_regions = find_regions(term)?.len();
         anyhow::ensure!(
             actual_regions == expected_regions,
             "`{definition}` emitted {actual_regions} !closure edges; expected {expected_regions}"
@@ -115,6 +115,41 @@ fn closure2_examples_emit_expected_region_boundaries() -> anyhow::Result<()> {
                 "`{definition}` emitted malformed {edge}: expected two control-flow inputs and one bracketed output"
             );
         }
+    }
+
+    Ok(())
+}
+
+#[test]
+fn closure2_finds_named_and_captured_regions() -> anyhow::Result<()> {
+    let report = compile_through_forget_closures(include_str!("../examples/closure2.hex"))?;
+    let definitions = report
+        .forgotten_closures
+        .as_ref()
+        .and_then(|theories| theories.get(&TheoryId(op("program"))))
+        .ok_or_else(|| anyhow::anyhow!("forget_closures did not emit the program theory"))?;
+
+    let named = definitions
+        .get(&op("closure2-named-if"))
+        .ok_or_else(|| anyhow::anyhow!("missing closure2-named-if"))?;
+    let named_regions = find_regions(named)?;
+    anyhow::ensure!(named_regions.len() == 2);
+    for region in named_regions {
+        anyhow::ensure!(region.environment.is_empty());
+        anyhow::ensure!(
+            region.edges.len() == 2,
+            "named body should contain name + eval"
+        );
+    }
+
+    let captured = definitions
+        .get(&op("closure2-captured-if"))
+        .ok_or_else(|| anyhow::anyhow!("missing closure2-captured-if"))?;
+    let captured_regions = find_regions(captured)?;
+    anyhow::ensure!(captured_regions.len() == 2);
+    for region in captured_regions {
+        anyhow::ensure!(region.environment == vec![region.codomain]);
+        anyhow::ensure!(region.edges.is_empty());
     }
 
     Ok(())

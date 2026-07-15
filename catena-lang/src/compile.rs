@@ -6,7 +6,7 @@ use thiserror::Error;
 
 use crate::{
     check::{CheckError, partial_definition_types},
-    closure2::{definition::DefineClosuresError, region::FindRegionError},
+    closure2::ConversionError,
     codegen::CodegenError,
     elaborate::ElaborateError,
     pass::{
@@ -42,9 +42,7 @@ pub enum CompileError {
     #[error(transparent)]
     ForgetClosures(#[from] ForgetClosuresError),
     #[error(transparent)]
-    FindClosureRegions(#[from] FindRegionError),
-    #[error(transparent)]
-    DefineClosures(#[from] DefineClosuresError),
+    ClosureConversion(#[from] ConversionError),
     #[error(transparent)]
     Pass(#[from] PassError),
     #[error(transparent)]
@@ -106,29 +104,29 @@ fn compile_into(report: &mut CompileReport) -> Result<(), CompileError> {
     let forgotten_closures = crate::pass::forget_closures::run(&theory_set, &definition_types)?;
     report.forgotten_closures = Some(forgotten_closures.clone());
 
-    let closure_regions = crate::closure2::region::run(&forgotten_closures)?;
-    report.closure_regions = Some(closure_regions.clone());
-
-    let closure_definitions =
-        crate::closure2::definition::run(&theory_set, &forgotten_closures, &closure_regions)?;
-    let definition_types = match crate::check::check(&closure_definitions) {
-        Ok(definition_types) => definition_types,
-        Err(error) => {
-            report.partial_definition_types = partial_definition_types(&error);
+    let closure_conversion = match crate::closure2::run(&theory_set, &forgotten_closures) {
+        Ok(conversion) => conversion,
+        Err(error @ ConversionError::CheckDefinitions(_)) => {
+            let ConversionError::CheckDefinitions(check_error) = &error else {
+                unreachable!("matched generated-definition check error")
+            };
+            report.partial_definition_types = partial_definition_types(check_error);
             return Err(error.into());
         }
+        Err(error) => return Err(error.into()),
     };
-    report.definition_types = Some(definition_types);
-    report.theory_set = Some(closure_definitions.clone());
-    report.closure_definitions = Some(closure_definitions);
+    report.definition_types = Some(closure_conversion.definition_types.clone());
+    report.theory_set = Some(closure_conversion.definitions.clone());
+    report.closure_conversion = Some(closure_conversion);
 
     return Err(CompileError::NotImplementedError);
 
     // TODO:
-    //  1. Replace !closure regions with env + fn pointer + 'closure context' box
-    //  2. Uncomment remaining phases below
+    //  1. Uncomment remaining phases below
 
-    // let boundary_sizes = crate::pass::record_boundary_sizes::run(&forgotten_closures)?;
+    // let boundary_sizes = crate::pass::record_boundary_sizes::run(
+    //     &report.closure_conversion.as_ref().unwrap().replacements,
+    // )?;
     // report.boundary_sizes = Some(boundary_sizes.clone());
     //
     // let unpacked_products = crate::pass::unpack_products::run(&boundary_sizes)?;

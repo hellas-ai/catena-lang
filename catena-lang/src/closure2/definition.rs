@@ -505,7 +505,7 @@ fn interpret_type_map(syntax: &Theory, map: &Hexpr) -> Result<Term, DefineClosur
         })
 }
 
-fn closure_operation(definition: &Operation, closure: NodeId) -> Operation {
+pub(crate) fn closure_operation(definition: &Operation, closure: NodeId) -> Operation {
     format!("closure.{definition}.{}", closure.0)
         .parse()
         .expect("generated closure operation should parse")

@@ -19,7 +19,7 @@ const STDLIB: &[&str] = &[
     include_str!("../stdlib/gpu.hex"),
 ];
 
-fn compile_through_forget_closures(source: &str) -> anyhow::Result<CompileReport> {
+fn compile_through_closure_conversion(source: &str) -> anyhow::Result<CompileReport> {
     let raw = RawTheorySet::from_texts(STDLIB.iter().copied().chain([source]))?;
     let report = match compile(raw) {
         Ok(report) => report,
@@ -33,19 +33,15 @@ fn compile_through_forget_closures(source: &str) -> anyhow::Result<CompileReport
         "compile stopped before forget_closures completed"
     );
     anyhow::ensure!(
-        report.closure_regions.is_some(),
-        "compile stopped before closure region discovery completed"
-    );
-    anyhow::ensure!(
-        report.closure_definitions.is_some(),
-        "compile stopped before generated closure definitions completed"
+        report.closure_conversion.is_some(),
+        "compile stopped before closure conversion completed"
     );
     Ok(report)
 }
 
 #[test]
 fn defer_bool_id() -> anyhow::Result<()> {
-    compile_through_forget_closures(
+    compile_through_closure_conversion(
         r#"
         (def program defer-bool-id : (bool val) -> (bool val) = (
           {defer (name.bool.id lift)}
@@ -59,7 +55,7 @@ fn defer_bool_id() -> anyhow::Result<()> {
 
 #[test]
 fn run_named_and_packed_with_free() -> anyhow::Result<()> {
-    compile_through_forget_closures(
+    compile_through_closure_conversion(
         r#"
         (def program and-packed-with-free :
           {({(bool val) (bool val)} *) (bool val)} -> (bool val) = (
@@ -82,7 +78,7 @@ fn run_named_and_packed_with_free() -> anyhow::Result<()> {
 
 #[test]
 fn closure2_examples_emit_expected_region_boundaries() -> anyhow::Result<()> {
-    let report = compile_through_forget_closures(include_str!("../examples/closure2.hex"))?;
+    let report = compile_through_closure_conversion(include_str!("../examples/closure2.hex"))?;
     let program = TheoryId(op("program"));
     let definitions = report
         .forgotten_closures
@@ -126,7 +122,7 @@ fn closure2_examples_emit_expected_region_boundaries() -> anyhow::Result<()> {
 
 #[test]
 fn closure2_finds_named_and_captured_regions() -> anyhow::Result<()> {
-    let report = compile_through_forget_closures(include_str!("../examples/closure2.hex"))?;
+    let report = compile_through_closure_conversion(include_str!("../examples/closure2.hex"))?;
     let definitions = report
         .forgotten_closures
         .as_ref()
@@ -161,10 +157,11 @@ fn closure2_finds_named_and_captured_regions() -> anyhow::Result<()> {
 
 #[test]
 fn closure2_builds_closure_and_name_arrows() -> anyhow::Result<()> {
-    let report = compile_through_forget_closures(include_str!("../examples/closure2.hex"))?;
+    let report = compile_through_closure_conversion(include_str!("../examples/closure2.hex"))?;
     let generated = report
-        .closure_definitions
+        .closure_conversion
         .as_ref()
+        .map(|conversion| &conversion.definitions)
         .ok_or_else(|| anyhow::anyhow!("missing generated closure definitions"))?;
     let Theory::Theory { arrows, .. } = generated
         .theories
@@ -203,6 +200,70 @@ fn closure2_builds_closure_and_name_arrows() -> anyhow::Result<()> {
     }
 
     catena_lang::check::check(generated)?;
+    Ok(())
+}
+
+#[test]
+fn closure2_replacement_uses_generated_name_boundaries() -> anyhow::Result<()> {
+    let report = compile_through_closure_conversion(include_str!("../examples/closure2.hex"))?;
+    let theory_id = TheoryId(op("program"));
+    let definitions = report
+        .closure_conversion
+        .as_ref()
+        .map(|conversion| &conversion.replacements)
+        .and_then(|theories| theories.get(&theory_id))
+        .ok_or_else(|| anyhow::anyhow!("missing replaced program definitions"))?;
+    let Theory::Theory { arrows, .. } = report
+        .closure_conversion
+        .as_ref()
+        .map(|conversion| &conversion.theory_set)
+        .and_then(|theories| theories.theories.get(&theory_id))
+        .ok_or_else(|| anyhow::anyhow!("missing replaced program theory"))?
+    else {
+        anyhow::bail!("program should be a user theory");
+    };
+
+    for definition in ["closure2-named-if", "closure2-captured-if"] {
+        let term = definitions
+            .get(&op(definition))
+            .ok_or_else(|| anyhow::anyhow!("missing replacement for {definition}"))?;
+        anyhow::ensure!(
+            term.hypergraph
+                .edges
+                .iter()
+                .any(|op| op.as_str() == "bool.ifc")
+        );
+        anyhow::ensure!(
+            !term
+                .hypergraph
+                .edges
+                .iter()
+                .any(|op| op.as_str() == "bool.if")
+        );
+
+        for (context, boundary) in term
+            .hypergraph
+            .edges
+            .iter()
+            .zip(&term.hypergraph.adjacency)
+            .filter(|(op, _)| op.as_str().starts_with("__catena_context.closure."))
+        {
+            let name: Operation = context
+                .as_str()
+                .strip_prefix("__catena_context.")
+                .map(|closure| format!("name.{closure}"))
+                .expect("generated context prefix should strip")
+                .parse()?;
+            let name_arrow = arrows
+                .get(&name)
+                .ok_or_else(|| anyhow::anyhow!("missing wired name declaration {name}"))?;
+            anyhow::ensure!(
+                boundary.targets.len()
+                    == boundary.sources.len() + name_arrow.type_maps.0.targets.len(),
+                "context outputs should be environment copies followed by the actual name inputs"
+            );
+        }
+    }
     Ok(())
 }
 

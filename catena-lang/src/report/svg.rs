@@ -7,7 +7,7 @@ use open_hypergraphs::lax::{NodeId, OpenHypergraph};
 use open_hypergraphs_dot::{Options, svg::to_svg_with};
 
 use crate::{
-    closure2::region::{ClosureRegion, ClosureRegionMap},
+    closure2::{definition::closure_operation, region::ClosureRegion},
     pass::forget_closures::{Region, RegionTerm},
     report::CompileReport,
 };
@@ -113,9 +113,8 @@ pub fn dump_svgs(report: &CompileReport, dir: &Path) -> io::Result<()> {
                 &definition_dir,
                 region_to_hexpr_operation,
             )?;
-            dump_closure2_region_svgs(
-                &report.forgotten_closures,
-                &report.closure_regions,
+            dump_closure_conversion_trace(
+                report,
                 theory_id,
                 definition_name,
                 syntax_theory,
@@ -145,24 +144,27 @@ pub fn dump_svgs(report: &CompileReport, dir: &Path) -> io::Result<()> {
     Ok(())
 }
 
-fn dump_closure2_region_svgs(
-    theories: &Option<crate::report::TheoryTermMap<Region<Operation>>>,
-    discovered: &Option<ClosureRegionMap>,
+fn dump_closure_conversion_trace(
+    report: &CompileReport,
     theory_id: &TheoryId,
     definition_name: &Operation,
     syntax_theory: &Theory,
     definition_dir: &Path,
 ) -> io::Result<()> {
-    let Some(term) = theories
+    let Some(conversion) = &report.closure_conversion else {
+        return Ok(());
+    };
+    let Some(term) = report
+        .forgotten_closures
         .as_ref()
         .and_then(|theories| theories.get(theory_id))
         .and_then(|definitions| definitions.get(definition_name))
     else {
         return Ok(());
     };
-    let Some(regions) = discovered
-        .as_ref()
-        .and_then(|theories| theories.get(theory_id))
+    let Some(regions) = conversion
+        .regions
+        .get(theory_id)
         .and_then(|definitions| definitions.get(definition_name))
     else {
         return Ok(());
@@ -171,14 +173,49 @@ fn dump_closure2_region_svgs(
         return Ok(());
     }
 
+    dump_typed_stage_svg(
+        &report.forgotten_closures,
+        "closure_conversion_00_input",
+        theory_id,
+        definition_name,
+        syntax_theory,
+        definition_dir,
+        region_to_hexpr_operation,
+    )?;
+
     let overview = labelled_region_overview(term, regions, syntax_theory)?;
-    let overview_path = definition_dir.join("regions.svg");
+    let overview_path = definition_dir.join("closure_conversion_10_regions.svg");
     fs::write(&overview_path, overview).map_err(|error| {
         io::Error::new(
             error.kind(),
             format!("failed to write {}: {error}", overview_path.display()),
         )
     })?;
+
+    let generated_theory = conversion
+        .definitions
+        .theories
+        .get(theory_id)
+        .ok_or_else(|| invalid_data(format!("missing generated theory `{theory_id}`")))?;
+    let Theory::Theory {
+        arrows: generated_arrows,
+        ..
+    } = generated_theory
+    else {
+        return Err(invalid_data(format!(
+            "generated theory `{theory_id}` is not a user theory"
+        )));
+    };
+    let generated_types = conversion
+        .definition_types
+        .get(theory_id)
+        .ok_or_else(|| invalid_data(format!("missing generated types for `{theory_id}`")))?;
+    let mut index_document = format!(
+        "# Closure conversion: `{theory_id}.{definition_name}`\n\n\
+         1. [Closure-forgotten input](closure_conversion_00_input.svg) \
+            ([hex](closure_conversion_00_input.hex))\n\
+         2. [Colored region overview](closure_conversion_10_regions.svg)\n"
+    );
 
     for (index, region) in regions.iter().enumerate() {
         let extracted = labelled_extracted_region(term, region, index, syntax_theory)?;
@@ -190,14 +227,80 @@ fn dump_closure2_region_svgs(
             (0..extracted.hypergraph.edges.len())
                 .map(|edge| (format!("e_{edge}"), region_color(index))),
         )?;
-        let path = definition_dir.join(format!("region_{index}.svg"));
+        let region_stage = format!("closure_conversion_11_region_{index}");
+        let path = definition_dir.join(format!("{region_stage}.svg"));
         fs::write(&path, svg).map_err(|error| {
             io::Error::new(
                 error.kind(),
                 format!("failed to write {}: {error}", path.display()),
             )
         })?;
+
+        let closure_name = closure_operation(definition_name, region.closure);
+        let closure_arrow = generated_arrows
+            .get(&closure_name)
+            .ok_or_else(|| invalid_data(format!("missing generated closure `{closure_name}`")))?;
+        let mut closure_body = closure_arrow
+            .definition
+            .clone()
+            .ok_or_else(|| invalid_data(format!("`{closure_name}` has no body")))?;
+        closure_body.quotient().map_err(|error| {
+            invalid_data(format!(
+                "failed to quotient generated closure `{closure_name}`: {error:?}"
+            ))
+        })?;
+        let labels = generated_types
+            .get(&closure_name)
+            .cloned()
+            .ok_or_else(|| invalid_data(format!("missing checked labels for `{closure_name}`")))?;
+        let closure_body = closure_body
+            .with_nodes(|_| labels)
+            .ok_or_else(|| invalid_data(format!("label count mismatch for `{closure_name}`")))?;
+        let closure_stage = format!("closure_conversion_20_closure_{index}");
+        let closure_svg = render_typed_svg(&closure_body, syntax_theory)?;
+        let closure_path = definition_dir.join(format!("{closure_stage}.svg"));
+        fs::write(&closure_path, closure_svg).map_err(|error| {
+            io::Error::new(
+                error.kind(),
+                format!("failed to write {}: {error}", closure_path.display()),
+            )
+        })?;
+        dump_typed_stage_hex(
+            &closure_body,
+            &closure_stage,
+            definition_dir,
+            |operation| operation.clone(),
+            syntax_theory,
+        )?;
+
+        index_document.push_str(&format!(
+            "   - Region {index}: `{closure_name}` \
+             ([region](closure_conversion_11_region_{index}.svg), \
+              [body](closure_conversion_20_closure_{index}.svg), \
+              [body hex](closure_conversion_20_closure_{index}.hex))\n"
+        ));
     }
+
+    dump_typed_stage_svg(
+        &Some(conversion.replacements.clone()),
+        "closure_conversion_30_output",
+        theory_id,
+        definition_name,
+        syntax_theory,
+        definition_dir,
+        |operation| operation.clone(),
+    )?;
+    index_document.push_str(
+        "3. [Replacement output](closure_conversion_30_output.svg) \
+         ([hex](closure_conversion_30_output.hex))\n",
+    );
+    let index_path = definition_dir.join("closure_conversion.md");
+    fs::write(&index_path, index_document).map_err(|error| {
+        io::Error::new(
+            error.kind(),
+            format!("failed to write {}: {error}", index_path.display()),
+        )
+    })?;
 
     Ok(())
 }

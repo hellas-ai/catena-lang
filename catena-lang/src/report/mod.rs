@@ -12,7 +12,7 @@ use metacat::{
 use std::collections::BTreeMap;
 
 use crate::check::{AnnotatedTerm, PartialDefinitionTypes};
-use crate::closure2::region::ClosureRegionMap;
+use crate::closure2::Conversion;
 use crate::codegen::GpuModuleMap;
 use crate::pass::{forget_closures::Region, record_boundary_sizes::OperationWithBoundarySizes};
 
@@ -26,8 +26,7 @@ pub struct CompileReport {
     pub definition_types: Option<BTreeMap<TheoryId, BTreeMap<Operation, Vec<Tree<(), Operation>>>>>,
     pub partial_definition_types: Option<PartialDefinitionTypes>,
     pub forgotten_closures: Option<TheoryTermMap<Region<Operation>>>,
-    pub closure_regions: Option<ClosureRegionMap>,
-    pub closure_definitions: Option<TheorySet>,
+    pub closure_conversion: Option<Conversion>,
     pub boundary_sizes: Option<TheoryTermMap<OperationWithBoundarySizes<Operation>>>,
     pub unpacked_products: Option<TheoryTermMap<OperationWithBoundarySizes<Operation>>>,
     pub gpu_modules: Option<GpuModuleMap>,
@@ -42,8 +41,7 @@ impl CompileReport {
             definition_types: None,
             partial_definition_types: None,
             forgotten_closures: None,
-            closure_regions: None,
-            closure_definitions: None,
+            closure_conversion: None,
             boundary_sizes: None,
             unpacked_products: None,
             gpu_modules: None,

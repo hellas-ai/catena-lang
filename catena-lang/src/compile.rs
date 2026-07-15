@@ -6,7 +6,7 @@ use thiserror::Error;
 
 use crate::{
     check::{CheckError, partial_definition_types},
-    closure2::region::FindRegionError,
+    closure2::{definition::DefineClosuresError, region::FindRegionError},
     codegen::CodegenError,
     elaborate::ElaborateError,
     pass::{
@@ -43,6 +43,8 @@ pub enum CompileError {
     ForgetClosures(#[from] ForgetClosuresError),
     #[error(transparent)]
     FindClosureRegions(#[from] FindRegionError),
+    #[error(transparent)]
+    DefineClosures(#[from] DefineClosuresError),
     #[error(transparent)]
     Pass(#[from] PassError),
     #[error(transparent)]
@@ -105,14 +107,26 @@ fn compile_into(report: &mut CompileReport) -> Result<(), CompileError> {
     report.forgotten_closures = Some(forgotten_closures.clone());
 
     let closure_regions = crate::closure2::region::run(&forgotten_closures)?;
-    report.closure_regions = Some(closure_regions);
+    report.closure_regions = Some(closure_regions.clone());
+
+    let closure_definitions =
+        crate::closure2::definition::run(&theory_set, &forgotten_closures, &closure_regions)?;
+    let definition_types = match crate::check::check(&closure_definitions) {
+        Ok(definition_types) => definition_types,
+        Err(error) => {
+            report.partial_definition_types = partial_definition_types(&error);
+            return Err(error.into());
+        }
+    };
+    report.definition_types = Some(definition_types);
+    report.theory_set = Some(closure_definitions.clone());
+    report.closure_definitions = Some(closure_definitions);
 
     return Err(CompileError::NotImplementedError);
 
     // TODO:
-    //  1. Inline ({_ name.f} eval) for all inlined definitions - replace this hexpr with body of f directly
-    //  2. Replace !closure regions with env + fn pointer + 'closure context' box
-    //  3. Uncomment remaining phases below
+    //  1. Replace !closure regions with env + fn pointer + 'closure context' box
+    //  2. Uncomment remaining phases below
 
     // let boundary_sizes = crate::pass::record_boundary_sizes::run(&forgotten_closures)?;
     // report.boundary_sizes = Some(boundary_sizes.clone());

@@ -7,6 +7,8 @@
 /// Find regions by following closure domains to their codomains.
 pub mod region;
 
+/// Turn discovered regions into `closure.*` definitions and `name.closure.*` declarations.
+pub mod definition;
+
 // Future stages:
-// - Create one new definition from each discovered closure region.
 // - Replace each region with an environment, function pointer, and context operations.

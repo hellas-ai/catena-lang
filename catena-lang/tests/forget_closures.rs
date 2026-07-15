@@ -5,7 +5,7 @@ use catena_lang::{
     report::CompileReport,
 };
 use hexpr::Operation;
-use metacat::theory::{RawTheorySet, TheoryId};
+use metacat::theory::{RawTheorySet, Theory, TheoryId};
 
 const STDLIB: &[&str] = &[
     include_str!("../stdlib/cmc.hex"),
@@ -35,6 +35,10 @@ fn compile_through_forget_closures(source: &str) -> anyhow::Result<CompileReport
     anyhow::ensure!(
         report.closure_regions.is_some(),
         "compile stopped before closure region discovery completed"
+    );
+    anyhow::ensure!(
+        report.closure_definitions.is_some(),
+        "compile stopped before generated closure definitions completed"
     );
     Ok(report)
 }
@@ -152,6 +156,53 @@ fn closure2_finds_named_and_captured_regions() -> anyhow::Result<()> {
         anyhow::ensure!(region.edges.is_empty());
     }
 
+    Ok(())
+}
+
+#[test]
+fn closure2_builds_closure_and_name_arrows() -> anyhow::Result<()> {
+    let report = compile_through_forget_closures(include_str!("../examples/closure2.hex"))?;
+    let generated = report
+        .closure_definitions
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("missing generated closure definitions"))?;
+    let Theory::Theory { arrows, .. } = generated
+        .theories
+        .get(&TheoryId(op("program")))
+        .ok_or_else(|| anyhow::anyhow!("missing generated program theory"))?
+    else {
+        anyhow::bail!("program should be a user theory");
+    };
+
+    for definition in ["closure2-named-if", "closure2-captured-if"] {
+        let closure_prefix = format!("closure.{definition}.");
+        let name_prefix = format!("name.{closure_prefix}");
+        let closures = arrows
+            .iter()
+            .filter(|(name, _)| name.as_str().starts_with(&closure_prefix))
+            .collect::<Vec<_>>();
+        let names = arrows
+            .iter()
+            .filter(|(name, _)| name.as_str().starts_with(&name_prefix))
+            .collect::<Vec<_>>();
+
+        anyhow::ensure!(
+            closures.len() == 2,
+            "expected two closures for {definition}"
+        );
+        anyhow::ensure!(names.len() == 2, "expected two names for {definition}");
+        for (_, closure) in closures {
+            anyhow::ensure!(closure.definition.is_some());
+            anyhow::ensure!(closure.type_maps.0.targets.len() == 2);
+            anyhow::ensure!(closure.type_maps.1.targets.len() == 1);
+        }
+        for (_, name) in names {
+            anyhow::ensure!(name.definition.is_none());
+            anyhow::ensure!(name.type_maps.1.targets.len() == 1);
+        }
+    }
+
+    catena_lang::check::check(generated)?;
     Ok(())
 }
 

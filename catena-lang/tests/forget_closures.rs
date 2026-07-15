@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 
 use catena_lang::{
     closure2::{self, region::find_regions},
+    codegen::{GpuDialect, gpu::render_module},
     compile::compile,
     pass::forget_closures::Region,
     report::CompileReport,
@@ -133,6 +134,43 @@ fn closure2_examples_emit_expected_region_boundaries() -> anyhow::Result<()> {
                 "`{definition}` emitted malformed {edge}: expected two control-flow inputs and one bracketed output"
             );
         }
+    }
+
+    Ok(())
+}
+
+#[test]
+fn closure2_packed_examples_generate_renderable_gpu_code() -> anyhow::Result<()> {
+    let report = compile_through_closure_conversion(include_str!("../examples/closure2.hex"))?;
+    let modules = report
+        .gpu_modules
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("closure2 examples did not reach GPU codegen"))?;
+
+    for (definition, operation, input_sizes) in [
+        ("closure2-packed-closure", "bool.and", vec![1, 1]),
+        ("closure2-packed-if", "bool.ifc", vec![1, 1, 1, 1, 1, 0]),
+    ] {
+        let module = modules
+            .values()
+            .find(|module| {
+                module
+                    .source_name
+                    .as_ref()
+                    .is_some_and(|name| name.as_str() == definition)
+            })
+            .ok_or_else(|| anyhow::anyhow!("missing GPU module for `{definition}`"))?;
+        let assignment = module
+            .entry
+            .assignments
+            .iter()
+            .find(|assignment| assignment.op.as_str() == operation)
+            .ok_or_else(|| anyhow::anyhow!("`{definition}` does not call `{operation}`"))?;
+
+        anyhow::ensure!(assignment.input_sizes == input_sizes);
+        anyhow::ensure!(assignment.output_sizes == [1]);
+        anyhow::ensure!(assignment.outputs.len() == 1);
+        render_module(module, GpuDialect::Hip)?;
     }
 
     Ok(())

@@ -447,13 +447,139 @@
 ))
 
 # two-bufs-at(env,flat) = C(row(flat),col(flat))
-(def program closure2.matmul-two-bufs-at : ([n m k . ] {({({[ . n] u64} :) ({({[ . m] u64} :) ({({[ . k] u64} :) ({({({[ . n] [ . k]} *) u64} :) ({({({[ . k] [ . m]} *) u64} :) ({({cap.ref ({[ . n] [ . k]} *) f32} buf val) ({cap.ref ({[ . k] [ . m]} *) f32} buf val)} *)} *)} *)} *)} *)} *) (({[ . n] [ . m]} *) ix val)}) -> ([n m k . ] (f32 val)) = ([env flat . ] ([ . env] *.elim [rows rest-a . ] ([ . rest-a] *.elim [cols rest-b . ] ([ . rest-b] *.elim [inner rest-c . ] ([ . rest-c] *.elim [left-size rest-d . ] ([ . rest-d] *.elim [right-size buffers . ] ([ . buffers] *.elim [left-buffer right-buffer . ] ([ . flat] closure2.matrix-flat-copy [flat-row flat-col . ] ({[ . cols] [ . flat-row]} closure2.row-major-row [i . ] ({[ . cols] [ . flat-col]} closure2.row-major-col [j . ] {[ . rows] [ . cols] [ . inner] [ . left-size] [ . right-size] [ . left-buffer] [ . right-buffer] [ . i] [ . j]} closure2.matmul-cell-two-bufs)))))))))))
+(def program closure2.matmul-two-bufs-at :
+  ([n m k.] {
+    ({
+      ({[.n] u64} :)
+      ({
+        ({[.m] u64} :)
+        ({
+          ({[.k] u64} :)
+          ({
+            ({({[.n] [.k]} *) u64} :)
+            ({
+              ({({[.k] [.m]} *) u64} :)
+              ({
+                ({cap.ref ({[.n] [.k]} *) f32} buf val)
+                ({cap.ref ({[.k] [.m]} *) f32} buf val)
+              } *)
+            } *)
+          } *)
+        } *)
+      } *)
+    } *)
+    (({[.n] [.m]} *) ix val)
+  })
+  ->
+  ([n m k.] (f32 val))
+= ([env flat.]
+  ([.env] *.elim [rows rest-a.]
+    ([.rest-a] *.elim [cols rest-b.]
+      ([.rest-b] *.elim [inner rest-c.]
+        ([.rest-c] *.elim [left-size rest-d.]
+          ([.rest-d] *.elim [right-size buffers.]
+            ([.buffers] *.elim [left-buffer right-buffer.]
+              ([.flat] closure2.matrix-flat-copy [flat-row flat-col.]
+                ({[.cols] [.flat-row]} closure2.row-major-row [i.]
+                  ({[.cols] [.flat-col]} closure2.row-major-col [j.]
+                    {
+                      [.rows] [.cols] [.inner]
+                      [.left-size] [.right-size]
+                      [.left-buffer] [.right-buffer]
+                      [.i] [.j]
+                    }
+                    closure2.matmul-cell-two-bufs
+                  )
+                )
+              )
+            )
+          )
+        )
+      )
+    )
+  )
+))
 
 # matmul-two-bufs(A,B)[flat] = sum_p A(row(flat),p)*B(p,col(flat))
-(def program closure2.matmul-two-bufs : ([n m k . ] {({[ . n] u64} :) ({[ . m] u64} :) ({[ . k] u64} :) ({({[ . n] [ . k]} *) u64} :) ({({[ . k] [ . m]} *) u64} :) ({({[ . n] [ . m]} *) u64} :) ({cap.ref ({[ . n] [ . k]} *) f32} buf val) ({cap.ref ({[ . k] [ . m]} *) f32} buf val)}) -> ([n m k . ] ({cap.own ({[ . n] [ . m]} *) f32} buf val)) = ([rows cols inner left-size right-size output-size left-buffer right-buffer . ] {({[ . rows] ({[ . cols] ({[ . inner] ({[ . left-size] ({[ . right-size] ({[ . left-buffer] [ . right-buffer]} *.intro)} *.intro)} *.intro)} *.intro)} *.intro)} *.intro) ({([ . rows] :.param) ([ . cols] :.param) ([ . inner] :.param)} name.closure2.matmul-two-bufs-at) [ . output-size]} materializec))
+(def program closure2.matmul-two-bufs :
+  ([n m k.] {
+    ({[.n] u64} :)
+    ({[.m] u64} :)
+    ({[.k] u64} :)
+    ({({[.n] [.k]} *) u64} :)
+    ({({[.k] [.m]} *) u64} :)
+    ({({[.n] [.m]} *) u64} :)
+    ({cap.ref ({[.n] [.k]} *) f32} buf val)
+    ({cap.ref ({[.k] [.m]} *) f32} buf val)
+  })
+  ->
+  ([n m k.] ({cap.own ({[.n] [.m]} *) f32} buf val))
+= ([rows cols inner left-size right-size output-size left-buffer right-buffer.]
+  {
+    ({[.rows]
+      ({[.cols]
+        ({[.inner]
+          ({[.left-size]
+            ({[.right-size]
+              ({[.left-buffer] [.right-buffer]} *.intro)
+            } *.intro)
+          } *.intro)
+        } *.intro)
+      } *.intro)
+    } *.intro)
+    ({
+      ([.rows] :.param)
+      ([.cols] :.param)
+      ([.inner] :.param)
+    } name.closure2.matmul-two-bufs-at)
+    [.output-size]
+  }
+  materializec
+))
 
 # buf-identity-at(env,flat) = sum_p A(row(flat),p)*I(p,col(flat))
-(def program closure2.matmul-buf-identity-at : ([n . ] {({({[ . n] u64} :) ({({({[ . n] [ . n]} *) u64} :) ({cap.ref ({[ . n] [ . n]} *) f32} buf val)} *)} *) (({[ . n] [ . n]} *) ix val)}) -> ([n . ] (f32 val)) = ([env flat . ] ([ . env] *.elim [size rest . ] ([ . rest] *.elim [flat-size input . ] ([ . flat] closure2.matrix-flat-copy [flat-row flat-col . ] ({[ . size] [ . flat-row]} closure2.row-major-row [i . ] ({[ . size] [ . flat-col]} closure2.row-major-col [j . ] {[ . size] [ . flat-size] [ . input] [ . i] [ . j]} closure2.matmul-cell-buf-and-identity)))))))
+(def program closure2.matmul-buf-identity-at :
+  ([n.] {
+    ({
+      ({[.n] u64} :)
+      ({
+        ({({[.n] [.n]} *) u64} :)
+        ({cap.ref ({[.n] [.n]} *) f32} buf val)
+      } *)
+    } *)
+    (({[.n] [.n]} *) ix val)
+  })
+  ->
+  ([n.] (f32 val))
+= ([env flat.]
+  ([.env] *.elim [size rest.]
+    ([.rest] *.elim [flat-size input.]
+      ([.flat] closure2.matrix-flat-copy [flat-row flat-col.]
+        ({[.size] [.flat-row]} closure2.row-major-row [i.]
+          ({[.size] [.flat-col]} closure2.row-major-col [j.]
+            {[.size] [.flat-size] [.input] [.i] [.j]}
+            closure2.matmul-cell-buf-and-identity
+          )
+        )
+      )
+    )
+  )
+))
 
 # matmul-buf-identity(A)[flat] = sum_p A(row(flat),p)*I(p,col(flat))
-(def program closure2.matmul-buf-and-identity : ([n . ] {({[ . n] u64} :) ({({[ . n] [ . n]} *) u64} :) ({cap.ref ({[ . n] [ . n]} *) f32} buf val)}) -> ([n . ] ({cap.own ({[ . n] [ . n]} *) f32} buf val)) = ([size flat-size input . ] {({[ . size] ({[ . flat-size] [ . input]} *.intro)} *.intro) (([ . size] :.param) name.closure2.matmul-buf-identity-at) [ . flat-size]} materializec))
+(def program closure2.matmul-buf-and-identity :
+  ([n.] {
+    ({[.n] u64} :)
+    ({({[.n] [.n]} *) u64} :)
+    ({cap.ref ({[.n] [.n]} *) f32} buf val)
+  })
+  ->
+  ([n.] ({cap.own ({[.n] [.n]} *) f32} buf val))
+= ([size flat-size input.]
+  {
+    ({[.size] ({[.flat-size] [.input]} *.intro)} *.intro)
+    (([.size] :.param) name.closure2.matmul-buf-identity-at)
+    [.flat-size]
+  }
+  materializec
+))

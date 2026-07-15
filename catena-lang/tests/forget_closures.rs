@@ -108,7 +108,8 @@ fn closure2_examples_emit_expected_region_boundaries() -> anyhow::Result<()> {
         ("closure2-captured-if", 2),
         ("closure2-composed-if", 2),
         ("closure2-tensored-if", 2),
-        ("closure2-packed-closure", 2),
+        ("closure2-packed-closure", 0),
+        ("closure2-packed-if", 2),
         ("closure2-reduce", 2),
     ] {
         let term = definitions

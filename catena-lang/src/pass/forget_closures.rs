@@ -125,6 +125,9 @@ impl Functor<Obj, Arr, Obj, Region<Arr>> for ForgetClosures<'_> {
         }
 
         match a.as_str() {
+            PRODUCT_INTRO | PRODUCT_ELIM | UNIT_INTRO | UNIT_ELIM => {
+                map_structural_operation(source, target)
+            }
             DEFER | RUN => OpenHypergraph::identity(closure_forgotten_boundaries(source)),
             COMPOSE => map_compose(source),
             TENSOR => map_tensor(source),
@@ -176,6 +179,16 @@ fn typed_definition(
 
 ////////////////////////////////////////////////////////////////////////////////
 /// Action of forget_closures on generating operations
+
+fn map_structural_operation(source: &[Obj], target: &[Obj]) -> RegionTerm {
+    let source = closure_forgotten_boundaries(source);
+    let target = closure_forgotten_boundaries(target);
+    assert_eq!(
+        source, target,
+        "forgotten product/unit operation should have identical boundaries"
+    );
+    OpenHypergraph::identity(source)
+}
 
 fn map_context_projection_operation(source: &[Obj], target: &[Obj]) -> RegionTerm {
     let mapped_source = closure_forgotten_boundaries(source);
@@ -651,6 +664,25 @@ mod tests {
 
     fn region_op(name: &str) -> Region<Operation> {
         Region::Operation(op(name))
+    }
+
+    #[test]
+    fn structural_operations_with_closures_map_to_identities() {
+        let a = object("A");
+        let b = object("B");
+        let x = object("X");
+        let closure = Tree::Node(op(FN_HOM_TYPE), 0, vec![a.clone(), b.clone()]);
+        let packed = product(closure.clone(), x.clone());
+
+        let intro =
+            map_structural_operation(&[closure.clone(), x.clone()], std::slice::from_ref(&packed));
+        let elim = map_structural_operation(&[packed], &[closure, x.clone()]);
+
+        for mapped in [intro, elim] {
+            assert!(mapped.hypergraph.edges.is_empty());
+            assert_eq!(source_types(&mapped), vec![a.clone(), b.clone(), x.clone()]);
+            assert_eq!(target_types(&mapped), vec![a.clone(), b.clone(), x.clone()]);
+        }
     }
 
     #[test]

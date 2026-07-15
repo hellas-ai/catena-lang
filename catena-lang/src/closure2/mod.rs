@@ -5,13 +5,14 @@
 //! original region with an explicit environment and function pointer.
 
 use hexpr::Operation;
-use metacat::theory::TheorySet;
+use metacat::theory::{Theory, TheorySet};
 use thiserror::Error;
 
 use crate::{
     check::{CheckError, DefinitionTypes, PartialDefinitionTypes, partial_definition_types},
     pass::forget_closures::Region,
     report::TheoryTermMap,
+    stdlib::constants::FN_HOM_TYPE,
 };
 
 /// Find regions by following closure domains to their codomains.
@@ -72,6 +73,8 @@ pub fn run(
     theory_set: &TheorySet,
     forgotten: &TheoryTermMap<Region<Operation>>,
 ) -> Result<Conversion, ConversionError> {
+    assert_closure_boundary_definitions_are_inlined(theory_set);
+
     let regions = region::run(forgotten)?;
     let definition::DefinedClosures {
         generated_theory,
@@ -98,4 +101,33 @@ pub fn run(
         runtime_functions,
         replacement_theory: replacement.theory_set,
     })
+}
+
+/// Region discovery assumes that calls to definitions with closure-typed
+/// interfaces have already been expanded by the early inlining pass.
+fn assert_closure_boundary_definitions_are_inlined(theory_set: &TheorySet) {
+    for (theory_id, theory) in &theory_set.theories {
+        let Theory::Theory { arrows, .. } = theory else {
+            continue;
+        };
+
+        for (definition_name, arrow) in arrows {
+            if arrow.definition.is_none() {
+                continue;
+            }
+
+            assert!(
+                !contains_closure(&arrow.type_maps.0) && !contains_closure(&arrow.type_maps.1),
+                "closure conversion requires closure-boundary definitions to be inlined first; `{theory_id}.{definition_name}` still has a closure on its global interface"
+            );
+        }
+    }
+}
+
+fn contains_closure(type_map: &metacat::theory::Term) -> bool {
+    type_map
+        .hypergraph
+        .edges
+        .iter()
+        .any(|operation| operation.as_str() == FN_HOM_TYPE)
 }

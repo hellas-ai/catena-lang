@@ -24,9 +24,6 @@ use crate::{
     pass::forget_closures::{Region, RegionTerm},
     prefixes::{GENERATED_CONTEXT_PREFIX, GENERATED_VARIABLE_PREFIX, NAME_PREFIX},
     report::TheoryTermMap,
-    stdlib::constants::{
-        PRODUCT_ELIM, PRODUCT_INTRO, PRODUCT_TYPE, UNIT_ELIM, UNIT_INTRO, UNIT_TYPE,
-    },
 };
 
 type Obj = Tree<(), Operation>;
@@ -175,9 +172,6 @@ pub fn run(
                     definition: definition_name.to_string(),
                     error: format!("{error:?}"),
                 })?;
-            normalize_structural_types(&mut rewritten);
-            remove_stale_unit_edges(&mut rewritten);
-
             let Theory::Theory { arrows, .. } = output
                 .theories
                 .get_mut(theory_id)
@@ -379,22 +373,8 @@ fn rewrite_one(
 
     for (new_edge, old_edge) in retained_edges.iter().enumerate() {
         let old = &definition.hypergraph.adjacency[old_edge.0];
-        let replacement_sources = if old.sources.contains(&region.closure)
-            && matches!(
-                &definition.hypergraph.edges[old_edge.0],
-                Region::Operation(operation) if operation.as_str() == PRODUCT_INTRO
-            ) {
-            vec![pack_replacement_targets(&mut rewritten, &appended_targets)]
-        } else {
-            appended_targets.clone()
-        };
         rewritten.hypergraph.adjacency[new_edge] = Hyperedge {
-            sources: remap_nodes(
-                &node_map,
-                &old.sources,
-                region.closure,
-                &replacement_sources,
-            )?,
+            sources: remap_nodes(&node_map, &old.sources, region.closure, &appended_targets)?,
             targets: remap_nodes(&node_map, &old.targets, region.closure, &appended_targets)?,
         };
     }
@@ -405,22 +385,6 @@ fn rewrite_one(
         &appended_targets,
     )?;
     Ok(rewritten)
-}
-
-fn pack_replacement_targets(term: &mut RegionTerm, targets: &[NodeId]) -> NodeId {
-    let types = targets
-        .iter()
-        .map(|node| term.hypergraph.nodes[node.0].clone())
-        .collect();
-    let packer = to_packer(types).map_edges(Region::Operation);
-    let (sources, packed) = term.append(packer);
-    for (&target, source) in targets.iter().zip(sources) {
-        term.unify(target, source);
-    }
-    let [packed] = packed.as_slice() else {
-        unreachable!("replacement packer should have one target")
-    };
-    *packed
 }
 
 fn remap_nodes(
@@ -471,138 +435,6 @@ fn rewrite_converted_primitives(term: &mut TypedTerm) {
             *operation = converted.parse().expect("converted primitive should parse");
         }
     }
-}
-
-/// Recompute product labels after a closure wire changes representation.
-///
-/// Structural product edges are erased by `unpack_products`, but their node
-/// labels determine the flattened boundary. A closure nested under products
-/// therefore has to propagate its new packed `(environment * pointer)` type
-/// through the surrounding intro/elim chain first.
-fn normalize_structural_types(term: &mut TypedTerm) {
-    let iterations = term.hypergraph.edges.len().max(1);
-    for _ in 0..iterations {
-        let mut changed = false;
-        for edge_index in 0..term.hypergraph.edges.len() {
-            let operation = &term.hypergraph.edges[edge_index];
-            let boundary = &term.hypergraph.adjacency[edge_index];
-            if operation.as_str().starts_with(GENERATED_CONTEXT_PREFIX) {
-                for (&source, &target) in boundary.sources.iter().zip(&boundary.targets) {
-                    let source_type = term.hypergraph.nodes[source.0].clone();
-                    if term.hypergraph.nodes[target.0] != source_type {
-                        term.hypergraph.nodes[target.0] = source_type;
-                        changed = true;
-                    }
-                }
-                continue;
-            }
-            match operation.as_str() {
-                PRODUCT_INTRO => {
-                    let [left, right] = boundary.sources.as_slice() else {
-                        continue;
-                    };
-                    let [target] = boundary.targets.as_slice() else {
-                        continue;
-                    };
-                    let product = product_type(
-                        term.hypergraph.nodes[left.0].clone(),
-                        term.hypergraph.nodes[right.0].clone(),
-                    );
-                    if term.hypergraph.nodes[target.0] != product {
-                        term.hypergraph.nodes[target.0] = product;
-                        changed = true;
-                    }
-                }
-                PRODUCT_ELIM => {
-                    let [source] = boundary.sources.as_slice() else {
-                        continue;
-                    };
-                    let [left, right] = boundary.targets.as_slice() else {
-                        continue;
-                    };
-                    let Tree::Node(operation, _, children) =
-                        term.hypergraph.nodes[source.0].clone()
-                    else {
-                        continue;
-                    };
-                    if operation.as_str() != PRODUCT_TYPE {
-                        continue;
-                    }
-                    let [left_type, right_type] = children.as_slice() else {
-                        continue;
-                    };
-                    if term.hypergraph.nodes[left.0] != *left_type {
-                        term.hypergraph.nodes[left.0] = left_type.clone();
-                        changed = true;
-                    }
-                    if term.hypergraph.nodes[right.0] != *right_type {
-                        term.hypergraph.nodes[right.0] = right_type.clone();
-                        changed = true;
-                    }
-                }
-                _ => {}
-            }
-        }
-        if !changed {
-            break;
-        }
-    }
-}
-
-fn product_type(left: Obj, right: Obj) -> Obj {
-    Tree::Node(
-        PRODUCT_TYPE
-            .parse()
-            .expect("standard product type operation should parse"),
-        0,
-        vec![left, right],
-    )
-}
-
-fn remove_stale_unit_edges(term: &mut TypedTerm) {
-    let stale = term
-        .hypergraph
-        .edges
-        .iter()
-        .zip(&term.hypergraph.adjacency)
-        .enumerate()
-        .filter_map(|(index, (operation, boundary))| {
-            let node = match operation.as_str() {
-                UNIT_INTRO => boundary.targets.first(),
-                UNIT_ELIM => boundary.sources.first(),
-                _ => return None,
-            }?;
-            (!is_unit_type(&term.hypergraph.nodes[node.0])).then_some(EdgeId(index))
-        })
-        .collect::<Vec<_>>();
-    if stale.is_empty() {
-        return;
-    }
-    term.delete_edges(&stale);
-
-    let mut incident = vec![false; term.hypergraph.nodes.len()];
-    for node in term.sources.iter().chain(&term.targets).chain(
-        term.hypergraph
-            .adjacency
-            .iter()
-            .flat_map(|edge| edge.sources.iter().chain(&edge.targets)),
-    ) {
-        incident[node.0] = true;
-    }
-    let isolated = incident
-        .into_iter()
-        .enumerate()
-        .filter_map(|(index, incident)| (!incident).then_some(NodeId(index)))
-        .collect::<Vec<_>>();
-    term.delete_nodes(&isolated);
-}
-
-fn is_unit_type(object: &Obj) -> bool {
-    matches!(
-        object,
-        Tree::Node(operation, _, children)
-            if operation.as_str() == UNIT_TYPE && children.is_empty()
-    )
 }
 
 fn declare_context_arrows(

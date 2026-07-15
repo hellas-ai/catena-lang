@@ -1,9 +1,13 @@
+use std::collections::BTreeMap;
+
 use catena_lang::{
-    closure2::region::find_regions, compile::compile, pass::forget_closures::Region,
+    closure2::{self, region::find_regions},
+    compile::compile,
+    pass::forget_closures::Region,
     report::CompileReport,
 };
 use hexpr::Operation;
-use metacat::theory::{RawTheorySet, Theory, TheoryId};
+use metacat::theory::{RawTheorySet, Theory, TheoryId, TheorySet};
 
 const STDLIB: &[&str] = &[
     include_str!("../stdlib/cmc.hex"),
@@ -28,6 +32,27 @@ fn compile_through_closure_conversion(source: &str) -> anyhow::Result<CompileRep
     anyhow::ensure!(report.unpacked_products.is_some());
     anyhow::ensure!(report.gpu_modules.is_some());
     Ok(report)
+}
+
+#[test]
+#[should_panic(
+    expected = "closure conversion requires closure-boundary definitions to be inlined first"
+)]
+fn closure2_rejects_uninlined_closure_boundary_definitions() {
+    let raw = RawTheorySet::from_texts(STDLIB.iter().copied().chain([r#"
+        (def program returns-closure :
+          (bool val) -> ({1 (bool val)} =>)
+        = (
+          [captured.]
+          ([.captured] defer)
+        ))
+    "#]))
+    .expect("test theories should parse");
+    let elaborated = catena_lang::elaborate::elaborate(raw).expect("test theory should elaborate");
+    let theory_set = TheorySet::from_raw(elaborated).expect("test theory should interpret");
+
+    closure2::run(&theory_set, &BTreeMap::new())
+        .expect("closure2 should not recover from skipped boundary inlining");
 }
 
 #[test]

@@ -60,17 +60,20 @@
   bool.if
 ))
 
-# 5. A closure below a product boundary.  This exercises the polarity-aware
-# adapter which unpacks the closure domain before emitting !closure and repacks
-# the enclosing product for the primitive operation.  Both *.intro and the
-# consumer observe the nested closure, so forget_closures emits two consecutive
-# region boundaries along the same control-flow path.
-(theory program type {
-  (arr closure2.consume-packed :
-    ({({1 (bool val)} =>) (bool val)} *)
-    ->
-    (bool val))
-})
+# 5. A closure below a product boundary.  The consumer is deliberately a
+# definition rather than a primitive: because its boundary contains a closure,
+# the early inline pass expands it before forget_closures.  This leaves the
+# structural *.intro/*.elim pair around the closure available for inspecting
+# how forget_closures treats product structure.
+(def program closure2.consume-packed :
+  ({({1 (bool val)} =>) (bool val)} *)
+  ->
+  (bool val)
+= ([packed.]
+  ([.packed] *.elim [function payload.])
+  {([.function] run) [.payload]}
+  bool.and
+))
 
 (def program closure2-packed-closure :
   {(bool val) (bool val)}

@@ -1,0 +1,105 @@
+# Closure-conversion-v2 examples.
+#
+# These definitions deliberately stop at ordinary closure-using operations.  The
+# forget_closures pass bends the CMC wiring and inserts one !closure edge at each
+# place where a non-CMC operation observes a closure.  Closure conversion v2 can
+# then discover a region by walking backwards from the first !closure input and
+# forwards again until it reaches the second input.
+
+# 1. Closed closures made from names.  The region contains the name's function
+# pointer and the eval introduced by forget_closures, but has no captured value.
+(def program closure2-named-if :
+  {(bool val) (bool val)}
+  ->
+  (bool val)
+= ([flag argument.]
+  {(name.bool.not lift) (name.bool.id lift) [.flag argument]}
+  bool.if
+))
+
+# 2. The smallest captured environments.  Each branch captures one runtime
+# value and has unit as its closure domain.
+(def program closure2-captured-if :
+  {(bool val) (bool val) (bool val)}
+  ->
+  (bool val)
+= ([lhs rhs flag.]
+  {([.lhs] defer) ([.rhs] defer) [.flag] unit.intro}
+  bool.if
+))
+
+# 3. A multi-edge region.  The captured value is deferred and then flows through
+# a lifted named operation before reaching the !closure boundary.
+(def program closure2-composed-if :
+  {(bool val) (bool val) (bool val)}
+  ->
+  (bool val)
+= ([lhs rhs flag.]
+  {
+    ({([.lhs] defer) (name.bool.not lift)} compose)
+    ({([.rhs] defer) (name.bool.id lift)} compose)
+    [.flag]
+    unit.intro
+  }
+  bool.if
+))
+
+# 4. Parallel control flow inside one closure.  tensor combines two independently
+# captured values into a single closure whose domain and codomain are products.
+(def program closure2-tensored-if :
+  {(bool val) (bool val) (bool val)}
+  ->
+  ({(bool val) (bool val)} *)
+= ([lhs rhs flag.]
+  {
+    ({([.lhs] defer) ([.rhs] defer)} tensor)
+    ({(bool.f defer) (bool.t defer)} tensor)
+    [.flag]
+    ({unit.intro unit.intro} *.intro)
+  }
+  bool.if
+))
+
+# 5. A closure below a product boundary.  This exercises the polarity-aware
+# adapter which unpacks the closure domain before emitting !closure and repacks
+# the enclosing product for the primitive operation.  Both *.intro and the
+# consumer observe the nested closure, so forget_closures emits two consecutive
+# region boundaries along the same control-flow path.
+(theory program type {
+  (arr closure2.consume-packed :
+    ({({1 (bool val)} =>) (bool val)} *)
+    ->
+    (bool val))
+})
+
+(def program closure2-packed-closure :
+  {(bool val) (bool val)}
+  ->
+  (bool val)
+= ([captured payload.]
+  {([.captured] defer) [.payload]}
+  *.intro
+  closure2.consume-packed
+))
+
+# 6. Two unrelated closure regions at one operation, including a product domain
+# and a domain whose type depends on the ambient reduction length.
+(def program closure2-u64-one-at :
+  ([n.] ([.n] ix val))
+  ->
+  ([n.] (u64 val))
+= ([i.] u64.one))
+
+(def program closure2-reduce :
+  []
+  ->
+  (u64 val)
+= (
+  {
+    const.u64.0x0000000000000000
+    (name.u64.add lift)
+    ((u64.zero :.param) name.closure2-u64-one-at lift)
+    u64.zero
+  }
+  reduce
+))

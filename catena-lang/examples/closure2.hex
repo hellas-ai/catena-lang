@@ -85,7 +85,22 @@
   closure2.consume-packed
 ))
 
-# 6. Two unrelated closure regions at one operation, including a product domain
+# 6. Two closures pass through an explicit product round trip before becoming
+# the two branches of a closure-consuming primitive.  This makes both sides of
+# the structural boundary visible: *.intro consumes two closure wires, while
+# *.elim emits the same two closure wires for bool.if.
+(def program closure2-packed-if :
+  {(bool val) (bool val) (bool val)}
+  ->
+  (bool val)
+= ([lhs rhs flag.]
+  ({([.lhs] defer) ([.rhs] defer)} *.intro [packed.])
+  ([.packed] *.elim [true-branch false-branch.])
+  {[.true-branch] [.false-branch] [.flag] unit.intro}
+  bool.if
+))
+
+# 7. Two unrelated closure regions at one operation, including a product domain
 # and a domain whose type depends on the ambient reduction length.
 (def program closure2-u64-one-at :
   ([n.] ([.n] ix val))

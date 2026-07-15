@@ -188,6 +188,76 @@ fn closure2_product_examples_generate_renderable_gpu_code() -> anyhow::Result<()
 }
 
 #[test]
+fn closure2_matmul_examples_inline_closure_only_helpers() -> anyhow::Result<()> {
+    let report = compile_through_closure_conversion(include_str!("../examples/closure2.hex"))?;
+    let program = TheoryId(op("program"));
+    let Theory::Theory { arrows, .. } = report
+        .theory_set
+        .as_ref()
+        .and_then(|theories| theories.theories.get(&program))
+        .ok_or_else(|| anyhow::anyhow!("missing inlined program theory"))?
+    else {
+        anyhow::bail!("program should be a user theory");
+    };
+
+    for inlined in [
+        "closure2.matmul-dot",
+        "closure2.matmul-cell",
+        "closure2.matrix-row",
+        "closure2.matrix-col",
+        "closure2.f32-buf-view",
+        "closure2.row-major-matrix-view",
+    ] {
+        anyhow::ensure!(
+            !arrows.contains_key(&op(inlined)),
+            "closure-boundary helper `{inlined}` should have been inlined"
+        );
+    }
+
+    let forgotten = report
+        .closure_conversion
+        .as_ref()
+        .and_then(|conversion| conversion.closure_forgotten_definitions.get(&program))
+        .ok_or_else(|| anyhow::anyhow!("missing forgotten matmul examples"))?;
+    let modules = report
+        .gpu_modules
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("matmul examples did not reach GPU codegen"))?;
+
+    for outer in [
+        "closure2.matmul-cell-two-bufs",
+        "closure2.matmul-cell-buf-and-identity",
+    ] {
+        anyhow::ensure!(find_regions(&forgotten[&op(outer)])?.len() == 2);
+    }
+
+    for outer in [
+        "closure2.matmul-two-bufs",
+        "closure2.matmul-buf-and-identity",
+    ] {
+        let module = modules
+            .values()
+            .find(|module| {
+                module
+                    .source_name
+                    .as_ref()
+                    .is_some_and(|name| name.as_str() == outer)
+            })
+            .ok_or_else(|| anyhow::anyhow!("missing GPU module for `{outer}`"))?;
+        anyhow::ensure!(
+            module
+                .entry
+                .assignments
+                .iter()
+                .any(|assignment| assignment.op.as_str() == "materializec"),
+            "`{outer}` should build its output buffer with materializec"
+        );
+    }
+
+    Ok(())
+}
+
+#[test]
 fn closure2_finds_named_and_captured_regions() -> anyhow::Result<()> {
     let report = compile_through_closure_conversion(include_str!("../examples/closure2.hex"))?;
     let definitions = report

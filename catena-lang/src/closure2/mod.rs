@@ -25,9 +25,6 @@ mod context;
 /// Replace regions with explicit environments, function pointers, and context operations.
 pub mod replace;
 
-#[cfg(test)]
-mod tests;
-
 /// Complete output of closure conversion, including its debugging snapshots.
 #[derive(Debug, Clone)]
 pub struct Conversion {
@@ -139,4 +136,32 @@ fn contains_closure(type_map: &metacat::theory::Term) -> bool {
         .edges
         .iter()
         .any(|operation| operation.as_str() == FN_HOM_TYPE)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use metacat::theory::{RawTheorySet, TheorySet};
+
+    /// This is an internal stage invariant rather than a compile integration
+    /// case: callers may not skip closure-boundary inlining before conversion.
+    #[test]
+    #[should_panic(
+        expected = "closure conversion requires closure-boundary definitions to be inlined first"
+    )]
+    fn rejects_uninlined_closure_boundary_definitions() {
+        let source = r#"
+            (def program returns-closure :
+              (bool val) -> ({1 (bool val)} =>)
+            = ([captured.] ([.captured] defer)))
+        "#;
+        let raw = RawTheorySet::from_texts(crate::stdlib::sources().chain([source]))
+            .expect("test theories should parse");
+        let elaborated = crate::elaborate::elaborate(raw).expect("test theory should elaborate");
+        let theory_set = TheorySet::from_raw(elaborated).expect("test theory should interpret");
+
+        super::run(&theory_set, &BTreeMap::new())
+            .expect("the inlining invariant should panic before conversion");
+    }
 }

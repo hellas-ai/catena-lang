@@ -1,0 +1,92 @@
+# Reduction closure fixtures.
+
+# Two unrelated closure regions at one operation, including a product domain
+# and a domain whose type depends on the reduction length.  The final reducec
+# receives an explicit environment/name pair for both closure.* arrows.
+(def program u64-one-at :
+  ([n.] ([.n] ix val))
+  ->
+  ([n.] (u64 val))
+= ([i.] u64.one))
+
+(def program scalar-reduce :
+  []
+  ->
+  (u64 val)
+= (
+  {
+    const.u64.0x0000000000000000
+    (name.u64.add lift)
+    ((u64.zero :.param) name.u64-one-at lift)
+    u64.zero
+  }
+  reduce
+))
+
+# The two generated arrows of reduce need different contexts.  The closed
+# addition closure has a nullary name.closure.* arrow.  The indexed producer has
+# name.closure.* : n -> function-pointer, and its closure.* source mentions n
+# although its u64 result does not.  Both lower to explicit pairs for reducec.
+(def program diagonal-view :
+  ([n.] ([.n] ix val))
+  ->
+  ([n.] (u64 val))
+= ([i.] u64.one))
+
+(def program context-reduce :
+  ([n.] {({[.n] u64} :) ({[.n] u64} :)})
+  ->
+  ([n.] (u64 val))
+= ([producer-len reduce-len.]
+  {
+    const.u64.0x0000000000000000
+    (name.u64.add lift)
+    (([.producer-len] :.param) name.diagonal-view lift)
+    [.reduce-len]
+  }
+  reduce
+))
+
+# reduce also supports a product accumulator.  Binding the initializer first
+# fixes the concrete accumulator object before the two closures are supplied.
+# Closure conversion generates their environment-prefixed functions, and the
+# resulting reducec returns two flattened result wires.
+(def program u64-pair-add :
+  ({({(u64 val) (f32 val)} *) ({(u64 val) (f32 val)} *)} *)
+  ->
+  ({(u64 val) (f32 val)} *)
+= ([pair.]
+  ([.pair] *.elim [acc value.])
+  ([.acc] *.elim [acc-u64 acc-f32.])
+  ([.value] *.elim [value-u64 value-f32.])
+  {
+    ([.acc-u64 value-u64] u64.add [result-u64.])
+    ([.acc-f32 value-f32] f32.add [result-f32.])
+    ({[.result-u64] [.result-f32]} *.intro [result.])
+    [.result]
+  }
+))
+
+(def program u64-pair-at :
+  ([n.] ([.n] ix val))
+  ->
+  ([n.] ({(u64 val) (f32 val)} *))
+= ([i.]
+  {([.i] ix.to-u64) f32.one}
+  *.intro
+))
+
+(def program pair-reduce :
+  ([n.] ({[.n] u64} :))
+  ->
+  ([n.] ({(u64 val) (f32 val)} *))
+= ([len.]
+  ({const.u64.0x0000000000000000 f32.one} *.intro [init.])
+  {
+    [.init]
+    (name.u64-pair-add lift)
+    (([.len] :.param) name.u64-pair-at lift)
+    [.len]
+  }
+  reduce
+))

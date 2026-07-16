@@ -1,0 +1,140 @@
+# Context-dependent closure fixtures.
+
+# An indexed value can be captured even when its length is present only in
+# the value's type.  Each generated closure.* arrow has a compact local context
+# n and receives (environment, unit); each name.closure.* arrow receives n and
+# produces the corresponding function pointer.  The final bool.ifc receives the
+# two explicit (environment, function pointer) pairs.
+(def program indexed-if :
+  ([n.] {([.n] ix val) ([.n] ix val) (bool val)})
+  ->
+  ([n.] ([.n] ix val))
+= ([lhs rhs flag.]
+  {([.lhs] defer) ([.rhs] defer) [.flag] unit.intro}
+  bool.if
+))
+
+# A closure may combine a captured runtime value with a named arrow selected
+# by type-level context.  Forgetting evaluates that named arrow before the new
+# closure boundary, so closure.* captures the resulting u64 and name.closure.*
+# is nullary.  The original context-dependent name and eval remain explicit in
+# the final graph.  The other branch captures the materialized length as data.
+(def program u64-id-for-n :
+  ([n.] (u64 val))
+  ->
+  ([n.] (u64 val))
+= [x])
+
+(def program u64-id :
+  (u64 val)
+  ->
+  (u64 val)
+= [x])
+
+(def program mixed-context-if :
+  ([n.] {({[.n] u64} :) (u64 val) (bool val)})
+  ->
+  ([n.] (u64 val))
+= ([len value flag.]
+  ([.len] :.ty [runtime-len closure-n.]
+    {
+      ({([.value] defer) ([.closure-n] name.u64-id-for-n lift)} compose)
+      ([.runtime-len] :.forget defer)
+      [.flag]
+      unit.intro
+    }
+    bool.if
+  )
+))
+
+# Two distinct wires can denote the same context parameter.  Here they
+# select two named arrows which are evaluated before the closure boundary.
+# closure.* therefore captures only the resulting u64 and name.closure.* is
+# nullary; the final graph keeps both original context-selected names and evals,
+# followed by the explicit pairs consumed by bool.ifc.
+(def program duplicate-context-if :
+  ([n.] {({[.n] u64} :) (u64 val) (bool val)})
+  ->
+  ([n.] (u64 val))
+= ([len value flag.]
+  ([.len] :.ty [runtime-len left-n.]
+    ([.runtime-len] :.ty [runtime-len-again right-n.]
+      {
+        ({
+          ({([.value] defer) ([.left-n] name.u64-id-for-n lift)} compose)
+          ([.right-n] name.u64-id-for-n lift)
+        } compose)
+        ([.runtime-len-again] :.forget defer)
+        [.flag]
+        unit.intro
+      }
+      bool.if
+    )
+  )
+))
+
+# Generated arrows use compact local context even when the original leaf is
+# sparse.  Here only original context leaf 2 (n) is required: closure.* calls it
+# local leaf 0, while name.closure.* is wired to the original n at this use site.
+(def program sparse-context-if :
+  ([unused-a unused-b n.] {([.n] ix val) ([.n] ix val) (bool val)})
+  ->
+  ([unused-a unused-b n.] ([.n] ix val))
+= ([lhs rhs flag.]
+  {([.lhs] defer) ([.rhs] defer) [.flag] unit.intro}
+  bool.if
+))
+
+# Context can be required only by operations inside a closure body.  The
+# branch itself has the context-free type u64 => u64, but its two internal names
+# are both selected by n.  closure.* therefore uses compact context [n], and
+# name.closure.* receives one canonical n wire even though two n wires enter the
+# discovered region.
+(def program internal-context-if :
+  ([n.] {({[.n] u64} :) (bool val)})
+  ->
+  ([n.] (u64 val))
+= ([len flag.]
+  ([.len] :.ty [runtime-len left-n.]
+    ([.runtime-len] :.ty [argument-len right-n.]
+      {
+        ({
+          ([.left-n] name.u64-id-for-n lift)
+          ([.right-n] name.u64-id-for-n lift)
+        } compose)
+        (name.u64-id lift)
+        [.flag]
+        ([.argument-len] :.forget)
+      }
+      bool.if
+    )
+  )
+))
+
+# Compact context preserves sorted original-leaf order.  The generated
+# closure.* arrow renames original leaves 2 and 5 to local leaves 0 and 1.  Its
+# name.closure.* use receives the original wires in the order (n, k).
+(def program two-sparse-contexts-if :
+  ([unused-a unused-b n unused-c unused-d k.] {
+    ({[.n] u64} :)
+    ({[.k] u64} :)
+    (bool val)
+  })
+  ->
+  ([unused-a unused-b n unused-c unused-d k.] (u64 val))
+= ([n-len k-len flag.]
+  ([.n-len] :.ty [n-runtime closure-n.]
+    ([.k-len] :.ty [k-runtime closure-k.]
+      {
+        ({
+          ([.closure-n] name.u64-id-for-n lift)
+          ([.closure-k] name.u64-id-for-n lift)
+        } compose)
+        (name.u64-id lift)
+        [.flag]
+        ({([.n-runtime] :.forget) ([.k-runtime] :.forget)} u64.add)
+      }
+      bool.if
+    )
+  )
+))

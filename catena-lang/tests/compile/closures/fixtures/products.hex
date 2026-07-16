@@ -1,0 +1,112 @@
+# Product and structural-boundary closure fixtures.
+
+# A named function with an ordinary product argument and an additional free
+# value.  This exercises composition through a packed boundary without making
+# that helper itself closure-typed.
+(def program and-packed-with-free :
+  {({(bool val) (bool val)} *) (bool val)}
+  ->
+  (bool val)
+= ([packed free.]
+  {([.packed] *.elim) [.free]}
+  {bool.and [free]}
+  bool.and
+))
+
+(def program run-named-and-packed-with-free :
+  {({(bool val) (bool val)} *) (bool val)}
+  ->
+  (bool val)
+= (
+  {(*.intro defer) (name.and-packed-with-free lift)}
+  compose
+  run
+))
+
+# Parallel control flow inside one closure.  tensor combines two captured
+# values, so each closure.* environment flattens to two bool wires.  The
+# generated name.closure.* arrows are nullary and bool.ifc consumes both pairs.
+(def program tensored-if :
+  {(bool val) (bool val) (bool val)}
+  ->
+  ({(bool val) (bool val)} *)
+= ([lhs rhs flag.]
+  {
+    ({([.lhs] defer) ([.rhs] defer)} tensor)
+    ({(bool.f defer) (bool.t defer)} tensor)
+    [.flag]
+    ({unit.intro unit.intro} *.intro)
+  }
+  bool.if
+))
+
+# A closure below a product boundary.  The consumer is deliberately a
+# definition rather than a primitive: because its boundary contains a closure,
+# the early inline pass expands it before forget_closures.  This leaves the
+# structural *.intro/*.elim pair around the closure available for inspecting
+# how forget_closures treats product structure.  No closure.* arrows are needed:
+# after inlining, the closure control flow connects directly to its run/eval.
+(def program consume-packed :
+  ({({1 (bool val)} =>) (bool val)} *)
+  ->
+  (bool val)
+= ([packed.]
+  ([.packed] *.elim [function payload.])
+  {([.function] run) [.payload]}
+  bool.and
+))
+
+(def program packed-closure :
+  {(bool val) (bool val)}
+  ->
+  (bool val)
+= ([captured payload.]
+  {([.captured] defer) [.payload]}
+  *.intro
+  consume-packed
+))
+
+# Two closures pass through an explicit product round trip before becoming
+# the two branches of a closure-consuming primitive.  This makes both sides of
+# the structural boundary visible: *.intro consumes two closure wires, while
+# *.elim emits the same two closure wires for bool.if.  Conversion generates
+# two closure.* bodies and two nullary name.closure.* arrows; product unpacking
+# later removes the structural round trip before bool.ifc reaches codegen.
+(def program packed-if :
+  {(bool val) (bool val) (bool val)}
+  ->
+  (bool val)
+= ([lhs rhs flag.]
+  ({([.lhs] defer) ([.rhs] defer)} *.intro [packed.])
+  ([.packed] *.elim [true-branch false-branch.])
+  {[.true-branch] [.false-branch] [.flag] unit.intro}
+  bool.if
+))
+
+# Nested products can contain several closures alongside ordinary data.
+# The closure-boundary helper is expanded before forgetting, after which forget
+# recursively exposes both inner closures and conversion produces two explicit
+# environment/function-pointer pairs for bool.ifc.
+(def program consume-nested :
+  ({({({1 (bool val)} =>) ({1 (bool val)} =>)} *) (bool val)} *)
+  ->
+  (bool val)
+= ([input.]
+  ([.input] *.elim [branches flag.])
+  ([.branches] *.elim [true-branch false-branch.])
+  {[.true-branch] [.false-branch] [.flag] unit.intro}
+  bool.if
+))
+
+(def program nested-direct :
+  {(bool val) (bool val) (bool val)}
+  ->
+  (bool val)
+= ([lhs rhs flag.]
+  {
+    ({([.lhs] defer) ([.rhs] defer)} *.intro)
+    [.flag]
+  }
+  *.intro
+  consume-nested
+))

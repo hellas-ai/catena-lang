@@ -10,7 +10,7 @@ use open_hypergraphs::lax::{
 };
 use thiserror::Error;
 
-use crate::check::TypedTerm;
+use crate::check::AnnotatedTerm;
 use crate::{prefixes::GENERATED_CONTEXT_PREFIX, report::TheoryTermMap};
 
 type Obj = Tree<(), Operation>;
@@ -73,8 +73,8 @@ pub fn erase(terms: &TheoryTermMap) -> Result<TheoryTermMap, EraseContextsError>
 
 fn erase_theory(
     theory_id: &TheoryId,
-    definitions: &BTreeMap<Operation, TypedTerm>,
-) -> Result<(TheoryId, BTreeMap<Operation, TypedTerm>), EraseContextsError> {
+    definitions: &BTreeMap<Operation, AnnotatedTerm>,
+) -> Result<(TheoryId, BTreeMap<Operation, AnnotatedTerm>), EraseContextsError> {
     let definitions = definitions
         .iter()
         .map(|(definition_name, term)| {
@@ -92,7 +92,7 @@ fn erase_theory(
     Ok((theory_id.clone(), definitions))
 }
 
-fn validate_context_boundaries(term: &TypedTerm) -> Result<(), EraseContextsError> {
+fn validate_context_boundaries(term: &AnnotatedTerm) -> Result<(), EraseContextsError> {
     for (operation, boundary) in term
         .hypergraph
         .edges

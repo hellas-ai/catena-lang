@@ -13,7 +13,7 @@ use open_hypergraphs::lax::{EdgeId, NodeId};
 use thiserror::Error;
 
 use crate::{
-    pass::forget_closures::{ClosureForgottenEdge, ClosureForgottenTerm},
+    pass::forget_closures::{ClosureForgotten, ClosureForgottenTerm},
     prefixes::NAME_PREFIX,
     report::TheoryTermMap,
 };
@@ -54,7 +54,7 @@ pub enum FindRegionError {
 
 /// Discover closure regions for every forgotten definition in a compiler stage.
 pub fn run(
-    terms: &TheoryTermMap<ClosureForgottenEdge<Operation>>,
+    terms: &TheoryTermMap<ClosureForgotten<Operation>>,
 ) -> Result<ClosureRegionMap, FindRegionError> {
     terms
         .iter()
@@ -76,7 +76,7 @@ pub fn find_regions(term: &ClosureForgottenTerm) -> Result<Vec<ClosureRegion>, F
         .iter()
         .enumerate()
         .filter_map(|(index, edge)| {
-            matches!(edge, ClosureForgottenEdge::ClosureMarker).then_some(EdgeId(index))
+            matches!(edge, ClosureForgotten::ClosureMarker).then_some(EdgeId(index))
         })
         .map(|marker| find_region(term, &connectivity, marker))
         .collect()
@@ -289,14 +289,14 @@ fn has_included_producer(
 fn is_marker(term: &ClosureForgottenTerm, edge: EdgeId) -> bool {
     matches!(
         term.hypergraph.edges[edge.0],
-        ClosureForgottenEdge::ClosureMarker
+        ClosureForgotten::ClosureMarker
     )
 }
 
 fn is_named_operation(term: &ClosureForgottenTerm, edge: EdgeId) -> bool {
     matches!(
         &term.hypergraph.edges[edge.0],
-        ClosureForgottenEdge::Operation(operation) if operation.as_str().starts_with(NAME_PREFIX)
+        ClosureForgotten::Operation(operation) if operation.as_str().starts_with(NAME_PREFIX)
     )
 }
 
@@ -343,7 +343,7 @@ mod tests {
         let name = term.new_edge(region_op("name.f"), (vec![], vec![pointer]));
         let eval = term.new_edge(region_op("eval"), (vec![domain, pointer], vec![codomain]));
         let marker = term.new_edge(
-            ClosureForgottenEdge::ClosureMarker,
+            ClosureForgotten::ClosureMarker,
             (vec![domain, codomain], vec![closure]),
         );
 
@@ -366,7 +366,7 @@ mod tests {
 
         let body = term.new_edge(region_op("body"), (vec![domain, captured], vec![codomain]));
         term.new_edge(
-            ClosureForgottenEdge::ClosureMarker,
+            ClosureForgotten::ClosureMarker,
             (vec![domain, codomain], vec![closure]),
         );
 
@@ -384,7 +384,7 @@ mod tests {
 
         term.new_edge(region_op("unit.elim"), (vec![domain], vec![]));
         term.new_edge(
-            ClosureForgottenEdge::ClosureMarker,
+            ClosureForgotten::ClosureMarker,
             (vec![domain, captured_codomain], vec![closure]),
         );
 
@@ -398,10 +398,7 @@ mod tests {
     fn malformed_marker_is_reported() {
         let mut term = ClosureForgottenTerm::empty();
         let only_source = term.new_node(obj("A"));
-        term.new_edge(
-            ClosureForgottenEdge::ClosureMarker,
-            (vec![only_source], vec![]),
-        );
+        term.new_edge(ClosureForgotten::ClosureMarker, (vec![only_source], vec![]));
 
         assert_eq!(
             find_regions(&term),
@@ -417,8 +414,8 @@ mod tests {
         Tree::Node(op(name), 0, vec![])
     }
 
-    fn region_op(name: &str) -> ClosureForgottenEdge<Operation> {
-        ClosureForgottenEdge::Operation(op(name))
+    fn region_op(name: &str) -> ClosureForgotten<Operation> {
+        ClosureForgotten::Operation(op(name))
     }
 
     fn op(name: &str) -> Operation {

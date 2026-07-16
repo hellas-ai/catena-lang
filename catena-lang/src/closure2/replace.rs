@@ -14,14 +14,14 @@ use open_hypergraphs::lax::{EdgeId, Hyperedge, NodeId};
 use thiserror::Error;
 
 use crate::{
-    check::TypedTerm,
+    check::AnnotatedTerm,
     closure2::{
         definition::closure_operation,
         region::{ClosureRegion, ClosureRegionMap, find_regions},
     },
     hexpr::{objects_to_hexpr, term_to_hexpr},
     nonstrict::to_packer,
-    pass::forget_closures::{ClosureForgottenEdge, ClosureForgottenTerm},
+    pass::forget_closures::{ClosureForgotten, ClosureForgottenTerm},
     prefixes::{GENERATED_CONTEXT_PREFIX, GENERATED_VARIABLE_PREFIX, NAME_PREFIX},
     report::TheoryTermMap,
 };
@@ -89,7 +89,7 @@ pub enum ReplaceClosuresError {
 /// static context inputs and function-pointer output used by each replacement.
 pub fn run(
     theory_set: &TheorySet,
-    forgotten: &TheoryTermMap<ClosureForgottenEdge<Operation>>,
+    forgotten: &TheoryTermMap<ClosureForgotten<Operation>>,
     regions: &ClosureRegionMap,
 ) -> Result<Replacement, ReplaceClosuresError> {
     let mut output = theory_set.clone();
@@ -266,10 +266,7 @@ fn replacement_term(
     let mut context_targets = environment_components.clone();
     context_targets.extend(name_sources.iter().copied());
     replacement.new_edge(
-        ClosureForgottenEdge::Operation(context_operation(
-            definition_name,
-            original_region.closure,
-        )),
+        ClosureForgotten::Operation(context_operation(definition_name, original_region.closure)),
         (sources.clone(), context_targets),
     );
 
@@ -277,7 +274,7 @@ fn replacement_term(
         .iter()
         .map(|node| replacement.hypergraph.nodes[node.0].clone())
         .collect();
-    let packer = to_packer(environment_types).map_edges(ClosureForgottenEdge::Operation);
+    let packer = to_packer(environment_types).map_edges(ClosureForgotten::Operation);
     let (packer_sources, packer_targets) = replacement.append(packer);
     for (component, packer_source) in environment_components.into_iter().zip(packer_sources) {
         replacement.unify(component, packer_source);
@@ -289,7 +286,7 @@ fn replacement_term(
     let function_pointer =
         replacement.new_node(instantiate_context(name_target_type, &original_leaves)?);
     replacement.new_edge(
-        ClosureForgottenEdge::Operation(name_operation),
+        ClosureForgotten::Operation(name_operation),
         (name_sources, vec![function_pointer]),
     );
     replacement.sources = sources;
@@ -338,7 +335,7 @@ fn rewrite_one(
     for (index, boundary) in definition.hypergraph.adjacency.iter().enumerate() {
         if matches!(
             definition.hypergraph.edges[index],
-            ClosureForgottenEdge::ClosureMarker
+            ClosureForgotten::ClosureMarker
         ) {
             continue;
         }
@@ -417,22 +414,22 @@ fn remap_node(node_map: &[Option<usize>], node: NodeId) -> Result<NodeId, Replac
         .ok_or(ReplaceClosuresError::DeletedBoundaryNode { node: node.0 })
 }
 
-fn unwrap_operations(term: ClosureForgottenTerm) -> Result<TypedTerm, ReplaceClosuresError> {
+fn unwrap_operations(term: ClosureForgottenTerm) -> Result<AnnotatedTerm, ReplaceClosuresError> {
     if term
         .hypergraph
         .edges
         .iter()
-        .any(|edge| matches!(edge, ClosureForgottenEdge::ClosureMarker))
+        .any(|edge| matches!(edge, ClosureForgotten::ClosureMarker))
     {
         return Err(ReplaceClosuresError::RemainingClosureMarker);
     }
     Ok(term.map_edges(|edge| match edge {
-        ClosureForgottenEdge::Operation(operation) => operation,
-        ClosureForgottenEdge::ClosureMarker => unreachable!("checked above"),
+        ClosureForgotten::Operation(operation) => operation,
+        ClosureForgotten::ClosureMarker => unreachable!("checked above"),
     }))
 }
 
-fn rewrite_converted_primitives(term: &mut TypedTerm) {
+fn rewrite_converted_primitives(term: &mut AnnotatedTerm) {
     for operation in &mut term.hypergraph.edges {
         if let Some((_, converted)) = CONVERTED_PRIMITIVES
             .iter()
@@ -446,7 +443,7 @@ fn rewrite_converted_primitives(term: &mut TypedTerm) {
 fn declare_context_arrows(
     syntax: &Theory,
     arrows: &mut BTreeMap<Operation, TheoryArrow>,
-    definition: &TypedTerm,
+    definition: &AnnotatedTerm,
     ambient_context_arity: usize,
 ) -> Result<(), ReplaceClosuresError> {
     for (operation, boundary) in definition
@@ -576,7 +573,7 @@ fn compact_type_map_leaves(
     }
 }
 
-fn node_types(term: &TypedTerm, nodes: &[NodeId]) -> Vec<Obj> {
+fn node_types(term: &AnnotatedTerm, nodes: &[NodeId]) -> Vec<Obj> {
     nodes
         .iter()
         .map(|node| term.hypergraph.nodes[node.0].clone())

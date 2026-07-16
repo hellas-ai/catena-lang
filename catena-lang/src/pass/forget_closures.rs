@@ -26,15 +26,15 @@ use crate::{
 
 pub type Obj = Tree<(), Operation>;
 pub type Arr = Operation;
-pub type ClosureForgottenTerm = OpenHypergraph<Obj, ClosureForgottenEdge<Arr>>;
+pub type ClosureForgottenTerm = OpenHypergraph<Obj, ClosureForgotten<Arr>>;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum ClosureForgottenEdge<A> {
+pub enum ClosureForgotten<A> {
     Operation(A),
     ClosureMarker,
 }
 
-impl<A: fmt::Display> fmt::Display for ClosureForgottenEdge<A> {
+impl<A: fmt::Display> fmt::Display for ClosureForgotten<A> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Operation(operation) => write!(f, "{operation}"),
@@ -60,7 +60,7 @@ pub enum ForgetClosuresError {
 pub fn run(
     theory_set: &TheorySet,
     definition_types: &DefinitionTypes,
-) -> Result<TheoryTermMap<ClosureForgottenEdge<Operation>>, ForgetClosuresError> {
+) -> Result<TheoryTermMap<ClosureForgotten<Operation>>, ForgetClosuresError> {
     let mut output = BTreeMap::new();
 
     for (theory_id, theory) in &theory_set.theories {
@@ -102,7 +102,7 @@ struct ForgetClosures<'a> {
     theory: &'a Theory,
 }
 
-impl Functor<Obj, Arr, Obj, ClosureForgottenEdge<Arr>> for ForgetClosures<'_> {
+impl Functor<Obj, Arr, Obj, ClosureForgotten<Arr>> for ForgetClosures<'_> {
     fn map_object(&self, o: &Obj) -> impl ExactSizeIterator<Item = Obj> {
         closure_forgotten_boundary(o).into_iter()
     }
@@ -112,7 +112,7 @@ impl Functor<Obj, Arr, Obj, ClosureForgottenEdge<Arr>> for ForgetClosures<'_> {
         a: &Arr,
         source: &[Obj],
         target: &[Obj],
-    ) -> OpenHypergraph<Obj, ClosureForgottenEdge<Arr>> {
+    ) -> OpenHypergraph<Obj, ClosureForgotten<Arr>> {
         if let Some(name) = a.as_str().strip_prefix(NAME_PREFIX)
             && target.len() == 1
             && closure_parts(&target[0]).is_some()
@@ -139,7 +139,7 @@ impl Functor<Obj, Arr, Obj, ClosureForgottenEdge<Arr>> for ForgetClosures<'_> {
     fn map_arrow(
         &self,
         f: &OpenHypergraph<Obj, Arr>,
-    ) -> OpenHypergraph<Obj, ClosureForgottenEdge<Arr>> {
+    ) -> OpenHypergraph<Obj, ClosureForgotten<Arr>> {
         try_define_map_arrow(self, f).expect("programmer error: forget-closures is not a functor")
     }
 }
@@ -272,7 +272,7 @@ fn map_non_cmc_operation(a: &Arr, source: &[Obj], target: &[Obj]) -> ClosureForg
     let (source, source_adapter) = closure_erased_source_adapter(source);
     let target = closure_erased_operation_objects(target);
     let operation = OpenHypergraph::singleton(
-        ClosureForgottenEdge::Operation(a.clone()),
+        ClosureForgotten::Operation(a.clone()),
         source,
         target.clone(),
     );
@@ -488,12 +488,12 @@ fn source_adapter_object(object: &Obj, variance: Polarity) -> (Vec<Obj>, Closure
             let children = left_adapter.tensor(&right_adapter);
             let product_adapter = match variance {
                 Polarity::Positive => OpenHypergraph::singleton(
-                    ClosureForgottenEdge::Operation(op(PRODUCT_INTRO)),
+                    ClosureForgotten::Operation(op(PRODUCT_INTRO)),
                     vec![left_object, right_object],
                     vec![product.clone()],
                 ),
                 Polarity::Negative => flip_boundaries(OpenHypergraph::singleton(
-                    ClosureForgottenEdge::Operation(op(PRODUCT_ELIM)),
+                    ClosureForgotten::Operation(op(PRODUCT_ELIM)),
                     vec![product.clone()],
                     vec![left_object, right_object],
                 )),
@@ -512,12 +512,12 @@ fn source_adapter_object(object: &Obj, variance: Polarity) -> (Vec<Obj>, Closure
             let unit = object.clone();
             let unit_adapter = match variance {
                 Polarity::Positive => OpenHypergraph::singleton(
-                    ClosureForgottenEdge::Operation(op(UNIT_INTRO)),
+                    ClosureForgotten::Operation(op(UNIT_INTRO)),
                     vec![],
                     vec![unit.clone()],
                 ),
                 Polarity::Negative => flip_boundaries(OpenHypergraph::singleton(
-                    ClosureForgottenEdge::Operation(op(UNIT_ELIM)),
+                    ClosureForgotten::Operation(op(UNIT_ELIM)),
                     vec![unit.clone()],
                     vec![],
                 )),
@@ -536,7 +536,7 @@ fn source_adapter_object(object: &Obj, variance: Polarity) -> (Vec<Obj>, Closure
             let adapter = source_adapter
                 .tensor(&target_adapter)
                 .compose(&OpenHypergraph::singleton(
-                    ClosureForgottenEdge::ClosureMarker,
+                    ClosureForgotten::ClosureMarker,
                     source_objects,
                     vec![closure.clone()],
                 ))
@@ -571,7 +571,7 @@ fn flip_boundaries<O, A>(mut term: OpenHypergraph<O, A>) -> OpenHypergraph<O, A>
 }
 
 fn lift_operations(term: AnnotatedTerm) -> ClosureForgottenTerm {
-    term.map_edges(ClosureForgottenEdge::Operation)
+    term.map_edges(ClosureForgotten::Operation)
 }
 
 fn closure_forgotten_flatteners(objects: &[Obj]) -> ClosureForgottenTerm {
@@ -678,8 +678,8 @@ mod tests {
         assert_eq!(target_types(term), closure_forgotten_boundaries(target));
     }
 
-    fn region_op(name: &str) -> ClosureForgottenEdge<Operation> {
-        ClosureForgottenEdge::Operation(op(name))
+    fn region_op(name: &str) -> ClosureForgotten<Operation> {
+        ClosureForgotten::Operation(op(name))
     }
 
     #[test]
@@ -849,7 +849,7 @@ mod tests {
             .hypergraph
             .edges
             .iter()
-            .position(|operation| matches!(operation, ClosureForgottenEdge::ClosureMarker))
+            .position(|operation| matches!(operation, ClosureForgotten::ClosureMarker))
             .expect("closure source should be bracketed");
         let closure_edge = &mapped.hypergraph.adjacency[closure_index];
 

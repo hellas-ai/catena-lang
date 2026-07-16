@@ -11,13 +11,13 @@ use metacat::{
 };
 use std::collections::BTreeMap;
 
-use crate::check::{PartialDefinitionTypes, TypedTerm};
+use crate::check::{AnnotatedTerm, PartialDefinitionTypes};
 use crate::closure2::Conversion;
 use crate::codegen::GpuModuleMap;
 use crate::pass::record_boundary_sizes::OperationWithBoundarySizes;
 
 /// Generic storage for per-theory, per-definition graph results produced by compiler passes.
-pub type TheoryTermMap<A = Operation> = BTreeMap<TheoryId, BTreeMap<Operation, TypedTerm<A>>>;
+pub type TheoryTermMap<A = Operation> = BTreeMap<TheoryId, BTreeMap<Operation, AnnotatedTerm<A>>>;
 #[derive(Debug)]
 pub struct CompileReport {
     pub raw_theories: RawTheorySet,

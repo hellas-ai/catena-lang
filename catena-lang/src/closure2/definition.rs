@@ -13,12 +13,12 @@ use open_hypergraphs::lax::{EdgeId, NodeId};
 use thiserror::Error;
 
 use crate::{
-    check::TypedTerm,
+    check::AnnotatedTerm,
     closure2::region::{ClosureRegion, ClosureRegionMap},
     elaborate::{ElaborateError, name_symbols},
     hexpr::{objects_to_hexpr, term_to_hexpr},
     nonstrict::{to_packer, to_unpacker, unpack_packed_object},
-    pass::forget_closures::{ClosureForgottenEdge, ClosureForgottenTerm},
+    pass::forget_closures::{ClosureForgotten, ClosureForgottenTerm},
     prefixes::{GENERATED_VARIABLE_PREFIX, NAME_PREFIX},
     report::TheoryTermMap,
 };
@@ -31,7 +31,7 @@ pub struct DefinedClosures {
     pub generated_theory: TheorySet,
     pub generated_functions: TheoryTermMap,
     /// Complete typed definition map ready for region replacement.
-    pub definitions: TheoryTermMap<ClosureForgottenEdge<Operation>>,
+    pub definitions: TheoryTermMap<ClosureForgotten<Operation>>,
 }
 
 #[derive(Debug, Error)]
@@ -90,7 +90,7 @@ pub enum DefineClosuresError {
 /// the later replacement stage.
 pub fn run(
     theory_set: &TheorySet,
-    forgotten: &TheoryTermMap<ClosureForgottenEdge<Operation>>,
+    forgotten: &TheoryTermMap<ClosureForgotten<Operation>>,
     regions: &ClosureRegionMap,
 ) -> Result<DefinedClosures, DefineClosuresError> {
     let mut output = theory_set.clone();
@@ -186,7 +186,7 @@ pub fn run(
         for (operation, body) in functions {
             output.insert(
                 operation.clone(),
-                body.clone().map_edges(ClosureForgottenEdge::Operation),
+                body.clone().map_edges(ClosureForgotten::Operation),
             );
         }
     }
@@ -204,8 +204,8 @@ fn build_body(
     arrows: &BTreeMap<Operation, TheoryArrow>,
     term: &ClosureForgottenTerm,
     region: &ClosureRegion,
-) -> Result<TypedTerm, DefineClosuresError> {
-    let mut body = TypedTerm::empty();
+) -> Result<AnnotatedTerm, DefineClosuresError> {
+    let mut body = AnnotatedTerm::empty();
     let mut node_map = HashMap::new();
     let named_evals = named_evals(term, region)?;
     let skipped_edges = named_evals
@@ -255,7 +255,7 @@ fn build_body(
                 edge: edge.0,
             }
         })?;
-        let ClosureForgottenEdge::Operation(operation) = operation else {
+        let ClosureForgotten::Operation(operation) = operation else {
             return Err(DefineClosuresError::NestedClosureMarker {
                 theory: theory_id.to_string(),
                 definition: definition_name.to_string(),
@@ -326,7 +326,7 @@ fn named_evals(
         .filter(|edge| {
             matches!(
                 &term.hypergraph.edges[edge.0],
-                ClosureForgottenEdge::Operation(operation) if operation.as_str() == "eval"
+                ClosureForgotten::Operation(operation) if operation.as_str() == "eval"
             )
         })
         .map(|eval| {
@@ -343,7 +343,7 @@ fn named_evals(
                     included.contains(producer)
                         && matches!(
                             &term.hypergraph.edges[producer.0],
-                            ClosureForgottenEdge::Operation(operation)
+                            ClosureForgotten::Operation(operation)
                                 if operation.as_str().starts_with(NAME_PREFIX)
                         )
                 })
@@ -354,14 +354,13 @@ fn named_evals(
 }
 
 fn inline_named_eval(
-    body: &mut TypedTerm,
+    body: &mut AnnotatedTerm,
     node_map: &HashMap<NodeId, NodeId>,
     arrows: &BTreeMap<Operation, TheoryArrow>,
     term: &ClosureForgottenTerm,
     pair: NamedEval,
 ) -> Result<(), DefineClosuresError> {
-    let ClosureForgottenEdge::Operation(name_operation) = &term.hypergraph.edges[pair.name.0]
-    else {
+    let ClosureForgotten::Operation(name_operation) = &term.hypergraph.edges[pair.name.0] else {
         unreachable!("named eval producer should be an operation");
     };
     let operation: Operation = name_operation
@@ -426,7 +425,7 @@ fn remap_nodes(
         .collect()
 }
 
-fn packed_environment_source(body: &mut TypedTerm) -> NodeId {
+fn packed_environment_source(body: &mut AnnotatedTerm) -> NodeId {
     let components = body.sources.clone();
     let component_types = components
         .iter()
@@ -449,7 +448,7 @@ struct ClosureContext {
 }
 
 impl ClosureContext {
-    fn from_term_boundary(term: &TypedTerm) -> Self {
+    fn from_term_boundary(term: &AnnotatedTerm) -> Self {
         let mut leaves = BTreeSet::new();
         for node in term.sources.iter().chain(&term.targets) {
             collect_leaf_indices(&term.hypergraph.nodes[node.0], &mut leaves);
@@ -463,7 +462,7 @@ impl ClosureContext {
         self.original_leaf_by_compact_leaf.len()
     }
 
-    fn relabel_term(&self, term: TypedTerm) -> TypedTerm {
+    fn relabel_term(&self, term: AnnotatedTerm) -> AnnotatedTerm {
         let compact = self
             .original_leaf_by_compact_leaf
             .iter()
@@ -493,7 +492,7 @@ fn relabel_object_context(object: Obj, compact: &BTreeMap<usize, usize>) -> Obj 
     }
 }
 
-fn type_maps_for_term(term: &TypedTerm, context_arity: usize) -> (Hexpr, Hexpr) {
+fn type_maps_for_term(term: &AnnotatedTerm, context_arity: usize) -> (Hexpr, Hexpr) {
     (
         objects_to_hexpr_in_context(&interface_types(term, &term.sources), context_arity),
         objects_to_hexpr_in_context(&interface_types(term, &term.targets), context_arity),
@@ -542,7 +541,7 @@ pub(crate) fn closure_operation(definition: &Operation, closure: NodeId) -> Oper
         .expect("generated closure operation should parse")
 }
 
-fn interface_types(term: &TypedTerm, interface: &[NodeId]) -> Vec<Obj> {
+fn interface_types(term: &AnnotatedTerm, interface: &[NodeId]) -> Vec<Obj> {
     interface
         .iter()
         .map(|node| term.hypergraph.nodes[node.0].clone())

@@ -7,7 +7,7 @@ use metacat::{
 use crate::{
     closure2::{Conversion, region::find_regions},
     compile::compile,
-    pass::forget_closures::ClosureForgottenEdge,
+    pass::forget_closures::ClosureForgotten,
     stdlib,
 };
 
@@ -61,7 +61,7 @@ fn identity_has_no_closure_work_to_do() {
             .hypergraph
             .edges
             .iter()
-            .all(|edge| !matches!(edge, ClosureForgottenEdge::ClosureMarker))
+            .all(|edge| !matches!(edge, ClosureForgotten::ClosureMarker))
     );
     assert!(
         program_arrows(&conversion)

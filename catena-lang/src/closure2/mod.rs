@@ -10,7 +10,7 @@ use thiserror::Error;
 
 use crate::{
     check::{CheckError, DefinitionTypes, PartialDefinitionTypes, partial_definition_types},
-    pass::forget_closures::ClosureForgottenEdge,
+    pass::forget_closures::ClosureForgotten,
     report::TheoryTermMap,
     stdlib::constants::FN_HOM_TYPE,
 };
@@ -32,7 +32,7 @@ mod tests;
 #[derive(Debug, Clone)]
 pub struct Conversion {
     /// Closure-forgotten graph on which conversion operates.
-    pub closure_forgotten_definitions: TheoryTermMap<ClosureForgottenEdge<Operation>>,
+    pub closure_forgotten_definitions: TheoryTermMap<ClosureForgotten<Operation>>,
     /// Regions discovered in the closure-forgotten input.
     pub regions: region::ClosureRegionMap,
     /// Theory after inserting the generated `closure.*` and `name.closure.*` arrows.
@@ -74,7 +74,7 @@ pub enum ConversionError {
 /// result which preserves every useful intermediate representation.
 pub fn run(
     theory_set: &TheorySet,
-    forgotten: &TheoryTermMap<ClosureForgottenEdge<Operation>>,
+    forgotten: &TheoryTermMap<ClosureForgotten<Operation>>,
 ) -> Result<Conversion, ConversionError> {
     assert_closure_boundary_definitions_are_inlined(theory_set);
 

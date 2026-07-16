@@ -21,7 +21,7 @@ use crate::{
     },
     hexpr::{objects_to_hexpr, term_to_hexpr},
     nonstrict::to_packer,
-    pass::forget_closures::{Region, RegionTerm},
+    pass::forget_closures::{ClosureForgottenEdge, ClosureForgottenTerm},
     prefixes::{GENERATED_CONTEXT_PREFIX, GENERATED_VARIABLE_PREFIX, NAME_PREFIX},
     report::TheoryTermMap,
 };
@@ -89,7 +89,7 @@ pub enum ReplaceClosuresError {
 /// static context inputs and function-pointer output used by each replacement.
 pub fn run(
     theory_set: &TheorySet,
-    forgotten: &TheoryTermMap<Region<Operation>>,
+    forgotten: &TheoryTermMap<ClosureForgottenEdge<Operation>>,
     regions: &ClosureRegionMap,
 ) -> Result<Replacement, ReplaceClosuresError> {
     let mut output = theory_set.clone();
@@ -204,10 +204,10 @@ pub fn run(
 fn replacement_term(
     definition_name: &Operation,
     arrows: &BTreeMap<Operation, TheoryArrow>,
-    term: &RegionTerm,
+    term: &ClosureForgottenTerm,
     region: &ClosureRegion,
     original_region: &ClosureRegion,
-) -> Result<RegionTerm, ReplaceClosuresError> {
+) -> Result<ClosureForgottenTerm, ReplaceClosuresError> {
     let name_operation = name_operation(definition_name, original_region.closure);
     let name_arrow =
         arrows
@@ -239,7 +239,7 @@ fn replacement_term(
     }
     let original_leaves = original_leaves.into_iter().collect::<Vec<_>>();
 
-    let mut replacement = RegionTerm::empty();
+    let mut replacement = ClosureForgottenTerm::empty();
     let sources = region
         .environment
         .iter()
@@ -266,7 +266,10 @@ fn replacement_term(
     let mut context_targets = environment_components.clone();
     context_targets.extend(name_sources.iter().copied());
     replacement.new_edge(
-        Region::Operation(context_operation(definition_name, original_region.closure)),
+        ClosureForgottenEdge::Operation(context_operation(
+            definition_name,
+            original_region.closure,
+        )),
         (sources.clone(), context_targets),
     );
 
@@ -274,7 +277,7 @@ fn replacement_term(
         .iter()
         .map(|node| replacement.hypergraph.nodes[node.0].clone())
         .collect();
-    let packer = to_packer(environment_types).map_edges(Region::Operation);
+    let packer = to_packer(environment_types).map_edges(ClosureForgottenEdge::Operation);
     let (packer_sources, packer_targets) = replacement.append(packer);
     for (component, packer_source) in environment_components.into_iter().zip(packer_sources) {
         replacement.unify(component, packer_source);
@@ -286,7 +289,7 @@ fn replacement_term(
     let function_pointer =
         replacement.new_node(instantiate_context(name_target_type, &original_leaves)?);
     replacement.new_edge(
-        Region::Operation(name_operation),
+        ClosureForgottenEdge::Operation(name_operation),
         (name_sources, vec![function_pointer]),
     );
     replacement.sources = sources;
@@ -295,10 +298,10 @@ fn replacement_term(
 }
 
 fn rewrite_one(
-    definition: &RegionTerm,
+    definition: &ClosureForgottenTerm,
     region: &ClosureRegion,
-    replacement: &RegionTerm,
-) -> Result<RegionTerm, ReplaceClosuresError> {
+    replacement: &ClosureForgottenTerm,
+) -> Result<ClosureForgottenTerm, ReplaceClosuresError> {
     for edge in region.edges.iter().chain([&region.marker]) {
         if edge.0 >= definition.hypergraph.edges.len() {
             return Err(ReplaceClosuresError::EdgeOutOfBounds { edge: edge.0 });
@@ -333,7 +336,10 @@ fn rewrite_one(
     let mut deleted_edges = region.edges.clone();
     deleted_edges.push(region.marker);
     for (index, boundary) in definition.hypergraph.adjacency.iter().enumerate() {
-        if matches!(definition.hypergraph.edges[index], Region::Closure) {
+        if matches!(
+            definition.hypergraph.edges[index],
+            ClosureForgottenEdge::ClosureMarker
+        ) {
             continue;
         }
         if boundary
@@ -411,18 +417,18 @@ fn remap_node(node_map: &[Option<usize>], node: NodeId) -> Result<NodeId, Replac
         .ok_or(ReplaceClosuresError::DeletedBoundaryNode { node: node.0 })
 }
 
-fn unwrap_operations(term: RegionTerm) -> Result<TypedTerm, ReplaceClosuresError> {
+fn unwrap_operations(term: ClosureForgottenTerm) -> Result<TypedTerm, ReplaceClosuresError> {
     if term
         .hypergraph
         .edges
         .iter()
-        .any(|edge| matches!(edge, Region::Closure))
+        .any(|edge| matches!(edge, ClosureForgottenEdge::ClosureMarker))
     {
         return Err(ReplaceClosuresError::RemainingClosureMarker);
     }
     Ok(term.map_edges(|edge| match edge {
-        Region::Operation(operation) => operation,
-        Region::Closure => unreachable!("checked above"),
+        ClosureForgottenEdge::Operation(operation) => operation,
+        ClosureForgottenEdge::ClosureMarker => unreachable!("checked above"),
     }))
 }
 

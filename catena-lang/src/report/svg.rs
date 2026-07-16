@@ -8,7 +8,7 @@ use open_hypergraphs_dot::{Options, svg::to_svg_with};
 
 use crate::{
     closure2::{Conversion, definition::closure_operation, region::ClosureRegion},
-    pass::forget_closures::{Region, RegionTerm},
+    pass::forget_closures::{ClosureForgottenEdge, ClosureForgottenTerm},
     report::CompileReport,
 };
 
@@ -290,7 +290,7 @@ fn dump_closure_conversion_trace(
 }
 
 fn labelled_region_overview(
-    term: &RegionTerm,
+    term: &ClosureForgottenTerm,
     regions: &[ClosureRegion],
     syntax_theory: &Theory,
 ) -> io::Result<Vec<u8>> {
@@ -393,7 +393,7 @@ fn labelled_region_overview(
 }
 
 fn labelled_extracted_region(
-    term: &RegionTerm,
+    term: &ClosureForgottenTerm,
     region: &ClosureRegion,
     region_index: usize,
     syntax_theory: &Theory,
@@ -575,10 +575,10 @@ fn write_stage_hex(
     })
 }
 
-fn region_to_hexpr_operation(region: &Region<Operation>) -> Operation {
+fn region_to_hexpr_operation(region: &ClosureForgottenEdge<Operation>) -> Operation {
     match region {
-        Region::Operation(operation) => operation.clone(),
-        Region::Closure => op("!closure"),
+        ClosureForgottenEdge::Operation(operation) => operation.clone(),
+        ClosureForgottenEdge::ClosureMarker => op("!closure"),
     }
 }
 

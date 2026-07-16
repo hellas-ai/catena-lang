@@ -13,7 +13,7 @@ use open_hypergraphs::lax::{EdgeId, NodeId};
 use thiserror::Error;
 
 use crate::{
-    pass::forget_closures::{Region, RegionTerm},
+    pass::forget_closures::{ClosureForgottenEdge, ClosureForgottenTerm},
     prefixes::NAME_PREFIX,
     report::TheoryTermMap,
 };
@@ -53,7 +53,9 @@ pub enum FindRegionError {
 }
 
 /// Discover closure regions for every forgotten definition in a compiler stage.
-pub fn run(terms: &TheoryTermMap<Region<Operation>>) -> Result<ClosureRegionMap, FindRegionError> {
+pub fn run(
+    terms: &TheoryTermMap<ClosureForgottenEdge<Operation>>,
+) -> Result<ClosureRegionMap, FindRegionError> {
     terms
         .iter()
         .map(|(theory, definitions)| {
@@ -67,19 +69,21 @@ pub fn run(terms: &TheoryTermMap<Region<Operation>>) -> Result<ClosureRegionMap,
 }
 
 /// Find every closure region in marker-edge order.
-pub fn find_regions(term: &RegionTerm) -> Result<Vec<ClosureRegion>, FindRegionError> {
+pub fn find_regions(term: &ClosureForgottenTerm) -> Result<Vec<ClosureRegion>, FindRegionError> {
     let connectivity = Connectivity::new(term);
     term.hypergraph
         .edges
         .iter()
         .enumerate()
-        .filter_map(|(index, edge)| matches!(edge, Region::Closure).then_some(EdgeId(index)))
+        .filter_map(|(index, edge)| {
+            matches!(edge, ClosureForgottenEdge::ClosureMarker).then_some(EdgeId(index))
+        })
         .map(|marker| find_region(term, &connectivity, marker))
         .collect()
 }
 
 fn find_region(
-    term: &RegionTerm,
+    term: &ClosureForgottenTerm,
     connectivity: &Connectivity,
     marker: EdgeId,
 ) -> Result<ClosureRegion, FindRegionError> {
@@ -124,7 +128,11 @@ fn find_region(
 }
 
 /// Mark edges reachable in the ordinary graph direction from `start`.
-fn reachable_forward(term: &RegionTerm, connectivity: &Connectivity, start: NodeId) -> Vec<bool> {
+fn reachable_forward(
+    term: &ClosureForgottenTerm,
+    connectivity: &Connectivity,
+    start: NodeId,
+) -> Vec<bool> {
     let mut reached_nodes = vec![false; term.hypergraph.nodes.len()];
     let mut reached_edges = vec![false; term.hypergraph.edges.len()];
     let mut pending = VecDeque::from([start]);
@@ -149,7 +157,11 @@ fn reachable_forward(term: &RegionTerm, connectivity: &Connectivity, start: Node
 }
 
 /// Mark edges from which `end` is reachable in the ordinary graph direction.
-fn reachable_backward(term: &RegionTerm, connectivity: &Connectivity, end: NodeId) -> Vec<bool> {
+fn reachable_backward(
+    term: &ClosureForgottenTerm,
+    connectivity: &Connectivity,
+    end: NodeId,
+) -> Vec<bool> {
     let mut reached_nodes = vec![false; term.hypergraph.nodes.len()];
     let mut reached_edges = vec![false; term.hypergraph.edges.len()];
     let mut pending = VecDeque::from([end]);
@@ -176,7 +188,7 @@ fn reachable_backward(term: &RegionTerm, connectivity: &Connectivity, end: NodeI
 /// Named function pointers are static dependencies of an `eval`, not runtime
 /// closure captures. Keep their producer edges in the extracted body.
 fn include_named_dependencies(
-    term: &RegionTerm,
+    term: &ClosureForgottenTerm,
     connectivity: &Connectivity,
     included_edges: &mut [bool],
 ) {
@@ -202,7 +214,7 @@ fn include_named_dependencies(
 }
 
 fn environment_nodes(
-    term: &RegionTerm,
+    term: &ClosureForgottenTerm,
     connectivity: &Connectivity,
     included_edges: &[bool],
     domain: NodeId,
@@ -236,7 +248,7 @@ fn environment_nodes(
 }
 
 fn region_nodes(
-    term: &RegionTerm,
+    term: &ClosureForgottenTerm,
     included_edges: &[bool],
     domain: NodeId,
     codomain: NodeId,
@@ -274,14 +286,17 @@ fn has_included_producer(
         .any(|producer| included_edges[producer.0])
 }
 
-fn is_marker(term: &RegionTerm, edge: EdgeId) -> bool {
-    matches!(term.hypergraph.edges[edge.0], Region::Closure)
+fn is_marker(term: &ClosureForgottenTerm, edge: EdgeId) -> bool {
+    matches!(
+        term.hypergraph.edges[edge.0],
+        ClosureForgottenEdge::ClosureMarker
+    )
 }
 
-fn is_named_operation(term: &RegionTerm, edge: EdgeId) -> bool {
+fn is_named_operation(term: &ClosureForgottenTerm, edge: EdgeId) -> bool {
     matches!(
         &term.hypergraph.edges[edge.0],
-        Region::Operation(operation) if operation.as_str().starts_with(NAME_PREFIX)
+        ClosureForgottenEdge::Operation(operation) if operation.as_str().starts_with(NAME_PREFIX)
     )
 }
 
@@ -291,7 +306,7 @@ struct Connectivity {
 }
 
 impl Connectivity {
-    fn new(term: &RegionTerm) -> Self {
+    fn new(term: &ClosureForgottenTerm) -> Self {
         let mut producers_by_node = vec![Vec::new(); term.hypergraph.nodes.len()];
         let mut consumers_by_node = vec![Vec::new(); term.hypergraph.nodes.len()];
         for (edge_index, boundary) in term.hypergraph.adjacency.iter().enumerate() {
@@ -319,7 +334,7 @@ mod tests {
 
     #[test]
     fn named_closure_contains_eval_and_name_without_runtime_environment() {
-        let mut term = RegionTerm::empty();
+        let mut term = ClosureForgottenTerm::empty();
         let domain = term.new_node(obj("A"));
         let pointer = term.new_node(obj("pointer"));
         let codomain = term.new_node(obj("B"));
@@ -327,7 +342,10 @@ mod tests {
 
         let name = term.new_edge(region_op("name.f"), (vec![], vec![pointer]));
         let eval = term.new_edge(region_op("eval"), (vec![domain, pointer], vec![codomain]));
-        let marker = term.new_edge(Region::Closure, (vec![domain, codomain], vec![closure]));
+        let marker = term.new_edge(
+            ClosureForgottenEdge::ClosureMarker,
+            (vec![domain, codomain], vec![closure]),
+        );
 
         let [region] = find_regions(&term).unwrap().try_into().unwrap();
         assert_eq!(region.marker, marker);
@@ -340,14 +358,17 @@ mod tests {
 
     #[test]
     fn operation_inputs_off_the_control_path_are_environment() {
-        let mut term = RegionTerm::empty();
+        let mut term = ClosureForgottenTerm::empty();
         let domain = term.new_node(obj("A"));
         let captured = term.new_node(obj("E"));
         let codomain = term.new_node(obj("B"));
         let closure = term.new_node(obj("A=>B"));
 
         let body = term.new_edge(region_op("body"), (vec![domain, captured], vec![codomain]));
-        term.new_edge(Region::Closure, (vec![domain, codomain], vec![closure]));
+        term.new_edge(
+            ClosureForgottenEdge::ClosureMarker,
+            (vec![domain, codomain], vec![closure]),
+        );
 
         let [region] = find_regions(&term).unwrap().try_into().unwrap();
         assert_eq!(region.environment, vec![captured]);
@@ -356,14 +377,14 @@ mod tests {
 
     #[test]
     fn deferred_value_is_captured_when_no_domain_to_codomain_path_exists() {
-        let mut term = RegionTerm::empty();
+        let mut term = ClosureForgottenTerm::empty();
         let domain = term.new_node(obj("1"));
         let captured_codomain = term.new_node(obj("B"));
         let closure = term.new_node(obj("1=>B"));
 
         term.new_edge(region_op("unit.elim"), (vec![domain], vec![]));
         term.new_edge(
-            Region::Closure,
+            ClosureForgottenEdge::ClosureMarker,
             (vec![domain, captured_codomain], vec![closure]),
         );
 
@@ -375,9 +396,12 @@ mod tests {
 
     #[test]
     fn malformed_marker_is_reported() {
-        let mut term = RegionTerm::empty();
+        let mut term = ClosureForgottenTerm::empty();
         let only_source = term.new_node(obj("A"));
-        term.new_edge(Region::Closure, (vec![only_source], vec![]));
+        term.new_edge(
+            ClosureForgottenEdge::ClosureMarker,
+            (vec![only_source], vec![]),
+        );
 
         assert_eq!(
             find_regions(&term),
@@ -393,8 +417,8 @@ mod tests {
         Tree::Node(op(name), 0, vec![])
     }
 
-    fn region_op(name: &str) -> Region<Operation> {
-        Region::Operation(op(name))
+    fn region_op(name: &str) -> ClosureForgottenEdge<Operation> {
+        ClosureForgottenEdge::Operation(op(name))
     }
 
     fn op(name: &str) -> Operation {

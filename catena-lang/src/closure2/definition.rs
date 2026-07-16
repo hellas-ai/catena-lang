@@ -18,7 +18,7 @@ use crate::{
     elaborate::{ElaborateError, name_symbols},
     hexpr::{objects_to_hexpr, term_to_hexpr},
     nonstrict::{to_packer, to_unpacker, unpack_packed_object},
-    pass::forget_closures::{Region, RegionTerm},
+    pass::forget_closures::{ClosureForgottenEdge, ClosureForgottenTerm},
     prefixes::{GENERATED_VARIABLE_PREFIX, NAME_PREFIX},
     report::TheoryTermMap,
 };
@@ -31,7 +31,7 @@ pub struct DefinedClosures {
     pub generated_theory: TheorySet,
     pub generated_functions: TheoryTermMap,
     /// Complete typed definition map ready for region replacement.
-    pub definitions: TheoryTermMap<Region<Operation>>,
+    pub definitions: TheoryTermMap<ClosureForgottenEdge<Operation>>,
 }
 
 #[derive(Debug, Error)]
@@ -90,7 +90,7 @@ pub enum DefineClosuresError {
 /// the later replacement stage.
 pub fn run(
     theory_set: &TheorySet,
-    forgotten: &TheoryTermMap<Region<Operation>>,
+    forgotten: &TheoryTermMap<ClosureForgottenEdge<Operation>>,
     regions: &ClosureRegionMap,
 ) -> Result<DefinedClosures, DefineClosuresError> {
     let mut output = theory_set.clone();
@@ -184,7 +184,10 @@ pub fn run(
     for (theory_id, functions) in &bodies {
         let output = definitions.entry(theory_id.clone()).or_default();
         for (operation, body) in functions {
-            output.insert(operation.clone(), body.clone().map_edges(Region::Operation));
+            output.insert(
+                operation.clone(),
+                body.clone().map_edges(ClosureForgottenEdge::Operation),
+            );
         }
     }
 
@@ -199,7 +202,7 @@ fn build_body(
     theory_id: &TheoryId,
     definition_name: &Operation,
     arrows: &BTreeMap<Operation, TheoryArrow>,
-    term: &RegionTerm,
+    term: &ClosureForgottenTerm,
     region: &ClosureRegion,
 ) -> Result<TypedTerm, DefineClosuresError> {
     let mut body = TypedTerm::empty();
@@ -252,7 +255,7 @@ fn build_body(
                 edge: edge.0,
             }
         })?;
-        let Region::Operation(operation) = operation else {
+        let ClosureForgottenEdge::Operation(operation) = operation else {
             return Err(DefineClosuresError::NestedClosureMarker {
                 theory: theory_id.to_string(),
                 definition: definition_name.to_string(),
@@ -305,7 +308,7 @@ struct NamedEval {
 }
 
 fn named_evals(
-    term: &RegionTerm,
+    term: &ClosureForgottenTerm,
     region: &ClosureRegion,
 ) -> Result<Vec<NamedEval>, DefineClosuresError> {
     let included = region.edges.iter().copied().collect::<HashSet<_>>();
@@ -323,7 +326,7 @@ fn named_evals(
         .filter(|edge| {
             matches!(
                 &term.hypergraph.edges[edge.0],
-                Region::Operation(operation) if operation.as_str() == "eval"
+                ClosureForgottenEdge::Operation(operation) if operation.as_str() == "eval"
             )
         })
         .map(|eval| {
@@ -340,7 +343,7 @@ fn named_evals(
                     included.contains(producer)
                         && matches!(
                             &term.hypergraph.edges[producer.0],
-                            Region::Operation(operation)
+                            ClosureForgottenEdge::Operation(operation)
                                 if operation.as_str().starts_with(NAME_PREFIX)
                         )
                 })
@@ -354,10 +357,11 @@ fn inline_named_eval(
     body: &mut TypedTerm,
     node_map: &HashMap<NodeId, NodeId>,
     arrows: &BTreeMap<Operation, TheoryArrow>,
-    term: &RegionTerm,
+    term: &ClosureForgottenTerm,
     pair: NamedEval,
 ) -> Result<(), DefineClosuresError> {
-    let Region::Operation(name_operation) = &term.hypergraph.edges[pair.name.0] else {
+    let ClosureForgottenEdge::Operation(name_operation) = &term.hypergraph.edges[pair.name.0]
+    else {
         unreachable!("named eval producer should be an operation");
     };
     let operation: Operation = name_operation

@@ -26,19 +26,19 @@ use crate::{
 
 pub type Obj = Tree<(), Operation>;
 pub type Arr = Operation;
-pub type RegionTerm = OpenHypergraph<Obj, Region<Arr>>;
+pub type ClosureForgottenTerm = OpenHypergraph<Obj, ClosureForgottenEdge<Arr>>;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum Region<A> {
+pub enum ClosureForgottenEdge<A> {
     Operation(A),
-    Closure,
+    ClosureMarker,
 }
 
-impl<A: fmt::Display> fmt::Display for Region<A> {
+impl<A: fmt::Display> fmt::Display for ClosureForgottenEdge<A> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Operation(operation) => write!(f, "{operation}"),
-            Self::Closure => write!(f, "!closure"),
+            Self::ClosureMarker => write!(f, "!closure"),
         }
     }
 }
@@ -60,7 +60,7 @@ pub enum ForgetClosuresError {
 pub fn run(
     theory_set: &TheorySet,
     definition_types: &DefinitionTypes,
-) -> Result<TheoryTermMap<Region<Operation>>, ForgetClosuresError> {
+) -> Result<TheoryTermMap<ClosureForgottenEdge<Operation>>, ForgetClosuresError> {
     let mut output = BTreeMap::new();
 
     for (theory_id, theory) in &theory_set.theories {
@@ -102,7 +102,7 @@ struct ForgetClosures<'a> {
     theory: &'a Theory,
 }
 
-impl Functor<Obj, Arr, Obj, Region<Arr>> for ForgetClosures<'_> {
+impl Functor<Obj, Arr, Obj, ClosureForgottenEdge<Arr>> for ForgetClosures<'_> {
     fn map_object(&self, o: &Obj) -> impl ExactSizeIterator<Item = Obj> {
         closure_forgotten_boundary(o).into_iter()
     }
@@ -112,7 +112,7 @@ impl Functor<Obj, Arr, Obj, Region<Arr>> for ForgetClosures<'_> {
         a: &Arr,
         source: &[Obj],
         target: &[Obj],
-    ) -> OpenHypergraph<Obj, Region<Arr>> {
+    ) -> OpenHypergraph<Obj, ClosureForgottenEdge<Arr>> {
         if let Some(name) = a.as_str().strip_prefix(NAME_PREFIX)
             && target.len() == 1
             && closure_parts(&target[0]).is_some()
@@ -136,7 +136,10 @@ impl Functor<Obj, Arr, Obj, Region<Arr>> for ForgetClosures<'_> {
         }
     }
 
-    fn map_arrow(&self, f: &OpenHypergraph<Obj, Arr>) -> OpenHypergraph<Obj, Region<Arr>> {
+    fn map_arrow(
+        &self,
+        f: &OpenHypergraph<Obj, Arr>,
+    ) -> OpenHypergraph<Obj, ClosureForgottenEdge<Arr>> {
         try_define_map_arrow(self, f).expect("programmer error: forget-closures is not a functor")
     }
 }
@@ -180,7 +183,7 @@ fn typed_definition(
 ////////////////////////////////////////////////////////////////////////////////
 /// Action of forget_closures on generating operations
 
-fn map_structural_operation(source: &[Obj], target: &[Obj]) -> RegionTerm {
+fn map_structural_operation(source: &[Obj], target: &[Obj]) -> ClosureForgottenTerm {
     let source = closure_forgotten_boundaries(source);
     let target = closure_forgotten_boundaries(target);
     assert_eq!(
@@ -190,7 +193,7 @@ fn map_structural_operation(source: &[Obj], target: &[Obj]) -> RegionTerm {
     OpenHypergraph::identity(source)
 }
 
-fn map_context_projection_operation(source: &[Obj], target: &[Obj]) -> RegionTerm {
+fn map_context_projection_operation(source: &[Obj], target: &[Obj]) -> ClosureForgottenTerm {
     let mapped_source = closure_forgotten_boundaries(source);
     let mapped_target = closure_forgotten_boundaries(target);
     assert!(
@@ -198,7 +201,7 @@ fn map_context_projection_operation(source: &[Obj], target: &[Obj]) -> RegionTer
         "context.closure.* should preserve the region inputs as its environment outputs"
     );
 
-    let mut result: RegionTerm = OpenHypergraph::identity(mapped_source.clone());
+    let mut result: ClosureForgottenTerm = OpenHypergraph::identity(mapped_source.clone());
     let extra_targets = mapped_target[mapped_source.len()..]
         .iter()
         .map(|object| context_leaf_target(&mapped_source, &mut result, object))
@@ -207,7 +210,11 @@ fn map_context_projection_operation(source: &[Obj], target: &[Obj]) -> RegionTer
     result
 }
 
-fn context_leaf_target(mapped_source: &[Obj], result: &mut RegionTerm, object: &Obj) -> NodeId {
+fn context_leaf_target(
+    mapped_source: &[Obj],
+    result: &mut ClosureForgottenTerm,
+    object: &Obj,
+) -> NodeId {
     assert!(
         matches!(object, Tree::Leaf(_, _)),
         "context.closure.* extra outputs should only be context leaves for name.closure.*"
@@ -221,7 +228,12 @@ fn context_leaf_target(mapped_source: &[Obj], result: &mut RegionTerm, object: &
 }
 
 // name.* operations map to the original operation, plus packers, with input wires 'bent around'
-fn map_name_operation(theory: &Theory, name: &str, source: &[Obj], target: &[Obj]) -> RegionTerm {
+fn map_name_operation(
+    theory: &Theory,
+    name: &str,
+    source: &[Obj],
+    target: &[Obj],
+) -> ClosureForgottenTerm {
     let [closure_type] = target else {
         panic!("name.* target should be a single closure-typed wire");
     };
@@ -256,10 +268,14 @@ fn map_name_operation(theory: &Theory, name: &str, source: &[Obj], target: &[Obj
 
 // Defines the action of forget_closures on non-CMC operations f:
 // adapt source ; f ; flatten target
-fn map_non_cmc_operation(a: &Arr, source: &[Obj], target: &[Obj]) -> RegionTerm {
+fn map_non_cmc_operation(a: &Arr, source: &[Obj], target: &[Obj]) -> ClosureForgottenTerm {
     let (source, source_adapter) = closure_erased_source_adapter(source);
     let target = closure_erased_operation_objects(target);
-    let operation = OpenHypergraph::singleton(Region::Operation(a.clone()), source, target.clone());
+    let operation = OpenHypergraph::singleton(
+        ClosureForgottenEdge::Operation(a.clone()),
+        source,
+        target.clone(),
+    );
     let flatten = closure_forgotten_flatteners(&target);
 
     source_adapter
@@ -268,7 +284,7 @@ fn map_non_cmc_operation(a: &Arr, source: &[Obj], target: &[Obj]) -> RegionTerm 
         .expect("regular operation adapters should compose")
 }
 
-fn map_compose(source: &[Obj]) -> RegionTerm {
+fn map_compose(source: &[Obj]) -> ClosureForgottenTerm {
     let [lhs, rhs] = source else {
         panic!("compose should have two closure inputs");
     };
@@ -286,7 +302,7 @@ fn map_compose(source: &[Obj]) -> RegionTerm {
         .tensor(&OpenHypergraph::identity(c))
 }
 
-fn map_tensor(source: &[Obj]) -> RegionTerm {
+fn map_tensor(source: &[Obj]) -> ClosureForgottenTerm {
     let [lhs, rhs] = source else {
         panic!("tensor should have two closure inputs");
     };
@@ -314,7 +330,7 @@ fn map_tensor(source: &[Obj]) -> RegionTerm {
     result
 }
 
-fn map_lift(source: &[Obj], target: &[Obj]) -> RegionTerm {
+fn map_lift(source: &[Obj], target: &[Obj]) -> ClosureForgottenTerm {
     let [function_type] = source else {
         panic!("lift should have one function pointer input");
     };
@@ -442,7 +458,7 @@ impl Polarity {
     }
 }
 
-fn closure_erased_source_adapter(objects: &[Obj]) -> (Vec<Obj>, RegionTerm) {
+fn closure_erased_source_adapter(objects: &[Obj]) -> (Vec<Obj>, ClosureForgottenTerm) {
     objects
         .iter()
         .map(|object| source_adapter_object(object, Polarity::Positive))
@@ -455,7 +471,7 @@ fn closure_erased_source_adapter(objects: &[Obj]) -> (Vec<Obj>, RegionTerm) {
         )
 }
 
-fn source_adapter_object(object: &Obj, variance: Polarity) -> (Vec<Obj>, RegionTerm) {
+fn source_adapter_object(object: &Obj, variance: Polarity) -> (Vec<Obj>, ClosureForgottenTerm) {
     match object {
         Tree::Node(operation, _, children) if operation.as_str() == PRODUCT_TYPE => {
             let [left, right] = children.as_slice() else {
@@ -472,12 +488,12 @@ fn source_adapter_object(object: &Obj, variance: Polarity) -> (Vec<Obj>, RegionT
             let children = left_adapter.tensor(&right_adapter);
             let product_adapter = match variance {
                 Polarity::Positive => OpenHypergraph::singleton(
-                    Region::Operation(op(PRODUCT_INTRO)),
+                    ClosureForgottenEdge::Operation(op(PRODUCT_INTRO)),
                     vec![left_object, right_object],
                     vec![product.clone()],
                 ),
                 Polarity::Negative => flip_boundaries(OpenHypergraph::singleton(
-                    Region::Operation(op(PRODUCT_ELIM)),
+                    ClosureForgottenEdge::Operation(op(PRODUCT_ELIM)),
                     vec![product.clone()],
                     vec![left_object, right_object],
                 )),
@@ -496,12 +512,12 @@ fn source_adapter_object(object: &Obj, variance: Polarity) -> (Vec<Obj>, RegionT
             let unit = object.clone();
             let unit_adapter = match variance {
                 Polarity::Positive => OpenHypergraph::singleton(
-                    Region::Operation(op(UNIT_INTRO)),
+                    ClosureForgottenEdge::Operation(op(UNIT_INTRO)),
                     vec![],
                     vec![unit.clone()],
                 ),
                 Polarity::Negative => flip_boundaries(OpenHypergraph::singleton(
-                    Region::Operation(op(UNIT_ELIM)),
+                    ClosureForgottenEdge::Operation(op(UNIT_ELIM)),
                     vec![unit.clone()],
                     vec![],
                 )),
@@ -520,7 +536,7 @@ fn source_adapter_object(object: &Obj, variance: Polarity) -> (Vec<Obj>, RegionT
             let adapter = source_adapter
                 .tensor(&target_adapter)
                 .compose(&OpenHypergraph::singleton(
-                    Region::Closure,
+                    ClosureForgottenEdge::ClosureMarker,
                     source_objects,
                     vec![closure.clone()],
                 ))
@@ -534,7 +550,7 @@ fn source_adapter_object(object: &Obj, variance: Polarity) -> (Vec<Obj>, RegionT
     }
 }
 
-fn source_adapter_component(object: &Obj, variance: Polarity) -> (Obj, RegionTerm) {
+fn source_adapter_component(object: &Obj, variance: Polarity) -> (Obj, ClosureForgottenTerm) {
     let (objects, adapter) = source_adapter_object(object, variance);
     let packed = pack_objects(&objects);
     let packer = match variance {
@@ -554,11 +570,11 @@ fn flip_boundaries<O, A>(mut term: OpenHypergraph<O, A>) -> OpenHypergraph<O, A>
     term
 }
 
-fn lift_operations(term: AnnotatedTerm) -> RegionTerm {
-    term.map_edges(Region::Operation)
+fn lift_operations(term: AnnotatedTerm) -> ClosureForgottenTerm {
+    term.map_edges(ClosureForgottenEdge::Operation)
 }
 
-fn closure_forgotten_flatteners(objects: &[Obj]) -> RegionTerm {
+fn closure_forgotten_flatteners(objects: &[Obj]) -> ClosureForgottenTerm {
     lift_operations(to_flatteners(objects))
 }
 
@@ -601,21 +617,21 @@ fn parts<'a>(o: &'a Obj, op_name: &str) -> Option<(&'a Obj, &'a Obj)> {
     Some((source, target))
 }
 
-fn cup(object: &[Obj]) -> RegionTerm {
+fn cup(object: &[Obj]) -> ClosureForgottenTerm {
     let mut result = OpenHypergraph::identity(object.to_vec());
     result.sources = vec![];
     result.targets = [result.targets.clone(), result.targets].concat();
     result
 }
 
-fn cap(object: &[Obj]) -> RegionTerm {
+fn cap(object: &[Obj]) -> ClosureForgottenTerm {
     let mut result = OpenHypergraph::identity(object.to_vec());
     result.sources = [result.sources.clone(), result.sources].concat();
     result.targets = vec![];
     result
 }
 
-fn duplicate_outputs(object: &[Obj]) -> RegionTerm {
+fn duplicate_outputs(object: &[Obj]) -> ClosureForgottenTerm {
     let mut result = OpenHypergraph::identity(object.to_vec());
     result.targets = [result.targets.clone(), result.targets].concat();
     result
@@ -662,8 +678,8 @@ mod tests {
         assert_eq!(target_types(term), closure_forgotten_boundaries(target));
     }
 
-    fn region_op(name: &str) -> Region<Operation> {
-        Region::Operation(op(name))
+    fn region_op(name: &str) -> ClosureForgottenEdge<Operation> {
+        ClosureForgottenEdge::Operation(op(name))
     }
 
     #[test]
@@ -833,7 +849,7 @@ mod tests {
             .hypergraph
             .edges
             .iter()
-            .position(|operation| matches!(operation, Region::Closure))
+            .position(|operation| matches!(operation, ClosureForgottenEdge::ClosureMarker))
             .expect("closure source should be bracketed");
         let closure_edge = &mapped.hypergraph.adjacency[closure_index];
 

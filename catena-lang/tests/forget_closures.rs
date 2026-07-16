@@ -4,7 +4,7 @@ use catena_lang::{
     closure2::{self, region::find_regions},
     codegen::{GpuDialect, gpu::render_module},
     compile::compile,
-    pass::forget_closures::Region,
+    pass::forget_closures::ClosureForgottenEdge,
     report::CompileReport,
 };
 use hexpr::Operation;
@@ -127,7 +127,7 @@ fn closure2_examples_emit_expected_region_boundaries() -> anyhow::Result<()> {
             .edges
             .iter()
             .zip(&term.hypergraph.adjacency)
-            .filter(|(edge, _)| matches!(edge, Region::Closure))
+            .filter(|(edge, _)| matches!(edge, ClosureForgottenEdge::ClosureMarker))
         {
             anyhow::ensure!(
                 adjacency.sources.len() == 2 && adjacency.targets.len() == 1,

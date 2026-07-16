@@ -66,3 +66,19 @@ fn named_function_keeps_its_packed_argument_boundary() {
     assert_eq!(operation_count(term, "run"), 0);
     assert_fully_lowered("run-named-and-packed-with-free");
 }
+
+/// Product packing, inlining, and closure replacement must not introduce an
+/// implicit fan-out. These context-free cases can therefore be checked as
+/// strict monogamous graphs after product lowering.
+#[test]
+fn product_final_graphs_are_monogamous() {
+    for definition in [
+        "tensored-if",
+        "packed-closure",
+        "packed-if",
+        "nested-direct",
+        "run-named-and-packed-with-free",
+    ] {
+        assert_monogamous(definition);
+    }
+}

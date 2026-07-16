@@ -58,3 +58,21 @@
   }
   bool.if
 ))
+
+# Two parallel regions with deliberately different shapes.  The left branch has
+# a defer/name/eval/compose path while the right branch is a single defer path.
+# Conversion must replace both regions even though removing the larger region
+# changes the positional node and edge IDs used by the smaller one.
+(def program asymmetric-regions-if :
+  {(bool val) (bool val) (bool val)}
+  ->
+  (bool val)
+= ([lhs rhs flag.]
+  {
+    ({([.lhs] defer) (name.bool.not lift)} compose)
+    ([.rhs] defer)
+    [.flag]
+    unit.intro
+  }
+  bool.if
+))

@@ -106,6 +106,19 @@ pub fn assert_fully_lowered(definition: &str) {
     }
 }
 
+/// Runtime-only definitions should remain linear after all graph rewrites and
+/// product lowering. Contextual definitions are checked separately because
+/// erased/type-level context wires may intentionally be shared.
+pub fn assert_monogamous(definition: &str) {
+    let mut term = final_term(definition).clone();
+    term.quotient()
+        .unwrap_or_else(|error| panic!("could not quotient `{definition}`: {error:?}"));
+    assert!(
+        term.to_strict().is_monogamous(),
+        "final graph `{definition}` is not monogamous"
+    );
+}
+
 pub fn op(name: &str) -> Operation {
     name.parse().expect("test operation should parse")
 }

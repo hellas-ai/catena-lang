@@ -102,3 +102,54 @@ fn captured_and_composed_branches_preserve_their_regions() {
         assert_fully_lowered(definition);
     }
 }
+
+/// This is the asymmetric form of the historical multiple-region regression:
+/// replacing the larger left region must not leave stale positional IDs for the
+/// smaller right region.
+///
+/// ```text
+/// lhs ─ defer ─ name/eval ─ compose ─┐
+/// rhs ─ defer ───────────────────────┼─ bool.if
+/// flag ──────────────────────────────┘
+/// ```
+#[test]
+fn asymmetric_parallel_regions_are_both_replaced() {
+    let regions = regions("asymmetric-regions-if");
+    assert_eq!(regions.len(), 2);
+    assert_ne!(regions[0].marker, regions[1].marker);
+
+    let final_graph = final_term("asymmetric-regions-if");
+    assert_eq!(operation_count(final_graph, "bool.if"), 0);
+    assert_eq!(operation_count(final_graph, "bool.ifc"), 1);
+    assert_eq!(
+        final_graph
+            .hypergraph
+            .edges
+            .iter()
+            .filter(|edge| edge
+                .operation
+                .as_str()
+                .starts_with("name.closure.asymmetric-regions-if."))
+            .count(),
+        2
+    );
+    assert_fully_lowered("asymmetric-regions-if");
+    assert_monogamous("asymmetric-regions-if");
+}
+
+/// Closure conversion and structural lowering must preserve linear use of every
+/// runtime wire. These definitions intentionally have no ambient context, so a
+/// strict monogamy check is appropriate for their complete final graphs.
+#[test]
+fn runtime_only_final_graphs_are_monogamous() {
+    for definition in [
+        "identity",
+        "deferred-identity",
+        "named-if",
+        "captured-if",
+        "composed-if",
+        "asymmetric-regions-if",
+    ] {
+        assert_monogamous(definition);
+    }
+}

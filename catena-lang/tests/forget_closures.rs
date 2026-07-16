@@ -225,8 +225,8 @@ fn closure2_matmul_examples_inline_closure_only_helpers() -> anyhow::Result<()> 
         .ok_or_else(|| anyhow::anyhow!("matmul examples did not reach GPU codegen"))?;
 
     for outer in [
-        "closure2.matmul-cell-two-bufs",
-        "closure2.matmul-cell-buf-and-identity",
+        "closure2.matmul-two-bufs-at",
+        "closure2.matmul-buf-identity-at",
     ] {
         anyhow::ensure!(find_regions(&forgotten[&op(outer)])?.len() == 2);
     }

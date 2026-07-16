@@ -120,10 +120,20 @@ fn find_region(
     let forward = reachable_forward(term, connectivity, *domain);
     let backward = reachable_backward(term, connectivity, *codomain);
     let mut included_edges = forward
-        .into_iter()
-        .zip(backward)
-        .map(|(from_domain, to_codomain)| from_domain && to_codomain)
+        .iter()
+        .zip(&backward)
+        .map(|(from_domain, to_codomain)| *from_domain && *to_codomain)
         .collect::<Vec<_>>();
+
+    // A closure may ignore its argument. Such a discard is reachable from the
+    // domain but, because it has no targets, cannot lie on a domain-to-codomain
+    // path. It still belongs to the closure body and must not look like an
+    // escaping use during replacement.
+    for (edge, reachable) in forward.into_iter().enumerate() {
+        if reachable && term.hypergraph.adjacency[edge].targets.is_empty() {
+            included_edges[edge] = true;
+        }
+    }
 
     include_named_dependencies(term, connectivity, &mut included_edges);
 
@@ -401,7 +411,7 @@ mod tests {
         let captured_codomain = term.new_node(obj("B"));
         let closure = term.new_node(obj("1=>B"));
 
-        term.new_edge(region_op("unit.elim"), (vec![domain], vec![]));
+        let discard = term.new_edge(region_op("unit.elim"), (vec![domain], vec![]));
         term.new_edge(
             ClosureForgotten::ClosureMarker,
             (vec![domain, captured_codomain], vec![closure]),
@@ -409,7 +419,7 @@ mod tests {
 
         let [region] = find_regions(&term).unwrap().try_into().unwrap();
         assert_eq!(region.environment, vec![captured_codomain]);
-        assert!(region.edges.is_empty());
+        assert_eq!(region.edges, vec![discard]);
         assert_eq!(region.nodes, vec![domain, captured_codomain]);
     }
 

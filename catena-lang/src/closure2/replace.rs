@@ -443,6 +443,7 @@ fn splice_region(
     region: &ClosureRegion,
     replacement: &ClosureForgottenTerm,
 ) -> Result<ClosureForgottenTerm, ReplaceClosuresError> {
+    assert_replacement_boundary(definition, region, replacement);
     let deletion = plan_region_deletion(definition, region)?;
 
     // First remove the old body, marker, and opaque closure node. Environment
@@ -499,6 +500,40 @@ struct RegionDeletion {
     retained_edges: Vec<EdgeId>,
 }
 
+fn assert_replacement_boundary(
+    definition: &ClosureForgottenTerm,
+    region: &ClosureRegion,
+    replacement: &ClosureForgottenTerm,
+) {
+    assert!(
+        replacement.clone().to_strict().is_monogamous(),
+        "the constructed closure replacement must be monogamous"
+    );
+    assert_eq!(
+        replacement.sources.len(),
+        region.environment.len(),
+        "closure replacement source arity must match the captured environment"
+    );
+    assert_eq!(
+        replacement.targets.len(),
+        2,
+        "closure replacement must produce exactly (Environment, FnPointer)"
+    );
+    for (index, (&environment, &replacement_source)) in region
+        .environment
+        .iter()
+        .zip(&replacement.sources)
+        .enumerate()
+    {
+        let environment_type = &definition.hypergraph.nodes[environment.0];
+        let replacement_type = &replacement.hypergraph.nodes[replacement_source.0];
+        assert_eq!(
+            environment_type, replacement_type,
+            "closure replacement source {index} must have the same type as its captured environment wire"
+        );
+    }
+}
+
 /// Compute everything removed by a splice before mutating node and edge IDs.
 fn plan_region_deletion(
     definition: &ClosureForgottenTerm,
@@ -539,31 +574,45 @@ fn plan_region_deletion(
 
     let mut deleted_edges = region.edges.clone();
     deleted_edges.push(region.marker);
-    // Also remove any edge outside the control-flow slice which touches a body
-    // node being deleted. Such an edge cannot remain well-formed after the
-    // splice. Other closure markers are handled by later iterations.
-    for (index, boundary) in definition.hypergraph.adjacency.iter().enumerate() {
-        if matches!(
-            definition.hypergraph.edges[index],
-            ClosureForgotten::ClosureMarker
-        ) {
-            continue;
-        }
-        if boundary
-            .sources
-            .iter()
-            .chain(&boundary.targets)
-            .any(|node| deleted_node_set.contains(&node.0))
-        {
-            deleted_edges.push(EdgeId(index));
-        }
-    }
     deleted_edges.sort_by_key(|edge| edge.0);
     deleted_edges.dedup();
     let deleted_edge_set = deleted_edges
         .iter()
         .map(|edge| edge.0)
         .collect::<BTreeSet<_>>();
+
+    // An operation outside the discovered region must never use an internal
+    // node. Deleting such an operation would silently discard an escaping use;
+    // keep this as a hard invariant of regions produced from CMC graphs.
+    // Other `!closure` markers are metadata which may share control-flow
+    // endpoints and are rediscovered after this splice.
+    for (index, boundary) in definition.hypergraph.adjacency.iter().enumerate() {
+        if deleted_edge_set.contains(&index)
+            || matches!(
+                definition.hypergraph.edges[index],
+                ClosureForgotten::ClosureMarker
+            )
+        {
+            continue;
+        }
+        let escaping_nodes = boundary
+            .sources
+            .iter()
+            .chain(&boundary.targets)
+            .filter(|node| deleted_node_set.contains(&node.0))
+            .map(|node| node.0)
+            .collect::<Vec<_>>();
+        assert!(
+            escaping_nodes.is_empty(),
+            "closure region has escaping internal wires {escaping_nodes:?} at retained edge e{index} (`{}`: {:?} -> {:?}); domain=w{}, codomain=w{}",
+            definition.hypergraph.edges[index],
+            boundary.sources,
+            boundary.targets,
+            region.domain.0,
+            region.codomain.0,
+        );
+    }
+
     let retained_edges = (0..definition.hypergraph.edges.len())
         .filter(|edge| !deleted_edge_set.contains(edge))
         .map(EdgeId)
@@ -830,4 +879,47 @@ fn context_vars(arity: usize) -> Vec<Variable> {
                 .expect("generated context variable should parse")
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[should_panic(expected = "closure region has escaping internal wires")]
+    fn deletion_plan_rejects_escaping_internal_wire() {
+        let mut definition = ClosureForgottenTerm::empty();
+        let domain = definition.new_node(Tree::Empty);
+        let internal = definition.new_node(Tree::Empty);
+        let codomain = definition.new_node(Tree::Empty);
+        let closure = definition.new_node(Tree::Empty);
+        let escaped = definition.new_node(Tree::Empty);
+        let first = definition.new_edge(
+            ClosureForgotten::Operation("first".parse().unwrap()),
+            (vec![domain], vec![internal]),
+        );
+        let second = definition.new_edge(
+            ClosureForgotten::Operation("second".parse().unwrap()),
+            (vec![internal], vec![codomain]),
+        );
+        definition.new_edge(
+            ClosureForgotten::Operation("outside".parse().unwrap()),
+            (vec![internal], vec![escaped]),
+        );
+        let marker = definition.new_edge(
+            ClosureForgotten::ClosureMarker,
+            (vec![domain, codomain], vec![closure]),
+        );
+        let region = ClosureRegion {
+            marker,
+            domain,
+            codomain,
+            closure,
+            environment: vec![],
+            nodes: vec![domain, internal, codomain],
+            edges: vec![first, second],
+        };
+
+        let _ = plan_region_deletion(&definition, &region);
+    }
 }

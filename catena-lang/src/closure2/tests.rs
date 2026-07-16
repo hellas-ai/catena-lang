@@ -132,7 +132,15 @@ fn deferred_values_become_runtime_environments() {
 
     assert_eq!(regions.len(), 2);
     assert!(regions.iter().all(|region| region.environment.len() == 1));
-    assert!(regions.iter().all(|region| region.edges.is_empty()));
+    assert!(regions.iter().all(|region| {
+        let [edge] = region.edges.as_slice() else {
+            return false;
+        };
+        matches!(
+            &forgotten.hypergraph.edges[edge.0],
+            ClosureForgotten::Operation(operation) if operation.as_str() == "unit.elim"
+        )
+    }));
 
     let rewritten = &conversion.rewritten_definitions[&program][&op("closure2-test-captured-if")];
     assert_eq!(operation_count(rewritten, "bool.ifc"), 1);

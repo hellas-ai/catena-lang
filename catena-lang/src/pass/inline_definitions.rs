@@ -320,11 +320,11 @@ mod tests {
         let theory_set = theory_set(
             r#"
             (def program mk-closure : (f32 val) -> ({1 (f32 val)} =>) = defer)
-            (def program mk-closure2 : (f32 val) -> ({1 (f32 val)} =>) = mk-closure)
-            (def program use-closure : (f32 val) -> (f32 val) = (mk-closure2 run))
+            (def program mk-nested-closure : (f32 val) -> ({1 (f32 val)} =>) = mk-closure)
+            (def program use-closure : (f32 val) -> (f32 val) = (mk-nested-closure run))
             "#,
         );
-        let selected = selected_program_definitions(["mk-closure", "mk-closure2"]);
+        let selected = selected_program_definitions(["mk-closure", "mk-nested-closure"]);
 
         let output = run(&theory_set, &selected).expect("inline pass should succeed");
         let program = output
@@ -345,7 +345,7 @@ mod tests {
                 .edges
                 .iter()
                 .all(|operation| operation.as_str() != "mk-closure"
-                    && operation.as_str() != "mk-closure2")
+                    && operation.as_str() != "mk-nested-closure")
         );
         assert!(
             use_closure

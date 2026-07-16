@@ -949,7 +949,7 @@ mod tests {
         let d = object("D");
         let closure0 = Tree::Node(op(FN_HOM_TYPE), 0, vec![a0.clone(), b0.clone()]);
         let closure1 = Tree::Node(op(FN_HOM_TYPE), 0, vec![b0.clone(), c.clone()]);
-        let closure2 = Tree::Node(op(FN_HOM_TYPE), 0, vec![a1.clone(), b1.clone()]);
+        let closure_2 = Tree::Node(op(FN_HOM_TYPE), 0, vec![a1.clone(), b1.clone()]);
 
         assert_closure_forgotten_boundaries(
             &map_non_cmc_operation(
@@ -978,8 +978,8 @@ mod tests {
         );
 
         assert_closure_forgotten_boundaries(
-            &map_tensor(&[closure0.clone(), closure2.clone()]),
-            &[closure0.clone(), closure2],
+            &map_tensor(&[closure0.clone(), closure_2.clone()]),
+            &[closure0.clone(), closure_2],
             &[Tree::Node(
                 op(FN_HOM_TYPE),
                 0,

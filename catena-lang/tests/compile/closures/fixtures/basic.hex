@@ -2,7 +2,7 @@
 #
 # These definitions deliberately stop at ordinary closure-using operations.  The
 # forget_closures pass bends the CMC wiring and inserts one !closure edge at each
-# place where a non-CMC operation observes a closure.  Closure conversion v2 can
+# place where a non-CMC operation observes a closure. Closure conversion can
 # then discover a region by walking backwards from the first !closure input and
 # forwards again until it reaches the second input.
 

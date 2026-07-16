@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, sync::OnceLock};
 
 use catena_lang::{
-    closure2::{Conversion, region::ClosureRegion},
+    closure::{Conversion, region::ClosureRegion},
     pass::record_boundary_sizes::OperationWithBoundarySizes,
     report::CompileReport,
 };

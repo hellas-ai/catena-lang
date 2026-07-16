@@ -12,7 +12,7 @@ use metacat::{
 use std::collections::BTreeMap;
 
 use crate::check::{AnnotatedTerm, PartialDefinitionTypes};
-use crate::closure2::Conversion;
+use crate::closure::Conversion;
 use crate::codegen::GpuModuleMap;
 use crate::pass::record_boundary_sizes::OperationWithBoundarySizes;
 

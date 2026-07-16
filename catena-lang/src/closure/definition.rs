@@ -14,7 +14,7 @@ use thiserror::Error;
 
 use crate::{
     check::AnnotatedTerm,
-    closure2::region::{ClosureRegion, ClosureRegionMap},
+    closure::region::{ClosureRegion, ClosureRegionMap},
     elaborate::{ElaborateError, name_symbols},
     hexpr::{objects_to_hexpr, term_to_hexpr},
     nonstrict::{to_packer, to_unpacker, unpack_packed_object},

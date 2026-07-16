@@ -17,7 +17,7 @@ use thiserror::Error;
 
 use crate::{
     check::AnnotatedTerm,
-    closure2::{
+    closure::{
         definition::{ClosureContextMap, closure_operation},
         region::{ClosureRegion, ClosureRegionMap, find_regions},
     },

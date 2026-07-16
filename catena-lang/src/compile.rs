@@ -6,7 +6,7 @@ use thiserror::Error;
 
 use crate::{
     check::{CheckError, partial_definition_types},
-    closure2::ConversionError,
+    closure::ConversionError,
     codegen::CodegenError,
     elaborate::ElaborateError,
     pass::{
@@ -101,7 +101,7 @@ fn compile_into(report: &mut CompileReport) -> Result<(), CompileError> {
     // Compute out closures by bending wires
     let forgotten_closures = crate::pass::forget_closures::run(&theory_set, &definition_types)?;
 
-    let closure_conversion = crate::closure2::run(&theory_set, &forgotten_closures)?;
+    let closure_conversion = crate::closure::run(&theory_set, &forgotten_closures)?;
     report.closure_conversion = Some(closure_conversion);
 
     let converted_terms = &report

@@ -7,7 +7,7 @@ use open_hypergraphs::lax::{NodeId, OpenHypergraph};
 use open_hypergraphs_dot::{Options, svg::to_svg_with};
 
 use crate::{
-    closure2::{Conversion, definition::closure_operation, region::ClosureRegion},
+    closure::{Conversion, definition::closure_operation, region::ClosureRegion},
     pass::forget_closures::{ClosureForgotten, ClosureForgottenTerm},
     report::CompileReport,
 };

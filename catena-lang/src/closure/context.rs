@@ -1,4 +1,4 @@
-//! Remove generated context projections from the runtime closure representation.
+//! Erase generated context projections from the runtime closure representation.
 
 use std::collections::BTreeMap;
 

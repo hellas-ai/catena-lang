@@ -7,7 +7,9 @@ use metacat::{
     check::eval_type,
     dual::Dual,
     spiders::WithSpiders,
-    theory::{Term, Theory, TheoryArrow, TheorySet, ast::RawTheoryArrow, model::SignatureError},
+    theory::{
+        Term, Theory, TheoryArrow, TheoryId, TheorySet, ast::RawTheoryArrow, model::SignatureError,
+    },
     tree::Tree,
 };
 use open_hypergraphs::lax::{EdgeId, Hyperedge, NodeId};
@@ -135,58 +137,18 @@ pub fn run(
                     .insert(definition_name.clone(), unwrap_operations(term.clone())?);
                 continue;
             }
-            let mut rewritten = term.clone();
+            let rewritten = replace_definition_regions(
+                theory_id,
+                definition_name,
+                arrows,
+                term,
+                definition_regions,
+                closure_contexts,
+            )?;
 
-            for original_region in definition_regions {
-                let closure_operation = closure_operation(definition_name, original_region.closure);
-                let original_context_leaves = closure_contexts
-                    .get(theory_id)
-                    .and_then(|contexts| contexts.get(&closure_operation))
-                    .ok_or_else(|| ReplaceClosuresError::MissingClosureContext {
-                        operation: closure_operation.to_string(),
-                    })?;
-                let current_regions = find_regions(&rewritten).map_err(|_| {
-                    ReplaceClosuresError::RegionCountChanged {
-                        theory: theory_id.to_string(),
-                        definition: definition_name.to_string(),
-                    }
-                })?;
-                let Some(current_region) = current_regions.first() else {
-                    return Err(ReplaceClosuresError::RegionCountChanged {
-                        theory: theory_id.to_string(),
-                        definition: definition_name.to_string(),
-                    });
-                };
-                let replacement = replacement_term(
-                    definition_name,
-                    arrows,
-                    &rewritten,
-                    current_region,
-                    original_region,
-                    original_context_leaves,
-                )?;
-                rewritten = rewrite_one(&rewritten, current_region, &replacement)?;
-            }
-
-            if !find_regions(&rewritten)
-                .map_err(|_| ReplaceClosuresError::RemainingClosureMarker)?
-                .is_empty()
-            {
-                return Err(ReplaceClosuresError::RegionCountChanged {
-                    theory: theory_id.to_string(),
-                    definition: definition_name.to_string(),
-                });
-            }
-
-            let mut rewritten = unwrap_operations(rewritten)?;
-            rewrite_converted_primitives(&mut rewritten);
-            rewritten
-                .quotient()
-                .map_err(|error| ReplaceClosuresError::Quotient {
-                    theory: theory_id.to_string(),
-                    definition: definition_name.to_string(),
-                    error: format!("{error:?}"),
-                })?;
+            // Context projections are temporary graph operations introduced by
+            // replacement. Declare them so the rewritten theory can be checked;
+            // the final closure-conversion step erases them from runtime code.
             let Theory::Theory { arrows, .. } = output
                 .theories
                 .get_mut(theory_id)
@@ -219,36 +181,122 @@ pub fn run(
     })
 }
 
-fn replacement_term(
+/// Replace every region in one definition, then turn the marker-bearing graph
+/// back into an ordinary annotated definition.
+fn replace_definition_regions(
+    theory_id: &TheoryId,
     definition_name: &Operation,
     arrows: &BTreeMap<Operation, TheoryArrow>,
-    term: &ClosureForgottenTerm,
+    definition: &ClosureForgottenTerm,
+    original_regions: &[ClosureRegion],
+    closure_contexts: &ClosureContextMap,
+) -> Result<AnnotatedTerm, ReplaceClosuresError> {
+    let mut rewritten = definition.clone();
+
+    // Splicing changes node and edge identifiers. Rediscover the first
+    // remaining region before every rewrite, but use `original_region` to keep
+    // the stable generated closure name and context mapping.
+    for original_region in original_regions {
+        let generated_closure = closure_operation(definition_name, original_region.closure);
+        let original_context_leaves = closure_contexts
+            .get(theory_id)
+            .and_then(|contexts| contexts.get(&generated_closure))
+            .ok_or_else(|| ReplaceClosuresError::MissingClosureContext {
+                operation: generated_closure.to_string(),
+            })?;
+        let current_region = first_remaining_region(theory_id, definition_name, &rewritten)?;
+        let replacement = build_closure_value(
+            definition_name,
+            arrows,
+            &rewritten,
+            &current_region,
+            original_region,
+            original_context_leaves,
+        )?;
+        rewritten = splice_region(&rewritten, &current_region, &replacement)?;
+    }
+
+    if !find_regions(&rewritten)
+        .map_err(|_| ReplaceClosuresError::RemainingClosureMarker)?
+        .is_empty()
+    {
+        return Err(region_count_changed(theory_id, definition_name));
+    }
+
+    let mut rewritten = unwrap_operations(rewritten)?;
+    rewrite_converted_primitives(&mut rewritten);
+    rewritten
+        .quotient()
+        .map_err(|error| ReplaceClosuresError::Quotient {
+            theory: theory_id.to_string(),
+            definition: definition_name.to_string(),
+            error: format!("{error:?}"),
+        })?;
+    Ok(rewritten)
+}
+
+fn first_remaining_region(
+    theory_id: &TheoryId,
+    definition_name: &Operation,
+    definition: &ClosureForgottenTerm,
+) -> Result<ClosureRegion, ReplaceClosuresError> {
+    find_regions(definition)
+        .ok()
+        .and_then(|regions| regions.into_iter().next())
+        .ok_or_else(|| region_count_changed(theory_id, definition_name))
+}
+
+fn region_count_changed(theory_id: &TheoryId, definition_name: &Operation) -> ReplaceClosuresError {
+    ReplaceClosuresError::RegionCountChanged {
+        theory: theory_id.to_string(),
+        definition: definition_name.to_string(),
+    }
+}
+
+/// Build the value which replaces one opaque closure node.
+///
+/// Before replacement, the marker delimits the body and produces one opaque
+/// closure value `C`:
+///
+/// ```text
+/// captures ────────> [ closure body ]
+/// A ───────────────> [              ] ──> B
+/// A, B ────────────> !closure ──────────> C
+/// ```
+///
+/// The body has already been cut out as `closure.*`. This function constructs
+/// the two values which replace `C`:
+///
+/// ```text
+/// captures ─> context.closure.* ─> copies ─> pack ─> Environment
+///                         `──────> context ─> name.closure.* ─> FnPointer
+/// ```
+///
+/// The context operation temporarily exposes both linear capture copies and
+/// the original type-level context required by `name.closure.*`. It is erased
+/// at the end of closure conversion.
+fn build_closure_value(
+    definition_name: &Operation,
+    arrows: &BTreeMap<Operation, TheoryArrow>,
+    definition: &ClosureForgottenTerm,
     region: &ClosureRegion,
     original_region: &ClosureRegion,
     original_context_leaves: &[usize],
 ) -> Result<ClosureForgottenTerm, ReplaceClosuresError> {
-    let name_operation = name_operation(definition_name, original_region.closure);
-    let name_arrow =
-        arrows
-            .get(&name_operation)
-            .ok_or_else(|| ReplaceClosuresError::MissingNameOperation {
-                operation: name_operation.to_string(),
-            })?;
-    let name_source_types = interface_types(&name_arrow.type_maps.0)?;
-    let name_target_types = interface_types(&name_arrow.type_maps.1)?;
-    let [name_target_type] = name_target_types.as_slice() else {
-        return Err(ReplaceClosuresError::InvalidNameTargets {
-            operation: name_operation.to_string(),
-            targets: name_target_types.len(),
-        });
-    };
+    let generated_name = generated_name_boundary(
+        definition_name,
+        arrows,
+        original_region.closure,
+        original_context_leaves,
+    )?;
 
     let mut replacement = ClosureForgottenTerm::empty();
-    let sources = region
+    let capture_sources = region
         .environment
         .iter()
         .map(|node| {
-            term.hypergraph
+            definition
+                .hypergraph
                 .nodes
                 .get(node.0)
                 .cloned()
@@ -257,55 +305,205 @@ fn replacement_term(
         })
         .collect::<Result<Vec<_>, _>>()?;
 
-    let environment_components = sources
+    let projected = add_context_projection(
+        &mut replacement,
+        definition_name,
+        original_region.closure,
+        &capture_sources,
+        &generated_name.source_types,
+    );
+    let environment = pack_environment(&mut replacement, projected.environment_components);
+    let function_pointer =
+        add_generated_name(&mut replacement, generated_name, projected.name_sources);
+
+    replacement.sources = capture_sources;
+    replacement.targets = vec![environment, function_pointer];
+    Ok(replacement)
+}
+
+struct GeneratedNameBoundary {
+    operation: Operation,
+    source_types: Vec<Obj>,
+    target_type: Obj,
+}
+
+/// Read the generated declaration and translate its compact context leaves back
+/// to the context of the original definition.
+fn generated_name_boundary(
+    definition_name: &Operation,
+    arrows: &BTreeMap<Operation, TheoryArrow>,
+    original_closure: NodeId,
+    original_context_leaves: &[usize],
+) -> Result<GeneratedNameBoundary, ReplaceClosuresError> {
+    let operation = name_operation(definition_name, original_closure);
+    let arrow =
+        arrows
+            .get(&operation)
+            .ok_or_else(|| ReplaceClosuresError::MissingNameOperation {
+                operation: operation.to_string(),
+            })?;
+    let source_types = interface_types(&arrow.type_maps.0)?
+        .iter()
+        .map(|object| instantiate_context(object, original_context_leaves))
+        .collect::<Result<_, _>>()?;
+    let target_types = interface_types(&arrow.type_maps.1)?;
+    let [target_type] = target_types.as_slice() else {
+        return Err(ReplaceClosuresError::InvalidNameTargets {
+            operation: operation.to_string(),
+            targets: target_types.len(),
+        });
+    };
+
+    Ok(GeneratedNameBoundary {
+        operation,
+        source_types,
+        target_type: instantiate_context(target_type, original_context_leaves)?,
+    })
+}
+
+struct ProjectedInputs {
+    environment_components: Vec<NodeId>,
+    name_sources: Vec<NodeId>,
+}
+
+/// Add the temporary context projection which makes fresh linear copies of the
+/// captures and exposes the static inputs of `name.closure.*`.
+fn add_context_projection(
+    replacement: &mut ClosureForgottenTerm,
+    definition_name: &Operation,
+    original_closure: NodeId,
+    capture_sources: &[NodeId],
+    name_source_types: &[Obj],
+) -> ProjectedInputs {
+    let environment_components = capture_sources
         .iter()
         .map(|source| replacement.new_node(replacement.hypergraph.nodes[source.0].clone()))
         .collect::<Vec<_>>();
     let name_sources = name_source_types
         .iter()
-        .map(|object| {
-            instantiate_context(object, original_context_leaves)
-                .map(|object| replacement.new_node(object))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    let mut context_targets = environment_components.clone();
-    context_targets.extend(name_sources.iter().copied());
+        .map(|object| replacement.new_node(object.clone()))
+        .collect::<Vec<_>>();
+    let targets = environment_components
+        .iter()
+        .chain(&name_sources)
+        .copied()
+        .collect::<Vec<_>>();
     replacement.new_edge(
-        ClosureForgotten::Operation(context_operation(definition_name, original_region.closure)),
-        (sources.clone(), context_targets),
+        ClosureForgotten::Operation(context_operation(definition_name, original_closure)),
+        (capture_sources.to_vec(), targets),
     );
+    ProjectedInputs {
+        environment_components,
+        name_sources,
+    }
+}
 
-    let environment_types = environment_components
+fn pack_environment(replacement: &mut ClosureForgottenTerm, components: Vec<NodeId>) -> NodeId {
+    let component_types = components
         .iter()
         .map(|node| replacement.hypergraph.nodes[node.0].clone())
         .collect();
-    let packer = to_packer(environment_types).map_edges(ClosureForgotten::Operation);
+    let packer = to_packer(component_types).map_edges(ClosureForgotten::Operation);
     let (packer_sources, packer_targets) = replacement.append(packer);
-    for (component, packer_source) in environment_components.into_iter().zip(packer_sources) {
+    for (component, packer_source) in components.into_iter().zip(packer_sources) {
         replacement.unify(component, packer_source);
     }
     let [environment] = packer_targets.as_slice() else {
         unreachable!("environment packer should have one target")
     };
-
-    let function_pointer = replacement.new_node(instantiate_context(
-        name_target_type,
-        original_context_leaves,
-    )?);
-    replacement.new_edge(
-        ClosureForgotten::Operation(name_operation),
-        (name_sources, vec![function_pointer]),
-    );
-    replacement.sources = sources;
-    replacement.targets = vec![*environment, function_pointer];
-    Ok(replacement)
+    *environment
 }
 
-fn rewrite_one(
+fn add_generated_name(
+    replacement: &mut ClosureForgottenTerm,
+    generated_name: GeneratedNameBoundary,
+    sources: Vec<NodeId>,
+) -> NodeId {
+    let function_pointer = replacement.new_node(generated_name.target_type);
+    replacement.new_edge(
+        ClosureForgotten::Operation(generated_name.operation),
+        (sources, vec![function_pointer]),
+    );
+    function_pointer
+}
+
+/// Splice `(Environment, FnPointer)` in place of the closure node.
+///
+/// Every old incidence of the single closure node expands in order:
+///
+/// ```text
+/// ... C ...    becomes    ... Environment, FnPointer ...
+/// ```
+///
+/// This is why retained edge boundaries are rebuilt after deleting the region:
+/// a normal node remap maps one node to one node, while closure replacement maps
+/// one node to two nodes and therefore changes consumer arity.
+fn splice_region(
     definition: &ClosureForgottenTerm,
     region: &ClosureRegion,
     replacement: &ClosureForgottenTerm,
 ) -> Result<ClosureForgottenTerm, ReplaceClosuresError> {
+    let deletion = plan_region_deletion(definition, region)?;
+
+    // First remove the old body, marker, and opaque closure node. Environment
+    // nodes survive because they become the inputs of the replacement graph.
+    let mut rewritten = definition.clone();
+    rewritten.delete_edges(&deletion.edges);
+    let node_map = rewritten.hypergraph.delete_nodes_witness(&deletion.nodes);
+    rewritten.sources = expand_closure_node(&node_map, &definition.sources, region.closure, &[])?;
+
+    // Append the small graph built by `build_closure_value` and identify its
+    // capture inputs with the retained environment nodes of the outer graph.
+    let retained_environment = region
+        .environment
+        .iter()
+        .map(|node| remap_node(&node_map, *node))
+        .collect::<Result<Vec<_>, _>>()?;
+    let (replacement_sources, replacement_targets) = rewritten.append(replacement.clone());
+    for (outer, inner) in retained_environment.into_iter().zip(replacement_sources) {
+        rewritten.unify(outer, inner);
+    }
+
+    // Deleting nodes gives a one-to-one node map. Rebuild retained boundaries
+    // explicitly so an occurrence of the old closure node can instead expand
+    // to both replacement outputs `(Environment, FnPointer)`.
+    for (new_edge, old_edge) in deletion.retained_edges.iter().enumerate() {
+        let old = &definition.hypergraph.adjacency[old_edge.0];
+        rewritten.hypergraph.adjacency[new_edge] = Hyperedge {
+            sources: expand_closure_node(
+                &node_map,
+                &old.sources,
+                region.closure,
+                &replacement_targets,
+            )?,
+            targets: expand_closure_node(
+                &node_map,
+                &old.targets,
+                region.closure,
+                &replacement_targets,
+            )?,
+        };
+    }
+    rewritten.targets = expand_closure_node(
+        &node_map,
+        &definition.targets,
+        region.closure,
+        &replacement_targets,
+    )?;
+    Ok(rewritten)
+}
+
+struct RegionDeletion {
+    nodes: Vec<NodeId>,
+    edges: Vec<EdgeId>,
+    retained_edges: Vec<EdgeId>,
+}
+
+/// Compute everything removed by a splice before mutating node and edge IDs.
+fn plan_region_deletion(
+    definition: &ClosureForgottenTerm,
+    region: &ClosureRegion,
+) -> Result<RegionDeletion, ReplaceClosuresError> {
     for edge in region.edges.iter().chain([&region.marker]) {
         if edge.0 >= definition.hypergraph.edges.len() {
             return Err(ReplaceClosuresError::EdgeOutOfBounds { edge: edge.0 });
@@ -333,12 +531,17 @@ fn rewrite_one(
     deleted_nodes.dedup();
     let deleted_node_set = deleted_nodes
         .iter()
+        // The closure node is deliberately excluded: its incident consumer
+        // edges survive and are expanded to consume `(Environment, FnPointer)`.
         .filter(|node| **node != region.closure)
         .map(|node| node.0)
         .collect::<BTreeSet<_>>();
 
     let mut deleted_edges = region.edges.clone();
     deleted_edges.push(region.marker);
+    // Also remove any edge outside the control-flow slice which touches a body
+    // node being deleted. Such an edge cannot remain well-formed after the
+    // splice. Other closure markers are handled by later iterations.
     for (index, boundary) in definition.hypergraph.adjacency.iter().enumerate() {
         if matches!(
             definition.hypergraph.edges[index],
@@ -366,47 +569,23 @@ fn rewrite_one(
         .map(EdgeId)
         .collect::<Vec<_>>();
 
-    let mut rewritten = definition.clone();
-    rewritten.delete_edges(&deleted_edges);
-    let node_map = rewritten.hypergraph.delete_nodes_witness(&deleted_nodes);
-    rewritten.sources = remap_nodes(&node_map, &definition.sources, region.closure, &[])?;
-
-    let replacement_sources = region
-        .environment
-        .iter()
-        .map(|node| remap_node(&node_map, *node))
-        .collect::<Result<Vec<_>, _>>()?;
-    let (appended_sources, appended_targets) = rewritten.append(replacement.clone());
-    for (outer, inner) in replacement_sources.into_iter().zip(appended_sources) {
-        rewritten.unify(outer, inner);
-    }
-
-    for (new_edge, old_edge) in retained_edges.iter().enumerate() {
-        let old = &definition.hypergraph.adjacency[old_edge.0];
-        rewritten.hypergraph.adjacency[new_edge] = Hyperedge {
-            sources: remap_nodes(&node_map, &old.sources, region.closure, &appended_targets)?,
-            targets: remap_nodes(&node_map, &old.targets, region.closure, &appended_targets)?,
-        };
-    }
-    rewritten.targets = remap_nodes(
-        &node_map,
-        &definition.targets,
-        region.closure,
-        &appended_targets,
-    )?;
-    Ok(rewritten)
+    Ok(RegionDeletion {
+        nodes: deleted_nodes,
+        edges: deleted_edges,
+        retained_edges,
+    })
 }
 
-fn remap_nodes(
+fn expand_closure_node(
     node_map: &[Option<usize>],
     nodes: &[NodeId],
-    replaced: NodeId,
-    replacement: &[NodeId],
+    closure: NodeId,
+    closure_value: &[NodeId],
 ) -> Result<Vec<NodeId>, ReplaceClosuresError> {
     let mut output = Vec::new();
     for &node in nodes {
-        if node == replaced {
-            output.extend_from_slice(replacement);
+        if node == closure {
+            output.extend_from_slice(closure_value);
         } else {
             output.push(remap_node(node_map, node)?);
         }
@@ -437,6 +616,16 @@ fn unwrap_operations(term: ClosureForgottenTerm) -> Result<AnnotatedTerm, Replac
 }
 
 fn rewrite_converted_primitives(term: &mut AnnotatedTerm) {
+    // Splicing expands each closure input:
+    //
+    //     primitive(..., Closure, ...)
+    //
+    // becomes
+    //
+    //     primitivec(..., Environment, FnPointer, ...)
+    //
+    // The graph boundary already has the expanded arity; select the matching
+    // runtime primitive after all regions have been replaced.
     for operation in &mut term.hypergraph.edges {
         if let Some((_, converted)) = CONVERTED_PRIMITIVES
             .iter()

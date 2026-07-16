@@ -69,6 +69,25 @@ pub fn run(
 }
 
 /// Find every closure region in marker-edge order.
+///
+/// For each marker with sources `(domain, codomain)`, region discovery proceeds
+/// as follows:
+///
+/// 1. Walk forward from `domain`, without crossing any closure marker, and mark
+///    every reachable edge.
+/// 2. Walk backward from `codomain`, again without crossing markers, and mark
+///    every edge from which the codomain is reachable.
+/// 3. Intersect those two edge sets. An edge is in the control-flow body exactly
+///    when it lies on a directed path from the closure domain to its codomain.
+/// 4. Add `name.*` producers used by included `eval` edges. These are static
+///    dependencies of the body rather than captured runtime values.
+/// 5. Treat inputs of included edges that have no producer inside the body as
+///    environment values. If forgetting `defer` removed the entire control
+///    path, the unproduced codomain itself is the captured value.
+///
+/// The resulting region contains the intersected body, its static named
+/// dependencies, and the environment boundary; the marker edge is only the
+/// delimiter and is not part of the body.
 pub fn find_regions(term: &ClosureForgottenTerm) -> Result<Vec<ClosureRegion>, FindRegionError> {
     let connectivity = Connectivity::new(term);
     term.hypergraph

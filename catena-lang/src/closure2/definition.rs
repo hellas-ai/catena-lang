@@ -653,4 +653,40 @@ mod tests {
 
         assert_eq!(context.original_leaf_by_compact_leaf, vec![4]);
     }
+
+    #[test]
+    fn target_only_dependency_uses_one_shared_type_map_domain() {
+        let object = |name: &str, children: Vec<Obj>| {
+            Tree::Node(
+                name.parse().expect("test operation should parse"),
+                0,
+                children,
+            )
+        };
+        let mut body = AnnotatedTerm::empty();
+        let source = body.new_node(object("val", vec![object("u64", vec![])]));
+        let target = body.new_node(object("val", vec![object("ix", vec![Tree::Leaf(4, ())])]));
+        body.sources = vec![source];
+        body.targets = vec![target];
+
+        let context = ClosureContext::from_term(&body);
+        assert_eq!(context.original_leaf_by_compact_leaf, vec![4]);
+        let body = context.relabel_term(body);
+        let maps = type_maps_for_term(&body, context.arity());
+
+        let raw = metacat::theory::RawTheorySet::from_texts(crate::stdlib::sources())
+            .expect("standard library should parse");
+        let elaborated =
+            crate::elaborate::elaborate(raw).expect("standard library should elaborate");
+        let theory_set = TheorySet::from_raw(elaborated).expect("standard library should load");
+        let program = TheoryId("program".parse().unwrap());
+        let Theory::Theory { syntax, .. } = &theory_set.theories[&program] else {
+            panic!("program should be a user theory");
+        };
+        let syntax = &theory_set.theories[syntax];
+        let (source_map, target_map) = interpret_type_maps(syntax, &maps).unwrap();
+
+        assert_eq!(source_map.sources, target_map.sources);
+        assert_eq!(source_map.sources.len(), 1);
+    }
 }

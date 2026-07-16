@@ -46,7 +46,7 @@ fn operation_count(
 }
 
 #[test]
-fn ported_identity_has_no_closure_work_to_do() {
+fn identity_has_no_closure_work_to_do() {
     let conversion = conversion(
         r#"
         (def program closure2-test-id : (bool val) -> (bool val) = [x])
@@ -71,7 +71,7 @@ fn ported_identity_has_no_closure_work_to_do() {
 }
 
 #[test]
-fn ported_named_if_generates_two_closures_and_ifc() {
+fn named_if_generates_two_closures_and_ifc() {
     let conversion = conversion(
         r#"
         (def program closure2-test-named-if :
@@ -114,7 +114,7 @@ fn ported_named_if_generates_two_closures_and_ifc() {
 }
 
 #[test]
-fn ported_deferred_values_become_runtime_environments() {
+fn deferred_values_become_runtime_environments() {
     let conversion = conversion(
         r#"
         (def program closure2-test-captured-if :
@@ -139,7 +139,7 @@ fn ported_deferred_values_become_runtime_environments() {
 }
 
 #[test]
-fn ported_product_capture_stays_one_packed_environment() {
+fn product_capture_stays_one_packed_environment() {
     let conversion = conversion(
         r#"
         (def program closure2-test-product-capture :
@@ -184,7 +184,7 @@ fn ported_product_capture_stays_one_packed_environment() {
 }
 
 #[test]
-fn ported_indexed_defer_supplies_ambient_context() {
+fn indexed_defer_supplies_ambient_context() {
     let conversion = conversion(
         r#"
         (def program closure2-test-indexed-if :
@@ -215,7 +215,7 @@ fn ported_indexed_defer_supplies_ambient_context() {
 }
 
 #[test]
-fn ported_reduce_converts_both_closure_arguments() {
+fn reduce_converts_both_closure_arguments() {
     let conversion = conversion(
         r#"
         (def program closure2-test-one-at :
@@ -244,7 +244,7 @@ fn ported_reduce_converts_both_closure_arguments() {
 }
 
 #[test]
-fn ported_mixed_runtime_and_free_context_name_boundary() {
+fn mixed_runtime_and_free_context_name_boundary() {
     let conversion = conversion(
         r#"
         (def program closure2-test-u64-id-for-n :
@@ -280,7 +280,7 @@ fn ported_mixed_runtime_and_free_context_name_boundary() {
 }
 
 #[test]
-fn ported_parallel_composed_regions_rewrite_without_stale_ids() {
+fn parallel_composed_regions_rewrite_without_stale_ids() {
     let conversion = conversion(
         r#"
         (def program closure2-test-parallel-regions :
@@ -313,7 +313,7 @@ fn ported_parallel_composed_regions_rewrite_without_stale_ids() {
 }
 
 #[test]
-fn ported_context_dependent_reduce_closures_share_ambient_length() {
+fn context_dependent_reduce_closures_share_ambient_length() {
     let conversion = conversion(
         r#"
         (def program closure2-test-diagonal-view :

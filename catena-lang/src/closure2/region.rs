@@ -119,21 +119,14 @@ fn find_region(
 
     let forward = reachable_forward(term, connectivity, *domain);
     let backward = reachable_backward(term, connectivity, *codomain);
+    let discarded = reachable_backward_from_forward_sinks(term, connectivity, &forward);
     let mut included_edges = forward
         .iter()
-        .zip(&backward)
-        .map(|(from_domain, to_codomain)| *from_domain && *to_codomain)
+        .zip(backward.iter().zip(discarded))
+        .map(|(from_domain, (to_codomain, to_discard))| {
+            *from_domain && (*to_codomain || to_discard)
+        })
         .collect::<Vec<_>>();
-
-    // A closure may ignore its argument. Such a discard is reachable from the
-    // domain but, because it has no targets, cannot lie on a domain-to-codomain
-    // path. It still belongs to the closure body and must not look like an
-    // escaping use during replacement.
-    for (edge, reachable) in forward.into_iter().enumerate() {
-        if reachable && term.hypergraph.adjacency[edge].targets.is_empty() {
-            included_edges[edge] = true;
-        }
-    }
 
     include_named_dependencies(term, connectivity, &mut included_edges);
 
@@ -195,6 +188,59 @@ fn reachable_backward(
     let mut reached_edges = vec![false; term.hypergraph.edges.len()];
     let mut pending = VecDeque::from([end]);
     reached_nodes[end.0] = true;
+
+    while let Some(node) = pending.pop_front() {
+        for &edge in &connectivity.producers_by_node[node.0] {
+            if is_marker(term, edge) || reached_edges[edge.0] {
+                continue;
+            }
+            reached_edges[edge.0] = true;
+            for &source in &term.hypergraph.adjacency[edge.0].sources {
+                if !reached_nodes[source.0] {
+                    reached_nodes[source.0] = true;
+                    pending.push_back(source);
+                }
+            }
+        }
+    }
+
+    reached_edges
+}
+
+/// Mark forward-reachable branches which terminate without producing a value.
+///
+/// A closure may ignore all or part of its argument, for example:
+///
+/// ```text
+/// domain ─> *.elim ─┬─> unit.elim
+///                    `─> unit.elim
+/// ```
+///
+/// These edges cannot reach the codomain, but they remain part of the closure
+/// body. Start at reachable sink edges and walk backwards to recover the whole
+/// discarded branch; the caller intersects the result with forward reachability
+/// from the closure domain.
+fn reachable_backward_from_forward_sinks(
+    term: &ClosureForgottenTerm,
+    connectivity: &Connectivity,
+    forward: &[bool],
+) -> Vec<bool> {
+    let mut reached_nodes = vec![false; term.hypergraph.nodes.len()];
+    let mut reached_edges = vec![false; term.hypergraph.edges.len()];
+    let mut pending = VecDeque::new();
+
+    for (index, reachable) in forward.iter().copied().enumerate() {
+        if !reachable || !term.hypergraph.adjacency[index].targets.is_empty() {
+            continue;
+        }
+        reached_edges[index] = true;
+        for &source in &term.hypergraph.adjacency[index].sources {
+            if !reached_nodes[source.0] {
+                reached_nodes[source.0] = true;
+                pending.push_back(source);
+            }
+        }
+    }
 
     while let Some(node) = pending.pop_front() {
         for &edge in &connectivity.producers_by_node[node.0] {

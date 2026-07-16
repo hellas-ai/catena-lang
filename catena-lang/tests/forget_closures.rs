@@ -252,6 +252,12 @@ fn closure2_matmul_examples_inline_closure_only_helpers() -> anyhow::Result<()> 
                 .any(|assignment| assignment.op.as_str() == "materializec"),
             "`{outer}` should build its output buffer with materializec"
         );
+        for dialect in [GpuDialect::Hip, GpuDialect::Cuda] {
+            let rendered = render_module(module, dialect)?;
+            anyhow::ensure!(rendered.contains("MallocManaged"));
+            anyhow::ensure!(rendered.contains("DeviceSynchronize"));
+            anyhow::ensure!(rendered.contains("out[i] = value"));
+        }
     }
 
     Ok(())
@@ -287,7 +293,13 @@ fn closure2_finds_named_and_captured_regions() -> anyhow::Result<()> {
     anyhow::ensure!(captured_regions.len() == 2);
     for region in captured_regions {
         anyhow::ensure!(region.environment == vec![region.codomain]);
-        anyhow::ensure!(region.edges.is_empty());
+        let [edge] = region.edges.as_slice() else {
+            anyhow::bail!("captured closure should contain one unit discard");
+        };
+        anyhow::ensure!(matches!(
+            &captured.hypergraph.edges[edge.0],
+            ClosureForgotten::Operation(operation) if operation.as_str() == "unit.elim"
+        ));
     }
 
     Ok(())

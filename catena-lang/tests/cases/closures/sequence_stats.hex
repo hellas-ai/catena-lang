@@ -1,0 +1,70 @@
+# moments-at((base, step), i) = (value, value*value), where
+# value = base + step*i.
+(def program progression-moments-at :
+  ([n.] {
+    ({(u64 val) (u64 val)} *)
+    ([.n] ix val)
+  })
+  ->
+  ([n.] ({(u64 val) (u64 val)} *))
+= ([parameters i.]
+  ([.parameters] *.elim [base step.])
+  ([.i] ix.to-u64 [i-u64.])
+  {[.step i-u64]} u64.mul [offset.]
+  {[.base offset]} u64.add [value.]
+  {
+    [.value]
+    ({[.value value]} u64.mul)
+  }
+  *.intro
+))
+
+# Add two (sum, sum-of-squares) pairs component-wise.
+(def program progression-moments-add :
+  ({
+    ({(u64 val) (u64 val)} *)
+    ({(u64 val) (u64 val)} *)
+  } *)
+  ->
+  ({(u64 val) (u64 val)} *)
+= ([pairs.]
+  ([.pairs] *.elim [lhs rhs.])
+  ([.lhs] *.elim [lhs-sum lhs-squares.])
+  ([.rhs] *.elim [rhs-sum rhs-squares.])
+  {
+    ({[.lhs-sum rhs-sum]} u64.add)
+    ({[.lhs-squares rhs-squares]} u64.add)
+  }
+  *.intro
+))
+
+# Compute (sum, sum-of-squares) for the arithmetic progression in one fold.
+(def program progression-moments :
+  ([n.] {
+    ({[.n] u64} :)
+    (u64 val)
+    (u64 val)
+  })
+  ->
+  ([n.] ({(u64 val) (u64 val)} *))
+= ([len base step.]
+  ([.len] :.ty [reduce-len producer-len.]
+    ({[.base] [.step]} *.intro [parameters.])
+    {
+      ({const.u64.0x0000000000000000 const.u64.0x0000000000000000} *.intro)
+      (name.progression-moments-add lift)
+      ({
+        ({
+          ([.producer-len] name.progression-index-with-unit lift)
+          ({
+            ([.parameters] defer)
+            ([.producer-len] name.progression-index-id lift)
+          } tensor)
+        } compose)
+        ([.producer-len] name.progression-moments-at lift)
+      } compose)
+      [.reduce-len]
+    }
+    reduce
+  )
+))

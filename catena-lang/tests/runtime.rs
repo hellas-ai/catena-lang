@@ -1050,5 +1050,5 @@ mod reducec;
 #[path = "cases/reduce.rs"]
 mod reduce;
 
-#[path = "cases/closure.rs"]
-mod closure;
+#[path = "cases/closures.rs"]
+mod closures;

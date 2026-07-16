@@ -25,6 +25,9 @@ mod context;
 /// Replace regions with explicit environments, function pointers, and context operations.
 pub mod replace;
 
+#[cfg(test)]
+mod tests;
+
 /// Complete output of closure conversion, including its debugging snapshots.
 #[derive(Debug, Clone)]
 pub struct Conversion {

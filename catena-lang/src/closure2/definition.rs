@@ -25,13 +25,16 @@ use crate::{
 
 type Obj = Tree<(), Operation>;
 
+/// Compact generated-context leaves mapped back to leaves of the original
+/// definition, keyed by generated `closure.*` operation.
+pub type ClosureContextMap = BTreeMap<TheoryId, BTreeMap<Operation, Vec<usize>>>;
+
 /// Generated declarations together with their still-annotated closure bodies.
 #[derive(Debug, Clone)]
 pub struct DefinedClosures {
     pub generated_theory: TheorySet,
     pub generated_functions: TheoryTermMap,
-    /// Complete typed definition map ready for region replacement.
-    pub definitions: TheoryTermMap<ClosureForgotten<Operation>>,
+    pub closure_contexts: ClosureContextMap,
 }
 
 #[derive(Debug, Error)]
@@ -93,8 +96,9 @@ pub fn run(
     forgotten: &TheoryTermMap<ClosureForgotten<Operation>>,
     regions: &ClosureRegionMap,
 ) -> Result<DefinedClosures, DefineClosuresError> {
-    let mut output = theory_set.clone();
-    let mut bodies = BTreeMap::new();
+    let mut generated_theory = theory_set.clone();
+    let mut generated_functions = BTreeMap::new();
+    let mut closure_contexts = BTreeMap::new();
 
     for (theory_id, definitions) in regions {
         let original_theory = theory_set
@@ -112,8 +116,9 @@ pub fn run(
             .get(theory_id)
             .ok_or_else(|| DefineClosuresError::MissingTheory(theory_id.to_string()))?;
 
-        let mut generated = BTreeMap::new();
+        let mut generated_arrows = BTreeMap::new();
         let mut generated_bodies = BTreeMap::new();
+        let mut generated_contexts = BTreeMap::new();
         for (definition_name, definition_regions) in definitions {
             if definition_regions.is_empty() {
                 continue;
@@ -132,69 +137,102 @@ pub fn run(
             })?;
 
             for region in definition_regions {
-                let body = build_body(theory_id, definition_name, arrows, term, region)?;
-                let context = ClosureContext::from_term_boundary(&body);
-                let body = context.relabel_term(body);
-                let closure_name = closure_operation(definition_name, region.closure);
-                let raw_closure = RawTheoryArrow {
-                    name: closure_name.clone(),
-                    type_maps: type_maps_for_term(&body, context.arity()),
-                    definition: Some(term_to_hexpr(&body)),
-                };
-                let closure_type_maps = interpret_type_maps(syntax_theory, &raw_closure.type_maps)?;
-                generated.insert(
-                    closure_name.clone(),
-                    TheoryArrow {
-                        name: closure_name.clone(),
-                        raw: raw_closure.clone(),
-                        type_maps: closure_type_maps,
-                        definition: Some(body.clone().map_nodes(|_| ())),
-                    },
-                );
-                generated_bodies.insert(closure_name, body);
-
-                let raw_name = name_symbols::name_arrow(syntax_theory, &theory_id.0, &raw_closure)?;
-                let name_type_maps = interpret_type_maps(syntax_theory, &raw_name.type_maps)?;
-                generated.insert(
-                    raw_name.name.clone(),
-                    TheoryArrow {
-                        name: raw_name.name.clone(),
-                        raw: raw_name,
-                        type_maps: name_type_maps,
-                        definition: None,
-                    },
-                );
+                let generated = define_region(
+                    theory_id,
+                    definition_name,
+                    syntax_theory,
+                    arrows,
+                    term,
+                    region,
+                )?;
+                let closure_name = generated.closure.name.clone();
+                generated_contexts.insert(closure_name.clone(), generated.original_context_leaves);
+                generated_bodies.insert(closure_name.clone(), generated.body);
+                generated_arrows.insert(closure_name, generated.closure);
+                generated_arrows.insert(generated.name.name.clone(), generated.name);
             }
         }
 
-        let Theory::Theory { arrows, .. } = output
+        let Theory::Theory { arrows, .. } = generated_theory
             .theories
             .get_mut(theory_id)
             .expect("validated theory should remain present")
         else {
             unreachable!("validated user theory should remain a user theory")
         };
-        arrows.extend(generated);
+        arrows.extend(generated_arrows);
         if !generated_bodies.is_empty() {
-            bodies.insert(theory_id.clone(), generated_bodies);
-        }
-    }
-
-    let mut definitions = forgotten.clone();
-    for (theory_id, functions) in &bodies {
-        let output = definitions.entry(theory_id.clone()).or_default();
-        for (operation, body) in functions {
-            output.insert(
-                operation.clone(),
-                body.clone().map_edges(ClosureForgotten::Operation),
-            );
+            generated_functions.insert(theory_id.clone(), generated_bodies);
+            closure_contexts.insert(theory_id.clone(), generated_contexts);
         }
     }
 
     Ok(DefinedClosures {
-        generated_theory: output,
-        generated_functions: bodies,
-        definitions,
+        generated_theory,
+        generated_functions,
+        closure_contexts,
+    })
+}
+
+/// The two arrows produced for one region and the annotated body of the
+/// executable `closure.*` arrow.
+struct GeneratedClosure {
+    closure: TheoryArrow,
+    name: TheoryArrow,
+    body: AnnotatedTerm,
+    original_context_leaves: Vec<usize>,
+}
+
+/// Turn one discovered region into:
+///
+/// - `closure.<definition>.<node>`, an executable arrow whose inputs are the
+///   packed runtime environment and the original closure argument; and
+/// - `name.closure.<definition>.<node>`, the corresponding function pointer.
+fn define_region(
+    theory_id: &TheoryId,
+    definition_name: &Operation,
+    syntax_theory: &Theory,
+    arrows: &BTreeMap<Operation, TheoryArrow>,
+    term: &ClosureForgottenTerm,
+    region: &ClosureRegion,
+) -> Result<GeneratedClosure, DefineClosuresError> {
+    let body = build_body(theory_id, definition_name, arrows, term, region)?;
+
+    // Runtime captures are already represented by the body's first input.
+    // This context is different: it contains type-level variables required by
+    // any node in the generated body. Compact them so each generated definition
+    // has a minimal, locally numbered type context, while retaining the reverse
+    // mapping needed to wire `name.closure.*` at the original use site.
+    let context = ClosureContext::from_term(&body);
+    let original_context_leaves = context.original_leaf_by_compact_leaf.clone();
+    let body = context.relabel_term(body);
+
+    let closure_name = closure_operation(definition_name, region.closure);
+    let raw_closure = RawTheoryArrow {
+        name: closure_name.clone(),
+        type_maps: type_maps_for_term(&body, context.arity()),
+        definition: Some(term_to_hexpr(&body)),
+    };
+    let closure = TheoryArrow {
+        name: closure_name,
+        type_maps: interpret_type_maps(syntax_theory, &raw_closure.type_maps)?,
+        definition: Some(body.clone().map_nodes(|_| ())),
+        raw: raw_closure.clone(),
+    };
+
+    let raw_name = name_symbols::name_arrow(syntax_theory, &theory_id.0, &raw_closure)?;
+    let name = TheoryArrow {
+        name: raw_name.name.clone(),
+        type_maps: interpret_type_maps(syntax_theory, &raw_name.type_maps)?,
+        definition: None,
+        raw: raw_name,
+    };
+
+    Ok(GeneratedClosure {
+        closure,
+        name,
+        body,
+        original_context_leaves,
     })
 }
 
@@ -207,12 +245,19 @@ fn build_body(
 ) -> Result<AnnotatedTerm, DefineClosuresError> {
     let mut body = AnnotatedTerm::empty();
     let mut node_map = HashMap::new();
+
+    // A `name.f -> eval` pair is the first-order encoding of a direct call to
+    // `f`. Reconstruct that call in the generated function instead of copying
+    // the temporary name and eval operations into its body.
     let named_evals = named_evals(term, region)?;
     let skipped_edges = named_evals
         .iter()
         .flat_map(|pair| [pair.name, pair.eval])
         .collect::<HashSet<_>>();
 
+    // Region discovery retains useful control-flow nodes as well as the nodes
+    // incident to its operations. A standalone function only needs its
+    // boundary and the nodes used by operations that we copy or reconstruct.
     let mut required_nodes = HashSet::from([region.domain, region.codomain]);
     required_nodes.extend(region.environment.iter().copied());
     for pair in &named_evals {
@@ -229,6 +274,8 @@ fn build_body(
         required_nodes.extend(boundary.targets.iter().copied());
     }
 
+    // Copy the required nodes first, recording the old-to-new correspondence
+    // used by copied edges and reconstructed calls below.
     for &node in region
         .nodes
         .iter()
@@ -244,6 +291,7 @@ fn build_body(
         node_map.insert(node, body.new_node(ty));
     }
 
+    // Copy ordinary region operations. Named eval pairs are handled separately.
     for &edge in &region.edges {
         if skipped_edges.contains(&edge) {
             continue;
@@ -272,6 +320,10 @@ fn build_body(
         inline_named_eval(&mut body, &node_map, arrows, term, pair)?;
     }
 
+    // Initially expose every captured value separately. Packing them creates a
+    // single runtime environment input, including the unit object when there
+    // are no captures. The second input and sole output are the marker's domain
+    // and codomain respectively.
     body.sources = remap_nodes(&node_map, region.marker, &region.environment)?;
     let domain =
         *node_map
@@ -448,10 +500,16 @@ struct ClosureContext {
 }
 
 impl ClosureContext {
-    fn from_term_boundary(term: &AnnotatedTerm) -> Self {
+    /// Collect every type metavariable needed to check the generated body.
+    ///
+    /// Looking only at public inputs and outputs is insufficient: an operation
+    /// inside the closure may use a type metavariable which is absent from the
+    /// runtime boundary. That metavariable must still be part of the generated
+    /// `closure.*` and `name.closure.*` context.
+    fn from_term(term: &AnnotatedTerm) -> Self {
         let mut leaves = BTreeSet::new();
-        for node in term.sources.iter().chain(&term.targets) {
-            collect_leaf_indices(&term.hypergraph.nodes[node.0], &mut leaves);
+        for object in &term.hypergraph.nodes {
+            collect_leaf_indices(object, &mut leaves);
         }
         Self {
             original_leaf_by_compact_leaf: leaves.into_iter().collect(),
@@ -576,4 +634,23 @@ fn context_vars(arity: usize) -> Vec<Variable> {
                 .expect("generated variable should parse")
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn closure_context_includes_leaves_used_only_inside_body() {
+        let mut body = AnnotatedTerm::empty();
+        let source = body.new_node(Tree::Empty);
+        let target = body.new_node(Tree::Empty);
+        body.new_node(Tree::Leaf(4, ())); // Not part of the public boundary.
+        body.sources = vec![source];
+        body.targets = vec![target];
+
+        let context = ClosureContext::from_term(&body);
+
+        assert_eq!(context.original_leaf_by_compact_leaf, vec![4]);
+    }
 }

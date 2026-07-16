@@ -82,7 +82,7 @@ pub fn run(
     let definition::DefinedClosures {
         generated_theory,
         generated_functions,
-        definitions,
+        closure_contexts,
     } = definition::run(theory_set, forgotten, &regions)?;
     let generated_types = crate::check::check(&generated_theory).map_err(|error| {
         ConversionError::CheckDefinitions {
@@ -90,7 +90,13 @@ pub fn run(
             error,
         }
     })?;
-    let replacement = replace::run(&generated_theory, &definitions, &regions)?;
+    let replacement = replace::run(
+        &generated_theory,
+        forgotten,
+        &generated_functions,
+        &regions,
+        &closure_contexts,
+    )?;
     let rewritten_definitions = replacement.terms;
     let runtime_functions = context::erase(&rewritten_definitions)?;
 

@@ -16,7 +16,7 @@ use thiserror::Error;
 use crate::{
     check::AnnotatedTerm,
     closure2::{
-        definition::closure_operation,
+        definition::{ClosureContextMap, closure_operation},
         region::{ClosureRegion, ClosureRegionMap, find_regions},
     },
     hexpr::{objects_to_hexpr, term_to_hexpr},
@@ -52,6 +52,8 @@ pub enum ReplaceClosuresError {
     MissingDefinition { theory: String, definition: String },
     #[error("missing generated name operation `{operation}`")]
     MissingNameOperation { operation: String },
+    #[error("missing context mapping for generated closure `{operation}`")]
+    MissingClosureContext { operation: String },
     #[error("generated name operation `{operation}` has {targets} targets; expected one")]
     InvalidNameTargets { operation: String, targets: usize },
     #[error("closure region count changed while rewriting `{theory}.{definition}`")]
@@ -90,10 +92,15 @@ pub enum ReplaceClosuresError {
 pub fn run(
     theory_set: &TheorySet,
     forgotten: &TheoryTermMap<ClosureForgotten<Operation>>,
+    generated_functions: &TheoryTermMap,
     regions: &ClosureRegionMap,
+    closure_contexts: &ClosureContextMap,
 ) -> Result<Replacement, ReplaceClosuresError> {
     let mut output = theory_set.clone();
-    let mut terms = BTreeMap::new();
+    // Generated closure bodies are already ordinary operation graphs. Keep
+    // them separate from marker-bearing forgotten definitions and include them
+    // directly in the final definition map.
+    let mut terms = generated_functions.clone();
 
     for (theory_id, definitions) in forgotten {
         let theory = theory_set
@@ -131,6 +138,13 @@ pub fn run(
             let mut rewritten = term.clone();
 
             for original_region in definition_regions {
+                let closure_operation = closure_operation(definition_name, original_region.closure);
+                let original_context_leaves = closure_contexts
+                    .get(theory_id)
+                    .and_then(|contexts| contexts.get(&closure_operation))
+                    .ok_or_else(|| ReplaceClosuresError::MissingClosureContext {
+                        operation: closure_operation.to_string(),
+                    })?;
                 let current_regions = find_regions(&rewritten).map_err(|_| {
                     ReplaceClosuresError::RegionCountChanged {
                         theory: theory_id.to_string(),
@@ -149,6 +163,7 @@ pub fn run(
                     &rewritten,
                     current_region,
                     original_region,
+                    original_context_leaves,
                 )?;
                 rewritten = rewrite_one(&rewritten, current_region, &replacement)?;
             }
@@ -192,7 +207,10 @@ pub fn run(
             arrow.definition = Some(rewritten.clone().map_nodes(|_| ()));
             replaced_definitions.insert(definition_name.clone(), rewritten);
         }
-        terms.insert(theory_id.clone(), replaced_definitions);
+        terms
+            .entry(theory_id.clone())
+            .or_default()
+            .extend(replaced_definitions);
     }
 
     Ok(Replacement {
@@ -207,6 +225,7 @@ fn replacement_term(
     term: &ClosureForgottenTerm,
     region: &ClosureRegion,
     original_region: &ClosureRegion,
+    original_context_leaves: &[usize],
 ) -> Result<ClosureForgottenTerm, ReplaceClosuresError> {
     let name_operation = name_operation(definition_name, original_region.closure);
     let name_arrow =
@@ -223,21 +242,6 @@ fn replacement_term(
             targets: name_target_types.len(),
         });
     };
-
-    let mut original_leaves = BTreeSet::new();
-    for node in region
-        .environment
-        .iter()
-        .chain([&region.domain, &region.codomain])
-    {
-        let object = term
-            .hypergraph
-            .nodes
-            .get(node.0)
-            .ok_or(ReplaceClosuresError::NodeOutOfBounds { node: node.0 })?;
-        collect_leaf_indices(object, &mut original_leaves);
-    }
-    let original_leaves = original_leaves.into_iter().collect::<Vec<_>>();
 
     let mut replacement = ClosureForgottenTerm::empty();
     let sources = region
@@ -260,7 +264,8 @@ fn replacement_term(
     let name_sources = name_source_types
         .iter()
         .map(|object| {
-            instantiate_context(object, &original_leaves).map(|object| replacement.new_node(object))
+            instantiate_context(object, original_context_leaves)
+                .map(|object| replacement.new_node(object))
         })
         .collect::<Result<Vec<_>, _>>()?;
     let mut context_targets = environment_components.clone();
@@ -283,8 +288,10 @@ fn replacement_term(
         unreachable!("environment packer should have one target")
     };
 
-    let function_pointer =
-        replacement.new_node(instantiate_context(name_target_type, &original_leaves)?);
+    let function_pointer = replacement.new_node(instantiate_context(
+        name_target_type,
+        original_context_leaves,
+    )?);
     replacement.new_edge(
         ClosureForgotten::Operation(name_operation),
         (name_sources, vec![function_pointer]),

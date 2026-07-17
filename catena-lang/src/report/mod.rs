@@ -12,6 +12,7 @@ use metacat::{
 use std::collections::BTreeMap;
 
 use crate::check::{AnnotatedTerm, PartialDefinitionTypes};
+use crate::closure::Conversion;
 use crate::codegen::GpuModuleMap;
 use crate::pass::record_boundary_sizes::OperationWithBoundarySizes;
 
@@ -24,7 +25,7 @@ pub struct CompileReport {
     pub theory_set: Option<TheorySet>,
     pub definition_types: Option<BTreeMap<TheoryId, BTreeMap<Operation, Vec<Tree<(), Operation>>>>>,
     pub partial_definition_types: Option<PartialDefinitionTypes>,
-    pub forgotten_closures: Option<TheoryTermMap>,
+    pub closure_conversion: Option<Conversion>,
     pub boundary_sizes: Option<TheoryTermMap<OperationWithBoundarySizes<Operation>>>,
     pub unpacked_products: Option<TheoryTermMap<OperationWithBoundarySizes<Operation>>>,
     pub gpu_modules: Option<GpuModuleMap>,
@@ -38,7 +39,7 @@ impl CompileReport {
             theory_set: None,
             definition_types: None,
             partial_definition_types: None,
-            forgotten_closures: None,
+            closure_conversion: None,
             boundary_sizes: None,
             unpacked_products: None,
             gpu_modules: None,
@@ -47,7 +48,7 @@ impl CompileReport {
 }
 
 impl CompileReport {
-    pub fn dump_to_dir(&self, dir: impl AsRef<Path>) -> io::Result<()> {
+    pub fn dump_graphs_to_dir(&self, dir: impl AsRef<Path>) -> io::Result<()> {
         let dir = dir.as_ref();
         fs::create_dir_all(dir)?;
         fs::write(
@@ -56,6 +57,12 @@ impl CompileReport {
         )?;
         elaboration::dump_elaboration(self, dir)?;
         svg::dump_svgs(self, &dir.join("svgs"))?;
+        Ok(())
+    }
+
+    pub fn dump_to_dir(&self, dir: impl AsRef<Path>) -> io::Result<()> {
+        let dir = dir.as_ref();
+        self.dump_graphs_to_dir(dir)?;
         gpu::dump_gpu(self, &dir.join("gpu"))?;
         Ok(())
     }

@@ -1,0 +1,33 @@
+# Return the larger of a runtime value and a runtime floor. Both alternatives
+# are captured values, so source-level bool.if receives two unit-domain closures.
+(def program max-with-floor :
+  {(f32 val) (f32 val)}
+  ->
+  (f32 val)
+= ([value floor.]
+  ([.value floor] f32.gte [keep-value.])
+  {
+    ([.value] defer)
+    ([.floor] defer)
+    [.keep-value]
+    unit.intro
+  }
+  bool.if
+))
+
+# Order two runtime values. Both branches capture the inputs and return one
+# product object, which is flattened to two runtime outputs at bool.ifc.
+(def program ordered-pair :
+  {(f32 val) (f32 val)}
+  ->
+  ({(f32 val) (f32 val)} *)
+= ([lhs rhs.]
+  ([.lhs rhs] f32.lte [already-ordered.])
+  {
+    ({[.lhs] [.rhs]} *.intro defer)
+    ({[.rhs] [.lhs]} *.intro defer)
+    [.already-ordered]
+    unit.intro
+  }
+  bool.if
+))

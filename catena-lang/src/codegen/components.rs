@@ -1,8 +1,9 @@
 use crate::codegen::{
-    GpuAssign, GpuValue, gpu::GpuRenderError, render_utils::sanitize_ident, runtime_type,
+    GpuAssign, GpuValue, GpuVar, gpu::GpuRenderError, render_utils::sanitize_ident, runtime_type,
 };
 
 pub(in crate::codegen) type Component<'a> = &'a [GpuValue];
+pub(in crate::codegen) type OutputComponent<'a> = &'a [GpuVar];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::codegen) struct ComponentValueCountError {
@@ -28,6 +29,31 @@ pub(in crate::codegen) fn input_components<'a>(
         .map(|size| {
             let end = offset + *size;
             let component = &assignment.inputs[offset..end];
+            offset = end;
+            component
+        })
+        .collect())
+}
+
+pub(in crate::codegen) fn output_components(
+    assignment: &GpuAssign,
+) -> Result<Vec<OutputComponent<'_>>, GpuRenderError> {
+    let expected = assignment.output_sizes.iter().sum::<usize>();
+    if expected != assignment.outputs.len() {
+        return Err(GpuRenderError::InvalidFlattenedOutputCount {
+            op: assignment.op.clone(),
+            expected,
+            actual: assignment.outputs.len(),
+        });
+    }
+
+    let mut offset = 0;
+    Ok(assignment
+        .output_sizes
+        .iter()
+        .map(|size| {
+            let end = offset + *size;
+            let component = &assignment.outputs[offset..end];
             offset = end;
             component
         })
@@ -94,11 +120,15 @@ mod tests {
     }
 
     fn var(node: usize, name: &str) -> GpuValue {
-        GpuValue::Var(GpuVar {
+        GpuValue::Var(output_var(node, name))
+    }
+
+    fn output_var(node: usize, name: &str) -> GpuVar {
+        GpuVar {
             node: NodeId(node),
             name: name.to_string(),
             lowered: LoweredType::Runtime(CType::U64),
-        })
+        }
     }
 
     fn fn_symbol(name: &str) -> GpuValue {
@@ -121,6 +151,24 @@ mod tests {
         assert_eq!(components[0], [var(0, "a")]);
         assert!(components[1].is_empty());
         assert_eq!(components[2], [var(1, "b"), fn_symbol("g")]);
+    }
+
+    #[test]
+    fn output_sizes_split_flattened_outputs_into_components() {
+        let assignment = GpuAssign {
+            op: op("f"),
+            input_sizes: vec![],
+            output_sizes: vec![2, 0, 1],
+            call_symbol: None,
+            inputs: vec![],
+            outputs: vec![output_var(0, "a"), output_var(1, "b"), output_var(2, "c")],
+        };
+
+        let components = output_components(&assignment).unwrap();
+
+        assert_eq!(components[0].len(), 2);
+        assert!(components[1].is_empty());
+        assert_eq!(components[2], [output_var(2, "c")]);
     }
 
     #[test]

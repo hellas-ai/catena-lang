@@ -1,0 +1,67 @@
+# Helpers for building an indexed closure from captured progression parameters.
+(def program progression-index-id :
+  ([n.] ([.n] ix val))
+  ->
+  ([n.] ([.n] ix val))
+= [i])
+
+(def program progression-index-with-unit :
+  ([n.] ([.n] ix val))
+  ->
+  ([n.] {1 ([.n] ix val)} *)
+= ([i.] {unit.intro [.i]} *.intro))
+
+# progression-at((base, step), i) = base + step*i
+(def program progression-at :
+  ([n.] {
+    ({(u64 val) (u64 val)} *)
+    ([.n] ix val)
+  })
+  ->
+  ([n.] (u64 val))
+= ([parameters i.]
+  ([.parameters] *.elim [base step.])
+  ([.i] ix.to-u64 [i-u64.])
+  {[.step i-u64]} u64.mul [offset.]
+  {[.base offset]} u64.add
+))
+
+(def program progression-add :
+  ({(u64 val) (u64 val)} *)
+  ->
+  (u64 val)
+= ([pair.]
+  ([.pair] *.elim [acc value.])
+  {[.acc value]} u64.add
+))
+
+# Sum base + step*i for every index below the supplied length.
+(def program sum-progression :
+  ([n.] {
+    ({[.n] u64} :)
+    (u64 val)
+    (u64 val)
+  })
+  ->
+  ([n.] (u64 val))
+= ([len base step.]
+  ([.len] :.ty [reduce-len producer-len.]
+    ({[.base] [.step]} *.intro [parameters.])
+    {
+      const.u64.0x0000000000000000
+      (name.progression-add lift)
+      ({
+        ({
+          ([.producer-len] name.progression-index-with-unit lift)
+          ({
+            ([.parameters] defer)
+            ([.producer-len] name.progression-index-id lift)
+          } tensor)
+        } compose)
+        ([.producer-len] name.progression-at lift)
+      } compose)
+      [.reduce-len]
+    }
+    reduce
+  )
+))

@@ -6,6 +6,7 @@ use thiserror::Error;
 use crate::codegen::{
     GpuAssign, GpuDialect, GpuFunction, GpuModule, GpuModuleMap, GpuValue, GpuVar,
     components::value_expr,
+    components::{input_components, single_value, value_expr},
     gpu_placement::{
         GpuFunctionPlacement, direct_function_placement, function_placement, function_placements,
     },
@@ -47,6 +48,20 @@ pub enum GpuRenderError {
         "operation `{op}` input sizes account for {expected} flattened inputs, but assignment has {actual}"
     )]
     InvalidFlattenedInputCount {
+        op: Operation,
+        expected: usize,
+        actual: usize,
+    },
+    #[error("operation `{op}` expected {expected} output components, found {actual}")]
+    InvalidOutputComponentCount {
+        op: Operation,
+        expected: usize,
+        actual: usize,
+    },
+    #[error(
+        "operation `{op}` output sizes account for {expected} flattened outputs, but assignment has {actual}"
+    )]
+    InvalidFlattenedOutputCount {
         op: Operation,
         expected: usize,
         actual: usize,
@@ -325,6 +340,7 @@ fn render_assignment(
         "u64.lte" => render_binary_bool(out, assignment, "<=")?,
         "u64.gte" => render_binary_bool(out, assignment, ">=")?,
         "u64.mul" => render_binary(out, assignment, "*")?,
+        "u64.name" => render_forget(out, assignment)?,
         "u32.one" => render_u64_one(out, assignment)?,
         "u32.add" => render_binary(out, assignment, "+")?,
         "u32.sub" => render_binary(out, assignment, "-")?,
@@ -375,6 +391,8 @@ fn render_assignment(
         "row-major-index" => row_major::render_index(out, assignment)?,
         "row-major-row" => row_major::render_row(out, assignment)?,
         "row-major-col" => row_major::render_col(out, assignment)?,
+        "ix.to-u64" => render_forget(out, assignment)?,
+        "u64.to-ix" => render_u64_to_ix(out, assignment)?,
         "eval" => render_eval(out, assignment)?,
         "reducec" => reducec::render(out, assignment)?,
         "gpu.materialize" => render_materialize_call(out, function, assignment, dialect)?,
@@ -819,6 +837,34 @@ fn render_ix(out: &mut String, assignment: &GpuAssign) -> Result<(), GpuRenderEr
         output.name,
         value_expr(buffer),
         value_expr(index)
+    ));
+    Ok(())
+}
+
+fn render_u64_to_ix(out: &mut String, assignment: &GpuAssign) -> Result<(), GpuRenderError> {
+    let components = input_components(assignment)?;
+    let [index, _bound, _proof] = components.as_slice() else {
+        return Err(GpuRenderError::InvalidInputComponentCount {
+            op: assignment.op.clone(),
+            expected: 3,
+            actual: components.len(),
+        });
+    };
+    let index =
+        single_value(index).map_err(|error| GpuRenderError::InvalidInputComponentValueCount {
+            op: assignment.op.clone(),
+            component: "index",
+            description: "runtime value",
+            expected: 1,
+            actual: error.actual,
+        })?;
+    let [output] = assignment.outputs.as_slice() else {
+        return Err(invalid_outputs(assignment, 1));
+    };
+    out.push_str(&format!(
+        "    {output} = {index};\n",
+        output = output.name,
+        index = value_expr(index)
     ));
     Ok(())
 }

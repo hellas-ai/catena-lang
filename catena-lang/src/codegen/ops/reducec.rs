@@ -22,8 +22,8 @@
 use crate::codegen::{
     GpuAssign, GpuValue,
     components::{
-        Component, input_components, is_runtime_value, runtime_values, single_function,
-        single_value, value_expr,
+        Component, input_components, is_runtime_value, output_components, runtime_values,
+        single_function, single_value, value_expr,
     },
     gpu::GpuRenderError,
     render_utils::{c_type, invalid_outputs},
@@ -34,36 +34,69 @@ pub(in crate::codegen) fn render(
     out: &mut String,
     assignment: &GpuAssign,
 ) -> Result<(), GpuRenderError> {
-    let [output] = assignment.outputs.as_slice() else {
-        return Err(invalid_outputs(assignment, 1));
-    };
-    let element = runtime_type(output).ok_or_else(|| GpuRenderError::ErasedType(output.clone()))?;
     let (zero, add_env, add_fn, get_env, get_fn, n) = parts(assignment)?;
+    let output_components = output_components(assignment)?;
+    let [outputs] = output_components.as_slice() else {
+        return Err(GpuRenderError::InvalidOutputComponentCount {
+            op: assignment.op.clone(),
+            expected: 1,
+            actual: output_components.len(),
+        });
+    };
+    if zero.len() != outputs.len() {
+        return Err(GpuRenderError::InvalidInputComponentValueCount {
+            op: assignment.op.clone(),
+            component: "zero",
+            description: "reducec zero input must match the accumulator arity",
+            expected: outputs.len(),
+            actual: zero.len(),
+        });
+    }
+    if outputs.is_empty() {
+        return Err(invalid_outputs(assignment, 1));
+    }
 
-    let i = format!("reduce_i_{}", output.name);
-    let value = format!("reduce_value_{}", output.name);
-    let next = format!("reduce_next_{}", output.name);
+    let i = format!("reduce_i_{}", outputs[0].name);
+    let values = outputs
+        .iter()
+        .map(|output| {
+            Ok((
+                output,
+                runtime_type(output).ok_or_else(|| GpuRenderError::ErasedType(output.clone()))?,
+                format!("reduce_value_{}", output.name),
+                format!("reduce_next_{}", output.name),
+            ))
+        })
+        .collect::<Result<Vec<_>, GpuRenderError>>()?;
 
     // Keep the accumulator in the output slot itself. This makes the final
     // assignment to the function's out-pointer use the usual renderer path.
     out.push_str("    {\n");
-    out.push_str(&format!(
-        "        {} = {};\n",
-        output.name,
-        value_expr(zero)
-    ));
+    for ((output, _ty, _value, _next), zero_value) in values.iter().zip(zero.iter()) {
+        out.push_str(&format!(
+            "        {} = {};\n",
+            output.name,
+            value_expr(zero_value)
+        ));
+    }
     out.push_str(&format!(
         "        for (uint64_t {i} = 0; {i} < {n}; ++{i}) {{\n",
         n = value_expr(n),
     ));
-    out.push_str(&format!("            {} {value};\n", c_type(element)));
-    out.push_str(&format!("            {} {next};\n", c_type(element)));
+    for (_output, ty, value, next) in &values {
+        out.push_str(&format!("            {} {value};\n", c_type(ty)));
+        out.push_str(&format!("            {} {next};\n", c_type(ty)));
+    }
 
     // The producer closure is called with its runtime environment, the current
     // index, and an out-pointer for the element at that index.
     let mut get_args = runtime_args(get_env);
     get_args.push(i.clone());
-    get_args.push(format!("&{value}"));
+    get_args.extend(
+        values
+            .iter()
+            .map(|(_output, _ty, value, _next)| format!("&{value}")),
+    );
     out.push_str(&format!(
         "            {}({});\n",
         value_expr(get_fn),
@@ -73,22 +106,36 @@ pub(in crate::codegen) fn render(
     // The accumulator closure receives its runtime environment, the current
     // accumulator, the freshly produced element, and an out-pointer for `next`.
     let mut add_args = runtime_args(add_env);
-    add_args.push(output.name.clone());
-    add_args.push(value);
-    add_args.push(format!("&{next}"));
+    add_args.extend(
+        values
+            .iter()
+            .map(|(output, _ty, _value, _next)| output.name.clone()),
+    );
+    add_args.extend(
+        values
+            .iter()
+            .map(|(_output, _ty, value, _next)| value.clone()),
+    );
+    add_args.extend(
+        values
+            .iter()
+            .map(|(_output, _ty, _value, next)| format!("&{next}")),
+    );
     out.push_str(&format!(
         "            {}({});\n",
         value_expr(add_fn),
         add_args.join(", ")
     ));
-    out.push_str(&format!("            {} = {next};\n", output.name));
+    for (output, _ty, _value, next) in &values {
+        out.push_str(&format!("            {} = {next};\n", output.name));
+    }
     out.push_str("        }\n");
     out.push_str("    }\n");
     Ok(())
 }
 
 type ReducecParts<'a> = (
-    &'a GpuValue,
+    Component<'a>,
     Component<'a>,
     &'a GpuValue,
     Component<'a>,
@@ -114,17 +161,13 @@ fn parts(assignment: &GpuAssign) -> Result<ReducecParts<'_>, GpuRenderError> {
             0,
         ));
     }
-    if zero.len() == 1 && !is_runtime_value(&zero[0]) {
+    if !zero.iter().all(|value| is_runtime_value(value)) {
         return Err(GpuRenderError::ErasedInputComponentValue {
             op: assignment.op.clone(),
             component: "zero",
-            description: "reducec zero input must be a runtime value",
+            description: "reducec zero input must be runtime values",
         });
     }
-    let zero = single_value(zero).map_err(|error| {
-        invalid_component_count(assignment, "zero", "runtime zero input", error.actual)
-    })?;
-
     let add_fn = single_function(add_fn).map_err(|error| {
         invalid_component_count(assignment, "add_fn", "function symbol input", error.actual)
     })?;
@@ -218,5 +261,45 @@ mod tests {
                 "program_add(add_env0, add_env1, out, reduce_value_out, &reduce_next_out);"
             )
         );
+    }
+
+    #[test]
+    fn product_accumulators_pass_every_flattened_output() {
+        let outputs = vec![
+            GpuVar {
+                node: NodeId(5),
+                name: "out0".to_string(),
+                lowered: LoweredType::Runtime(CType::U64),
+            },
+            GpuVar {
+                node: NodeId(6),
+                name: "out1".to_string(),
+                lowered: LoweredType::Runtime(CType::U64),
+            },
+        ];
+        let assignment = GpuAssign {
+            op: op("reducec"),
+            input_sizes: vec![2, 0, 1, 0, 1, 1],
+            output_sizes: vec![2],
+            call_symbol: None,
+            inputs: vec![
+                var(0, "zero0"),
+                var(1, "zero1"),
+                fn_symbol("add"),
+                fn_symbol("get"),
+                var(2, "n"),
+            ],
+            outputs,
+        };
+
+        let mut out = String::new();
+        render(&mut out, &assignment).unwrap();
+
+        assert!(
+            out.contains("program_get(reduce_i_out0, &reduce_value_out0, &reduce_value_out1);")
+        );
+        assert!(out.contains(
+            "program_add(out0, out1, reduce_value_out0, reduce_value_out1, &reduce_next_out0, &reduce_next_out1);"
+        ));
     }
 }

@@ -930,11 +930,128 @@ fn rmsnorm_test() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[test]
+fn broadcast_f32_test() -> anyhow::Result<()> {
+    let runtime = runtime_with(NN_EXAMPLES)?;
+
+    let [empty] = runtime.exec("broadcast-f32", [3.5_f32.into(), 0_u64.into()])?;
+    let Value::Mem(empty) = empty else {
+        anyhow::bail!("broadcast-f32 returned non-mem value: {empty:?}");
+    };
+    assert_eq!(empty.to_f32_vec(), Vec::<f32>::new());
+
+    let [result] = runtime.exec("broadcast-f32", [3.5_f32.into(), 4_u64.into()])?;
+    let Value::Mem(result) = result else {
+        anyhow::bail!("broadcast-f32 returned non-mem value: {result:?}");
+    };
+    assert_eq!(result.to_f32_vec(), vec![3.5, 3.5, 3.5, 3.5]);
+    Ok(())
+}
+
+#[test]
+fn arange_f32_test() -> anyhow::Result<()> {
+    let runtime = runtime_with(NN_EXAMPLES)?;
+
+    let [empty] = runtime.exec("arange-f32", [0_u64.into()])?;
+    let Value::Mem(empty) = empty else {
+        anyhow::bail!("arange-f32 returned non-mem value: {empty:?}");
+    };
+    assert_eq!(empty.to_f32_vec(), Vec::<f32>::new());
+
+    let [result] = runtime.exec("arange-f32", [5_u64.into()])?;
+    let Value::Mem(result) = result else {
+        anyhow::bail!("arange-f32 returned non-mem value: {result:?}");
+    };
+    assert_eq!(result.to_f32_vec(), vec![0.0, 1.0, 2.0, 3.0, 4.0]);
+    Ok(())
+}
+
+#[test]
+fn slice_f32_test() -> anyhow::Result<()> {
+    let runtime = runtime_with(NN_EXAMPLES)?;
+
+    let [result] = runtime.exec(
+        "slice-f32",
+        [
+            runtime.mem_f32(&[10.0_f32, 20.0, 30.0, 40.0])?,
+            0_u64.into(),
+            2_u64.into(),
+        ],
+    )?;
+    let Value::Mem(result) = result else {
+        anyhow::bail!("slice-f32 returned non-mem value: {result:?}");
+    };
+    assert_eq!(result.to_f32_vec(), vec![10.0, 20.0]);
+
+    let [result] = runtime.exec(
+        "slice-f32",
+        [
+            runtime.mem_f32(&[10.0_f32, 20.0, 30.0, 40.0])?,
+            1_u64.into(),
+            2_u64.into(),
+        ],
+    )?;
+    let Value::Mem(result) = result else {
+        anyhow::bail!("slice-f32 returned non-mem value: {result:?}");
+    };
+    assert_eq!(result.to_f32_vec(), vec![20.0, 30.0]);
+
+    let [result] = runtime.exec(
+        "slice-f32",
+        [
+            runtime.mem_f32(&[10.0_f32, 20.0, 30.0, 40.0])?,
+            2_u64.into(),
+            0_u64.into(),
+        ],
+    )?;
+    let Value::Mem(result) = result else {
+        anyhow::bail!("slice-f32 returned non-mem value: {result:?}");
+    };
+    assert_eq!(result.to_f32_vec(), Vec::<f32>::new());
+
+    let [result] = runtime.exec(
+        "slice-f32",
+        [
+            runtime.mem_f32(&[10.0_f32, 20.0, 30.0, 40.0])?,
+            0_u64.into(),
+            4_u64.into(),
+        ],
+    )?;
+    let Value::Mem(result) = result else {
+        anyhow::bail!("slice-f32 returned non-mem value: {result:?}");
+    };
+    assert_eq!(result.to_f32_vec(), vec![10.0, 20.0, 30.0, 40.0]);
+    Ok(())
+}
+
+#[test]
+fn argmax_f32_test() -> anyhow::Result<()> {
+    let runtime = runtime_with(NN_EXAMPLES)?;
+
+    for (input_values, expected) in [
+        (vec![5.0_f32], 0_u64),
+        (vec![1.0_f32, 2.0, 4.0], 2_u64),
+        (vec![4.0_f32, 2.0, 1.0], 0_u64),
+        (vec![1.0_f32, 7.0, 3.0, 2.0], 1_u64),
+        (vec![1.0_f32, 7.0, 7.0, 2.0], 1_u64),
+        (vec![3.0_f32, 3.0, 3.0], 0_u64),
+    ] {
+        let input = runtime.mem_f32(&input_values)?;
+        let [result] = runtime.exec("argmax-f32", [input])?;
+        let Value::U64(result) = result else {
+            anyhow::bail!("argmax-f32 returned non-u64 value: {result:?}");
+        };
+        assert_eq!(result, expected, "argmax-f32({input_values:?})");
+    }
+
+    Ok(())
+}
+
 #[path = "cases/reducec.rs"]
 mod reducec;
 
 #[path = "cases/reduce.rs"]
 mod reduce;
 
-#[path = "cases/closure.rs"]
-mod closure;
+#[path = "cases/closures.rs"]
+mod closures;

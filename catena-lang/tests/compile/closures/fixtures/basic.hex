@@ -1,0 +1,78 @@
+# Closure-conversion compile fixtures.
+#
+# These definitions deliberately stop at ordinary closure-using operations.  The
+# forget_closures pass bends the CMC wiring and inserts one !closure edge at each
+# place where a non-CMC operation observes a closure. Closure conversion can
+# then discover a region by walking backwards from the first !closure input and
+# forwards again until it reaches the second input.
+
+# A closure-free baseline.  The compile pipeline must leave it alone and must
+# not manufacture generated closure arrows.
+(def program identity : (bool val) -> (bool val) = [value])
+
+# CMC-only construction and elimination.  The closure is built by composing a
+# deferred argument with a named identity, then consumed directly by run.
+(def program deferred-identity : (bool val) -> (bool val) = (
+  {defer (name.bool.id lift)}
+  compose
+  run
+))
+
+# Closed closures made from names.  Each closure.* arrow receives unit as its
+# environment and the original bool argument as its domain.  Its corresponding
+# name.closure.* arrow is nullary and produces only a function pointer.
+(def program named-if :
+  {(bool val) (bool val)}
+  ->
+  (bool val)
+= ([flag argument.]
+  {(name.bool.not lift) (name.bool.id lift) [.flag argument]}
+  bool.if
+))
+
+# The smallest captured environments.  Each closure.* arrow receives one
+# captured bool as its environment and unit as its domain.  Each name.closure.*
+# arrow is nullary; bool.ifc receives both explicit environment/name pairs.
+(def program captured-if :
+  {(bool val) (bool val) (bool val)}
+  ->
+  (bool val)
+= ([lhs rhs flag.]
+  {([.lhs] defer) ([.rhs] defer) [.flag] unit.intro}
+  bool.if
+))
+
+# A multi-edge region.  The generated closure.* body contains the captured
+# value's discard plus the lifted name/eval path.  name.closure.* remains
+# nullary because these named bool operations have no type-level parameters.
+(def program composed-if :
+  {(bool val) (bool val) (bool val)}
+  ->
+  (bool val)
+= ([lhs rhs flag.]
+  {
+    ({([.lhs] defer) (name.bool.not lift)} compose)
+    ({([.rhs] defer) (name.bool.id lift)} compose)
+    [.flag]
+    unit.intro
+  }
+  bool.if
+))
+
+# Two parallel regions with deliberately different shapes.  The left branch has
+# a defer/name/eval/compose path while the right branch is a single defer path.
+# Conversion must replace both regions even though removing the larger region
+# changes the positional node and edge IDs used by the smaller one.
+(def program asymmetric-regions-if :
+  {(bool val) (bool val) (bool val)}
+  ->
+  (bool val)
+= ([lhs rhs flag.]
+  {
+    ({([.lhs] defer) (name.bool.not lift)} compose)
+    ([.rhs] defer)
+    [.flag]
+    unit.intro
+  }
+  bool.if
+))

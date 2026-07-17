@@ -102,6 +102,7 @@
   (arr u64.gte  : {(u64 val) (u64 val)} -> (bool val))
   (arr u64.mul  : {(u64 val) (u64 val)} -> (u64 val))
   (arr u64.select : {(bool val) (u64 val) (u64 val)} -> (u64 val))
+  (arr u64.name : {[x.] (u64 val)} -> ([x.] ({[.x] u64} :)))
 
   (arr u32.zero : [] -> ({0 u32} :))
   (arr u32.one  : [] ->  (u32 val))

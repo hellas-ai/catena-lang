@@ -51,7 +51,7 @@
       ([.mean-sq-plus-eps] sqrt [rms.])
       {
         [.len]
-        ({({[.input] [.rms]} *.intro) (([.len] :.param) name.rmsnorm-at) [.len]}
+        ({[.len] ({[.input] [.rms]} *.intro) (([.len] :.param) name.rmsnorm-at)}
           materializec)
       }
     }

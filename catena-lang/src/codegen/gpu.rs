@@ -1094,14 +1094,14 @@ mod tests {
                 targets: vec![out.clone()],
                 assignments: vec![GpuAssign {
                     op: op("materializec"),
-                    input_sizes: vec![0, 1, 1],
+                    input_sizes: vec![1, 0, 1],
                     output_sizes: Vec::new(),
                     call_symbol: None,
                     inputs: vec![
+                        GpuValue::Var(len),
                         GpuValue::FnSymbol(FnPtrSymbol {
                             target: op("program.producer"),
                         }),
-                        GpuValue::Var(len),
                     ],
                     outputs: vec![out],
                 }],

@@ -57,7 +57,7 @@
       } reducec [denom.])
       {
         [.len]
-        ({({({[.input] [.max-x]} *.intro) [.denom]} *.intro) (([.len] :.param) name.softmax-at) [.len]}
+        ({[.len] ({({[.input] [.max-x]} *.intro) [.denom]} *.intro) (([.len] :.param) name.softmax-at)}
           materializec)
       }
     }

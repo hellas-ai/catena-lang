@@ -158,11 +158,11 @@ pub(in crate::codegen) fn kernel_name(
 fn parts(assignment: &GpuAssign) -> Result<(&GpuValue, &GpuValue, Component<'_>), GpuRenderError> {
     // The lowered inputs follow the closure-converted call shape:
     //
-    //     env..., producer_fn, len
+    //     len, env..., producer_fn
     //
     // `env` may be a zero-size component when the source environment is unit.
     let components = input_components(assignment)?;
-    let [env, func, len] = components.as_slice() else {
+    let [len, env, func] = components.as_slice() else {
         return Err(GpuRenderError::InvalidInputComponentCount {
             op: assignment.op.clone(),
             expected: 3,

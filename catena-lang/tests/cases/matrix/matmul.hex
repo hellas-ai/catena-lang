@@ -64,11 +64,7 @@
       } assert-then [a-same-length.]
         ({[.a-raw] [.a-same-length]} buf.f32.cast-same-length [a.]
           ([.nn-len] f32.matmul.len-copies2 [matmul-len output-len.]
-            ({
-              [.n-len]
-              [.matmul-len]
-              [.a]
-            } f32.matmul.row-major.right-identity [result.]
+            ({[.n-len] [.matmul-len] [.a]} test.matmul.right-identity [result.]
               {[.output-len] [.result]} buf.to-mem)
           )
         )
@@ -94,15 +90,98 @@
       } assert-then [a-same-length.]
         ({[.a-raw] [.a-same-length]} buf.f32.cast-same-length [a.]
           ([.nn-len] f32.matmul.len-copies2 [matmul-len output-len.]
-            ({
-              [.n-len]
-              [.matmul-len]
-              [.a]
-            } f32.matmul.row-major.left-identity [result.]
+            ({[.n-len] [.matmul-len] [.a]} test.matmul.left-identity [result.]
               {[.output-len] [.result]} buf.to-mem)
           )
         )
       )
+    )
+  )
+))
+(def program test.matmul.right-identity-at :
+  ([n.] {
+    ({
+      ({[.n] u64} :)
+      ({({({[.n] [.n]} *) u64} :) ({cap.ref ({[.n] [.n]} *) f32} buf val)} *)
+    } *)
+    (({[.n] [.n]} *) ix val)
+  })
+  ->
+  ([n.] (f32 val))
+= ([env flat.]
+  ([.env] *.elim [n-len rest.]
+    ([.rest] *.elim [nn-len a.]
+      ([.n-len] f32.matmul.len-copies3 [identity-n view-rows split-view-n.]
+        ([.split-view-n] f32.matmul.len-copies3 [view-cols generic-m generic-k.]
+          ({
+            [.generic-m]
+            [.generic-k]
+            ({[.view-rows] [.view-cols] ({[.nn-len] [.a]} f32.buf.view)} f32.row-major.matrix-view)
+            ([.identity-n] f32.matrix.identity)
+            [.flat]
+          } f32.matmul.row-major.cell-at)
+        )
+      )
+    )
+  )
+))
+
+(def program test.matmul.left-identity-at :
+  ([n.] {
+    ({
+      ({[.n] u64} :)
+      ({({({[.n] [.n]} *) u64} :) ({cap.ref ({[.n] [.n]} *) f32} buf val)} *)
+    } *)
+    (({[.n] [.n]} *) ix val)
+  })
+  ->
+  ([n.] (f32 val))
+= ([env flat.]
+  ([.env] *.elim [n-len rest.]
+    ([.rest] *.elim [nn-len a.]
+      ([.n-len] f32.matmul.len-copies3 [identity-n view-rows split-view-n.]
+        ([.split-view-n] f32.matmul.len-copies3 [view-cols generic-m generic-k.]
+          ({
+            [.generic-m]
+            [.generic-k]
+            ([.identity-n] f32.matrix.identity)
+            ({[.view-rows] [.view-cols] ({[.nn-len] [.a]} f32.buf.view)} f32.row-major.matrix-view)
+            [.flat]
+          } f32.matmul.row-major.cell-at)
+        )
+      )
+    )
+  )
+))
+
+(def program test.matmul.right-identity :
+  ([n.] {({[.n] u64} :) ({({[.n] [.n]} *) u64} :) ({cap.ref ({[.n] [.n]} *) f32} buf val)})
+  ->
+  ([n.] ({cap.own ({[.n] [.n]} *) f32} buf val))
+= ([n-len nn-len a.]
+  ([.n-len] f32.matmul.len-copy-param [env-n-len producer-n.]
+    ([.nn-len] f32.matmul.len-copies2 [env-nn-len output-len.]
+      ({
+        ({[.env-n-len] ({[.env-nn-len] [.a]} *.intro)} *.intro)
+        ([.producer-n] name.test.matmul.right-identity-at)
+        [.output-len]
+      } materializec)
+    )
+  )
+))
+
+(def program test.matmul.left-identity :
+  ([n.] {({[.n] u64} :) ({({[.n] [.n]} *) u64} :) ({cap.ref ({[.n] [.n]} *) f32} buf val)})
+  ->
+  ([n.] ({cap.own ({[.n] [.n]} *) f32} buf val))
+= ([n-len nn-len a.]
+  ([.n-len] f32.matmul.len-copy-param [env-n-len producer-n.]
+    ([.nn-len] f32.matmul.len-copies2 [env-nn-len output-len.]
+      ({
+        ({[.env-n-len] ({[.env-nn-len] [.a]} *.intro)} *.intro)
+        ([.producer-n] name.test.matmul.left-identity-at)
+        [.output-len]
+      } materializec)
     )
   )
 ))

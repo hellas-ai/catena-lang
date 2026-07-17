@@ -439,112 +439,27 @@
   )
 ))
 
-(def program f32.matmul.row-major.right-identity-at :
-  ([n.] {
-    ({
-      ({[.n] u64} :)
-      ({
-        ({({[.n] [.n]} *) u64} :)
-        ({cap.ref ({[.n] [.n]} *) f32} buf val)
-      } *)
-    } *)
-    (({[.n] [.n]} *) ix val)
+# Compute one row-major result cell from arbitrary matrix views.
+# This definition has closures on its boundary, so callers specialize it by
+# direct application before naming a closure-free materialization producer.
+(def program f32.matmul.row-major.cell-at :
+  ([n m k.] {
+    ({[.m] u64} :)
+    ({[.k] u64} :)
+    ({({([.n] ix val) ([.k] ix val)} *) (f32 val)} =>)
+    ({({([.k] ix val) ([.m] ix val)} *) (f32 val)} =>)
+    (({[.n] [.m]} *) ix val)
   })
   ->
-  ([n.] (f32 val))
-= ([env flat.]
-  ([.env] *.elim [n-len rest.]
-    ([.rest] *.elim [nn-len a.]
-      ([.n-len] f32.matmul.len-copies6 [row-cols col-cols cell-k-len a-row-len a-col-len identity-len.]
-        ([.flat] ix.copy [flat-for-row flat-for-col.]
-          ({[.row-cols] [.flat-for-row]} row-major-row [i.]
-            ({[.col-cols] [.flat-for-col]} row-major-col [j.]
-              ({
-                [.cell-k-len]
-                ({[.a-row-len] [.a-col-len] ({[.nn-len] [.a]} f32.buf.view)} f32.row-major.matrix-view)
-                ([.identity-len] f32.matrix.identity)
-                [.i]
-                [.j]
-              } f32.matmul.cell-dot)
-            )
-          )
+  ([n m k.] (f32 val))
+= ([m-len k-len a-view b-view flat.]
+  ([.m-len] f32.matmul.len-copies2 [row-cols col-cols.]
+    ([.flat] ix.copy [flat-for-row flat-for-col.]
+      ({[.row-cols] [.flat-for-row]} row-major-row [i.]
+        ({[.col-cols] [.flat-for-col]} row-major-col [j.]
+          ({[.k-len] [.a-view] [.b-view] [.i] [.j]} f32.matmul.cell-dot)
         )
       )
-    )
-  )
-))
-
-(def program f32.matmul.row-major.left-identity-at :
-  ([n.] {
-    ({
-      ({[.n] u64} :)
-      ({
-        ({({[.n] [.n]} *) u64} :)
-        ({cap.ref ({[.n] [.n]} *) f32} buf val)
-      } *)
-    } *)
-    (({[.n] [.n]} *) ix val)
-  })
-  ->
-  ([n.] (f32 val))
-= ([env flat.]
-  ([.env] *.elim [n-len rest.]
-    ([.rest] *.elim [nn-len a.]
-      ([.n-len] f32.matmul.len-copies6 [row-cols col-cols cell-k-len identity-len b-row-len b-col-len.]
-        ([.flat] ix.copy [flat-for-row flat-for-col.]
-          ({[.row-cols] [.flat-for-row]} row-major-row [i.]
-            ({[.col-cols] [.flat-for-col]} row-major-col [j.]
-              ({
-                [.cell-k-len]
-                ([.identity-len] f32.matrix.identity)
-                ({[.b-row-len] [.b-col-len] ({[.nn-len] [.a]} f32.buf.view)} f32.row-major.matrix-view)
-                [.i]
-                [.j]
-              } f32.matmul.cell-dot)
-            )
-          )
-        )
-      )
-    )
-  )
-))
-
-(def program f32.matmul.row-major.right-identity :
-  ([n.] {
-    ({[.n] u64} :)
-    ({({[.n] [.n]} *) u64} :)
-    ({cap.ref ({[.n] [.n]} *) f32} buf val)
-  })
-  ->
-  ([n.] ({cap.own ({[.n] [.n]} *) f32} buf val))
-= ([n-len nn-len a.]
-  ([.n-len] f32.matmul.len-copy-param [env-n-len producer-n.]
-    ([.nn-len] f32.matmul.len-copies2 [env-nn-len output-len.]
-      ({
-        ({[.env-n-len] ({[.env-nn-len] [.a]} *.intro)} *.intro)
-        ([.producer-n] name.f32.matmul.row-major.right-identity-at)
-        [.output-len]
-      } materializec)
-    )
-  )
-))
-
-(def program f32.matmul.row-major.left-identity :
-  ([n.] {
-    ({[.n] u64} :)
-    ({({[.n] [.n]} *) u64} :)
-    ({cap.ref ({[.n] [.n]} *) f32} buf val)
-  })
-  ->
-  ([n.] ({cap.own ({[.n] [.n]} *) f32} buf val))
-= ([n-len nn-len a.]
-  ([.n-len] f32.matmul.len-copy-param [env-n-len producer-n.]
-    ([.nn-len] f32.matmul.len-copies2 [env-nn-len output-len.]
-      ({
-        ({[.env-n-len] ({[.env-nn-len] [.a]} *.intro)} *.intro)
-        ([.producer-n] name.f32.matmul.row-major.left-identity-at)
-        [.output-len]
-      } materializec)
     )
   )
 ))

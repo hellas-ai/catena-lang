@@ -1,237 +1,7 @@
-# Application-sized matmul fixture.
+# Application-sized matmul fixture built from the matrix stdlib.
 
-# A minimal closure-only matmul kernel: compute one dot product from two
-# indexed f32 closures.  It knows nothing about buffers or how either closure
-# was constructed.
-# id(p) = p
-(def program index-id :
-  ([n.] ([.n] ix val))
-  ->
-  ([n.] ([.n] ix val))
-= [i])
-
-# copy(p) = (p,p)
-(def program index-copy :
-  ([n.] ([.n] ix val))
-  ->
-  ([n.] {([.n] ix val) ([.n] ix val)})
-= [i . i i])
-
-# flat-copy(p) = (p,p)
-(def program matrix-flat-copy :
-  ([n m.] (({[.n] [.m]} *) ix val))
-  ->
-  ([n m.] {
-    (({[.n] [.m]} *) ix val)
-    (({[.n] [.m]} *) ix val)
-  })
-= [i . i i])
-
-# with-unit(p) = (unit,p)
-(def program index-with-unit :
-  ([n.] ([.n] ix val))
-  ->
-  ([n.] {1 ([.n] ix val)} *)
-= ([i.] {unit.intro [.i]} *.intro))
-
-# buf-at(buffer,p) = buffer[p]
-(def program f32-buf-at :
-  ([n.] {
-    ({cap.ref [.n] f32} buf val)
-    ([.n] ix val)
-  })
-  ->
-  ([n.] (f32 val))
-= ([input i.]
-  {[.i input]} ix
-))
-
-# buf-view(buffer)(p) = buffer[p]
-# Turn a buffer into an indexed closure.  This construction stays at the outer
-# layer; matmul-dot below receives only the resulting closure.
-(def program f32-buf-view :
-  ([n.] {
-    ({[.n] u64} :)
-    ({cap.ref [.n] f32} buf val)
-  })
-  ->
-  ([n.] ({([.n] ix val) (f32 val)} =>))
-= ([len input.]
-  {
-    ({
-      (([.len] :.param) name.index-with-unit lift)
-      ({
-        ([.input] defer)
-        (([.len] :.param) name.index-id lift)
-      } tensor)
-    } compose)
-    (([.len] :.param) name.f32-buf-at lift)
-  }
-  compose
-))
-
-# dot(left,right) = sum_{p=0}^{k-1} left(p)*right(p)
-(def program matmul-dot :
-  ([k.] {
-    ({[.k] u64} :)
-    ({([.k] ix val) (f32 val)} =>)
-    ({([.k] ix val) (f32 val)} =>)
-  })
-  ->
-  ([k.] (f32 val))
-= ([len left right.]
-  {
-    (const.u32.0x00000000 u32.bitcast-f32)
-    (name.f32.add lift)
-    ({
-      ({
-        (([.len] :.param) name.index-copy lift)
-        ({[.left] [.right]} tensor)
-      } compose)
-      (name.f32.mul lift)
-    } compose)
-    [.len]
-  }
-  reduce
-))
-
-# id(i,j) = (i,j)
-(def program matrix-index-id :
-  ([n m.] {([.n] ix val) ([.m] ix val)} *)
-  ->
-  ([n m.] {([.n] ix val) ([.m] ix val)} *)
-= [ij])
-
-# with-unit(i,j) = (unit,(i,j))
-(def program matrix-index-with-unit :
-  ([n m.] {([.n] ix val) ([.m] ix val)} *)
-  ->
-  ([n m.] {1 ({([.n] ix val) ([.m] ix val)} *)} *)
-= ([ij.] {unit.intro [.ij]} *.intro))
-
-# view(i,j) = flat-view(i*m + j)
-(def program row-major-matrix-view :
-  ([n m.] {
-    ({[.n] u64} :)
-    ({[.m] u64} :)
-    ({(({[.n] [.m]} *) ix val) (f32 val)} =>)
-  })
-  ->
-  ([n m.] ({({([.n] ix val) ([.m] ix val)} *) (f32 val)} =>))
-= ([rows cols flat-view.]
-  {
-    ({
-      ({
-        ({
-          ({([.rows] :.param) ([.cols] :.param)}
-            name.matrix-index-with-unit lift)
-          ({
-            ([.cols] defer)
-            ({([.rows] :.param) ([.cols] :.param)}
-              name.matrix-index-id lift)
-          } tensor)
-        } compose)
-        ({([.rows] :.param) ([.cols] :.param)}
-          name.row-major-index lift)
-      } compose)
-      [.flat-view]
-    } compose)
-  }
-))
-
-# row(A,i)(p) = A(i,p)
-(def program matrix-row :
-  ([n k.] {
-    ({[.k] u64} :)
-    ({({([.n] ix val) ([.k] ix val)} *) (f32 val)} =>)
-    ([.n] ix val)
-  })
-  ->
-  ([n k.] ({([.k] ix val) (f32 val)} =>))
-= ([len matrix i.]
-  ({
-    ({
-      (([.len] :.param) name.index-with-unit lift)
-      ({
-        ([.i] defer)
-        (([.len] :.param) name.index-id lift)
-      } tensor)
-    } compose)
-    [.matrix]
-  } compose)
-))
-
-# with-unit-right(p) = (p,unit)
-(def program index-with-unit-right :
-  ([n.] ([.n] ix val))
-  ->
-  ([n.] {([.n] ix val) 1} *)
-= ([i.] {[.i] unit.intro} *.intro))
-
-# col(B,j)(p) = B(p,j)
-(def program matrix-col :
-  ([k m.] {
-    ({[.k] u64} :)
-    ({({([.k] ix val) ([.m] ix val)} *) (f32 val)} =>)
-    ([.m] ix val)
-  })
-  ->
-  ([k m.] ({([.k] ix val) (f32 val)} =>))
-= ([len matrix j.]
-  ({
-    ({
-      (([.len] :.param) name.index-with-unit-right lift)
-      ({
-        (([.len] :.param) name.index-id lift)
-        ([.j] defer)
-      } tensor)
-    } compose)
-    [.matrix]
-  } compose)
-))
-
-# C(i,j) = sum_{p=0}^{k-1} A(i,p) * B(p,j)
-(def program matmul-cell :
-  ([n m k.] {
-    ({[.k] u64} :)
-    ({({([.n] ix val) ([.k] ix val)} *) (f32 val)} =>)
-    ({({([.k] ix val) ([.m] ix val)} *) (f32 val)} =>)
-    ([.n] ix val)
-    ([.m] ix val)
-  })
-  ->
-  ([n m k.] (f32 val))
-= ([len left right i j.]
-  {
-    [.len]
-    ({[.len] [.left] [.i]} matrix-row)
-    ({[.len] [.right] [.j]} matrix-col)
-  }
-  matmul-dot
-))
-
-# I(i,j) = 1 when i=j and 0 otherwise.
-(def program f32-identity-at :
-  ([n.] {([.n] ix val) ([.n] ix val)} *)
-  ->
-  ([n.] (f32 val))
-= ([ij.]
-  ([.ij] *.elim [i j.]
-    ([.i] ix.to-u64 [i-u64.]
-      ([.j] ix.to-u64 [j-u64.]
-        ({[.i-u64 j-u64]} u64.ne [different.]
-          ([.different] bool.not [same.]
-            {[.same] f32.one (const.u32.0x00000000 u32.bitcast-f32)}
-            f32.select
-          )
-        )
-      )
-    )
-  )
-))
-
-# A(i,j) = left-buffer[i*k+j], B(i,j) = right-buffer[i*m+j].
-# two-bufs-at(env,flat) = sum_p A(row(flat),p)*B(p,col(flat)).
+# Convert two concrete row-major buffers into matrix-view closures and compute
+# the output cell selected by a flat row-major index.
 (def program matmul-two-bufs-at :
   ([n m k.] {
     ({
@@ -258,31 +28,21 @@
   ->
   ([n m k.] (f32 val))
 = ([env flat.]
-  ([.env] *.elim [rows rest-a.]
-    ([.rest-a] *.elim [cols rest-b.]
-      ([.rest-b] *.elim [inner rest-c.]
-        ([.rest-c] *.elim [left-size rest-d.]
-          ([.rest-d] *.elim [right-size buffers.]
-            ([.buffers] *.elim [left-buffer right-buffer.]
-              ([.flat] matrix-flat-copy [flat-row flat-col.]
-                ({[.cols] [.flat-row]} row-major-row [i.]
-                  ({[.cols] [.flat-col]} row-major-col [j.]
-                    {
-                      [.inner]
-                      ({
-                        [.rows]
-                        [.inner]
-                        ({[.left-size] [.left-buffer]} f32-buf-view)
-                      } row-major-matrix-view)
-                      ({
-                        [.inner]
-                        [.cols]
-                        ({[.right-size] [.right-buffer]} f32-buf-view)
-                      } row-major-matrix-view)
-                      [.i] [.j]
-                    }
-                    matmul-cell
-                  )
+  ([.env] *.elim [n-len rest-a.]
+    ([.rest-a] *.elim [m-len rest-b.]
+      ([.m-len] f32.matmul.len-copies2 [generic-m view-m.]
+        ([.rest-b] *.elim [k-len rest-c.]
+          ([.k-len] f32.matmul.len-copies3 [generic-k a-k b-k.]
+            ([.rest-c] *.elim [nk-len rest-d.]
+              ([.rest-d] *.elim [km-len buffers.]
+                ([.buffers] *.elim [a b.]
+                  ({
+                    [.generic-m]
+                    [.generic-k]
+                    ({[.n-len] [.a-k] ({[.nk-len] [.a]} f32.buf.view)} f32.row-major.matrix-view)
+                    ({[.b-k] [.view-m] ({[.km-len] [.b]} f32.buf.view)} f32.row-major.matrix-view)
+                    [.flat]
+                  } f32.matmul.row-major.cell-at)
                 )
               )
             )
@@ -293,7 +53,7 @@
   )
 ))
 
-# matmul-two-bufs(A,B)[flat] = sum_p A(row(flat),p)*B(p,col(flat))
+# Materialize the product of two concrete row-major buffers.
 (def program matmul-two-bufs :
   ([n m k.] {
     ({[.n] u64} :)
@@ -307,69 +67,70 @@
   })
   ->
   ([n m k.] ({cap.own ({[.n] [.m]} *) f32} buf val))
-= ([rows cols inner left-size right-size output-size left-buffer right-buffer.]
-  {
-    [.output-size]
-    ({[.rows]
-      ({[.cols]
-        ({[.inner]
-          ({[.left-size]
-            ({[.right-size]
-              ({[.left-buffer] [.right-buffer]} *.intro)
-            } *.intro)
-          } *.intro)
-        } *.intro)
-      } *.intro)
-    } *.intro)
-    ({
-      ([.rows] :.param)
-      ([.cols] :.param)
-      ([.inner] :.param)
-    } name.matmul-two-bufs-at)
-  }
-  materializec
-))
-
-# A(i,j) = input-buffer[i*n+j], B = I.
-# buf-identity-at(env,flat) = sum_p A(row(flat),p)*I(p,col(flat)).
-(def program matmul-buf-identity-at :
-  ([n.] {
-    ({
-      ({[.n] u64} :)
-      ({
-        ({({[.n] [.n]} *) u64} :)
-        ({cap.ref ({[.n] [.n]} *) f32} buf val)
-      } *)
-    } *)
-    (({[.n] [.n]} *) ix val)
-  })
-  ->
-  ([n.] (f32 val))
-= ([env flat.]
-  ([.env] *.elim [size rest.]
-    ([.rest] *.elim [flat-size input.]
-      ([.flat] matrix-flat-copy [flat-row flat-col.]
-        ({[.size] [.flat-row]} row-major-row [i.]
-          ({[.size] [.flat-col]} row-major-col [j.]
-            {
-              [.size]
+= ([n-len m-len k-len nk-len km-len nm-len a b.]
+  ([.n-len] f32.matmul.len-copy-param [env-n producer-n.]
+    ([.m-len] f32.matmul.len-copy-param [env-m producer-m.]
+      ([.k-len] f32.matmul.len-copy-param [env-k producer-k.]
+        ([.nm-len] f32.matmul.len-copies3 [output-len with-unit-len index-id-len.]
+          {
+            [.output-len]
+            ({
               ({
-                [.size]
-                [.size]
-                ({[.flat-size] [.input]} f32-buf-view)
-              } row-major-matrix-view)
-              (([.size] :.param) name.f32-identity-at lift)
-              [.i] [.j]
-            }
-            matmul-cell
-          )
+                (([.with-unit-len] :.param) name.f32.matmul.index-with-unit lift)
+                ({
+                  (({[.env-n]
+                    ({[.env-m]
+                      ({[.env-k]
+                        ({[.nk-len]
+                          ({[.km-len] ({[.a] [.b]} *.intro)} *.intro)
+                        } *.intro)
+                      } *.intro)
+                    } *.intro)
+                  } *.intro) defer)
+                  (([.index-id-len] :.param) name.f32.matmul.index-id lift)
+                } tensor)
+              } compose)
+              ({[.producer-n] [.producer-m] [.producer-k]} name.matmul-two-bufs-at lift)
+            } compose)
+          }
+          materialize
         )
       )
     )
   )
 ))
 
-# matmul-buf-identity(A)[flat] = sum_p A(row(flat),p)*I(p,col(flat))
+# Convert one concrete buffer into a matrix-view closure and multiply it by the
+# shared identity matrix closure.
+(def program matmul-buf-identity-at :
+  ([n.] {
+    ({
+      ({[.n] u64} :)
+      ({({({[.n] [.n]} *) u64} :) ({cap.ref ({[.n] [.n]} *) f32} buf val)} *)
+    } *)
+    (({[.n] [.n]} *) ix val)
+  })
+  ->
+  ([n.] (f32 val))
+= ([env flat.]
+  ([.env] *.elim [n-len rest.]
+    ([.rest] *.elim [nn-len a.]
+      ([.n-len] f32.matmul.len-copies3 [identity-n view-rows split-view-n.]
+        ([.split-view-n] f32.matmul.len-copies3 [view-cols generic-m generic-k.]
+          ({
+            [.generic-m]
+            [.generic-k]
+            ({[.view-rows] [.view-cols] ({[.nn-len] [.a]} f32.buf.view)} f32.row-major.matrix-view)
+            ([.identity-n] f32.matrix.identity)
+            [.flat]
+          } f32.matmul.row-major.cell-at)
+        )
+      )
+    )
+  )
+))
+
+# Materialize A * I from one concrete row-major buffer.
 (def program matmul-buf-and-identity :
   ([n.] {
     ({[.n] u64} :)
@@ -378,11 +139,25 @@
   })
   ->
   ([n.] ({cap.own ({[.n] [.n]} *) f32} buf val))
-= ([size flat-size input.]
-  {
-    [.flat-size]
-    ({[.size] ({[.flat-size] [.input]} *.intro)} *.intro)
-    (([.size] :.param) name.matmul-buf-identity-at)
-  }
-  materializec
+= ([n-len nn-len a.]
+  ([.n-len] f32.matmul.len-copy-param [env-n producer-n.]
+    ([.nn-len] f32.matmul.len-copies3 [env-nn output-len split-index-len.]
+      ([.split-index-len] f32.matmul.len-copies2 [with-unit-len index-id-len.]
+        {
+          [.output-len]
+          ({
+            ({
+              (([.with-unit-len] :.param) name.f32.matmul.index-with-unit lift)
+              ({
+                (({[.env-n] ({[.env-nn] [.a]} *.intro)} *.intro) defer)
+                (([.index-id-len] :.param) name.f32.matmul.index-id lift)
+              } tensor)
+            } compose)
+            ([.producer-n] name.matmul-buf-identity-at lift)
+          } compose)
+        }
+        materialize
+      )
+    )
+  )
 ))

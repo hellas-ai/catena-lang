@@ -379,66 +379,6 @@
   )
 ))
 
-#   cell-at-flat-index(flat-c) =
-#     let (i,j) = row-major-unpack(flat-c)
-#     in cell-dot(i,j)
-(def program f32.matmul.cell-at-flat-index :
-  ([n m k.] {
-    ({
-      ({[.n] u64} :)
-      ({
-        ({[.m] u64} :)
-        ({
-          ({[.k] u64} :)
-          ({
-            ({({[.n] [.k]} *) u64} :)
-            ({
-              ({({[.k] [.m]} *) u64} :)
-              ({
-                ({cap.ref ({[.n] [.k]} *) f32} buf val)
-                ({cap.ref ({[.k] [.m]} *) f32} buf val)
-              } *)
-            } *)
-          } *)
-        } *)
-      } *)
-    } *)
-    (({[.n] [.m]} *) ix val)
-  })
-  ->
-  ([n m k.] (f32 val))
-= ([env flat-c.]
-  ([.env] *.elim [n-len env-rest-a.]
-    ([.env-rest-a] *.elim [m-len env-rest-b.]
-      ([.m-len] f32.matmul.len-copies3 [b-m-len output-cols-for-row output-cols-for-col.]
-        ([.env-rest-b] *.elim [k-len env-rest-c.]
-          ([.k-len] f32.matmul.len-copies3 [cell-k-len a-k-len b-k-len.]
-            ([.env-rest-c] *.elim [nk-len env-rest-d.]
-              ([.env-rest-d] *.elim [km-len buffers.]
-                ([.buffers] *.elim [a b.]
-                  ([.flat-c] ix.copy [flat-for-row flat-for-col.]
-                    ({[.output-cols-for-row] [.flat-for-row]} row-major-row [i.]
-                      ({[.output-cols-for-col] [.flat-for-col]} row-major-col [j.]
-                        ({
-                          [.cell-k-len]
-                          ({[.n-len] [.a-k-len] ({[.nk-len] [.a]} f32.buf.view)} f32.row-major.matrix-view)
-                          ({[.b-k-len] [.b-m-len] ({[.km-len] [.b]} f32.buf.view)} f32.row-major.matrix-view)
-                          [.i]
-                          [.j]
-                        } f32.matmul.cell-dot)
-                      )
-                    )
-                  )
-                )
-              )
-            )
-          )
-        )
-      )
-    )
-  )
-))
-
 # Compute one row-major result cell from arbitrary matrix views.
 # This definition has closures on its boundary, so callers specialize it by
 # direct application before naming a closure-free materialization producer.
@@ -459,44 +399,6 @@
         ({[.col-cols] [.flat-for-col]} row-major-col [j.]
           ({[.k-len] [.a-view] [.b-view] [.i] [.j]} f32.matmul.cell-dot)
         )
-      )
-    )
-  )
-))
-
-#   row-major-bufs(A, B) = materialize(lambda flat-c. C[flat-c])
-(def program f32.matmul.row-major-bufs :
-  ([n m k.] {
-    ({[.n] u64} :)
-    ({[.m] u64} :)
-    ({[.k] u64} :)
-    ({({[.n] [.k]} *) u64} :)
-    ({({[.k] [.m]} *) u64} :)
-    ({({[.n] [.m]} *) u64} :)
-    ({cap.ref ({[.n] [.k]} *) f32} buf val)
-    ({cap.ref ({[.k] [.m]} *) f32} buf val)
-  })
-  ->
-  ([n m k.] ({cap.own ({[.n] [.m]} *) f32} buf val))
-= ([n-len m-len k-len nk-len km-len nm-len a b.]
-  ([.n-len] f32.matmul.len-copy-param [env-n-len producer-n.]
-    ([.m-len] f32.matmul.len-copy-param [env-m-len producer-m.]
-      ([.k-len] f32.matmul.len-copy-param [env-k-len producer-k.]
-        ({
-          ({[.env-n-len]
-            ({[.env-m-len]
-              ({[.env-k-len]
-                ({[.nk-len]
-                  ({[.km-len]
-                    ({[.a] [.b]} *.intro)
-                  } *.intro)
-                } *.intro)
-              } *.intro)
-            } *.intro)
-          } *.intro)
-          ({[.producer-n] [.producer-m] [.producer-k]} name.f32.matmul.cell-at-flat-index)
-          [.nm-len]
-        } materializec)
       )
     )
   )

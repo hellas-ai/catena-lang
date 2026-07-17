@@ -12,7 +12,7 @@
 = ([len.]
   {
     [.len]
-    ({unit.intro (([.len] :.param) name.materialize-index-producer) [.len]}
+    ({[.len] unit.intro (([.len] :.param) name.materialize-index-producer)}
       materializec)
   }
   buf.to-mem
@@ -36,7 +36,7 @@
   [len input.]
     {
       [.len]
-      ({[.input] (([.len] :.param) name.materialize-copy-u64-producer) [.len]}
+      ({[.len] [.input] (([.len] :.param) name.materialize-copy-u64-producer)}
         materializec)
     }
     buf.to-mem

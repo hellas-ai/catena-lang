@@ -673,6 +673,8 @@ fn exp2_approx_test() -> anyhow::Result<()> {
 #[path = "cases/materializec.rs"]
 mod materializec;
 
+#[path = "cases/materialize.rs"]
+mod materialize;
 #[path = "cases/matrix.rs"]
 mod matrix;
 

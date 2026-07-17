@@ -2,6 +2,7 @@
 
 mod basic;
 mod context;
+mod materialize;
 mod matmul;
 mod products;
 mod reduce;

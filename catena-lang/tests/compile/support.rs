@@ -25,6 +25,7 @@ pub fn report() -> &'static CompileReport {
             include_str!("closures/fixtures/products.hex"),
             include_str!("closures/fixtures/context.hex"),
             include_str!("closures/fixtures/reduce.hex"),
+            include_str!("closures/fixtures/materialize.hex"),
             include_str!("closures/fixtures/matmul.hex"),
         ];
         let report =

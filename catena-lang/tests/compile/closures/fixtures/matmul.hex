@@ -95,38 +95,6 @@
   reduce
 ))
 
-# Minimal row-major index primitives used only to turn flat buffer views into
-# matrix views.  Their formulas are included here so the examples remain
-# readable without importing the branch's matrix library.
-(theory program type {
-  # flat(m, i, j) = i*m + j
-  (arr row-major-index :
-    ([n m.] {
-      ({[.m] u64} :)
-      ({([.n] ix val) ([.m] ix val)} *)
-    })
-    ->
-    ([n m.] (({[.n] [.m]} *) ix val)))
-
-  # row(m, flat) = floor(flat/m)
-  (arr row-major-row :
-    ([n m.] {
-      ({[.m] u64} :)
-      (({[.n] [.m]} *) ix val)
-    })
-    ->
-    ([n m.] ([.n] ix val)))
-
-  # col(m, flat) = flat mod m
-  (arr row-major-col :
-    ([n m.] {
-      ({[.m] u64} :)
-      (({[.n] [.m]} *) ix val)
-    })
-    ->
-    ([n m.] ([.m] ix val)))
-})
-
 # id(i,j) = (i,j)
 (def program matrix-index-id :
   ([n m.] {([.n] ix val) ([.m] ix val)} *)

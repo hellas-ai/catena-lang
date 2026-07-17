@@ -5,7 +5,6 @@ use thiserror::Error;
 
 use crate::codegen::{
     GpuAssign, GpuDialect, GpuFunction, GpuModule, GpuModuleMap, GpuValue, GpuVar,
-    components::value_expr,
     components::{input_components, single_value, value_expr},
     gpu_placement::{
         GpuFunctionPlacement, direct_function_placement, function_placement, function_placements,

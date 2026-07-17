@@ -38,11 +38,6 @@
     ([i.] {[.i] [.i]})
   )
 
-  (arr ix.to-u64 :
-    ([n.] ([.n] ix val))
-    ->
-    ([n.] (u64 val)))
-
   # Row-major layout helpers for flattened matrix buffers.
   # These operations are common enough that we define them as primitives instead
   # of proving their arithmetic with inline certificates at each use site.

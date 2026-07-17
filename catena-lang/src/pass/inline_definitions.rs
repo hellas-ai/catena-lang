@@ -10,6 +10,8 @@ use open_hypergraphs::lax::{
 };
 use thiserror::Error;
 
+use crate::prefixes::NAME_PREFIX;
+
 pub type Term = OpenHypergraph<(), Operation>;
 
 #[derive(Debug, Error)]
@@ -217,6 +219,12 @@ fn selected_dependencies(term: &Term, selected: &BTreeSet<Operation>) -> BTreeSe
         .collect()
 }
 
+fn name_operation(definition_name: &Operation) -> Operation {
+    format!("{NAME_PREFIX}{definition_name}")
+        .parse()
+        .expect("generated name operation should parse")
+}
+
 fn inline_term(
     theory_id: &TheoryId,
     definition_name: &Operation,
@@ -286,10 +294,7 @@ mod tests {
         };
 
         assert!(!arrows.contains_key(&"mk-closure".parse().unwrap()));
-        assert!(
-            arrows.contains_key(&"name.mk-closure".parse().unwrap()),
-            "name.* is a function pointer value, not a direct call; keep it unless those uses are rewritten"
-        );
+        assert!(!arrows.contains_key(&"name.mk-closure".parse().unwrap()));
         let use_closure = arrows
             .get(&"use-closure".parse().unwrap())
             .and_then(|arrow| arrow.definition.as_ref())

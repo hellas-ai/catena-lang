@@ -675,6 +675,8 @@ mod materializec;
 
 #[path = "cases/materialize.rs"]
 mod materialize;
+#[path = "cases/matrix.rs"]
+mod matrix;
 
 #[test]
 fn sigmoid_test() -> anyhow::Result<()> {

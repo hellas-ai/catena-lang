@@ -7,6 +7,7 @@
 mod components;
 pub mod fn_ptrs;
 pub mod gpu;
+mod gpu_placement;
 pub mod lower_types;
 mod ops;
 mod prelude;
@@ -286,6 +287,10 @@ impl CodegenState<'_> {
                 .map(|(node, _)| var(*node, &term, &instance.overrides))
                 .collect::<Result<Vec<_>, CodegenError>>()?;
 
+            if is_erased_only(&inputs, &outputs) {
+                continue;
+            }
+
             validate::assignment(&self.definitions, &instance.op, &op, &inputs)?;
 
             let call_symbol = if self.definitions.contains_key(&op) {
@@ -386,5 +391,53 @@ pub fn runtime_type(var: &GpuVar) -> Option<&CType> {
     match &var.lowered {
         LoweredType::Runtime(ty) => Some(ty),
         LoweredType::Erased => None,
+    }
+}
+
+fn is_erased_only(inputs: &[GpuValue], outputs: &[GpuVar]) -> bool {
+    (!inputs.is_empty() || !outputs.is_empty())
+        && inputs
+            .iter()
+            .all(|value| matches!(value, GpuValue::Var(var) if matches!(var.lowered, LoweredType::Erased)))
+        && outputs
+            .iter()
+            .all(|var| matches!(var.lowered, LoweredType::Erased))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn erased_var(node: usize) -> GpuVar {
+        GpuVar {
+            node: NodeId(node),
+            name: format!("x{node}"),
+            lowered: LoweredType::Erased,
+        }
+    }
+
+    fn runtime_var(node: usize) -> GpuVar {
+        GpuVar {
+            node: NodeId(node),
+            name: format!("x{node}"),
+            lowered: LoweredType::Runtime(CType::U64),
+        }
+    }
+
+    #[test]
+    fn erased_only_requires_nonempty_erased_boundaries() {
+        assert!(is_erased_only(
+            &[GpuValue::Var(erased_var(0))],
+            &[erased_var(1)]
+        ));
+        assert!(!is_erased_only(&[], &[]));
+        assert!(!is_erased_only(
+            &[GpuValue::Var(runtime_var(0))],
+            &[erased_var(1)]
+        ));
+        assert!(!is_erased_only(
+            &[GpuValue::Var(erased_var(0))],
+            &[runtime_var(1)]
+        ));
     }
 }

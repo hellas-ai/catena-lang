@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 
 use hexpr::Operation;
 use thiserror::Error;
@@ -6,8 +6,11 @@ use thiserror::Error;
 use crate::codegen::{
     GpuAssign, GpuDialect, GpuFunction, GpuModule, GpuModuleMap, GpuValue, GpuVar,
     components::{input_components, single_value, value_expr},
+    gpu_placement::{
+        GpuFunctionPlacement, direct_function_placement, function_placement, function_placements,
+    },
     lower_types::CType,
-    ops::{ifc, materializec, reducec},
+    ops::{ifc, materializec, reducec, row_major},
     prelude::render_gpu_prelude,
     render_utils::{c_type, invalid_inputs, invalid_outputs, param_decl},
     runtime_type,
@@ -95,7 +98,12 @@ pub fn render_module(module: &GpuModule, dialect: GpuDialect) -> Result<String, 
     let mut out = String::new();
     out.push_str(&render_gpu_prelude(dialect));
     out.push('\n');
-    render_module_body(&mut out, module, dialect)?;
+    render_module_body(
+        &mut out,
+        module,
+        dialect,
+        direct_function_placement(&module.entry),
+    )?;
     Ok(out)
 }
 
@@ -107,16 +115,27 @@ pub fn render_modules(
     let mut out = String::new();
     out.push_str(&render_gpu_prelude(dialect));
     out.push('\n');
+    let placements = function_placements(modules);
 
     for module in modules.values() {
-        render_function_decl(&mut out, &module.entry, dialect)?;
+        render_function_decl(
+            &mut out,
+            &module.entry,
+            dialect,
+            function_placement(&placements, &module.entry.name),
+        )?;
     }
     if !modules.is_empty() {
         out.push('\n');
     }
 
     for module in modules.values() {
-        render_module_body(&mut out, module, dialect)?;
+        render_module_body(
+            &mut out,
+            module,
+            dialect,
+            function_placement(&placements, &module.entry.name),
+        )?;
         out.push('\n');
     }
 
@@ -127,6 +146,7 @@ fn render_module_body(
     out: &mut String,
     module: &GpuModule,
     dialect: GpuDialect,
+    placement: GpuFunctionPlacement,
 ) -> Result<(), GpuRenderError> {
     // Materialization is represented in the dataflow body as one assignment, but GPU codegen needs an
     // auxiliary `__global__` kernel in addition to the host wrapper function.
@@ -149,7 +169,7 @@ fn render_module_body(
     }
 
     // The entry function is the ordinary host-callable wrapper for this definition.
-    render_function(out, &module.entry, dialect)?;
+    render_function(out, &module.entry, dialect, placement)?;
     Ok(())
 }
 
@@ -157,13 +177,14 @@ fn render_function_decl(
     out: &mut String,
     function: &GpuFunction,
     dialect: GpuDialect,
+    placement: GpuFunctionPlacement,
 ) -> Result<(), GpuRenderError> {
-    if function_is_host_only(function) {
+    if placement.is_host_only() {
         out.push_str(&format!("#ifndef {}\n", dialect.device_compile_guard()));
     }
-    out.push_str(&function_signature(function)?);
+    out.push_str(&function_signature(function, placement)?);
     out.push_str(";\n");
-    if function_is_host_only(function) {
+    if placement.is_host_only() {
         out.push_str("#endif\n");
     }
     Ok(())
@@ -173,11 +194,12 @@ fn render_function(
     out: &mut String,
     function: &GpuFunction,
     dialect: GpuDialect,
+    placement: GpuFunctionPlacement,
 ) -> Result<(), GpuRenderError> {
-    if function_is_host_only(function) {
+    if placement.is_host_only() {
         out.push_str(&format!("#ifndef {}\n", dialect.device_compile_guard()));
     }
-    out.push_str(&function_signature(function)?);
+    out.push_str(&function_signature(function, placement)?);
     out.push_str(" {\n");
     let mut declared = function
         .sources
@@ -195,29 +217,28 @@ fn render_function(
     }
 
     // Multiple outputs are returned by writing computed target wires into pointer parameters.
-    for result in &function.targets {
-        out.push_str(&format!("    *out_{} = {};\n", result.name, result.name));
+    for (result, output_param) in function
+        .targets
+        .iter()
+        .zip(output_param_names(&function.targets))
+    {
+        out.push_str(&format!("    *{output_param} = {};\n", result.name));
     }
     out.push_str("    return;\n");
     out.push_str("}\n");
-    if function_is_host_only(function) {
+    if placement.is_host_only() {
         out.push_str("#endif\n");
     }
     Ok(())
 }
 
-fn function_is_host_only(function: &GpuFunction) -> bool {
-    function
-        .assignments
-        .iter()
-        .any(|assignment| matches!(assignment.op.as_str(), "gpu.materialize" | "materializec"))
-}
-
-fn function_signature(function: &GpuFunction) -> Result<String, GpuRenderError> {
-    let qualifier = if function_is_host_only(function) {
-        "__host__ "
-    } else {
-        "__host__ __device__ "
+fn function_signature(
+    function: &GpuFunction,
+    placement: GpuFunctionPlacement,
+) -> Result<String, GpuRenderError> {
+    let qualifier = match placement {
+        GpuFunctionPlacement::HostOnly => "__host__ ",
+        GpuFunctionPlacement::HostAndDevice => "__host__ __device__ ",
     };
     let mut signature = format!("extern \"C\" {qualifier}void {}(", function.name);
     let mut params = Vec::new();
@@ -226,12 +247,41 @@ fn function_signature(function: &GpuFunction) -> Result<String, GpuRenderError> 
     for source in &function.sources {
         params.push(param_decl(source, false)?);
     }
-    for target in &function.targets {
-        params.push(param_decl(target, true)?);
+    for (target, output_param) in function
+        .targets
+        .iter()
+        .zip(output_param_names(&function.targets))
+    {
+        let ty = runtime_type(target).ok_or_else(|| GpuRenderError::ErasedType(target.clone()))?;
+        params.push(format!("{} *{}", c_type(ty), output_param));
     }
     signature.push_str(&params.join(", "));
     signature.push(')');
     Ok(signature)
+}
+
+fn output_param_names(targets: &[GpuVar]) -> Vec<String> {
+    let counts = targets
+        .iter()
+        .fold(BTreeMap::<&str, usize>::new(), |mut counts, target| {
+            *counts.entry(target.name.as_str()).or_default() += 1;
+            counts
+        });
+    let mut seen = BTreeMap::<&str, usize>::new();
+    targets
+        .iter()
+        .map(|target| {
+            let name = target.name.as_str();
+            if counts[name] == 1 {
+                format!("out_{name}")
+            } else {
+                let index = seen.entry(name).or_default();
+                let output_name = format!("out_{name}_{index}");
+                *index += 1;
+                output_name
+            }
+        })
+        .collect()
 }
 
 fn render_assignment(
@@ -334,9 +384,12 @@ fn render_assignment(
         }
         "f32.round-to-u32" => render_f32_round_to_u32(out, assignment)?,
         "f32.bitcast-u32" => render_f32_bitcast_u32(out, assignment)?,
+        "ix.to-u64" => render_forget(out, assignment)?,
         "ix.zero" => render_ix_zero(out, assignment)?,
         "ix" => render_ix(out, assignment)?,
-        "ix.to-u64" => render_forget(out, assignment)?,
+        "row-major-index" => row_major::render_index(out, assignment)?,
+        "row-major-row" => row_major::render_row(out, assignment)?,
+        "row-major-col" => row_major::render_col(out, assignment)?,
         "u64.to-ix" => render_u64_to_ix(out, assignment)?,
         "eval" => render_eval(out, assignment)?,
         "reducec" => reducec::render(out, assignment)?,
@@ -850,6 +903,11 @@ fn render_eval(out: &mut String, assignment: &GpuAssign) -> Result<(), GpuRender
     let Some((func, args)) = assignment.inputs.split_last() else {
         return Err(invalid_inputs(assignment, 1));
     };
+    if let GpuValue::FnSymbol(symbol) = func
+        && render_primitive_eval(out, assignment, &symbol.target, args)?
+    {
+        return Ok(());
+    }
     let mut call_args = args.iter().map(value_expr).collect::<Vec<_>>();
     call_args.extend(
         assignment
@@ -864,6 +922,31 @@ fn render_eval(out: &mut String, assignment: &GpuAssign) -> Result<(), GpuRender
         call_args.join(", ")
     ));
     Ok(())
+}
+
+fn render_primitive_eval(
+    out: &mut String,
+    assignment: &GpuAssign,
+    target: &Operation,
+    args: &[GpuValue],
+) -> Result<bool, GpuRenderError> {
+    let primitive = GpuAssign {
+        op: target.clone(),
+        input_sizes: Vec::new(),
+        output_sizes: assignment.output_sizes.clone(),
+        call_symbol: None,
+        inputs: args.to_vec(),
+        outputs: assignment.outputs.clone(),
+    };
+    match target.as_str() {
+        "f32.add" => render_binary(out, &primitive, "+")?,
+        "f32.mul" => render_binary(out, &primitive, "*")?,
+        "row-major-index" => row_major::render_index(out, &primitive)?,
+        "row-major-row" => row_major::render_row(out, &primitive)?,
+        "row-major-col" => row_major::render_col(out, &primitive)?,
+        _ => return Ok(false),
+    }
+    Ok(true)
 }
 
 fn render_materialize_kernel(
@@ -1076,6 +1159,152 @@ mod tests {
         assert!(source.contains("uint64_t x1;"));
         assert!(source.contains("    x1 = x0;\n"));
         assert!(!source.contains("uint64_t x2;"));
+    }
+
+    #[test]
+    fn erased_only_helper_assignment_must_be_removed_before_rendering() {
+        let input = erased_var(0, "x0");
+        let output_a = erased_var(1, "x1");
+        let output_b = erased_var(2, "x2");
+        let module = GpuModule {
+            name: "program_type_helper".to_string(),
+            source_name: Some(op("type-helper")),
+            entry: GpuFunction {
+                name: "program_type_helper".to_string(),
+                sources: Vec::new(),
+                targets: Vec::new(),
+                assignments: vec![GpuAssign {
+                    op: op("type-helper"),
+                    input_sizes: vec![1],
+                    output_sizes: vec![1, 1],
+                    call_symbol: None,
+                    inputs: vec![GpuValue::Var(input)],
+                    outputs: vec![output_a, output_b],
+                }],
+            },
+        };
+
+        let error = render_module(&module, GpuDialect::Hip).unwrap_err();
+
+        assert!(matches!(error, GpuRenderError::UnsupportedOp(op) if op.as_str() == "type-helper"));
+    }
+
+    #[test]
+    fn row_major_layout_operations_render_index_arithmetic() {
+        let cols = var(0, "cols", CType::U64);
+        let row = var(1, "row", CType::U64);
+        let col = var(2, "col", CType::U64);
+        let flat = var(3, "flat", CType::U64);
+        let recovered_row = var(4, "recovered_row", CType::U64);
+        let recovered_col = var(5, "recovered_col", CType::U64);
+        let erased = erased_var(6, "shape");
+        let module = GpuModule {
+            name: "program_row_major".to_string(),
+            source_name: Some(op("row-major-test")),
+            entry: GpuFunction {
+                name: "program_row_major".to_string(),
+                sources: vec![cols.clone(), row.clone(), col.clone()],
+                targets: vec![flat.clone(), recovered_row.clone(), recovered_col.clone()],
+                assignments: vec![
+                    GpuAssign {
+                        op: op("row-major-index"),
+                        input_sizes: vec![1, 2],
+                        output_sizes: vec![1],
+                        call_symbol: None,
+                        inputs: vec![
+                            GpuValue::Var(cols.clone()),
+                            GpuValue::Var(erased),
+                            GpuValue::Var(row),
+                            GpuValue::Var(col),
+                        ],
+                        outputs: vec![flat.clone()],
+                    },
+                    GpuAssign {
+                        op: op("row-major-row"),
+                        input_sizes: vec![1, 1],
+                        output_sizes: vec![1],
+                        call_symbol: None,
+                        inputs: vec![GpuValue::Var(cols.clone()), GpuValue::Var(flat.clone())],
+                        outputs: vec![recovered_row],
+                    },
+                    GpuAssign {
+                        op: op("row-major-col"),
+                        input_sizes: vec![1, 1],
+                        output_sizes: vec![1],
+                        call_symbol: None,
+                        inputs: vec![GpuValue::Var(cols), GpuValue::Var(flat)],
+                        outputs: vec![recovered_col],
+                    },
+                ],
+            },
+        };
+
+        let source = render_module(&module, GpuDialect::Hip).unwrap();
+
+        assert!(source.contains("    flat = row * cols + col;\n"));
+        assert!(source.contains("    recovered_row = flat / cols;\n"));
+        assert!(source.contains("    recovered_col = flat % cols;\n"));
+    }
+
+    #[test]
+    fn eval_of_primitive_function_symbol_renders_inline() {
+        let cols = var(0, "cols", CType::U64);
+        let row = var(1, "row", CType::U64);
+        let col = var(2, "col", CType::U64);
+        let flat = var(3, "flat", CType::U64);
+        let module = GpuModule {
+            name: "program_eval_primitive".to_string(),
+            source_name: Some(op("eval-primitive-test")),
+            entry: GpuFunction {
+                name: "program_eval_primitive".to_string(),
+                sources: vec![cols.clone(), row.clone(), col.clone()],
+                targets: vec![flat.clone()],
+                assignments: vec![GpuAssign {
+                    op: op("eval"),
+                    input_sizes: vec![1, 1, 1, 0],
+                    output_sizes: vec![1],
+                    call_symbol: None,
+                    inputs: vec![
+                        GpuValue::Var(cols),
+                        GpuValue::Var(row),
+                        GpuValue::Var(col),
+                        GpuValue::FnSymbol(FnPtrSymbol {
+                            target: op("row-major-index"),
+                        }),
+                    ],
+                    outputs: vec![flat],
+                }],
+            },
+        };
+
+        let source = render_module(&module, GpuDialect::Hip).unwrap();
+
+        assert!(source.contains("    flat = row * cols + col;\n"));
+        assert!(!source.contains("program_row_major_index"));
+    }
+
+    #[test]
+    fn duplicate_target_nodes_get_distinct_output_parameter_names() {
+        let value = var(0, "x0", CType::U64);
+        let module = GpuModule {
+            name: "program_index_copy".to_string(),
+            source_name: Some(op("ix.copy")),
+            entry: GpuFunction {
+                name: "program_index_copy".to_string(),
+                sources: vec![value.clone()],
+                targets: vec![value.clone(), value],
+                assignments: Vec::new(),
+            },
+        };
+
+        let source = render_module(&module, GpuDialect::Hip).unwrap();
+
+        assert!(source.contains(
+            "extern \"C\" __host__ __device__ void program_index_copy(uint64_t x0, uint64_t *out_x0_0, uint64_t *out_x0_1)"
+        ));
+        assert!(source.contains("    *out_x0_0 = x0;\n"));
+        assert!(source.contains("    *out_x0_1 = x0;\n"));
+        assert!(!source.contains("uint64_t *out_x0, uint64_t *out_x0"));
     }
 
     #[test]

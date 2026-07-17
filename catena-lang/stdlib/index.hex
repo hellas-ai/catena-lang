@@ -29,4 +29,42 @@
   # the zero index
   # ix.zero : (|- n > 0) -> val(ix n)
   (arr ix.zero : ({[n] 0} > |-) -> (ix val))
+
+  (def ix.copy :
+    ([n.] ([.n] ix val))
+    ->
+    ([n.] {([.n] ix val) ([.n] ix val)})
+    =
+    ([i.] {[.i] [.i]})
+  )
+
+  # Row-major layout helpers for flattened matrix buffers.
+  # These operations are common enough that we define them as primitives instead
+  # of proving their arithmetic with inline certificates at each use site.
+  # row-major-index(cols, row, col) -> flat
+  (arr row-major-index :
+    ([n k.] {
+      ({[.k] u64} :)
+      ({([.n] ix val) ([.k] ix val)} *)
+    })
+    ->
+    ([n k.] (({[.n] [.k]} *) ix val)))
+
+  # row-major-row(cols, flat) -> row
+  (arr row-major-row :
+    ([n m.] {
+      ({[.m] u64} :)
+      (({[.n] [.m]} *) ix val)
+    })
+    ->
+    ([n m.] ([.n] ix val)))
+
+  # row-major-col(cols, flat) -> col
+  (arr row-major-col :
+    ([n m.] {
+      ({[.m] u64} :)
+      (({[.n] [.m]} *) ix val)
+    })
+    ->
+    ([n m.] ([.m] ix val)))
 })

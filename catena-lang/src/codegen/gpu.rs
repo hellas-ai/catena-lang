@@ -401,7 +401,6 @@ fn render_assignment(
         op if op.starts_with(CONST_U32_PREFIX) => {
             render_int_const(out, assignment, CONST_U32_PREFIX, "U")?
         }
-        _op if is_erased_only_assignment(assignment) => {}
         op => {
             return Err(GpuRenderError::UnsupportedOp(
                 op.parse().unwrap_or_else(|_| assignment.op.clone()),
@@ -409,17 +408,6 @@ fn render_assignment(
         }
     }
     Ok(())
-}
-
-fn is_erased_only_assignment(assignment: &GpuAssign) -> bool {
-    assignment
-        .inputs
-        .iter()
-        .all(|value| matches!(value, GpuValue::Var(var) if runtime_type(var).is_none()))
-        && assignment
-            .outputs
-            .iter()
-            .all(|var| runtime_type(var).is_none())
 }
 
 fn render_assert(out: &mut String, assignment: &GpuAssign) -> Result<(), GpuRenderError> {
@@ -1174,7 +1162,7 @@ mod tests {
     }
 
     #[test]
-    fn erased_only_helper_assignment_renders_as_noop() {
+    fn erased_only_helper_assignment_must_be_removed_before_rendering() {
         let input = erased_var(0, "x0");
         let output_a = erased_var(1, "x1");
         let output_b = erased_var(2, "x2");
@@ -1196,10 +1184,9 @@ mod tests {
             },
         };
 
-        let source = render_module(&module, GpuDialect::Hip).unwrap();
+        let error = render_module(&module, GpuDialect::Hip).unwrap_err();
 
-        assert!(source.contains("void program_type_helper()"));
-        assert!(!source.contains("type-helper"));
+        assert!(matches!(error, GpuRenderError::UnsupportedOp(op) if op.as_str() == "type-helper"));
     }
 
     #[test]

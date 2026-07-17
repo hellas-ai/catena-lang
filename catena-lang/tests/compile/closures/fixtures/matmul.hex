@@ -341,6 +341,7 @@
   ([n m k.] ({cap.own ({[.n] [.m]} *) f32} buf val))
 = ([rows cols inner left-size right-size output-size left-buffer right-buffer.]
   {
+    [.output-size]
     ({[.rows]
       ({[.cols]
         ({[.inner]
@@ -357,7 +358,6 @@
       ([.cols] :.param)
       ([.inner] :.param)
     } name.matmul-two-bufs-at)
-    [.output-size]
   }
   materializec
 ))
@@ -412,9 +412,9 @@
   ([n.] ({cap.own ({[.n] [.n]} *) f32} buf val))
 = ([size flat-size input.]
   {
+    [.flat-size]
     ({[.size] ({[.flat-size] [.input]} *.intro)} *.intro)
     (([.size] :.param) name.matmul-buf-identity-at)
-    [.flat-size]
   }
   materializec
 ))

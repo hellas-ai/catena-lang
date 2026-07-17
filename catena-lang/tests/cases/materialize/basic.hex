@@ -1,0 +1,26 @@
+# Examples using source-level materialize. These exercise closure conversion
+# from materialize to materializec.
+
+(def program cast-index :
+  ([n.] ([.n] ix val))
+  ->
+  ([n.] (u64 val))
+= ([i.] [.i] ix.to-u64))
+
+(def program materialize-indexes-source :
+  ({[n] u64} :)
+  ->
+  ([n.] (cap.own mem))
+= ([len.]
+  {
+    [.len]
+    (
+      {
+        [.len]
+        ((([.len] :.param) name.cast-index) lift)
+      }
+      materialize
+    )
+  }
+  buf.to-mem
+))

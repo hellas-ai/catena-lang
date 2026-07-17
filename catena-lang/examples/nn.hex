@@ -241,7 +241,7 @@
 = ([value len.]
   {
     [.len]
-    ({[.value] (([.len] :.param) name.broadcast-at) [.len]}
+    ({[.len] [.value] (([.len] :.param) name.broadcast-at)}
       materializec)
   }
   buf.to-mem
@@ -266,7 +266,7 @@
 = ([len.]
   {
     [.len]
-    ({unit.intro (([.len] :.param) name.arange-at) [.len]}
+    ({[.len] unit.intro (([.len] :.param) name.arange-at)}
       materializec)
   }
   buf.to-mem
@@ -302,7 +302,7 @@
   ([.start] :.forget [start-val.])
   {
     [.len]
-    ({({[.input-mem] [.start-val]} *.intro) (([.len] :.param) name.slice-at) [.len]}
+    ({[.len] ({[.input-mem] [.start-val]} *.intro) (([.len] :.param) name.slice-at)}
       materializec)
   }
   buf.to-mem

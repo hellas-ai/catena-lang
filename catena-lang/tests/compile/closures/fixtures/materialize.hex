@@ -1,0 +1,28 @@
+# Materialization closure fixtures.
+
+# Produce the u64 representation of each index.
+(def program cast-index :
+  ([n.] ([.n] ix val))
+  ->
+  ([n.] (u64 val))
+= ([i.] [.i] ix.to-u64))
+
+# Source-level materialize should become materializec with an explicit
+# environment/function pair.
+(def program materialize-indexes-source :
+  ({[n] u64} :)
+  ->
+  ([n.] (cap.own mem))
+= ([len.]
+  {
+    [.len]
+    (
+      {
+        [.len]
+        ((([.len] :.param) name.cast-index) lift)
+      }
+      materialize
+    )
+  }
+  buf.to-mem
+))

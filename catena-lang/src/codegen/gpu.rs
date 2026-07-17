@@ -391,7 +391,6 @@ fn render_assignment(
         "row-major-index" => row_major::render_index(out, assignment)?,
         "row-major-row" => row_major::render_row(out, assignment)?,
         "row-major-col" => row_major::render_col(out, assignment)?,
-        "ix.to-u64" => render_forget(out, assignment)?,
         "u64.to-ix" => render_u64_to_ix(out, assignment)?,
         "eval" => render_eval(out, assignment)?,
         "reducec" => reducec::render(out, assignment)?,

@@ -12,130 +12,6 @@
 # ordering, so the same code can be read as ordinary matrix multiplication
 # rather than as flat-buffer arithmetic.
 
-(def program f32.matmul.len-split5 :
-  ([n.] ({[.n] u64} :))
-  ->
-  ([n.] {
-    ({[.n] u64} :)
-    ({[.n] u64} :)
-    ({[.n] u64} :)
-    ({[.n] u64} :)
-    ({[.n] u64} :)
-    [.n]
-  })
-= ([len.]
-  ([.len] :.ty [copy-a param.]
-    ([.copy-a] :.ty [copy-b _param-b.]
-      ([.copy-b] :.ty [copy-c _param-c.]
-        ([.copy-c] :.ty [copy-d _param-d.]
-          ([.copy-d] :.ty [copy-e _param-e.]
-            {[.copy-a] [.copy-b] [.copy-c] [.copy-d] [.copy-e] [.param]}
-          )
-        )
-      )
-    )
-  )
-))
-
-(def program f32.matmul.len-copies2 :
-  ([n.] ({[.n] u64} :))
-  ->
-  ([n.] {
-    ({[.n] u64} :)
-    ({[.n] u64} :)
-  })
-= ([len.]
-  ([.len] f32.matmul.len-split5 [copy-a copy-b unused-a unused-b unused-c _param.]
-    [.copy-a copy-b]
-  )
-))
-
-(def program f32.matmul.len-copies3 :
-  ([n.] ({[.n] u64} :))
-  ->
-  ([n.] {
-    ({[.n] u64} :)
-    ({[.n] u64} :)
-    ({[.n] u64} :)
-  })
-= ([len.]
-  ([.len] f32.matmul.len-split5 [copy-a copy-b copy-c unused-a unused-b _param.]
-    {[.copy-a] [.copy-b] [.copy-c]}
-  )
-))
-
-(def program f32.matmul.len-copies6 :
-  ([n.] ({[.n] u64} :))
-  ->
-  ([n.] {
-    ({[.n] u64} :)
-    ({[.n] u64} :)
-    ({[.n] u64} :)
-    ({[.n] u64} :)
-    ({[.n] u64} :)
-    ({[.n] u64} :)
-  })
-= ([len.]
-  ([.len] f32.matmul.len-split5 [copy-a copy-b copy-c copy-d copy-e _param.]
-    ([.copy-a] f32.matmul.len-split5 [copy-a1 copy-a2 unused-a unused-b unused-c _param-a.]
-      {[.copy-a1] [.copy-a2] [.copy-b] [.copy-c] [.copy-d] [.copy-e]}
-    )
-  )
-))
-
-(def program f32.matmul.len-copies2-param :
-  ([n.] ({[.n] u64} :))
-  ->
-  ([n.] {
-    ({[.n] u64} :)
-    ({[.n] u64} :)
-    [.n]
-  })
-= ([len.]
-  ([.len] f32.matmul.len-split5 [copy-a copy-b unused-a unused-b unused-c param.]
-    {[.copy-a] [.copy-b] [.param]}
-  )
-))
-
-(def program f32.matmul.len-copy-param :
-  ([n.] ({[.n] u64} :))
-  ->
-  ([n.] {({[.n] u64} :) [.n]})
-= ([len.]
-  ([.len] f32.matmul.len-copies2-param [copy unused param.]
-    {[.copy] [.param]}
-  )
-))
-
-(def program f32.matmul.len-params3 :
-  ([n.] ({[.n] u64} :))
-  ->
-  ([n.] {[.n] [.n] [.n]})
-= ([len.]
-  ([.len] f32.matmul.len-copy-params3 [unused param-a param-b param-c.]
-    {[.param-a] [.param-b] [.param-c]}
-  )
-))
-
-(def program f32.matmul.len-copy-params3 :
-  ([n.] ({[.n] u64} :))
-  ->
-  ([n.] {
-    ({[.n] u64} :)
-    [.n]
-    [.n]
-    [.n]
-  })
-= ([len.]
-  ([.len] :.ty [copy-a param-a.]
-    ([.copy-a] :.ty [copy-b param-b.]
-      ([.copy-b] :.ty [copy-c param-c.]
-        {[.copy-c] [.param-a] [.param-b] [.param-c]}
-      )
-    )
-  )
-))
-
 (def program f32.matmul.identity :
   [a]
   ->
@@ -204,7 +80,7 @@
   ->
   ([n.] ({([.n] ix val) (f32 val)} =>))
 = ([len input.]
-  ([.len] f32.matmul.len-params3 [with-unit-len index-id-len buf-at-len.]
+  ([.len] u64.params3 [with-unit-len index-id-len buf-at-len.]
     {
       ({
         ([.with-unit-len] name.f32.matmul.index-with-unit lift)
@@ -230,8 +106,8 @@
   ->
   ([n m.] ({({([.n] ix val) ([.m] ix val)} *) (f32 val)} =>))
 = ([n-len m-len flat-view.]
-  ([.n-len] f32.matmul.len-params3 [with-unit-n-param id-n-param index-n-param.]
-    ([.m-len] f32.matmul.len-copy-params3 [stride-len with-unit-m-param id-m-param index-m-param.]
+  ([.n-len] u64.params3 [with-unit-n-param id-n-param index-n-param.]
+    ([.m-len] u64.copy-params3 [stride-len with-unit-m-param id-m-param index-m-param.]
       ({
         ({
           ({
@@ -292,7 +168,7 @@
   ->
   ([n k.] ({([.k] ix val) (f32 val)} =>))
 = ([k-len matrix-view i.]
-  ([.k-len] f32.matmul.len-copies2 [unit-len id-len.]
+  ([.k-len] u64.copies2 [unit-len id-len.]
     ({
       ({
         (([.unit-len] :.param) name.f32.matmul.index-with-unit lift)
@@ -316,7 +192,7 @@
   ->
   ([k m.] ({([.k] ix val) (f32 val)} =>))
 = ([k-len matrix-view j.]
-  ([.k-len] f32.matmul.len-copies2 [unit-len id-len.]
+  ([.k-len] u64.copies2 [unit-len id-len.]
     ({
       ({
         (([.unit-len] :.param) name.f32.matmul.index-with-unit-right lift)
@@ -342,7 +218,7 @@
   ->
   ([n m k.] ({([.k] ix val) (f32 val)} =>))
 = ([k-len a-view b-view i j.]
-  ([.k-len] f32.matmul.len-copies2-param [a-k-len b-k-len copy-param.]
+  ([.k-len] u64.copies2-param [a-k-len b-k-len copy-param.]
     ({
       ({
         ([.copy-param] name.ix.copy lift)
@@ -368,7 +244,7 @@
   ->
   ([n m k.] (f32 val))
 = ([k-len a-view b-view i j.]
-  ([.k-len] f32.matmul.len-copies2 [reduce-len producer-len.]
+  ([.k-len] u64.copies2 [reduce-len producer-len.]
     {
       (const.u32.0x00000000 u32.bitcast-f32)
       (name.f32.add lift)
@@ -393,11 +269,57 @@
   ->
   ([n m k.] (f32 val))
 = ([m-len k-len a-view b-view flat.]
-  ([.m-len] f32.matmul.len-copies2 [row-cols col-cols.]
+  ([.m-len] u64.copies2 [row-cols col-cols.]
     ([.flat] ix.copy [flat-for-row flat-for-col.]
       ({[.row-cols] [.flat-for-row]} row-major-row [i.]
         ({[.col-cols] [.flat-for-col]} row-major-col [j.]
           ({[.k-len] [.a-view] [.b-view] [.i] [.j]} f32.matmul.cell-dot)
+        )
+      )
+    )
+  )
+))
+
+# Materialize a row-major product from two already constructed matrix views.
+# This helper deliberately has closures on its boundary: direct callers inline
+# it before closure conversion, leaving only the captured cell producer region.
+(def program f32.matmul.row-major.materialize :
+  ([n m k.] {
+    ({[.n] u64} :)
+    ({[.m] u64} :)
+    ({[.k] u64} :)
+    ({({[.n] [.m]} *) u64} :)
+    ({({([.n] ix val) ([.k] ix val)} *) (f32 val)} =>)
+    ({({([.k] ix val) ([.m] ix val)} *) (f32 val)} =>)
+  })
+  ->
+  ([n m k.] ({cap.own ({[.n] [.m]} *) f32} buf val))
+= ([n-len m-len k-len output-len a-view b-view.]
+  ([.n-len] :.param [producer-n.]
+    ([.m-len] u64.copy-param [cell-m producer-m.]
+      ([.k-len] u64.copy-param [cell-k producer-k.]
+        ([.output-len] u64.copies3 [materialize-len with-unit-len index-id-len.]
+          ({[.cell-m] [.cell-k]} *.intro [cell-env-a.]
+            ({[.cell-env-a] [.a-view]} *.intro [cell-env-b.]
+              ({[.cell-env-b] [.b-view]} *.intro [cell-env.]
+                {
+                  [.materialize-len]
+                  ({
+                    ({
+                      (([.with-unit-len] :.param) name.f32.matmul.index-with-unit lift)
+                      ({
+                        ([.cell-env] defer)
+                        (([.index-id-len] :.param) name.f32.matmul.index-id lift)
+                      } tensor)
+                    } compose)
+                    ({[.producer-n] [.producer-m] [.producer-k]}
+                      name.f32.matmul.row-major.cell-at lift)
+                  } compose)
+                }
+                materialize
+              )
+            )
+          )
         )
       )
     )

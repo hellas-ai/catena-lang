@@ -29,6 +29,7 @@ fn matmul_entry_points_share_inlined_closure_only_logic() {
         "f32.matrix.col-view",
         "f32.buf.view",
         "f32.row-major.matrix-view",
+        "f32.matmul.row-major.materialize",
     ] {
         assert!(
             !arrows.contains_key(&op(helper)),

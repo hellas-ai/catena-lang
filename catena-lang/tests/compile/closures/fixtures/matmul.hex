@@ -15,36 +15,21 @@
   ->
   ([n m k.] ({cap.own ({[.n] [.m]} *) f32} buf val))
 = ([n-len m-len k-len nk-len km-len nm-len a b.]
-  ([.n-len] f32.matmul.len-copy-param [a-rows producer-n.]
-    ([.m-len] f32.matmul.len-copies2-param [b-cols cell-m producer-m.]
-      ([.k-len] f32.matmul.len-split5 [a-cols b-rows cell-k _unused-k-a _unused-k-b producer-k.]
+  ([.n-len] u64.copies2 [a-rows materialize-n.]
+    ([.m-len] u64.copies2 [b-cols materialize-m.]
+      ([.k-len] u64.copies3 [a-cols b-rows materialize-k.]
         ({[.nk-len] [.a]} f32.buf.view [a-flat-view.]
           ({[.a-rows] [.a-cols] [.a-flat-view]} f32.row-major.matrix-view [a-view.]
             ({[.km-len] [.b]} f32.buf.view [b-flat-view.]
               ({[.b-rows] [.b-cols] [.b-flat-view]} f32.row-major.matrix-view [b-view.]
-                ({[.cell-m] [.cell-k]} *.intro [cell-env-a.]
-                  ({[.cell-env-a] [.a-view]} *.intro [cell-env-b.]
-                    ({[.cell-env-b] [.b-view]} *.intro [cell-env.]
-                      ([.nm-len] f32.matmul.len-copies3 [output-len with-unit-len index-id-len.]
-                        {
-                          [.output-len]
-                          ({
-                            ({
-                              (([.with-unit-len] :.param) name.f32.matmul.index-with-unit lift)
-                              ({
-                                ([.cell-env] defer)
-                                (([.index-id-len] :.param) name.f32.matmul.index-id lift)
-                              } tensor)
-                            } compose)
-                            ({[.producer-n] [.producer-m] [.producer-k]}
-                              name.f32.matmul.row-major.cell-at lift)
-                          } compose)
-                        }
-                        materialize
-                      )
-                    )
-                  )
-                )
+                ({
+                  [.materialize-n]
+                  [.materialize-m]
+                  [.materialize-k]
+                  [.nm-len]
+                  [.a-view]
+                  [.b-view]
+                } f32.matmul.row-major.materialize)
               )
             )
           )
@@ -64,36 +49,19 @@
   ->
   ([n.] ({cap.own ({[.n] [.n]} *) f32} buf val))
 = ([n-len nn-len a.]
-  ([.n-len] f32.matmul.len-split5 [view-rows view-cols identity-n split-runtime split-params _unused-n-param.]
-    ([.split-runtime] f32.matmul.len-split5 [cell-m cell-k _unused-cell-a _unused-cell-b _unused-cell-c _unused-cell-param.]
-      ([.split-params] f32.matmul.len-params3 [producer-n producer-m producer-k.]
-        ([.nn-len] f32.matmul.len-split5 [flat-view-len output-len with-unit-len index-id-len _unused-nn _unused-nn-param.]
-          ({[.flat-view-len] [.a]} f32.buf.view [flat-view.]
-            ({[.view-rows] [.view-cols] [.flat-view]} f32.row-major.matrix-view [a-view.]
-              ([.identity-n] f32.matrix.identity [identity-view.]
-                ({[.cell-m] [.cell-k]} *.intro [cell-env-a.]
-                  ({[.cell-env-a] [.a-view]} *.intro [cell-env-b.]
-                    ({[.cell-env-b] [.identity-view]} *.intro [cell-env.]
-                      {
-                        [.output-len]
-                        ({
-                          ({
-                            (([.with-unit-len] :.param) name.f32.matmul.index-with-unit lift)
-                            ({
-                              ([.cell-env] defer)
-                              (([.index-id-len] :.param) name.f32.matmul.index-id lift)
-                            } tensor)
-                          } compose)
-                          ({[.producer-n] [.producer-m] [.producer-k]}
-                            name.f32.matmul.row-major.cell-at lift)
-                        } compose)
-                      }
-                      materialize
-                    )
-                  )
-                )
-              )
-            )
+  ([.n-len] u64.copies6 [view-rows view-cols identity-n materialize-n materialize-m materialize-k.]
+    ([.nn-len] u64.copies2 [flat-view-len output-len.]
+      ({[.flat-view-len] [.a]} f32.buf.view [flat-view.]
+        ({[.view-rows] [.view-cols] [.flat-view]} f32.row-major.matrix-view [a-view.]
+          ([.identity-n] f32.matrix.identity [identity-view.]
+            ({
+              [.materialize-n]
+              [.materialize-m]
+              [.materialize-k]
+              [.output-len]
+              [.a-view]
+              [.identity-view]
+            } f32.matmul.row-major.materialize)
           )
         )
       )

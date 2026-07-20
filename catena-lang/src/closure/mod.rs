@@ -25,15 +25,13 @@ mod named_eval;
 /// Replace regions with explicit environments, function pointers, and context operations.
 pub mod replace;
 
-/// Complete output of closure conversion, including its debugging snapshots.
+/// Complete output of closure conversion.
 #[derive(Debug, Clone)]
 pub struct Conversion {
     /// Closure-forgotten graph after named-evaluation specialization.
     pub closure_forgotten_definitions: TheoryTermMap<ClosureForgotten<Operation>>,
     /// Regions discovered in the closure-forgotten input.
     pub regions: region::ClosureRegionMap,
-    /// Graph snapshot and spliceable regions for each inside-out conversion round.
-    pub region_rounds: Vec<RegionRound>,
     /// Theory after inserting the generated `closure.*` and `name.closure.*` arrows.
     pub generated_theory: TheorySet,
     /// Independently checked node labels for `generated_theory`.
@@ -46,14 +44,6 @@ pub struct Conversion {
     pub runtime_functions: TheoryTermMap,
     /// Debug theory containing replaced definitions and context declarations.
     pub replacement_theory: TheorySet,
-}
-
-/// One closure-conversion round, retained so diagnostics can render regions
-/// against the graph whose node and edge identifiers they reference.
-#[derive(Debug, Clone)]
-pub struct RegionRound {
-    pub definitions: TheoryTermMap<ClosureForgotten<Operation>>,
-    pub regions: region::ClosureRegionMap,
 }
 
 #[derive(Debug, Error)]
@@ -93,7 +83,6 @@ pub fn run(
     let regions = region::run(&working)?;
     let mut generated_theory = theory_set.clone();
     let mut generated_functions = TheoryTermMap::new();
-    let mut region_rounds = Vec::new();
 
     loop {
         let discovered = region::run(&working)?;
@@ -118,10 +107,6 @@ pub fn run(
             });
         }
 
-        region_rounds.push(RegionRound {
-            definitions: working.clone(),
-            regions: selected.clone(),
-        });
         let defined = definition::run(&generated_theory, &working, &selected)?;
         generated_theory = defined.generated_theory;
         merge_terms(&mut generated_functions, defined.generated_functions);
@@ -166,7 +151,6 @@ pub fn run(
     Ok(Conversion {
         closure_forgotten_definitions,
         regions,
-        region_rounds,
         generated_theory,
         generated_types,
         generated_functions,

@@ -1,8 +1,8 @@
 //! Closure conversion over graphs produced by `forget_closures`.
 //!
-//! The conversion is deliberately split into three stages: discover a delimited
-//! control-flow region, turn that region into a definition, and replace the
-//! original region with an explicit environment and function pointer.
+//! The conversion first specializes explicit named evaluations, then discovers
+//! delimited control-flow regions, turns them into definitions, and replaces
+//! them with explicit environments and function pointers.
 
 use hexpr::Operation;
 use metacat::theory::TheorySet;
@@ -21,14 +21,14 @@ pub mod region;
 pub mod definition;
 
 mod context;
-mod inline_named;
+mod named_eval;
 /// Replace regions with explicit environments, function pointers, and context operations.
 pub mod replace;
 
 /// Complete output of closure conversion, including its debugging snapshots.
 #[derive(Debug, Clone)]
 pub struct Conversion {
-    /// Closure-forgotten graph on which conversion operates.
+    /// Closure-forgotten graph after named-evaluation specialization.
     pub closure_forgotten_definitions: TheoryTermMap<ClosureForgotten<Operation>>,
     /// Regions discovered in the closure-forgotten input.
     pub regions: region::ClosureRegionMap,
@@ -73,7 +73,7 @@ pub enum ConversionError {
     #[error(transparent)]
     EraseContexts(#[from] context::EraseContextsError),
     #[error(transparent)]
-    InlineNamed(#[from] inline_named::InlineNamedError),
+    NamedEval(#[from] named_eval::NamedEvalError),
     #[error("closure conversion made no progress while {markers} closure regions remain")]
     NoSpliceableRegion { markers: usize },
 }
@@ -87,8 +87,8 @@ pub fn run(
     theory_set: &TheorySet,
     forgotten: &TheoryTermMap<ClosureForgotten<Operation>>,
 ) -> Result<Conversion, ConversionError> {
-    let templates = inline_named::template_definitions(theory_set, forgotten)?;
-    let mut working = inline_named::run(theory_set, forgotten, &templates)?;
+    let templates = named_eval::templates(theory_set, forgotten)?;
+    let mut working = named_eval::run(theory_set, forgotten, &templates)?;
     let closure_forgotten_definitions = working.clone();
     let regions = region::run(&working)?;
     let mut generated_theory = theory_set.clone();
@@ -227,9 +227,34 @@ mod tests {
         let types = crate::check::check(&theory_set).expect("test theory should check");
         let forgotten = crate::pass::forget_closures::run(&theory_set, &types)
             .expect("test theory should forget closures");
+        let program = metacat::theory::TheoryId("program".parse().unwrap());
+        let use_named: hexpr::Operation = "use-named-closure".parse().unwrap();
+        assert!(
+            forgotten[&program][&use_named]
+                .hypergraph
+                .edges
+                .iter()
+                .any(|edge| matches!(
+                    edge,
+                    crate::pass::forget_closures::ClosureForgotten::NamedEval {
+                        definition,
+                        ..
+                    } if definition.as_str() == "apply-closure"
+                ))
+        );
+
         let conversion = super::run(&theory_set, &forgotten)
             .expect("named closure-boundary evaluation should specialize");
-        let program = metacat::theory::TheoryId("program".parse().unwrap());
+        assert!(
+            conversion.closure_forgotten_definitions[&program][&use_named]
+                .hypergraph
+                .edges
+                .iter()
+                .all(|edge| !matches!(
+                    edge,
+                    crate::pass::forget_closures::ClosureForgotten::NamedEval { .. }
+                ))
+        );
         assert!(
             !conversion.runtime_functions[&program].contains_key(&"apply-closure".parse().unwrap())
         );

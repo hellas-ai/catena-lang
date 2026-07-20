@@ -5,14 +5,13 @@
 //! original region with an explicit environment and function pointer.
 
 use hexpr::Operation;
-use metacat::theory::{Theory, TheorySet};
+use metacat::theory::TheorySet;
 use thiserror::Error;
 
 use crate::{
     check::{CheckError, DefinitionTypes, PartialDefinitionTypes, partial_definition_types},
     pass::forget_closures::ClosureForgotten,
     report::TheoryTermMap,
-    stdlib::constants::FN_HOM_TYPE,
 };
 
 /// Find regions by following closure domains to their codomains.
@@ -22,6 +21,7 @@ pub mod region;
 pub mod definition;
 
 mod context;
+mod inline_named;
 /// Replace regions with explicit environments, function pointers, and context operations.
 pub mod replace;
 
@@ -32,6 +32,8 @@ pub struct Conversion {
     pub closure_forgotten_definitions: TheoryTermMap<ClosureForgotten<Operation>>,
     /// Regions discovered in the closure-forgotten input.
     pub regions: region::ClosureRegionMap,
+    /// Graph snapshot and spliceable regions for each inside-out conversion round.
+    pub region_rounds: Vec<RegionRound>,
     /// Theory after inserting the generated `closure.*` and `name.closure.*` arrows.
     pub generated_theory: TheorySet,
     /// Independently checked node labels for `generated_theory`.
@@ -44,6 +46,14 @@ pub struct Conversion {
     pub runtime_functions: TheoryTermMap,
     /// Debug theory containing replaced definitions and context declarations.
     pub replacement_theory: TheorySet,
+}
+
+/// One closure-conversion round, retained so diagnostics can render regions
+/// against the graph whose node and edge identifiers they reference.
+#[derive(Debug, Clone)]
+pub struct RegionRound {
+    pub definitions: TheoryTermMap<ClosureForgotten<Operation>>,
+    pub regions: region::ClosureRegionMap,
 }
 
 #[derive(Debug, Error)]
@@ -62,6 +72,10 @@ pub enum ConversionError {
     ReplaceClosures(#[from] replace::ReplaceClosuresError),
     #[error(transparent)]
     EraseContexts(#[from] context::EraseContextsError),
+    #[error(transparent)]
+    InlineNamed(#[from] inline_named::InlineNamedError),
+    #[error("closure conversion made no progress while {markers} closure regions remain")]
+    NoSpliceableRegion { markers: usize },
 }
 
 /// Closure-convert graphs produced by `forget_closures` as one compiler pass.
@@ -73,33 +87,86 @@ pub fn run(
     theory_set: &TheorySet,
     forgotten: &TheoryTermMap<ClosureForgotten<Operation>>,
 ) -> Result<Conversion, ConversionError> {
-    assert_closure_boundary_definitions_are_inlined(theory_set);
+    let templates = inline_named::template_definitions(theory_set, forgotten)?;
+    let mut working = inline_named::run(theory_set, forgotten, &templates)?;
+    let closure_forgotten_definitions = working.clone();
+    let regions = region::run(&working)?;
+    let mut generated_theory = theory_set.clone();
+    let mut generated_functions = TheoryTermMap::new();
+    let mut region_rounds = Vec::new();
 
-    let regions = region::run(forgotten)?;
-    let definition::DefinedClosures {
-        generated_theory,
-        generated_functions,
-        closure_contexts,
-    } = definition::run(theory_set, forgotten, &regions)?;
+    loop {
+        let discovered = region::run(&working)?;
+        let marker_count = discovered
+            .values()
+            .flat_map(|definitions| definitions.values())
+            .map(Vec::len)
+            .sum::<usize>();
+        if marker_count == 0 {
+            break;
+        }
+
+        let selected = spliceable_regions(&working, &discovered);
+        let selected_count = selected
+            .values()
+            .flat_map(|definitions| definitions.values())
+            .map(Vec::len)
+            .sum::<usize>();
+        if selected_count == 0 {
+            return Err(ConversionError::NoSpliceableRegion {
+                markers: marker_count,
+            });
+        }
+
+        region_rounds.push(RegionRound {
+            definitions: working.clone(),
+            regions: selected.clone(),
+        });
+        let defined = definition::run(&generated_theory, &working, &selected)?;
+        generated_theory = defined.generated_theory;
+        merge_terms(&mut generated_functions, defined.generated_functions);
+
+        // Validate each layer as soon as its generated declarations exist.
+        crate::check::check(&generated_theory).map_err(|error| {
+            ConversionError::CheckDefinitions {
+                partial_definition_types: partial_definition_types(&error),
+                error,
+            }
+        })?;
+
+        let partial = replace::run_partial(
+            &generated_theory,
+            &working,
+            &selected,
+            &defined.closure_contexts,
+        )?;
+        generated_theory = partial.theory_set;
+        working = partial.terms;
+        replace::rewrite_ready_converted_primitives(&mut working);
+    }
+
     let generated_types = crate::check::check(&generated_theory).map_err(|error| {
         ConversionError::CheckDefinitions {
             partial_definition_types: partial_definition_types(&error),
             error,
         }
     })?;
+    let empty_regions = region::run(&working)?;
     let replacement = replace::run(
         &generated_theory,
-        forgotten,
+        &working,
         &generated_functions,
-        &regions,
-        &closure_contexts,
+        &empty_regions,
+        &Default::default(),
     )?;
-    let rewritten_definitions = replacement.terms;
+    let mut rewritten_definitions = replacement.terms;
+    replace::rewrite_all_converted_primitives(&mut rewritten_definitions);
     let runtime_functions = context::erase(&rewritten_definitions)?;
 
     Ok(Conversion {
-        closure_forgotten_definitions: forgotten.clone(),
+        closure_forgotten_definitions,
         regions,
+        region_rounds,
         generated_theory,
         generated_types,
         generated_functions,
@@ -109,59 +176,66 @@ pub fn run(
     })
 }
 
-/// Region discovery assumes that calls to definitions with closure-typed
-/// interfaces have already been expanded by the early inlining pass.
-fn assert_closure_boundary_definitions_are_inlined(theory_set: &TheorySet) {
-    for (theory_id, theory) in &theory_set.theories {
-        let Theory::Theory { arrows, .. } = theory else {
-            continue;
-        };
-
-        for (definition_name, arrow) in arrows {
-            if arrow.definition.is_none() {
-                continue;
-            }
-
-            assert!(
-                !contains_closure(&arrow.type_maps.0) && !contains_closure(&arrow.type_maps.1),
-                "closure conversion requires closure-boundary definitions to be inlined first; `{theory_id}.{definition_name}` still has a closure on its global interface"
-            );
-        }
-    }
+fn spliceable_regions(
+    definitions: &TheoryTermMap<ClosureForgotten<Operation>>,
+    discovered: &region::ClosureRegionMap,
+) -> region::ClosureRegionMap {
+    discovered
+        .iter()
+        .filter_map(|(theory, theory_regions)| {
+            let selected = theory_regions
+                .iter()
+                .filter_map(|(definition, regions)| {
+                    let term = &definitions[theory][definition];
+                    let regions = regions
+                        .iter()
+                        .filter(|region| replace::region_is_spliceable(term, region))
+                        .cloned()
+                        .collect::<Vec<_>>();
+                    (!regions.is_empty()).then_some((definition.clone(), regions))
+                })
+                .collect::<std::collections::BTreeMap<_, _>>();
+            (!selected.is_empty()).then_some((theory.clone(), selected))
+        })
+        .collect()
 }
 
-fn contains_closure(type_map: &metacat::theory::Term) -> bool {
-    type_map
-        .hypergraph
-        .edges
-        .iter()
-        .any(|operation| operation.as_str() == FN_HOM_TYPE)
+fn merge_terms(output: &mut TheoryTermMap, next: TheoryTermMap) {
+    for (theory, definitions) in next {
+        output.entry(theory).or_default().extend(definitions);
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-
     use metacat::theory::{RawTheorySet, TheorySet};
 
-    /// This is an internal stage invariant rather than a compile integration
-    /// case: callers may not skip closure-boundary inlining before conversion.
     #[test]
-    #[should_panic(
-        expected = "closure conversion requires closure-boundary definitions to be inlined first"
-    )]
-    fn rejects_uninlined_closure_boundary_definitions() {
+    fn inlines_named_closure_boundary_evaluation_after_forgetting() {
         let source = r#"
-            (def program returns-closure :
-              (bool val) -> ({1 (bool val)} =>)
-            = ([captured.] ([.captured] defer)))
+            (def program apply-closure : ({1 (bool val)} =>) -> (bool val)
+              = run)
+            (def program use-named-closure : (bool val) -> (bool val)
+              = ([captured.]
+                  ([.captured] defer [inner.]
+                    ({([.inner] defer) (name.apply-closure lift)} compose run))))
         "#;
         let raw = RawTheorySet::from_texts(crate::stdlib::sources().chain([source]))
             .expect("test theories should parse");
         let elaborated = crate::elaborate::elaborate(raw).expect("test theory should elaborate");
         let theory_set = TheorySet::from_raw(elaborated).expect("test theory should interpret");
-
-        super::run(&theory_set, &BTreeMap::new())
-            .expect("the inlining invariant should panic before conversion");
+        let types = crate::check::check(&theory_set).expect("test theory should check");
+        let forgotten = crate::pass::forget_closures::run(&theory_set, &types)
+            .expect("test theory should forget closures");
+        let conversion = super::run(&theory_set, &forgotten)
+            .expect("named closure-boundary evaluation should specialize");
+        let program = metacat::theory::TheoryId("program".parse().unwrap());
+        assert!(
+            !conversion.runtime_functions[&program].contains_key(&"apply-closure".parse().unwrap())
+        );
+        assert!(
+            conversion.runtime_functions[&program]
+                .contains_key(&"use-named-closure".parse().unwrap())
+        );
     }
 }

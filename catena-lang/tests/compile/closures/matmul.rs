@@ -2,15 +2,15 @@ use metacat::theory::Theory;
 
 use crate::support::*;
 
-/// The application-sized fixture keeps only its concrete buffer adapters and
-/// uses the matrix stdlib for buffer views, row-major views, identity, and
-/// closure-only matmul. Compile must inline every stdlib helper with a closure
-/// boundary before forgetting and discover both closure arguments at each
-/// adapter call.
+/// The application-sized fixture builds matrix-view closures outside the
+/// materialization producer and partially applies the named closure-only
+/// `cell-at` definition. After forgetting, that named evaluation is specialized
+/// by inlining its forgotten body; nested reduction closures are converted
+/// inside-out before the outer materialization producer.
 ///
 /// ```text
 /// buf + buf ─▶ two closures ─┐
-///                            ├─▶ stdlib matmul ─▶ materialize ─▶ materializec
+///                            ├─▶ partially applied cell-at ─▶ materializec
 /// buf + id  ─▶ two closures ─┘
 /// ```
 #[test]
@@ -25,7 +25,6 @@ fn matmul_entry_points_share_inlined_closure_only_logic() {
     };
     for helper in [
         "f32.matmul.cell-dot",
-        "f32.matmul.row-major.cell-at",
         "f32.matrix.row-view",
         "f32.matrix.col-view",
         "f32.buf.view",
@@ -37,13 +36,18 @@ fn matmul_entry_points_share_inlined_closure_only_logic() {
         );
     }
 
-    for adapter in ["matmul-two-bufs-at", "matmul-buf-identity-at"] {
-        assert_eq!(regions(adapter).len(), 2);
-        assert_fully_lowered(adapter);
-    }
+    assert!(arrows.contains_key(&op("f32.matmul.row-major.cell-at")));
+    assert!(arrows.contains_key(&op("name.f32.matmul.row-major.cell-at")));
+    assert!(!arrows.contains_key(&op("matmul-two-bufs-at")));
+    assert!(!arrows.contains_key(&op("matmul-buf-identity-at")));
 
     for entry_point in ["matmul-two-bufs", "matmul-buf-and-identity"] {
+        assert!(regions(entry_point).len() >= 3);
         assert_eq!(operation_count(final_term(entry_point), "materializec"), 1);
+        assert_eq!(
+            operation_count(final_term(entry_point), "f32.matmul.row-major.cell-at"),
+            0
+        );
         assert_fully_lowered(entry_point);
     }
 }

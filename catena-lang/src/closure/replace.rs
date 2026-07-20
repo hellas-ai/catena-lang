@@ -43,6 +43,200 @@ pub struct Replacement {
     pub terms: TheoryTermMap,
 }
 
+pub struct PartialReplacement {
+    pub theory_set: TheorySet,
+    pub terms: TheoryTermMap<ClosureForgotten<Operation>>,
+}
+
+/// Replace only the supplied non-overlapping, currently spliceable regions.
+/// Other closure markers deliberately remain for a later conversion round.
+pub fn run_partial(
+    theory_set: &TheorySet,
+    forgotten: &TheoryTermMap<ClosureForgotten<Operation>>,
+    regions: &ClosureRegionMap,
+    closure_contexts: &ClosureContextMap,
+) -> Result<PartialReplacement, ReplaceClosuresError> {
+    let mut output = theory_set.clone();
+    let mut terms = forgotten.clone();
+
+    for (theory_id, selected_definitions) in regions {
+        let theory = theory_set
+            .theories
+            .get(theory_id)
+            .ok_or_else(|| ReplaceClosuresError::MissingTheory(theory_id.to_string()))?;
+        let Theory::Theory { syntax, arrows } = theory else {
+            return Err(ReplaceClosuresError::NotUserTheory(theory_id.to_string()));
+        };
+        let syntax_theory = theory_set
+            .theories
+            .get(syntax)
+            .ok_or_else(|| ReplaceClosuresError::MissingSyntaxTheory(syntax.to_string()))?;
+
+        for (definition_name, selected_regions) in selected_definitions {
+            if selected_regions.is_empty() {
+                continue;
+            }
+            let original_arrow = arrows.get(definition_name).ok_or_else(|| {
+                ReplaceClosuresError::MissingDefinition {
+                    theory: theory_id.to_string(),
+                    definition: definition_name.to_string(),
+                }
+            })?;
+            let term = terms
+                .get_mut(theory_id)
+                .and_then(|definitions| definitions.get_mut(definition_name))
+                .ok_or_else(|| ReplaceClosuresError::MissingDefinition {
+                    theory: theory_id.to_string(),
+                    definition: definition_name.to_string(),
+                })?;
+
+            for original_region in selected_regions {
+                let generated_closure = closure_operation(definition_name, original_region.closure);
+                let original_context_leaves = closure_contexts
+                    .get(theory_id)
+                    .and_then(|contexts| contexts.get(&generated_closure))
+                    .ok_or_else(|| ReplaceClosuresError::MissingClosureContext {
+                        operation: generated_closure.to_string(),
+                    })?;
+                let current_region = find_regions(term)
+                    .map_err(|_| ReplaceClosuresError::RemainingClosureMarker)?
+                    .into_iter()
+                    .find(|region| region_is_spliceable(term, region))
+                    .ok_or_else(|| region_count_changed(theory_id, definition_name))?;
+                let replacement = build_closure_value(
+                    definition_name,
+                    arrows,
+                    term,
+                    &current_region,
+                    original_region,
+                    original_context_leaves,
+                )?;
+                *term = splice_region(term, &current_region, &replacement)?;
+                term.quotient()
+                    .map_err(|error| ReplaceClosuresError::Quotient {
+                        theory: theory_id.to_string(),
+                        definition: definition_name.to_string(),
+                        error: format!("{error:?}"),
+                    })?;
+            }
+
+            let printable = term.clone().map_edges(|operation| match operation {
+                ClosureForgotten::Operation(operation) => operation,
+                ClosureForgotten::ClosureMarker => "closure.marker".parse().unwrap(),
+            });
+            let Theory::Theory { arrows, .. } = output
+                .theories
+                .get_mut(theory_id)
+                .expect("validated theory should remain present")
+            else {
+                unreachable!("validated user theory should remain a user theory")
+            };
+            declare_context_arrows(
+                syntax_theory,
+                arrows,
+                &printable,
+                original_arrow.type_maps.0.sources.len(),
+            )?;
+        }
+    }
+
+    Ok(PartialReplacement {
+        theory_set: output,
+        terms,
+    })
+}
+
+/// A region can be converted in the current round when none of its internal
+/// wires escape to an ordinary operation outside the region. Nested outer
+/// regions become spliceable after their inner markers have been replaced.
+pub fn region_is_spliceable(definition: &ClosureForgottenTerm, region: &ClosureRegion) -> bool {
+    let environment = region
+        .environment
+        .iter()
+        .map(|node| node.0)
+        .collect::<BTreeSet<_>>();
+    let internal = region
+        .nodes
+        .iter()
+        .filter(|node| !environment.contains(&node.0) && **node != region.closure)
+        .map(|node| node.0)
+        .collect::<BTreeSet<_>>();
+    let included = region
+        .edges
+        .iter()
+        .chain([&region.marker])
+        .map(|edge| edge.0)
+        .collect::<BTreeSet<_>>();
+
+    definition
+        .hypergraph
+        .adjacency
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| !included.contains(index))
+        .filter(|(index, _)| {
+            !matches!(
+                definition.hypergraph.edges[*index],
+                ClosureForgotten::ClosureMarker
+            )
+        })
+        .all(|(_, boundary)| {
+            boundary
+                .sources
+                .iter()
+                .chain(&boundary.targets)
+                .all(|node| !internal.contains(&node.0))
+        })
+}
+
+pub fn rewrite_all_converted_primitives(terms: &mut TheoryTermMap) {
+    for definitions in terms.values_mut() {
+        for term in definitions.values_mut() {
+            rewrite_converted_primitives(term);
+        }
+    }
+}
+
+pub fn rewrite_ready_converted_primitives(terms: &mut TheoryTermMap<ClosureForgotten<Operation>>) {
+    for definitions in terms.values_mut() {
+        for term in definitions.values_mut() {
+            for (operation, boundary) in term
+                .hypergraph
+                .edges
+                .iter_mut()
+                .zip(&term.hypergraph.adjacency)
+            {
+                let ClosureForgotten::Operation(operation) = operation else {
+                    continue;
+                };
+                let has_closure_source = boundary
+                    .sources
+                    .iter()
+                    .any(|source| object_contains_closure(&term.hypergraph.nodes[source.0]));
+                if has_closure_source {
+                    continue;
+                }
+                if let Some((_, converted)) = CONVERTED_PRIMITIVES
+                    .iter()
+                    .find(|(source, _)| operation.as_str() == *source)
+                {
+                    *operation = converted.parse().expect("converted primitive should parse");
+                }
+            }
+        }
+    }
+}
+
+fn object_contains_closure(object: &Obj) -> bool {
+    match object {
+        metacat::tree::Tree::Node(operation, _, children) => {
+            operation.as_str() == crate::stdlib::constants::FN_HOM_TYPE
+                || children.iter().any(object_contains_closure)
+        }
+        _ => false,
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum ReplaceClosuresError {
     #[error("missing theory `{0}`")]

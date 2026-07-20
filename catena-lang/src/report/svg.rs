@@ -204,52 +204,69 @@ fn dump_closure_conversion_trace(
          2. [Colored region overview](closure_conversion_10_regions.svg)\n"
     );
 
-    for (index, region) in regions.iter().enumerate() {
-        let extracted = labelled_extracted_region(term, region, index, syntax_theory)?;
-        let svg = to_svg_with(&extracted, &Options::default().display().lr())?;
-        let svg = colorize_svg(
-            svg,
-            (0..extracted.hypergraph.nodes.len())
-                .map(|node| (format!("n_{node}"), region_color(index))),
-            (0..extracted.hypergraph.edges.len())
-                .map(|edge| (format!("e_{edge}"), region_color(index))),
-        )?;
-        let region_stage = format!("closure_conversion_11_region_{index}");
-        let path = definition_dir.join(format!("{region_stage}.svg"));
-        fs::write(&path, svg).map_err(|error| {
-            io::Error::new(
-                error.kind(),
-                format!("failed to write {}: {error}", path.display()),
-            )
-        })?;
+    for (round_index, round) in conversion.region_rounds.iter().enumerate() {
+        let Some(round_term) = round
+            .definitions
+            .get(theory_id)
+            .and_then(|definitions| definitions.get(definition_name))
+        else {
+            continue;
+        };
+        let Some(round_regions) = round
+            .regions
+            .get(theory_id)
+            .and_then(|definitions| definitions.get(definition_name))
+        else {
+            continue;
+        };
+        for (index, region) in round_regions.iter().enumerate() {
+            let extracted = labelled_extracted_region(round_term, region, index, syntax_theory)?;
+            let svg = to_svg_with(&extracted, &Options::default().display().lr())?;
+            let svg = colorize_svg(
+                svg,
+                (0..extracted.hypergraph.nodes.len())
+                    .map(|node| (format!("n_{node}"), region_color(index))),
+                (0..extracted.hypergraph.edges.len())
+                    .map(|edge| (format!("e_{edge}"), region_color(index))),
+            )?;
+            let region_stage = format!("closure_conversion_11_round_{round_index}_region_{index}");
+            let path = definition_dir.join(format!("{region_stage}.svg"));
+            fs::write(&path, svg).map_err(|error| {
+                io::Error::new(
+                    error.kind(),
+                    format!("failed to write {}: {error}", path.display()),
+                )
+            })?;
 
-        let closure_name = closure_operation(definition_name, region.closure);
-        let closure_body = generated_bodies
-            .get(&closure_name)
-            .ok_or_else(|| invalid_data(format!("missing generated closure `{closure_name}`")))?;
-        let closure_stage = format!("closure_conversion_20_closure_{index}");
-        let closure_svg = render_typed_svg(closure_body, syntax_theory)?;
-        let closure_path = definition_dir.join(format!("{closure_stage}.svg"));
-        fs::write(&closure_path, closure_svg).map_err(|error| {
-            io::Error::new(
-                error.kind(),
-                format!("failed to write {}: {error}", closure_path.display()),
-            )
-        })?;
-        dump_typed_stage_hex(
-            closure_body,
-            &closure_stage,
-            definition_dir,
-            |operation| operation.clone(),
-            syntax_theory,
-        )?;
+            let closure_name = closure_operation(definition_name, region.closure);
+            let closure_body = generated_bodies.get(&closure_name).ok_or_else(|| {
+                invalid_data(format!("missing generated closure `{closure_name}`"))
+            })?;
+            let closure_stage =
+                format!("closure_conversion_20_round_{round_index}_closure_{index}");
+            let closure_svg = render_typed_svg(closure_body, syntax_theory)?;
+            let closure_path = definition_dir.join(format!("{closure_stage}.svg"));
+            fs::write(&closure_path, closure_svg).map_err(|error| {
+                io::Error::new(
+                    error.kind(),
+                    format!("failed to write {}: {error}", closure_path.display()),
+                )
+            })?;
+            dump_typed_stage_hex(
+                closure_body,
+                &closure_stage,
+                definition_dir,
+                |operation| operation.clone(),
+                syntax_theory,
+            )?;
 
-        index_document.push_str(&format!(
-            "   - Region {index}: `{closure_name}` \
-             ([region](closure_conversion_11_region_{index}.svg), \
-              [body](closure_conversion_20_closure_{index}.svg), \
-              [body hex](closure_conversion_20_closure_{index}.hex))\n"
-        ));
+            index_document.push_str(&format!(
+                "   - Round {round_index}, region {index}: `{closure_name}` \
+                 ([region]({region_stage}.svg), \
+                  [body]({closure_stage}.svg), \
+                  [body hex]({closure_stage}.hex))\n"
+            ));
+        }
     }
 
     dump_typed_stage_svg(

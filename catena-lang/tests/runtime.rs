@@ -1027,6 +1027,42 @@ fn slice_f32_test() -> anyhow::Result<()> {
 }
 
 #[test]
+fn concat_f32_test() -> anyhow::Result<()> {
+    let runtime = runtime_with(NN_EXAMPLES)?;
+
+    for (left, right, expected) in [
+        (
+            vec![1.0_f32, 2.0],
+            vec![3.0_f32, 4.0],
+            vec![1.0_f32, 2.0, 3.0, 4.0],
+        ),
+        (
+            vec![1.0_f32],
+            vec![2.0_f32, 3.0, 4.0],
+            vec![1.0_f32, 2.0, 3.0, 4.0],
+        ),
+        (vec![], vec![3.0_f32, 4.0], vec![3.0_f32, 4.0]),
+        (vec![1.0_f32, 2.0], vec![], vec![1.0_f32, 2.0]),
+        (vec![], vec![], vec![]),
+    ] {
+        let [result] = runtime.exec(
+            "concat-f32",
+            [runtime.mem_f32(&left)?, runtime.mem_f32(&right)?],
+        )?;
+        let Value::Mem(result) = result else {
+            anyhow::bail!("concat-f32 returned non-mem value: {result:?}");
+        };
+        assert_eq!(
+            result.to_f32_vec(),
+            expected,
+            "concat-f32({left:?}, {right:?})"
+        );
+    }
+
+    Ok(())
+}
+
+#[test]
 fn argmax_f32_test() -> anyhow::Result<()> {
     let runtime = runtime_with(NN_EXAMPLES)?;
 

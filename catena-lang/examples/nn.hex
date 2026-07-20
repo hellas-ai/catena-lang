@@ -308,6 +308,92 @@
   buf.to-mem
 ))
 
+# Read a borrowed f32 buffer using an index relative to a runtime offset.
+(def program ref.f32.at-offset :
+  ([len.] {
+    ({
+      (u64 val)
+      ({({[.len] u64} :) ({cap.ref [.len] f32} buf val)} *)
+    } *)
+    (u64 val)
+  } *)
+  ->
+  ([len.] (f32 val))
+= ([arg.]
+  ([.arg] *.elim [env global-i-val.])
+  ([.env] *.elim [offset-val input.])
+  ([.input] *.elim [len-named buffer.])
+  ([.global-i-val offset-val] u64.sub [local-i-val.])
+  ([.local-i-val] u64.name [local-i-named.])
+  ([.len-named local-i-named] u64.gt [in-bounds if-in-bounds _if-oob.])
+  ([.in-bounds if-in-bounds] assert-then [local-i-proof.])
+  ([.local-i-named len-named local-i-proof] u64.to-ix [local-i.])
+  ({[.local-i buffer]} ix [result.])
+  [.result]
+))
+
+# Select the source buffer for one output index.
+(def program concat-f32-at :
+  ([left-len right-len total-len.] {
+    ({
+      ({({[.left-len] u64} :) ({cap.ref [.left-len] f32} buf val)} *)
+      ({({[.right-len] u64} :) ({cap.ref [.right-len] f32} buf val)} *)
+    } *)
+    ([.total-len] ix val)
+  })
+  ->
+  ([left-len right-len total-len.] (f32 val))
+= ([inputs output-i.]
+  ([.inputs] *.elim [left-input right-input.])
+  ([.left-input] *.elim [left-len-named left.])
+  ([.right-input] *.elim [right-len-named right.])
+  ([.output-i] ix.to-u64 [output-i-val.])
+  ([.left-len-named] :.forget [left-len-val.])
+  ([.output-i-val left-len-val] u64.lt [use-left-val.])
+  (const.u64.0x0000000000000000 [zero-val.])
+  ({[.zero-val] [.left-input]} *.intro [left-env.])
+  ({[.left-len-val] [.right-input]} *.intro [right-env.])
+  {
+    [.left-env]
+    (([.left-len-named] :.param) name.ref.f32.at-offset)
+    [.right-env]
+    (([.right-len-named] :.param) name.ref.f32.at-offset)
+    [.use-left-val]
+    [.output-i-val]
+  }
+  bool.ifc
+))
+
+# Concatenate two borrowed f32 buffers into one owned buffer.
+(def program concat-f32 :
+  {(cap.ref mem) (cap.ref mem)}
+  ->
+  (cap.own mem)
+= (
+  {mem.cast.f32 mem.cast.f32}
+  [left-len-named left right-len-named right.]
+    ([.left-len-named] :.forget [left-len-val.])
+    ([.right-len-named] :.forget [right-len-val.])
+    ([.left-len-val right-len-val] u64.add [total-len-val.])
+    ([.total-len-val] u64.name [total-len-named.])
+    ({[.left-len-named] [.left]} *.intro [left-input.])
+    ({[.right-len-named] [.right]} *.intro [right-input.])
+    ({[.left-input] [.right-input]} *.intro [inputs.])
+    {
+      [.total-len-named]
+      ({
+        [.total-len-named]
+        [.inputs]
+        ({
+          ([.left-len-named] :.param)
+          ([.right-len-named] :.param)
+          ([.total-len-named] :.param)
+        } name.concat-f32-at)
+      } materializec)
+    }
+    buf.to-mem
+))
+
 # Read one f32 element and pair it with its runtime position.
 (def program argmax-pair-at :
   ([n.] {

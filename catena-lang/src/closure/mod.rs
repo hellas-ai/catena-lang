@@ -77,15 +77,14 @@ pub fn run(
     theory_set: &TheorySet,
     forgotten: &TheoryTermMap<ClosureForgotten<Operation>>,
 ) -> Result<Conversion, ConversionError> {
-    let templates = named_eval::templates(theory_set, forgotten)?;
-    let mut working = named_eval::run(theory_set, forgotten, &templates)?;
+    let mut working = named_eval::run(theory_set, forgotten)?;
     let closure_forgotten_definitions = working.clone();
-    let regions = region::run(&working)?;
+    let mut discovered = region::run(&working)?;
+    let regions = discovered.clone();
     let mut generated_theory = theory_set.clone();
     let mut generated_functions = TheoryTermMap::new();
 
     loop {
-        let discovered = region::run(&working)?;
         let marker_count = discovered
             .values()
             .flat_map(|definitions| definitions.values())
@@ -128,6 +127,7 @@ pub fn run(
         generated_theory = partial.theory_set;
         working = partial.terms;
         replace::rewrite_ready_converted_primitives(&mut working);
+        discovered = region::run(&working)?;
     }
 
     let generated_types = crate::check::check(&generated_theory).map_err(|error| {
@@ -136,12 +136,11 @@ pub fn run(
             error,
         }
     })?;
-    let empty_regions = region::run(&working)?;
     let replacement = replace::run(
         &generated_theory,
         &working,
         &generated_functions,
-        &empty_regions,
+        &discovered,
         &Default::default(),
     )?;
     let mut rewritten_definitions = replacement.terms;

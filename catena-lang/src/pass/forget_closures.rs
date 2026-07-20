@@ -8,7 +8,7 @@ use metacat::{
 };
 use open_hypergraphs::category::Arrow;
 use open_hypergraphs::lax::{
-    EdgeId, NodeId, OpenHypergraph,
+    NodeId, OpenHypergraph,
     functor::{Functor, try_define_map_arrow},
 };
 use thiserror::Error;
@@ -28,6 +28,8 @@ pub type Obj = Tree<(), Operation>;
 pub type Arr = Operation;
 pub type ClosureForgottenTerm = OpenHypergraph<Obj, ClosureForgotten<Arr>>;
 
+mod named_eval;
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ClosureForgotten<A> {
     Operation(A),
@@ -44,8 +46,6 @@ impl<A: fmt::Display> fmt::Display for ClosureForgotten<A> {
         }
     }
 }
-
-const NAMED_LIFT_PREFIX: &str = "__catena_named_lift.";
 
 #[derive(Debug, Error)]
 pub enum ForgetClosuresError {
@@ -83,7 +83,7 @@ pub fn run(
 
             let mut typed =
                 typed_definition(theory_id, definition_name, theory, theory_definition_types)?;
-            fuse_named_closure_lifts(&mut typed);
+            named_eval::fuse_lifts(&mut typed);
             let mut transformed_definition = ForgetClosures { theory }.map_arrow(&typed);
             transformed_definition.quotient().ok();
             transformed.insert(definition_name.clone(), transformed_definition);
@@ -118,8 +118,8 @@ impl Functor<Obj, Arr, Obj, ClosureForgotten<Arr>> for ForgetClosures<'_> {
         source: &[Obj],
         target: &[Obj],
     ) -> OpenHypergraph<Obj, ClosureForgotten<Arr>> {
-        if let Some(definition) = a.as_str().strip_prefix(NAMED_LIFT_PREFIX) {
-            return map_named_eval(definition, source, target);
+        if let Some(mapped) = named_eval::map_operation(a, source, target) {
+            return mapped;
         }
 
         if let Some(name) = a.as_str().strip_prefix(NAME_PREFIX)
@@ -150,92 +150,6 @@ impl Functor<Obj, Arr, Obj, ClosureForgotten<Arr>> for ForgetClosures<'_> {
         f: &OpenHypergraph<Obj, Arr>,
     ) -> OpenHypergraph<Obj, ClosureForgotten<Arr>> {
         try_define_map_arrow(self, f).expect("programmer error: forget-closures is not a functor")
-    }
-}
-
-fn fuse_named_closure_lifts(term: &mut AnnotatedTerm) {
-    #[derive(Clone)]
-    struct Pair {
-        name: usize,
-        lift: usize,
-        pointer: NodeId,
-        definition: String,
-    }
-
-    let mut pairs = Vec::new();
-    for (lift, operation) in term.hypergraph.edges.iter().enumerate() {
-        if operation.as_str() != LIFT {
-            continue;
-        }
-        let boundary = &term.hypergraph.adjacency[lift];
-        let ([pointer], [closure]) = (boundary.sources.as_slice(), boundary.targets.as_slice())
-        else {
-            continue;
-        };
-        if !closure_interface_contains_closure(&term.hypergraph.nodes[closure.0]) {
-            continue;
-        }
-        if term
-            .hypergraph
-            .adjacency
-            .iter()
-            .enumerate()
-            .filter(|(_, edge)| edge.sources.contains(pointer))
-            .map(|(edge, _)| edge)
-            .collect::<Vec<_>>()
-            != [lift]
-        {
-            continue;
-        }
-        let Some((name, definition)) = term
-            .hypergraph
-            .adjacency
-            .iter()
-            .enumerate()
-            .filter(|(_, edge)| edge.targets.contains(pointer))
-            .find_map(|(edge, _)| {
-                term.hypergraph.edges[edge]
-                    .as_str()
-                    .strip_prefix(NAME_PREFIX)
-                    .map(|definition| (edge, definition.to_string()))
-            })
-        else {
-            continue;
-        };
-        pairs.push(Pair {
-            name,
-            lift,
-            pointer: *pointer,
-            definition,
-        });
-    }
-
-    for pair in &pairs {
-        term.hypergraph.edges[pair.name] = op(&format!("{NAMED_LIFT_PREFIX}{}", pair.definition));
-        term.hypergraph.adjacency[pair.name].targets =
-            term.hypergraph.adjacency[pair.lift].targets.clone();
-    }
-    let lift_edges = pairs
-        .iter()
-        .map(|pair| EdgeId(pair.lift))
-        .collect::<Vec<_>>();
-    term.delete_edges(&lift_edges);
-    let pointer_nodes = pairs.iter().map(|pair| pair.pointer).collect::<Vec<_>>();
-    term.delete_nodes(&pointer_nodes);
-}
-
-fn closure_interface_contains_closure(object: &Obj) -> bool {
-    let Some((domain, codomain)) = closure_parts(object) else {
-        return false;
-    };
-    [domain, codomain].into_iter().any(object_contains_closure)
-}
-
-fn object_contains_closure(object: &Obj) -> bool {
-    match object {
-        Tree::Node(operation, _, _) if operation.as_str() == FN_HOM_TYPE => true,
-        Tree::Node(_, _, children) => children.iter().any(object_contains_closure),
-        Tree::Empty | Tree::Leaf(_, _) => false,
     }
 }
 
@@ -359,45 +273,6 @@ fn map_name_operation(
     let f = map_non_cmc_operation(&operation, &operation_source, &operation_target);
     cup.compose(&id.tensor(&f))
         .expect("name.* expansion should compose")
-}
-
-fn map_named_eval(definition: &str, source: &[Obj], target: &[Obj]) -> ClosureForgottenTerm {
-    let [closure] = target else {
-        panic!("fused named lift should produce one closure");
-    };
-    let (domain, codomain) =
-        closure_parts(closure).expect("fused named lift should produce a closure");
-    let context = closure_forgotten_boundaries(source);
-    let domain = closure_forgotten_boundary(domain);
-    let codomain = closure_forgotten_boundary(codomain);
-
-    // A named lifted function is represented by its future domain wires and
-    // the result of evaluating the known body on a second copy of that domain.
-    let mut prepare = cup(&domain).tensor(&OpenHypergraph::identity(context.clone()));
-    let domain_len = domain.len();
-    let context_len = context.len();
-    let targets = prepare.targets.clone();
-    prepare.targets = targets[..domain_len]
-        .iter()
-        .chain(&targets[2 * domain_len..])
-        .chain(&targets[domain_len..2 * domain_len])
-        .copied()
-        .collect();
-
-    let call = OpenHypergraph::singleton(
-        ClosureForgotten::NamedEval {
-            definition: definition
-                .parse()
-                .expect("fused named definition should parse"),
-            context: context_len,
-        },
-        [context, domain.clone()].concat(),
-        codomain,
-    );
-    let finish = OpenHypergraph::identity(domain).tensor(&call);
-    prepare
-        .compose(&finish)
-        .expect("fused named evaluation should compose")
 }
 
 // Defines the action of forget_closures on non-CMC operations f:

@@ -5,8 +5,6 @@
 //! forgotten boundary of the callee. Specialization is therefore ordinary
 //! template splicing; it never has to reconstruct product or closure adapters.
 
-use std::collections::BTreeMap;
-
 use hexpr::Operation;
 use metacat::{
     theory::{Theory, TheoryId, TheorySet},
@@ -48,7 +46,6 @@ pub enum NamedEvalError {
 pub fn run(
     theory_set: &TheorySet,
     forgotten: &TheoryTermMap<ClosureForgotten<Operation>>,
-    templates: &TheoryTermMap<ClosureForgotten<Operation>>,
 ) -> Result<TheoryTermMap<ClosureForgotten<Operation>>, NamedEvalError> {
     let mut output = forgotten.clone();
 
@@ -60,9 +57,9 @@ pub fn run(
         let Theory::Theory { arrows, .. } = theory else {
             return Err(NamedEvalError::NotUserTheory(theory_id.to_string()));
         };
-        let theory_templates = templates
-            .get(theory_id)
-            .ok_or_else(|| NamedEvalError::MissingTheory(theory_id.to_string()))?;
+        // `output` is a clone of `forgotten`, so the current theory is also
+        // available as the immutable source of inlining templates.
+        let theory_templates = &forgotten[theory_id];
 
         for (caller, term) in definitions.iter_mut() {
             while let Some(named_eval) = next(term) {
@@ -83,37 +80,6 @@ pub fn run(
         });
     }
 
-    Ok(output)
-}
-
-/// Closure-boundary definitions retained by early inlining are templates for
-/// `NamedEval`; they are not runtime functions.
-pub fn templates(
-    theory_set: &TheorySet,
-    forgotten: &TheoryTermMap<ClosureForgotten<Operation>>,
-) -> Result<TheoryTermMap<ClosureForgotten<Operation>>, NamedEvalError> {
-    let mut output = BTreeMap::new();
-    for (theory_id, definitions) in forgotten {
-        let theory = theory_set
-            .theories
-            .get(theory_id)
-            .ok_or_else(|| NamedEvalError::MissingTheory(theory_id.to_string()))?;
-        let Theory::Theory { arrows, .. } = theory else {
-            return Err(NamedEvalError::NotUserTheory(theory_id.to_string()));
-        };
-        let selected = definitions
-            .iter()
-            .filter(|(definition, _)| {
-                arrows
-                    .get(*definition)
-                    .is_some_and(arrow_has_closure_boundary)
-            })
-            .map(|(definition, term)| (definition.clone(), term.clone()))
-            .collect::<BTreeMap<_, _>>();
-        if !selected.is_empty() {
-            output.insert(theory_id.clone(), selected);
-        }
-    }
     Ok(output)
 }
 

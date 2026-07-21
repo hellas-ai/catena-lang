@@ -20,6 +20,7 @@ pub mod region;
 /// Turn discovered regions into `closure.*` definitions and `name.closure.*` declarations.
 pub mod definition;
 
+mod bottom_up;
 mod context;
 mod named_eval;
 /// Replace regions with explicit environments, function pointers, and context operations.
@@ -64,8 +65,8 @@ pub enum ConversionError {
     EraseContexts(#[from] context::EraseContextsError),
     #[error(transparent)]
     NamedEval(#[from] named_eval::NamedEvalError),
-    #[error("closure conversion made no progress while {markers} closure regions remain")]
-    NoSpliceableRegion { markers: usize },
+    #[error("no closure region is ready for extraction while {markers} markers remain")]
+    NoRegionReadyForExtraction { markers: usize },
 }
 
 /// Closure-convert graphs produced by `forget_closures` as one compiler pass.
@@ -83,7 +84,7 @@ pub fn run(
     let closure_forgotten_definitions = specialized.clone();
 
     // Phase 2: discover and replace the actual ClosureMarker regions.
-    let converted = convert_regions(theory_set, specialized)?;
+    let converted = bottom_up::run(theory_set, specialized)?;
     let working = converted.terms;
     let regions = converted.initial_regions;
     let final_regions = converted.final_regions;
@@ -120,101 +121,4 @@ pub fn run(
         runtime_functions,
         replacement_theory: replacement.theory_set,
     })
-}
-
-struct RegionConversion {
-    terms: TheoryTermMap<ClosureForgotten<Operation>>,
-    initial_regions: region::ClosureRegionMap,
-    /// Contains no regions, but retains the theory/definition keys expected by
-    /// the final replacement pass.
-    final_regions: region::ClosureRegionMap,
-    theory: TheorySet,
-    generated_functions: TheoryTermMap,
-}
-
-fn convert_regions(
-    theory_set: &TheorySet,
-    mut terms: TheoryTermMap<ClosureForgotten<Operation>>,
-) -> Result<RegionConversion, ConversionError> {
-    let mut theory = theory_set.clone();
-    let mut generated_functions = TheoryTermMap::new();
-    let mut discovered = region::run(&terms)?;
-    let initial_regions = discovered.clone();
-
-    loop {
-        let remaining = region_count(&discovered);
-        if remaining == 0 {
-            break;
-        }
-
-        // Only regions whose internals no longer contain another marker can be
-        // cut out safely. Re-discovery after each round exposes the next layer.
-        let selected = spliceable_regions(&terms, &discovered);
-        if region_count(&selected) == 0 {
-            return Err(ConversionError::NoSpliceableRegion { markers: remaining });
-        }
-
-        let defined = definition::run(&theory, &terms, &selected)?;
-        theory = defined.generated_theory;
-        merge_terms(&mut generated_functions, defined.generated_functions);
-
-        // Each generated layer must typecheck before its declarations are used
-        // to replace the selected markers.
-        crate::check::check(&theory).map_err(|error| ConversionError::CheckDefinitions {
-            partial_definition_types: partial_definition_types(&error),
-            error,
-        })?;
-
-        let partial = replace::run_partial(&theory, &terms, &selected, &defined.closure_contexts)?;
-        theory = partial.theory_set;
-        terms = partial.terms;
-        replace::rewrite_ready_converted_primitives(&mut terms);
-        discovered = region::run(&terms)?;
-    }
-
-    Ok(RegionConversion {
-        terms,
-        initial_regions,
-        final_regions: discovered,
-        theory,
-        generated_functions,
-    })
-}
-
-fn region_count(regions: &region::ClosureRegionMap) -> usize {
-    regions
-        .values()
-        .flat_map(|definitions| definitions.values())
-        .map(Vec::len)
-        .sum()
-}
-
-fn spliceable_regions(
-    definitions: &TheoryTermMap<ClosureForgotten<Operation>>,
-    discovered: &region::ClosureRegionMap,
-) -> region::ClosureRegionMap {
-    discovered
-        .iter()
-        .filter_map(|(theory, theory_regions)| {
-            let selected = theory_regions
-                .iter()
-                .filter_map(|(definition, regions)| {
-                    let term = &definitions[theory][definition];
-                    let regions = regions
-                        .iter()
-                        .filter(|region| replace::region_is_spliceable(term, region))
-                        .cloned()
-                        .collect::<Vec<_>>();
-                    (!regions.is_empty()).then_some((definition.clone(), regions))
-                })
-                .collect::<std::collections::BTreeMap<_, _>>();
-            (!selected.is_empty()).then_some((theory.clone(), selected))
-        })
-        .collect()
-}
-
-fn merge_terms(output: &mut TheoryTermMap, next: TheoryTermMap) {
-    for (theory, definitions) in next {
-        output.entry(theory).or_default().extend(definitions);
-    }
 }

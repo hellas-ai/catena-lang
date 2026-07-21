@@ -43,14 +43,15 @@ pub struct Replacement {
     pub terms: TheoryTermMap,
 }
 
-pub struct PartialReplacement {
-    pub theory_set: TheorySet,
-    pub terms: TheoryTermMap<ClosureForgotten<Operation>>,
+pub(super) struct PartialReplacement {
+    pub(super) theory_set: TheorySet,
+    pub(super) terms: TheoryTermMap<ClosureForgotten<Operation>>,
 }
 
-/// Replace only the supplied non-overlapping, currently spliceable regions.
+/// Replace only the supplied non-overlapping regions that are currently ready
+/// for extraction.
 /// Other closure markers deliberately remain for a later conversion round.
-pub fn run_partial(
+pub(super) fn run_partial(
     theory_set: &TheorySet,
     forgotten: &TheoryTermMap<ClosureForgotten<Operation>>,
     regions: &ClosureRegionMap,
@@ -101,7 +102,7 @@ pub fn run_partial(
                 let current_region = find_regions(term)
                     .map_err(|_| ReplaceClosuresError::RemainingClosureMarker)?
                     .into_iter()
-                    .find(|region| region_is_spliceable(term, region))
+                    .find(|region| region_is_ready_for_extraction(term, region))
                     .ok_or_else(|| region_count_changed(theory_id, definition_name))?;
                 let replacement = build_closure_value(
                     definition_name,
@@ -149,10 +150,13 @@ pub fn run_partial(
     })
 }
 
-/// A region can be converted in the current round when none of its internal
-/// wires escape to an ordinary operation outside the region. Nested outer
-/// regions become spliceable after their inner markers have been replaced.
-pub fn region_is_spliceable(definition: &ClosureForgottenTerm, region: &ClosureRegion) -> bool {
+/// A region is ready for extraction when none of its internal wires are used by
+/// an ordinary operation outside the region. Enclosing regions become ready
+/// after their nested markers have been extracted and the graph rediscovered.
+pub(super) fn region_is_ready_for_extraction(
+    definition: &ClosureForgottenTerm,
+    region: &ClosureRegion,
+) -> bool {
     let environment = region
         .environment
         .iter()
@@ -200,7 +204,9 @@ pub fn rewrite_all_converted_primitives(terms: &mut TheoryTermMap) {
     }
 }
 
-pub fn rewrite_ready_converted_primitives(terms: &mut TheoryTermMap<ClosureForgotten<Operation>>) {
+pub(super) fn rewrite_ready_converted_primitives(
+    terms: &mut TheoryTermMap<ClosureForgotten<Operation>>,
+) {
     for definitions in terms.values_mut() {
         for term in definitions.values_mut() {
             for (operation, boundary) in term

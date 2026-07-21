@@ -1,6 +1,6 @@
 //! Closure conversion over graphs produced by `forget_closures`.
 //!
-//! The conversion first specializes explicit named evaluations, then discovers
+//! The conversion first inlines named calls with closure-bearing interfaces, then discovers
 //! delimited control-flow regions, turns them into definitions, and replaces
 //! them with explicit environments and function pointers.
 
@@ -21,7 +21,7 @@ pub mod region;
 pub mod definition;
 
 mod context;
-mod named_eval;
+mod inline_named_calls;
 mod region_conversion;
 /// Replace regions with explicit environments, function pointers, and context operations.
 pub mod replace;
@@ -29,7 +29,7 @@ pub mod replace;
 /// Complete output of closure conversion.
 #[derive(Debug, Clone)]
 pub struct Conversion {
-    /// Closure-forgotten graph after named-evaluation specialization.
+    /// Closure-forgotten graph after closure-bearing named calls are inlined.
     pub closure_forgotten_definitions: TheoryTermMap<ClosureForgotten<Operation>>,
     /// Regions discovered in the closure-forgotten input.
     pub regions: region::ClosureRegionMap,
@@ -64,7 +64,7 @@ pub enum ConversionError {
     #[error(transparent)]
     EraseContexts(#[from] context::EraseContextsError),
     #[error(transparent)]
-    NamedEval(#[from] named_eval::NamedEvalError),
+    InlineNamedCalls(#[from] inline_named_calls::InlineNamedCallsError),
     #[error("no closure region is ready for extraction while {markers} markers remain")]
     NoRegionReadyForExtraction { markers: usize },
 }
@@ -78,9 +78,9 @@ pub fn run(
     theory_set: &TheorySet,
     forgotten: &TheoryTermMap<ClosureForgotten<Operation>>,
 ) -> Result<Conversion, ConversionError> {
-    // Statically named calls are ordinary graph substitutions. This happens
-    // before, and independently of, closure-region discovery.
-    let specialized = named_eval::run(theory_set, forgotten)?;
+    // Forgetting exposes `name.f -> eval`. Inline the complete call adapter
+    // when `f` has closures on its interface, before discovering regions.
+    let specialized = inline_named_calls::run(theory_set, forgotten)?;
     let closure_forgotten_definitions = specialized.clone();
 
     // Discover and replace the actual ClosureMarker regions.

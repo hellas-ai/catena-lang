@@ -467,7 +467,6 @@ fn region_to_hexpr_operation(region: &ClosureForgotten<Operation>) -> Operation 
     match region {
         ClosureForgotten::Operation(operation) => operation.clone(),
         ClosureForgotten::ClosureMarker => op("!closure"),
-        ClosureForgotten::NamedEval { definition, .. } => op(&format!("!named-eval.{definition}")),
     }
 }
 

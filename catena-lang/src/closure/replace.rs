@@ -118,9 +118,6 @@ pub(super) fn run_partial(
             let printable = term.clone().map_edges(|operation| match operation {
                 ClosureForgotten::Operation(operation) => operation,
                 ClosureForgotten::ClosureMarker => "closure.marker".parse().unwrap(),
-                ClosureForgotten::NamedEval { definition, .. } => {
-                    format!("named-eval.{definition}").parse().unwrap()
-                }
             });
             let Theory::Theory { arrows, .. } = output
                 .theories
@@ -726,9 +723,6 @@ fn unwrap_operations(term: ClosureForgottenTerm) -> Result<AnnotatedTerm, Replac
     Ok(term.map_edges(|edge| match edge {
         ClosureForgotten::Operation(operation) => operation,
         ClosureForgotten::ClosureMarker => unreachable!("checked above"),
-        ClosureForgotten::NamedEval { .. } => {
-            unreachable!("named evaluations must be specialized before region replacement")
-        }
     }))
 }
 

@@ -28,19 +28,10 @@ pub type Obj = Tree<(), Operation>;
 pub type Arr = Operation;
 pub type ClosureForgottenTerm = OpenHypergraph<Obj, ClosureForgotten<Arr>>;
 
-mod named_eval;
-
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ClosureForgotten<A> {
     Operation(A),
     ClosureMarker,
-    /// A statically known call preserved for substitution before region
-    /// conversion. The first `context_arity` inputs instantiate type leaves;
-    /// the remaining inputs are the callee's flattened runtime boundary.
-    NamedEval {
-        definition: A,
-        context_arity: usize,
-    },
 }
 
 impl<A: fmt::Display> fmt::Display for ClosureForgotten<A> {
@@ -48,7 +39,6 @@ impl<A: fmt::Display> fmt::Display for ClosureForgotten<A> {
         match self {
             Self::Operation(operation) => write!(f, "{operation}"),
             Self::ClosureMarker => write!(f, "!closure"),
-            Self::NamedEval { definition, .. } => write!(f, "!named-eval.{definition}"),
         }
     }
 }
@@ -87,9 +77,8 @@ pub fn run(
                 continue;
             };
 
-            let mut typed =
+            let typed =
                 typed_definition(theory_id, definition_name, theory, theory_definition_types)?;
-            named_eval::preserve_named_lifts(&mut typed);
             let mut transformed_definition = ForgetClosures { theory }.map_arrow(&typed);
             transformed_definition.quotient().ok();
             transformed.insert(definition_name.clone(), transformed_definition);
@@ -124,10 +113,6 @@ impl Functor<Obj, Arr, Obj, ClosureForgotten<Arr>> for ForgetClosures<'_> {
         source: &[Obj],
         target: &[Obj],
     ) -> OpenHypergraph<Obj, ClosureForgotten<Arr>> {
-        if let Some(mapped) = named_eval::map_fused_lift(a, source, target) {
-            return mapped;
-        }
-
         if let Some(name) = a.as_str().strip_prefix(NAME_PREFIX)
             && target.len() == 1
             && closure_parts(&target[0]).is_some()

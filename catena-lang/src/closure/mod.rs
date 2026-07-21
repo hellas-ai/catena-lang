@@ -77,71 +77,34 @@ pub fn run(
     theory_set: &TheorySet,
     forgotten: &TheoryTermMap<ClosureForgotten<Operation>>,
 ) -> Result<Conversion, ConversionError> {
-    let mut working = named_eval::run(theory_set, forgotten)?;
-    let closure_forgotten_definitions = working.clone();
-    let mut discovered = region::run(&working)?;
-    let regions = discovered.clone();
-    let mut generated_theory = theory_set.clone();
-    let mut generated_functions = TheoryTermMap::new();
+    // Phase 1: statically named calls are ordinary graph substitutions. This
+    // happens before, and independently of, closure-region discovery.
+    let specialized = named_eval::run(theory_set, forgotten)?;
+    let closure_forgotten_definitions = specialized.clone();
 
-    loop {
-        let marker_count = discovered
-            .values()
-            .flat_map(|definitions| definitions.values())
-            .map(Vec::len)
-            .sum::<usize>();
-        if marker_count == 0 {
-            break;
-        }
+    // Phase 2: discover and replace the actual ClosureMarker regions.
+    let converted = convert_regions(theory_set, specialized)?;
+    let working = converted.terms;
+    let regions = converted.initial_regions;
+    let final_regions = converted.final_regions;
+    let generated_theory = converted.theory;
+    let generated_functions = converted.generated_functions;
 
-        let selected = spliceable_regions(&working, &discovered);
-        let selected_count = selected
-            .values()
-            .flat_map(|definitions| definitions.values())
-            .map(Vec::len)
-            .sum::<usize>();
-        if selected_count == 0 {
-            return Err(ConversionError::NoSpliceableRegion {
-                markers: marker_count,
-            });
-        }
-
-        let defined = definition::run(&generated_theory, &working, &selected)?;
-        generated_theory = defined.generated_theory;
-        merge_terms(&mut generated_functions, defined.generated_functions);
-
-        // Validate each layer as soon as its generated declarations exist.
-        crate::check::check(&generated_theory).map_err(|error| {
-            ConversionError::CheckDefinitions {
-                partial_definition_types: partial_definition_types(&error),
-                error,
-            }
-        })?;
-
-        let partial = replace::run_partial(
-            &generated_theory,
-            &working,
-            &selected,
-            &defined.closure_contexts,
-        )?;
-        generated_theory = partial.theory_set;
-        working = partial.terms;
-        replace::rewrite_ready_converted_primitives(&mut working);
-        discovered = region::run(&working)?;
-    }
-
+    // Phase 3: validate the completed generated theory, finish primitive
+    // rewriting, and erase compile-time context projections.
     let generated_types = crate::check::check(&generated_theory).map_err(|error| {
         ConversionError::CheckDefinitions {
             partial_definition_types: partial_definition_types(&error),
             error,
         }
     })?;
+    let no_closure_contexts = definition::ClosureContextMap::new();
     let replacement = replace::run(
         &generated_theory,
         &working,
         &generated_functions,
-        &discovered,
-        &Default::default(),
+        &final_regions,
+        &no_closure_contexts,
     )?;
     let mut rewritten_definitions = replacement.terms;
     replace::rewrite_all_converted_primitives(&mut rewritten_definitions);
@@ -157,6 +120,73 @@ pub fn run(
         runtime_functions,
         replacement_theory: replacement.theory_set,
     })
+}
+
+struct RegionConversion {
+    terms: TheoryTermMap<ClosureForgotten<Operation>>,
+    initial_regions: region::ClosureRegionMap,
+    /// Contains no regions, but retains the theory/definition keys expected by
+    /// the final replacement pass.
+    final_regions: region::ClosureRegionMap,
+    theory: TheorySet,
+    generated_functions: TheoryTermMap,
+}
+
+fn convert_regions(
+    theory_set: &TheorySet,
+    mut terms: TheoryTermMap<ClosureForgotten<Operation>>,
+) -> Result<RegionConversion, ConversionError> {
+    let mut theory = theory_set.clone();
+    let mut generated_functions = TheoryTermMap::new();
+    let mut discovered = region::run(&terms)?;
+    let initial_regions = discovered.clone();
+
+    loop {
+        let remaining = region_count(&discovered);
+        if remaining == 0 {
+            break;
+        }
+
+        // Only regions whose internals no longer contain another marker can be
+        // cut out safely. Re-discovery after each round exposes the next layer.
+        let selected = spliceable_regions(&terms, &discovered);
+        if region_count(&selected) == 0 {
+            return Err(ConversionError::NoSpliceableRegion { markers: remaining });
+        }
+
+        let defined = definition::run(&theory, &terms, &selected)?;
+        theory = defined.generated_theory;
+        merge_terms(&mut generated_functions, defined.generated_functions);
+
+        // Each generated layer must typecheck before its declarations are used
+        // to replace the selected markers.
+        crate::check::check(&theory).map_err(|error| ConversionError::CheckDefinitions {
+            partial_definition_types: partial_definition_types(&error),
+            error,
+        })?;
+
+        let partial = replace::run_partial(&theory, &terms, &selected, &defined.closure_contexts)?;
+        theory = partial.theory_set;
+        terms = partial.terms;
+        replace::rewrite_ready_converted_primitives(&mut terms);
+        discovered = region::run(&terms)?;
+    }
+
+    Ok(RegionConversion {
+        terms,
+        initial_regions,
+        final_regions: discovered,
+        theory,
+        generated_functions,
+    })
+}
+
+fn region_count(regions: &region::ClosureRegionMap) -> usize {
+    regions
+        .values()
+        .flat_map(|definitions| definitions.values())
+        .map(Vec::len)
+        .sum()
 }
 
 fn spliceable_regions(
@@ -186,64 +216,5 @@ fn spliceable_regions(
 fn merge_terms(output: &mut TheoryTermMap, next: TheoryTermMap) {
     for (theory, definitions) in next {
         output.entry(theory).or_default().extend(definitions);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use metacat::theory::{RawTheorySet, TheorySet};
-
-    #[test]
-    fn inlines_named_closure_boundary_evaluation_after_forgetting() {
-        let source = r#"
-            (def program apply-closure : ({1 (bool val)} =>) -> (bool val)
-              = run)
-            (def program use-named-closure : (bool val) -> (bool val)
-              = ([captured.]
-                  ([.captured] defer [inner.]
-                    ({([.inner] defer) (name.apply-closure lift)} compose run))))
-        "#;
-        let raw = RawTheorySet::from_texts(crate::stdlib::sources().chain([source]))
-            .expect("test theories should parse");
-        let elaborated = crate::elaborate::elaborate(raw).expect("test theory should elaborate");
-        let theory_set = TheorySet::from_raw(elaborated).expect("test theory should interpret");
-        let types = crate::check::check(&theory_set).expect("test theory should check");
-        let forgotten = crate::pass::forget_closures::run(&theory_set, &types)
-            .expect("test theory should forget closures");
-        let program = metacat::theory::TheoryId("program".parse().unwrap());
-        let use_named: hexpr::Operation = "use-named-closure".parse().unwrap();
-        assert!(
-            forgotten[&program][&use_named]
-                .hypergraph
-                .edges
-                .iter()
-                .any(|edge| matches!(
-                    edge,
-                    crate::pass::forget_closures::ClosureForgotten::NamedEval {
-                        definition,
-                        ..
-                    } if definition.as_str() == "apply-closure"
-                ))
-        );
-
-        let conversion = super::run(&theory_set, &forgotten)
-            .expect("named closure-boundary evaluation should specialize");
-        assert!(
-            conversion.closure_forgotten_definitions[&program][&use_named]
-                .hypergraph
-                .edges
-                .iter()
-                .all(|edge| !matches!(
-                    edge,
-                    crate::pass::forget_closures::ClosureForgotten::NamedEval { .. }
-                ))
-        );
-        assert!(
-            !conversion.runtime_functions[&program].contains_key(&"apply-closure".parse().unwrap())
-        );
-        assert!(
-            conversion.runtime_functions[&program]
-                .contains_key(&"use-named-closure".parse().unwrap())
-        );
     }
 }

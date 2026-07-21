@@ -21,7 +21,7 @@ use crate::{
         definition::{ClosureContextMap, closure_operation},
         region::{ClosureRegion, ClosureRegionMap, find_regions},
     },
-    hexpr::{objects_to_hexpr, term_to_hexpr},
+    hexpr::objects_to_hexpr,
     nonstrict::to_packer,
     pass::forget_closures::{ClosureForgotten, ClosureForgottenTerm},
     prefixes::{GENERATED_CONTEXT_PREFIX, GENERATED_VARIABLE_PREFIX, NAME_PREFIX},
@@ -36,12 +36,6 @@ const CONVERTED_PRIMITIVES: &[(&str, &str)] = &[
     ("reduce", "reducec"),
     ("materialize", "materializec"),
 ];
-
-#[derive(Debug, Clone)]
-pub struct Replacement {
-    pub theory_set: TheorySet,
-    pub terms: TheoryTermMap,
-}
 
 pub(super) struct PartialReplacement {
     pub(super) theory_set: TheorySet,
@@ -291,163 +285,28 @@ pub enum ReplaceClosuresError {
     TypeMapEvaluation(String),
 }
 
-/// Replace every `!closure` marker and its body in the forgotten definitions.
-///
-/// The generated `name.closure.*` declaration is the source of truth for the
-/// static context inputs and function-pointer output used by each replacement.
-pub fn run(
-    theory_set: &TheorySet,
+/// Combine generated closure bodies with fully converted definitions and erase
+/// the `ClosureForgotten` edge wrapper. All markers must already be gone.
+pub(super) fn finalize(
     forgotten: &TheoryTermMap<ClosureForgotten<Operation>>,
     generated_functions: &TheoryTermMap,
-    regions: &ClosureRegionMap,
-    closure_contexts: &ClosureContextMap,
-) -> Result<Replacement, ReplaceClosuresError> {
-    let mut output = theory_set.clone();
-    // Generated closure bodies are already ordinary operation graphs. Keep
-    // them separate from marker-bearing forgotten definitions and include them
-    // directly in the final definition map.
+) -> Result<TheoryTermMap, ReplaceClosuresError> {
+    // Generated closure bodies are already ordinary operation graphs. Seed the
+    // final map with them, then add the converted caller definitions below.
     let mut terms = generated_functions.clone();
 
     for (theory_id, definitions) in forgotten {
-        let theory = theory_set
-            .theories
-            .get(theory_id)
-            .ok_or_else(|| ReplaceClosuresError::MissingTheory(theory_id.to_string()))?;
-        let Theory::Theory { syntax, arrows } = theory else {
-            return Err(ReplaceClosuresError::NotUserTheory(theory_id.to_string()));
-        };
-        let syntax_theory = theory_set
-            .theories
-            .get(syntax)
-            .ok_or_else(|| ReplaceClosuresError::MissingSyntaxTheory(syntax.to_string()))?;
-        let discovered = regions
-            .get(theory_id)
-            .ok_or_else(|| ReplaceClosuresError::MissingTheory(theory_id.to_string()))?;
-        let mut replaced_definitions = BTreeMap::new();
-
-        for (definition_name, term) in definitions {
-            let original_arrow = arrows.get(definition_name).ok_or_else(|| {
-                ReplaceClosuresError::MissingDefinition {
-                    theory: theory_id.to_string(),
-                    definition: definition_name.to_string(),
-                }
-            })?;
-            let definition_regions = discovered
-                .get(definition_name)
-                .map(Vec::as_slice)
-                .unwrap_or_default();
-            if definition_regions.is_empty() {
-                replaced_definitions
-                    .insert(definition_name.clone(), unwrap_operations(term.clone())?);
-                continue;
-            }
-            let rewritten = replace_definition_regions(
-                theory_id,
-                definition_name,
-                arrows,
-                term,
-                definition_regions,
-                closure_contexts,
-            )?;
-
-            // Context projections are temporary graph operations introduced by
-            // replacement. Declare them so the rewritten theory can be checked;
-            // the final closure-conversion step erases them from runtime code.
-            let Theory::Theory { arrows, .. } = output
-                .theories
-                .get_mut(theory_id)
-                .expect("validated theory should remain present")
-            else {
-                unreachable!("validated user theory should remain a user theory")
-            };
-            declare_context_arrows(
-                syntax_theory,
-                arrows,
-                &rewritten,
-                original_arrow.type_maps.0.sources.len(),
-            )?;
-            let arrow = arrows
-                .get_mut(definition_name)
-                .expect("validated definition should remain present");
-            arrow.raw.definition = Some(term_to_hexpr(&rewritten));
-            arrow.definition = Some(rewritten.clone().map_nodes(|_| ()));
-            replaced_definitions.insert(definition_name.clone(), rewritten);
-        }
+        let finalized = definitions
+            .iter()
+            .map(|(definition, term)| Ok((definition.clone(), unwrap_operations(term.clone())?)))
+            .collect::<Result<BTreeMap<_, _>, ReplaceClosuresError>>()?;
         terms
             .entry(theory_id.clone())
             .or_default()
-            .extend(replaced_definitions);
+            .extend(finalized);
     }
 
-    Ok(Replacement {
-        theory_set: output,
-        terms,
-    })
-}
-
-/// Replace every region in one definition, then turn the marker-bearing graph
-/// back into an ordinary annotated definition.
-fn replace_definition_regions(
-    theory_id: &TheoryId,
-    definition_name: &Operation,
-    arrows: &BTreeMap<Operation, TheoryArrow>,
-    definition: &ClosureForgottenTerm,
-    original_regions: &[ClosureRegion],
-    closure_contexts: &ClosureContextMap,
-) -> Result<AnnotatedTerm, ReplaceClosuresError> {
-    let mut rewritten = definition.clone();
-
-    // Splicing changes node and edge identifiers. Rediscover the first
-    // remaining region before every rewrite, but use `original_region` to keep
-    // the stable generated closure name and context mapping.
-    for original_region in original_regions {
-        let generated_closure = closure_operation(definition_name, original_region.closure);
-        let original_context_leaves = closure_contexts
-            .get(theory_id)
-            .and_then(|contexts| contexts.get(&generated_closure))
-            .ok_or_else(|| ReplaceClosuresError::MissingClosureContext {
-                operation: generated_closure.to_string(),
-            })?;
-        let current_region = first_remaining_region(theory_id, definition_name, &rewritten)?;
-        let replacement = build_closure_value(
-            definition_name,
-            arrows,
-            &rewritten,
-            &current_region,
-            original_region,
-            original_context_leaves,
-        )?;
-        rewritten = splice_region(&rewritten, &current_region, &replacement)?;
-    }
-
-    if !find_regions(&rewritten)
-        .map_err(|_| ReplaceClosuresError::RemainingClosureMarker)?
-        .is_empty()
-    {
-        return Err(region_count_changed(theory_id, definition_name));
-    }
-
-    let mut rewritten = unwrap_operations(rewritten)?;
-    rewrite_converted_primitives(&mut rewritten);
-    rewritten
-        .quotient()
-        .map_err(|error| ReplaceClosuresError::Quotient {
-            theory: theory_id.to_string(),
-            definition: definition_name.to_string(),
-            error: format!("{error:?}"),
-        })?;
-    Ok(rewritten)
-}
-
-fn first_remaining_region(
-    theory_id: &TheoryId,
-    definition_name: &Operation,
-    definition: &ClosureForgottenTerm,
-) -> Result<ClosureRegion, ReplaceClosuresError> {
-    find_regions(definition)
-        .ok()
-        .and_then(|regions| regions.into_iter().next())
-        .ok_or_else(|| region_count_changed(theory_id, definition_name))
+    Ok(terms)
 }
 
 fn region_count_changed(theory_id: &TheoryId, definition_name: &Operation) -> ReplaceClosuresError {

@@ -78,38 +78,30 @@ pub fn run(
     theory_set: &TheorySet,
     forgotten: &TheoryTermMap<ClosureForgotten<Operation>>,
 ) -> Result<Conversion, ConversionError> {
-    // Phase 1: statically named calls are ordinary graph substitutions. This
-    // happens before, and independently of, closure-region discovery.
+    // Statically named calls are ordinary graph substitutions. This happens
+    // before, and independently of, closure-region discovery.
     let specialized = named_eval::run(theory_set, forgotten)?;
     let closure_forgotten_definitions = specialized.clone();
 
-    // Phase 2: discover and replace the actual ClosureMarker regions.
+    // Discover and replace the actual ClosureMarker regions.
     let converted = bottom_up::run(theory_set, specialized)?;
     let working = converted.terms;
     let regions = converted.initial_regions;
-    let final_regions = converted.final_regions;
     let generated_theory = converted.theory;
     let generated_functions = converted.generated_functions;
 
-    // Phase 3: validate the completed generated theory, finish primitive
-    // rewriting, and erase compile-time context projections.
+    // Validate the completed generated theory, finish primitive rewriting, and
+    // erase compile-time context projections.
     let generated_types = crate::check::check(&generated_theory).map_err(|error| {
         ConversionError::CheckDefinitions {
             partial_definition_types: partial_definition_types(&error),
             error,
         }
     })?;
-    let no_closure_contexts = definition::ClosureContextMap::new();
-    let replacement = replace::run(
-        &generated_theory,
-        &working,
-        &generated_functions,
-        &final_regions,
-        &no_closure_contexts,
-    )?;
-    let mut rewritten_definitions = replacement.terms;
+    let mut rewritten_definitions = replace::finalize(&working, &generated_functions)?;
     replace::rewrite_all_converted_primitives(&mut rewritten_definitions);
     let runtime_functions = context::erase(&rewritten_definitions)?;
+    let replacement_theory = generated_theory.clone();
 
     Ok(Conversion {
         closure_forgotten_definitions,
@@ -119,6 +111,6 @@ pub fn run(
         generated_functions,
         rewritten_definitions,
         runtime_functions,
-        replacement_theory: replacement.theory_set,
+        replacement_theory,
     })
 }

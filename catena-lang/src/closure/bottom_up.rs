@@ -16,9 +16,6 @@ use crate::{
 pub(super) struct RegionConversion {
     pub(super) terms: TheoryTermMap<ClosureForgotten<Operation>>,
     pub(super) initial_regions: region::ClosureRegionMap,
-    /// Contains no regions, but retains the theory/definition keys expected by
-    /// the final replacement pass.
-    pub(super) final_regions: region::ClosureRegionMap,
     pub(super) theory: TheorySet,
     pub(super) generated_functions: TheoryTermMap,
 }
@@ -68,7 +65,6 @@ pub(super) fn run(
     Ok(RegionConversion {
         terms: state.terms,
         initial_regions,
-        final_regions: discovered_regions,
         theory: state.theory,
         generated_functions: state.generated_functions,
     })

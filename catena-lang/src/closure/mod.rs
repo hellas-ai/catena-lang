@@ -80,15 +80,16 @@ pub fn run(
 ) -> Result<Conversion, ConversionError> {
     // Forgetting exposes `name.f -> eval`. Inline the complete call adapter
     // when `f` has closures on its interface, before discovering regions.
-    let specialized = inline_named_calls::run(theory_set, forgotten)?;
-    let closure_forgotten_definitions = specialized.clone();
+    let inlined_definitions = inline_named_calls::run(theory_set, forgotten)?;
+    let closure_forgotten_definitions = inlined_definitions.clone();
 
     // Discover and replace the actual ClosureMarker regions.
-    let converted = region_conversion::run(theory_set, specialized)?;
-    let working = converted.terms;
-    let regions = converted.initial_regions;
-    let generated_theory = converted.theory;
-    let generated_functions = converted.generated_functions;
+    let region_conversion::RegionConversion {
+        terms: working,
+        initial_regions: regions,
+        theory: generated_theory,
+        generated_functions,
+    } = region_conversion::run(theory_set, inlined_definitions)?;
 
     // Validate the completed generated theory, finish primitive rewriting, and
     // erase compile-time context projections.

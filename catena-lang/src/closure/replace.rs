@@ -190,7 +190,7 @@ pub(super) fn region_is_ready_for_extraction(
         })
 }
 
-pub fn rewrite_all_converted_primitives(terms: &mut TheoryTermMap) {
+fn rewrite_all_converted_primitives(terms: &mut TheoryTermMap) {
     for definitions in terms.values_mut() {
         for term in definitions.values_mut() {
             rewrite_converted_primitives(term);
@@ -285,9 +285,10 @@ pub enum ReplaceClosuresError {
     TypeMapEvaluation(String),
 }
 
-/// Combine generated closure bodies with fully converted definitions and erase
-/// the `ClosureForgotten` edge wrapper. All markers must already be gone.
-pub(super) fn unwrap_and_merge_definitions(
+/// Build the rewritten definition map by combining generated closure bodies
+/// with converted callers, erasing `ClosureForgotten`, and selecting the
+/// closure-aware runtime primitives. All markers must already be gone.
+pub(super) fn build_rewritten_definitions(
     forgotten: &TheoryTermMap<ClosureForgotten<Operation>>,
     generated_functions: &TheoryTermMap,
 ) -> Result<TheoryTermMap, ReplaceClosuresError> {
@@ -306,6 +307,7 @@ pub(super) fn unwrap_and_merge_definitions(
             .extend(finalized);
     }
 
+    rewrite_all_converted_primitives(&mut terms);
     Ok(terms)
 }
 

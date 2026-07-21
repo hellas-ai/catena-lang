@@ -98,9 +98,8 @@ pub fn run(
             error,
         }
     })?;
-    let mut rewritten_definitions =
-        replace::unwrap_and_merge_definitions(&working, &generated_functions)?;
-    replace::rewrite_all_converted_primitives(&mut rewritten_definitions);
+    let rewritten_definitions =
+        replace::build_rewritten_definitions(&working, &generated_functions)?;
     let runtime_functions = context::erase(&rewritten_definitions)?;
     let replacement_theory = generated_theory.clone();
 

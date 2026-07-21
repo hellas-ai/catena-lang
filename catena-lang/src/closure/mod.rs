@@ -20,9 +20,9 @@ pub mod region;
 /// Turn discovered regions into `closure.*` definitions and `name.closure.*` declarations.
 pub mod definition;
 
-mod bottom_up;
 mod context;
 mod named_eval;
+mod region_conversion;
 /// Replace regions with explicit environments, function pointers, and context operations.
 pub mod replace;
 
@@ -84,7 +84,7 @@ pub fn run(
     let closure_forgotten_definitions = specialized.clone();
 
     // Discover and replace the actual ClosureMarker regions.
-    let converted = bottom_up::run(theory_set, specialized)?;
+    let converted = region_conversion::run(theory_set, specialized)?;
     let working = converted.terms;
     let regions = converted.initial_regions;
     let generated_theory = converted.theory;
@@ -98,7 +98,8 @@ pub fn run(
             error,
         }
     })?;
-    let mut rewritten_definitions = replace::finalize(&working, &generated_functions)?;
+    let mut rewritten_definitions =
+        replace::unwrap_and_merge_definitions(&working, &generated_functions)?;
     replace::rewrite_all_converted_primitives(&mut rewritten_definitions);
     let runtime_functions = context::erase(&rewritten_definitions)?;
     let replacement_theory = generated_theory.clone();

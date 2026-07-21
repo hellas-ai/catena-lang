@@ -287,7 +287,7 @@ pub enum ReplaceClosuresError {
 
 /// Combine generated closure bodies with fully converted definitions and erase
 /// the `ClosureForgotten` edge wrapper. All markers must already be gone.
-pub(super) fn finalize(
+pub(super) fn unwrap_and_merge_definitions(
     forgotten: &TheoryTermMap<ClosureForgotten<Operation>>,
     generated_functions: &TheoryTermMap,
 ) -> Result<TheoryTermMap, ReplaceClosuresError> {

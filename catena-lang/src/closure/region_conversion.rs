@@ -1,4 +1,4 @@
-//! Bottom-up conversion of `ClosureMarker` regions.
+//! Convert `ClosureMarker` regions from the innermost layer outward.
 //!
 //! A conversion round extracts every region that is currently self-contained.
 //! Nested enclosing regions are rediscovered and handled by later rounds.

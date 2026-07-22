@@ -6,8 +6,6 @@ use catena_lang::{
 
 const GPU_DIALECT_ENV: &str = "CATENA_GPU_DIALECT";
 
-const NN_EXAMPLES: &str = include_str!("../examples/nn.hex");
-
 /// Create a runtime with a provided user source file
 fn runtime_with(source: &'static str) -> anyhow::Result<Runtime> {
     Runtime::from_sources(stdlib::sources().chain([source]), configured_gpu_dialect()?)
@@ -972,7 +970,7 @@ fn rmsnorm_test() -> anyhow::Result<()> {
 
 #[test]
 fn broadcast_f32_test() -> anyhow::Result<()> {
-    let runtime = runtime_with(NN_EXAMPLES)?;
+    let runtime = runtime_with("")?;
 
     let [empty] = runtime.exec("broadcast-f32", [3.5_f32.into(), 0_u64.into()])?;
     let Value::Mem(empty) = empty else {
@@ -990,7 +988,7 @@ fn broadcast_f32_test() -> anyhow::Result<()> {
 
 #[test]
 fn arange_f32_test() -> anyhow::Result<()> {
-    let runtime = runtime_with(NN_EXAMPLES)?;
+    let runtime = runtime_with("")?;
 
     let [empty] = runtime.exec("arange-f32", [0_u64.into()])?;
     let Value::Mem(empty) = empty else {
@@ -1008,7 +1006,7 @@ fn arange_f32_test() -> anyhow::Result<()> {
 
 #[test]
 fn slice_f32_test() -> anyhow::Result<()> {
-    let runtime = runtime_with(NN_EXAMPLES)?;
+    let runtime = runtime_with("")?;
 
     let [result] = runtime.exec(
         "slice-f32",
@@ -1066,7 +1064,7 @@ fn slice_f32_test() -> anyhow::Result<()> {
 
 #[test]
 fn concat_f32_test() -> anyhow::Result<()> {
-    let runtime = runtime_with(NN_EXAMPLES)?;
+    let runtime = runtime_with("")?;
 
     for (left, right, expected) in [
         (
@@ -1102,7 +1100,7 @@ fn concat_f32_test() -> anyhow::Result<()> {
 
 #[test]
 fn argmax_f32_test() -> anyhow::Result<()> {
-    let runtime = runtime_with(NN_EXAMPLES)?;
+    let runtime = runtime_with("")?;
 
     for (input_values, expected) in [
         (vec![5.0_f32], 0_u64),

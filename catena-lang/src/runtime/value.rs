@@ -1,7 +1,4 @@
-use super::{
-    executor::{AbiValue, ArgValue},
-    mem::Mem,
-};
+use super::mem::Mem;
 
 /// Public Catena runtime values accepted at program boundaries.
 #[derive(Debug)]
@@ -47,28 +44,6 @@ impl Value {
             Value::U64(_) => ValueKind::U64,
             Value::F32(_) => ValueKind::F32,
             Value::Mem(_) => ValueKind::Mem,
-        }
-    }
-}
-
-impl Value {
-    pub(crate) fn as_input_arg(&self) -> ArgValue<'_> {
-        match self {
-            Value::Bool(value) => ArgValue::Val(AbiValue::U8(value)),
-            Value::U32(value) => ArgValue::Val(AbiValue::U32(value)),
-            Value::U64(value) => ArgValue::Val(AbiValue::U64(value)),
-            Value::F32(value) => ArgValue::Val(AbiValue::F32(value)),
-            Value::Mem(value) => ArgValue::Val(AbiValue::Mem(&value.abi)),
-        }
-    }
-
-    pub(crate) fn as_output_arg(&mut self) -> ArgValue<'_> {
-        match self {
-            Value::Bool(value) => ArgValue::Out(AbiValue::U8(value)),
-            Value::U32(value) => ArgValue::Out(AbiValue::U32(value)),
-            Value::U64(value) => ArgValue::Out(AbiValue::U64(value)),
-            Value::F32(value) => ArgValue::Out(AbiValue::F32(value)),
-            Value::Mem(value) => ArgValue::Out(AbiValue::Mem(&mut value.abi)),
         }
     }
 }

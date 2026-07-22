@@ -1,6 +1,6 @@
 use catena_lang::{
     codegen::GpuDialect,
-    runtime::{Runtime, Value},
+    runtime::{Runtime, Value, ValueKind},
     stdlib,
 };
 
@@ -53,6 +53,48 @@ fn not_false() -> anyhow::Result<()> {
     };
 
     assert_eq!(result, 1);
+    Ok(())
+}
+
+#[test]
+fn exec_validates_source_name_and_signature() -> anyhow::Result<()> {
+    use catena_lang::runtime::runtime::ExecError;
+
+    let runtime = runtime_with(
+        r#"
+        (def program not : (bool val) -> (bool val) = bool.not)
+"#,
+    )?;
+
+    assert!(matches!(
+        runtime.exec::<0, 0>("missing", []),
+        Err(ExecError::UnknownSourceFunction(name)) if name == "missing"
+    ));
+    assert!(matches!(
+        runtime.exec::<0, 1>("not", []),
+        Err(ExecError::InputArityMismatch {
+            expected: 1,
+            actual: 0,
+            ..
+        })
+    ));
+    assert!(matches!(
+        runtime.exec::<1, 0>("not", [false.into()]),
+        Err(ExecError::OutputArityMismatch {
+            expected: 1,
+            actual: 0,
+            ..
+        })
+    ));
+    assert!(matches!(
+        runtime.exec::<1, 1>("not", [0_u64.into()]),
+        Err(ExecError::TypeMismatch {
+            index: 0,
+            expected: ValueKind::Bool,
+            actual: ValueKind::U64,
+        })
+    ));
+
     Ok(())
 }
 

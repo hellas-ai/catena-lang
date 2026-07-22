@@ -7,10 +7,19 @@ use metacat::theory::{
 
 use crate::{
     elaborate::{ElaborateError, NAT_THEORY},
-    prefixes::{CONST_PREFIX, GENERATED_CONTEXT_PREFIX, GENERATED_VARIABLE_PREFIX, NAME_PREFIX},
+    prefixes::{
+        CONST_PREFIX, GENERATED_CONTEXT_PREFIX, GENERATED_PARTIAL_PREFIX,
+        GENERATED_VARIABLE_PREFIX, NAME_PREFIX, PARTIAL_PREFIX,
+    },
 };
 
-const RESERVED_OPERATION_PREFIXES: &[&str] = &[NAME_PREFIX, CONST_PREFIX, GENERATED_CONTEXT_PREFIX];
+const RESERVED_OPERATION_PREFIXES: &[&str] = &[
+    NAME_PREFIX,
+    PARTIAL_PREFIX,
+    CONST_PREFIX,
+    GENERATED_CONTEXT_PREFIX,
+    GENERATED_PARTIAL_PREFIX,
+];
 const RESERVED_VARIABLE_PREFIXES: &[&str] = &[GENERATED_VARIABLE_PREFIX];
 
 pub(crate) fn pre_elaboration_invariants(raw: &RawTheorySet) -> Result<(), ElaborateError> {

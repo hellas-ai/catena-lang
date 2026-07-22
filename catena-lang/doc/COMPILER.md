@@ -12,8 +12,11 @@ Here's each in more detail:
 
 **Elaboration** adds additional data to the raw metacat theories:
 
-- Reject any programs/libraries with defs/decls starting with `constant.*` or `name.*`
+- Reject any programs/libraries with declarations using elaborator-reserved prefixes such as
+  `const.*`, `name.*`, and `partial.*`
 - Constant elaboration: Add constant declarations for each used `u64` or `u32` constant
+- Partial-application elaboration: For each used `partial.f.N`, add a CMC definition that captures
+  the first `N` inputs of `f`
 - Name elaboration:     For each `f : A -> B`, add `name.f : I -> (A -> B)` (moral type)
 
 **Typechecking** runs the metacat typechecker on the elaborated theory.

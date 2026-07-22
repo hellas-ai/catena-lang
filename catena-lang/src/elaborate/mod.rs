@@ -1,6 +1,9 @@
 /// Add name.{f} for each arrow f
 pub(crate) mod name_symbols;
 
+/// Add partial.{f}.{n} for partial applications used by definitions.
+mod partial_applications;
+
 /// Add const.{type}.{c} arrows for each constant c required.
 mod constants;
 
@@ -44,6 +47,16 @@ pub enum ElaborateError {
     },
     #[error("invalid integer constant `{operation}`: {reason}")]
     InvalidConstant { operation: String, reason: String },
+    #[error("invalid partial application `{operation}`: {reason}")]
+    InvalidPartialApplication { operation: String, reason: String },
+    #[error(
+        "partial application `{operation}` refers to missing arrow `{arrow}` in theory `{theory}`"
+    )]
+    MissingPartialApplicationArrow {
+        theory: String,
+        operation: String,
+        arrow: String,
+    },
     #[error(
         "failed to interpret source type map for `name.{theory}.{arrow}` from `{map}`: {error}"
     )]
@@ -78,6 +91,7 @@ pub fn elaborate(mut raw: RawTheorySet) -> Result<RawTheorySet, ElaborateError> 
     validate::pre_elaboration_invariants(&raw)?;
     constants::elaborate(&mut raw, constants::U64)?;
     constants::elaborate(&mut raw, constants::U32)?;
+    partial_applications::elaborate(&mut raw)?;
 
     let theory_names: Vec<_> = raw
         .theories

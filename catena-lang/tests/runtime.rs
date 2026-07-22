@@ -721,7 +721,7 @@ mod matrix;
 
 #[test]
 fn sigmoid_test() -> anyhow::Result<()> {
-    let runtime = runtime_with(NN_EXAMPLES)?;
+    let runtime = runtime_with("")?;
 
     for input in [-6.0_f32, -1.0, 0.0, 1.0, 6.0] {
         let [result] = runtime.exec("sigmoid", [input.into()])?;
@@ -742,7 +742,7 @@ fn sigmoid_test() -> anyhow::Result<()> {
 
 #[test]
 fn silu_test() -> anyhow::Result<()> {
-    let runtime = runtime_with(NN_EXAMPLES)?;
+    let runtime = runtime_with("")?;
 
     for input in [-3.0_f32, -1.0, 0.0, 1.0, 3.0] {
         let [result] = runtime.exec("silu", [input.into()])?;
@@ -764,7 +764,7 @@ fn silu_test() -> anyhow::Result<()> {
 
 #[test]
 fn tanh_test() -> anyhow::Result<()> {
-    let runtime = runtime_with(NN_EXAMPLES)?;
+    let runtime = runtime_with("")?;
 
     for input in [-3.0_f32, -1.0, 0.0, 1.0, 3.0] {
         let [result] = runtime.exec("tanh", [input.into()])?;
@@ -785,7 +785,7 @@ fn tanh_test() -> anyhow::Result<()> {
 
 #[test]
 fn gelu_approx_test() -> anyhow::Result<()> {
-    let runtime = runtime_with(NN_EXAMPLES)?;
+    let runtime = runtime_with("")?;
 
     for input in [-3.0_f32, -1.0, 0.0, 1.0, 3.0] {
         let [result] = runtime.exec("gelu-approx", [input.into()])?;

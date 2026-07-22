@@ -6,7 +6,6 @@ use catena_lang::{
 
 const GPU_DIALECT_ENV: &str = "CATENA_GPU_DIALECT";
 
-const SIN_EXAMPLES: &str = include_str!("../examples/sincos.hex");
 const NN_EXAMPLES: &str = include_str!("../examples/nn.hex");
 const SOFTMAX_EXAMPLES: &str = include_str!("../examples/softmax.hex");
 const RMSNORM_EXAMPLES: &str = include_str!("../examples/rmsnorm.hex");
@@ -295,7 +294,7 @@ fn f32_fma_is_fused_test() -> anyhow::Result<()> {
 
 #[test]
 fn sin_approx_test() -> anyhow::Result<()> {
-    let runtime = runtime_with(SIN_EXAMPLES)?;
+    let runtime = runtime_with("")?;
 
     // Input range where the Taylor expansion is good enough
     for input in [0.0_f32, 0.5, 1.0, -0.5, -1.0] {
@@ -316,7 +315,7 @@ fn sin_approx_test() -> anyhow::Result<()> {
 
 #[test]
 fn sin_approx_full_test() -> anyhow::Result<()> {
-    let runtime = runtime_with(SIN_EXAMPLES)?;
+    let runtime = runtime_with("")?;
 
     for input in [
         -200.0_f32, -100.0, -10.0, -6.0, -3.0, -1.9, -0.5, 0.0, 0.5, 3.0, 6.0, 10.0, 100.0, 200.0,
@@ -672,7 +671,7 @@ fn array_head_u64() -> anyhow::Result<()> {
 
 #[test]
 fn exp_approx_test() -> anyhow::Result<()> {
-    let runtime = runtime_with(NN_EXAMPLES)?;
+    let runtime = runtime_with("")?;
 
     for input in [-3.0_f32, -1.0, -0.5, 0.0, 0.5, 1.0, 3.0] {
         let [result] = runtime.exec("exp-approx", [input.into()])?;
@@ -693,7 +692,7 @@ fn exp_approx_test() -> anyhow::Result<()> {
 
 #[test]
 fn exp2_approx_test() -> anyhow::Result<()> {
-    let runtime = runtime_with(NN_EXAMPLES)?;
+    let runtime = runtime_with("")?;
 
     for input in [-3.0_f32, -1.0, -0.5, 0.0, 0.5, 1.0, 3.0] {
         let [result] = runtime.exec("exp2-approx", [input.into()])?;
@@ -809,7 +808,7 @@ fn gelu_approx_test() -> anyhow::Result<()> {
 
 #[test]
 fn sqrt_test() -> anyhow::Result<()> {
-    let runtime = runtime_with(NN_EXAMPLES)?;
+    let runtime = runtime_with("")?;
 
     for input in [0.0_f32, 0.25, 1.0, 2.0, 9.0, 100.0] {
         let [result] = runtime.exec("sqrt", [input.into()])?;
@@ -830,7 +829,7 @@ fn sqrt_test() -> anyhow::Result<()> {
 
 #[test]
 fn log_approx_test() -> anyhow::Result<()> {
-    let runtime = runtime_with(NN_EXAMPLES)?;
+    let runtime = runtime_with("")?;
 
     for input in [0.1_f32, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 8.0, 10.0] {
         let [result] = runtime.exec("log-approx", [input.into()])?;
@@ -851,7 +850,7 @@ fn log_approx_test() -> anyhow::Result<()> {
 
 #[test]
 fn log2_approx_test() -> anyhow::Result<()> {
-    let runtime = runtime_with(NN_EXAMPLES)?;
+    let runtime = runtime_with("")?;
 
     for input in [0.1_f32, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 8.0, 10.0] {
         let [result] = runtime.exec("log2-approx", [input.into()])?;
@@ -872,7 +871,7 @@ fn log2_approx_test() -> anyhow::Result<()> {
 
 #[test]
 fn powf_test() -> anyhow::Result<()> {
-    let runtime = runtime_with(NN_EXAMPLES)?;
+    let runtime = runtime_with("")?;
 
     for (base, exponent) in [
         (0.25_f32, 0.5_f32),
@@ -901,7 +900,7 @@ fn powf_test() -> anyhow::Result<()> {
 
 #[test]
 fn softmax_test() -> anyhow::Result<()> {
-    let runtime = runtime_with_sources([REDUCEC_SUM_EXAMPLES, NN_EXAMPLES, SOFTMAX_EXAMPLES])?;
+    let runtime = runtime_with_sources([REDUCEC_SUM_EXAMPLES, SOFTMAX_EXAMPLES])?;
 
     let input_values = [1.0_f32, 2.0, 4.0];
     let input = runtime.mem_f32(&input_values)?;
@@ -941,7 +940,7 @@ fn softmax_test() -> anyhow::Result<()> {
 
 #[test]
 fn rmsnorm_test() -> anyhow::Result<()> {
-    let runtime = runtime_with_sources([REDUCEC_SUM_EXAMPLES, NN_EXAMPLES, RMSNORM_EXAMPLES])?;
+    let runtime = runtime_with_sources([REDUCEC_SUM_EXAMPLES, RMSNORM_EXAMPLES])?;
 
     let input_values = [1.0_f32, 2.0, 4.0, -1.0, -9.0, 13.29];
     let input = runtime.mem_f32(&input_values)?;

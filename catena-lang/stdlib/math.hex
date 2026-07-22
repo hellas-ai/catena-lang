@@ -1,0 +1,273 @@
+# 4-term Taylor approximation around 0:
+# x - x^3/3! + x^5/5! - x^7/7!
+(def program sin-approx : (f32 val) -> (f32 val) =
+  {[x.]
+    ([.x x] f32.mul [x2.])
+    ([.x2 x] f32.mul [x3.])
+    ([.x3 x2] f32.mul [x5.])
+    ([.x5 x2] f32.mul [x7.])
+
+    (const.u32.0x00000006 u32.to-f32 [fact_3.])
+    (const.u32.0x00000078 u32.to-f32 [fact_5.])
+    (const.u32.0x000013B0 u32.to-f32 [fact_7.])
+
+    ([.x3 fact_3] f32.div [x3_over_6.])
+    ([.x5 fact_5] f32.div [x5_over_120.])
+    ([.x7 fact_7] f32.div [x7_over_5040.])
+
+    ([.x x3_over_6] f32.sub [partial1.])
+    ([.partial1 x5_over_120] f32.add [partial2.])
+    ([.partial2 x7_over_5040] f32.sub [result.])
+    [.result]
+  }
+)
+
+# 4-term cosine approximation around 0:
+# 1 - x^2/2! + x^4/4! - x^6/6!
+(def program cos-approx : (f32 val) -> (f32 val) =
+  {[x.]
+    ([.x x] f32.mul [x2.])
+    ([.x2 x2] f32.mul [x4.])
+    ([.x4 x2] f32.mul [x6.])
+
+    (const.u32.0x00000002 u32.to-f32 [fact_2.])
+    (const.u32.0x00000018 u32.to-f32 [fact_4.])
+    (const.u32.0x000002D0 u32.to-f32 [fact_6.])
+    (const.u32.0x00000001 u32.to-f32 [one.])
+
+    ([.x2 fact_2] f32.div [x2_over_2.])
+    ([.x4 fact_4] f32.div [x4_over_24.])
+    ([.x6 fact_6] f32.div [x6_over_720.])
+
+    ([.one x2_over_2] f32.sub [partial1.])
+    ([.partial1 x4_over_24] f32.add [partial2.])
+    ([.partial2 x6_over_720] f32.sub [result.])
+    [.result]
+  }
+)
+
+# Cody-Waite style range reduction for non-negative inputs:
+# n = round(x * 2/pi), r = x - n * pio2_hi - n * pio2_lo
+# then choose sin/cos and sign from quadrant n mod 4.
+(def program sin-approx-full-nonneg : (f32 val) -> (f32 val) =
+  {[x.]
+    (const.u32.0x3F22F983 u32.bitcast-f32 [inv_pio2.])
+    (const.u32.0x3FC90FDA u32.bitcast-f32 [pio2_hi.])
+    (const.u32.0x33A22168 u32.bitcast-f32 [pio2_lo.])
+
+    ([.x inv_pio2] f32.mul [scaled.])
+    ([.scaled] f32.round-to-u32 [n_u32.])
+    ([.n_u32] u32.to-f32 [n_f.])
+
+    ([.n_f pio2_hi] f32.mul [n_pio2_hi.])
+    ([.n_f pio2_lo] f32.mul [n_pio2_lo.])
+    ([.x n_pio2_hi] f32.sub [r1.])
+    ([.r1 n_pio2_lo] f32.sub [r.])
+
+    ([.r] sin-approx [sin_r.])
+    ([.r] cos-approx [cos_r.])
+    ([.sin_r] f32.neg [neg_sin_r.])
+    ([.cos_r] f32.neg [neg_cos_r.])
+
+    (const.u32.0x00000003 [mask3.])
+    (const.u32.0x00000000 [q0_u32.])
+    (const.u32.0x00000001 [q1_u32.])
+    (const.u32.0x00000002 [q2_u32.])
+
+    ([.n_u32 mask3] u32.and [quadrant.])
+    ([.quadrant q0_u32] u32.eq [is_q0.])
+    ([.quadrant q1_u32] u32.eq [is_q1.])
+    ([.quadrant q2_u32] u32.eq [is_q2.])
+
+    ([.is_q2 neg_sin_r neg_cos_r] f32.select [q23.])
+    ([.is_q1 cos_r q23] f32.select [q123.])
+    ([.is_q0 sin_r q123] f32.select [result.])
+    [.result]
+  }
+)
+
+# Extend the non-negative implementation using odd symmetry:
+# compute on |x|, then apply a final negate when x < 0.
+(def program sin-approx-full : (f32 val) -> (f32 val) =
+  {[x.]
+    (const.u32.0x00000000 u32.to-f32 [zero.])
+    ([.x] f32.neg [neg_x.])
+    ([.x zero] f32.lt [is_negative.])
+    ([.is_negative neg_x x] f32.select [magnitude.])
+
+    ([.magnitude] sin-approx-full-nonneg [base_result.])
+    ([.base_result] f32.neg [negated_result.])
+    ([.is_negative negated_result base_result] f32.select [result.])
+    [.result]
+  }
+)
+# Log approximation for positive, normalized f32 inputs.
+# Decompose x by bit manipulation into
+#   x = m * 2^e
+# with m in [0.5, 1), then approximate:
+#   log(x) ~= poly(m) + e * ln(2)
+
+(def program log-approx : (f32 val) -> (f32 val) =
+  {[x.]
+    (const.u32.0x007FFFFF [frac_mask.])
+    (const.u32.0x00000017 [exp_shift.])
+    (const.u32.0x3F000000 [half_bits.])
+    (const.u32.0x0000007E [mantissa_bias.])
+    (const.u32.0x3F317218 u32.bitcast-f32 [ln2.])
+    (const.u32.0xC00BE629 u32.bitcast-f32 [c0.])
+    (const.u32.0x4087355A u32.bitcast-f32 [c1.])
+    (const.u32.0xC03AA687 u32.bitcast-f32 [c2.])
+    (const.u32.0x3F60A4E1 u32.bitcast-f32 [c3.])
+
+    ([.x] f32.bitcast-u32 [x_bits.])
+    ([.x_bits exp_shift] u32.shr [exp_bits.])
+    ([.x_bits frac_mask] u32.and [frac_bits.])
+
+    ([.frac_bits half_bits] u32.add [m_bits.])
+    ([.m_bits] u32.bitcast-f32 [m.])
+
+    ([.exp_bits] u32.to-f32 [biased_exp_f.])
+    ([.mantissa_bias] u32.to-f32 [mantissa_bias_f.])
+    ([.biased_exp_f mantissa_bias_f] f32.sub [e.])
+
+    ([.m c3] f32.mul [p3.])
+    ([.c2 p3] f32.add [p2.])
+    ([.m p2] f32.mul [m_p2.])
+    ([.c1 m_p2] f32.add [p1.])
+    ([.m p1] f32.mul [m_p1.])
+    ([.c0 m_p1] f32.add [poly.])
+
+    ([.e ln2] f32.mul [elog2.])
+    ([.poly elog2] f32.add [result.])
+    [.result]
+  }
+)
+
+# Range-reduced exp approximation using split ln(2) constants and
+# a degree-3 minimax polynomial on the reduced interval.
+(def program exp-approx-nonneg : (f32 val) -> (f32 val) =
+  {[x.]
+    (const.u32.0x3FB8AA3B u32.bitcast-f32 [inv_ln2.])
+    (const.u32.0x3F317200 u32.bitcast-f32 [ln2_hi.])
+    (const.u32.0x35BFBE8E u32.bitcast-f32 [ln2_lo.])
+    (const.u32.0x3F7FF8FC u32.bitcast-f32 [c0.])
+    (const.u32.0x3F809C7E u32.bitcast-f32 [c1.])
+    (const.u32.0x3EEF1187 u32.bitcast-f32 [c2.])
+    (const.u32.0x3E738A8B u32.bitcast-f32 [c3.])
+
+    ([.x inv_ln2] f32.mul [scaled.])
+    ([.scaled] f32.round-to-u32 [k_u32.])
+    ([.k_u32] u32.to-f32 [k_f32.])
+
+    ([.k_f32 ln2_hi] f32.mul [k_ln2_hi.])
+    ([.k_f32 ln2_lo] f32.mul [k_ln2_lo.])
+    ([.x k_ln2_hi] f32.sub [r1.])
+    ([.r1 k_ln2_lo] f32.sub [xr.])
+
+    ([.xr c3] f32.mul [xr_c3.])
+    ([.c2 xr_c3] f32.add [p2.])
+    ([.xr p2] f32.mul [xr_p2.])
+    ([.c1 xr_p2] f32.add [p1.])
+    ([.xr p1] f32.mul [xr_p1.])
+    ([.c0 xr_p1] f32.add [poly.])
+
+    (const.u32.0x0000007F [bias_u32.])
+    (const.u32.0x00800000 [exp_step_u32.])
+    ([.k_u32 bias_u32] u32.add [biased_exp.])
+    ([.biased_exp exp_step_u32] u32.mul [pow2_bits.])
+    ([.pow2_bits] u32.bitcast-f32 [pow2k.])
+
+    ([.poly pow2k] f32.mul [result.])
+    [.result]
+  }
+)
+
+(def program exp-approx : (f32 val) -> (f32 val) =
+  {[x.]
+    (const.u32.0x00000000 u32.to-f32 [zero.])
+    (const.u32.0x3F800000 u32.bitcast-f32 [one.])
+
+    ([.x] f32.neg [neg_x.])
+    ([.x zero] f32.lt [is_negative.])
+    ([.is_negative neg_x x] f32.select [magnitude.])
+
+    ([.magnitude] exp-approx-nonneg [base.])
+    ([.one base] f32.div [reciprocal.])
+    ([.is_negative reciprocal base] f32.select [result.])
+    [.result]
+  }
+)
+
+# exp2(x) = exp(x * ln(2))
+(def program exp2-approx : (f32 val) -> (f32 val) =
+  {[x.]
+    (const.u32.0x3F317218 u32.bitcast-f32 [ln2.])
+
+    ([.x ln2] f32.mul [scaled.])
+    ([.scaled] exp-approx [result.])
+    [.result]
+  }
+)
+
+# log2(x) = log(x) / ln(2)
+(def program log2-approx : (f32 val) -> (f32 val) =
+  {[x.]
+    (const.u32.0x3FB8AA3B u32.bitcast-f32 [inv_ln2.])
+
+    ([.x] log-approx [ln_x.])
+    ([.ln_x inv_ln2] f32.mul [result.])
+    [.result]
+  }
+)
+
+# powf(x, y) = exp2(y * log2(x))
+(def program powf : {(f32 val) (f32 val)} -> (f32 val) =
+  {[x y.]
+    ([.x] log2-approx [log2_x.])
+    ([.y log2_x] f32.mul [scaled.])
+    ([.scaled] exp2-approx [result.])
+    [.result]
+  }
+)
+
+# sqrt(x) by Newton-Raphson iteration
+# guess{n+1} = 0.5 * (guess{n} + x / guess{n})
+(def program sqrt : (f32 val) -> (f32 val) =
+  {[x.]
+    (const.u32.0x00000000 u32.to-f32 [zero.])
+    (const.u32.0x3F800000 u32.bitcast-f32 [one.])
+    (const.u32.0x3F000000 u32.bitcast-f32 [half.])
+
+    ([.x one] f32.lt [lt_one.])
+    ([.lt_one one x] f32.select [guess0.])
+
+    ([.x guess0] f32.div [ratio0.])
+    ([.guess0 ratio0] f32.add [sum0.])
+    ([.sum0 half] f32.mul [guess1.])
+
+    ([.x guess1] f32.div [ratio1.])
+    ([.guess1 ratio1] f32.add [sum1.])
+    ([.sum1 half] f32.mul [guess2.])
+
+    ([.x guess2] f32.div [ratio2.])
+    ([.guess2 ratio2] f32.add [sum2.])
+    ([.sum2 half] f32.mul [guess3.])
+
+    ([.x guess3] f32.div [ratio3.])
+    ([.guess3 ratio3] f32.add [sum3.])
+    ([.sum3 half] f32.mul [guess4.])
+
+    ([.x guess4] f32.div [ratio4.])
+    ([.guess4 ratio4] f32.add [sum4.])
+    ([.sum4 half] f32.mul [guess5.])
+
+    ([.x guess5] f32.div [ratio5.])
+    ([.guess5 ratio5] f32.add [sum5.])
+    ([.sum5 half] f32.mul [guess6.])
+
+    ([.x zero] f32.lte [is_nonpositive.])
+    ([.is_nonpositive zero guess6] f32.select [result.])
+    [.result]
+  }
+)
+

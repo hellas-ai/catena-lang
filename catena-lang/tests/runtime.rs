@@ -7,9 +7,7 @@ use catena_lang::{
 const GPU_DIALECT_ENV: &str = "CATENA_GPU_DIALECT";
 
 const NN_EXAMPLES: &str = include_str!("../examples/nn.hex");
-const SOFTMAX_EXAMPLES: &str = include_str!("../examples/softmax.hex");
 const RMSNORM_EXAMPLES: &str = include_str!("../examples/rmsnorm.hex");
-const REDUCEC_SUM_EXAMPLES: &str = include_str!("cases/reducec/sum.hex");
 
 /// Create a runtime with a provided user source file
 fn runtime_with(source: &'static str) -> anyhow::Result<Runtime> {
@@ -900,7 +898,7 @@ fn powf_test() -> anyhow::Result<()> {
 
 #[test]
 fn softmax_test() -> anyhow::Result<()> {
-    let runtime = runtime_with_sources([REDUCEC_SUM_EXAMPLES, SOFTMAX_EXAMPLES])?;
+    let runtime = runtime_with("")?;
 
     let input_values = [1.0_f32, 2.0, 4.0];
     let input = runtime.mem_f32(&input_values)?;
@@ -940,7 +938,7 @@ fn softmax_test() -> anyhow::Result<()> {
 
 #[test]
 fn rmsnorm_test() -> anyhow::Result<()> {
-    let runtime = runtime_with_sources([REDUCEC_SUM_EXAMPLES, RMSNORM_EXAMPLES])?;
+    let runtime = runtime_with(RMSNORM_EXAMPLES)?;
 
     let input_values = [1.0_f32, 2.0, 4.0, -1.0, -9.0, 13.29];
     let input = runtime.mem_f32(&input_values)?;

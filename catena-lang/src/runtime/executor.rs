@@ -1,10 +1,15 @@
 //! Execute compiled C backend functions through a small ABI-oriented interface.
 
-use std::ffi::c_void;
+use std::{collections::HashMap, ffi::c_void};
 
 use libffi::middle::{Arg, Cif, CodePtr, Type};
 use libloading::Library;
 use thiserror::Error;
+
+use super::{
+    signature::SignatureTable,
+    value::{Value, ValueKind},
+};
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
@@ -13,32 +18,23 @@ pub(crate) struct CatenaMem {
     pub(crate) len: u64,
 }
 
-/// The set of possible types in the image of lowering a valid catena boundary type
 #[derive(Debug)]
-pub enum AbiValue<'a> {
-    U8(&'a u8),
-    U32(&'a u32),
-    U64(&'a u64),
-    F32(&'a f32),
-    Mem(&'a CatenaMem),
+struct PreparedFunction {
+    code: CodePtr,
+    cif: Cif,
 }
 
-/// Role of an [`AbiValue`] as either input or output
+/// Loaded generated code and its prepared dynamic call interfaces.
 #[derive(Debug)]
-pub enum ArgValue<'a> {
-    Val(AbiValue<'a>),
-    Out(AbiValue<'a>),
-}
-
-/// List of arguments & return ptrs passed on function invocation
-#[derive(Debug)]
-pub struct CallFrame<'a> {
-    pub args: &'a mut [ArgValue<'a>],
+pub(crate) struct Executor {
+    // Keep the library loaded for as long as any cached code pointer can be used.
+    _library: Library,
+    functions: HashMap<String, PreparedFunction>,
 }
 
 #[derive(Debug, Error)]
-pub enum ExecutorError {
-    #[error("Failed to resolve symbol '{symbol}': {source}")]
+pub(crate) enum ExecutorError {
+    #[error("failed to resolve generated symbol `{symbol}`: {source}")]
     LoadSymbol {
         symbol: String,
         #[source]
@@ -46,105 +42,96 @@ pub enum ExecutorError {
     },
 }
 
-/// Invoke a compiled symbol using the generated C ABI.
-///
-/// The executor only knows about ABI-level scalar slots and output pointers.
-/// Catena-specific type mapping belongs in `runtime`.
-///
-/// TODO: this introduces a bunch of overhead which should be cached:
-///     - looking up symbols by name
-///     - computing Vec<Type> from Vec<ArgValue>
-pub(crate) fn exec(
-    library: &Library,
-    symbol: &str,
-    frame: CallFrame<'_>,
-) -> Result<(), ExecutorError> {
-    // Get function symbol by name
-    let symbol_name = format!("{symbol}\0");
-    let function =
-        unsafe { library.get::<*mut c_void>(symbol_name.as_bytes()) }.map_err(|source| {
-            ExecutorError::LoadSymbol {
-                symbol: symbol.to_string(),
-                source,
+impl Executor {
+    /// Resolve generated entry points and prepare their libffi call interfaces once.
+    pub(crate) fn new(
+        library: Library,
+        signatures: &SignatureTable,
+    ) -> Result<Self, ExecutorError> {
+        let mut functions = HashMap::with_capacity(signatures.len());
+        for signature in signatures.values() {
+            if functions.contains_key(&signature.symbol) {
+                continue;
             }
-        })?;
 
-    // Compute list of ABI types
-    let types = frame
-        .args
-        .iter()
-        .map(ArgValue::ffi_type)
-        .collect::<Vec<_>>();
+            let symbol_name = format!("{}\0", signature.symbol);
+            let function = unsafe { library.get::<*mut c_void>(symbol_name.as_bytes()) }.map_err(
+                |source| ExecutorError::LoadSymbol {
+                    symbol: signature.symbol.clone(),
+                    source,
+                },
+            )?;
 
-    // Outputs have to be treated separately: we need to give cif a *pointer to the pointer*,
-    // but we actually only have a pointer! So we'll need to create the double-pointers briefly
-    // while we cif.call.
-    let mut pointer_args = Vec::new();
-    for arg in frame.args.iter_mut() {
-        if let ArgValue::Out(value) = arg {
-            pointer_args.push(value.as_pointer_arg());
+            let argument_types = signature
+                .inputs
+                .iter()
+                .copied()
+                .map(ffi_type)
+                .chain(signature.outputs.iter().map(|_| Type::pointer()))
+                .collect::<Vec<_>>();
+            functions.insert(
+                signature.symbol.clone(),
+                PreparedFunction {
+                    code: CodePtr(*function),
+                    cif: Cif::new(argument_types, Type::void()),
+                },
+            );
         }
-    }
 
-    // Create a Cif to call function symbol
-    let cif = Cif::new(types, Type::void());
-    let mut pointer_index = 0usize;
-    let args: Vec<Arg<'_>> = frame
-        .args
-        .iter()
-        .map(|arg| match arg {
-            ArgValue::Val(value) => value.as_arg(),
-            ArgValue::Out(_) => {
-                let ptr = &pointer_args[pointer_index];
-                pointer_index += 1;
-                Arg::new(ptr)
-            }
+        Ok(Self {
+            _library: library,
+            functions,
         })
-        .collect();
-
-    unsafe {
-        cif.call::<()>(CodePtr(*function), &args);
-    }
-    Ok(())
-}
-
-impl AbiValue<'_> {
-    fn ffi_type(&self) -> Type {
-        match self {
-            AbiValue::U8(_) => Type::u8(),
-            AbiValue::U32(_) => Type::u32(),
-            AbiValue::U64(_) => Type::u64(),
-            AbiValue::F32(_) => Type::f32(),
-            AbiValue::Mem(_) => Type::structure([Type::pointer(), Type::u64()]),
-        }
     }
 
-    fn as_arg(&self) -> Arg<'_> {
-        match self {
-            AbiValue::U8(value) => Arg::new(*value),
-            AbiValue::U32(value) => Arg::new(*value),
-            AbiValue::U64(value) => Arg::new(*value),
-            AbiValue::F32(value) => Arg::new(*value),
-            AbiValue::Mem(value) => Arg::new(*value),
-        }
-    }
+    /// Invoke a prepared symbol. Runtime validation guarantees the value shapes and kinds.
+    pub(crate) fn call(&self, symbol: &str, inputs: &[Value], outputs: &mut [Value]) {
+        let function = self
+            .functions
+            .get(symbol)
+            .expect("source signature should have a prepared generated function");
 
-    fn as_pointer_arg(&self) -> *const c_void {
-        match self {
-            AbiValue::U8(slot) => (*slot as *const u8).cast::<c_void>(),
-            AbiValue::U32(slot) => (*slot as *const u32).cast::<c_void>(),
-            AbiValue::U64(slot) => (*slot as *const u64).cast::<c_void>(),
-            AbiValue::F32(slot) => (*slot as *const f32).cast::<c_void>(),
-            AbiValue::Mem(slot) => (*slot as *const CatenaMem).cast::<c_void>(),
+        // A generated output parameter is itself a pointer value. libffi therefore needs
+        // an address containing that pointer while it constructs the native call frame.
+        let output_pointers = outputs.iter_mut().map(output_pointer).collect::<Vec<_>>();
+        let arguments = inputs
+            .iter()
+            .map(input_arg)
+            .chain(output_pointers.iter().map(Arg::new))
+            .collect::<Vec<_>>();
+
+        unsafe {
+            function.cif.call::<()>(function.code, &arguments);
         }
     }
 }
 
-impl ArgValue<'_> {
-    fn ffi_type(&self) -> Type {
-        match self {
-            ArgValue::Val(value) => value.ffi_type(),
-            ArgValue::Out(_) => Type::pointer(),
-        }
+fn ffi_type(kind: ValueKind) -> Type {
+    match kind {
+        ValueKind::Bool => Type::u8(),
+        ValueKind::U32 => Type::u32(),
+        ValueKind::U64 => Type::u64(),
+        ValueKind::F32 => Type::f32(),
+        ValueKind::Mem => Type::structure([Type::pointer(), Type::u64()]),
+    }
+}
+
+fn input_arg(value: &Value) -> Arg<'_> {
+    match value {
+        Value::Bool(value) => Arg::new(value),
+        Value::U32(value) => Arg::new(value),
+        Value::U64(value) => Arg::new(value),
+        Value::F32(value) => Arg::new(value),
+        Value::Mem(value) => Arg::new(&value.abi),
+    }
+}
+
+fn output_pointer(value: &mut Value) -> *mut c_void {
+    match value {
+        Value::Bool(value) => (value as *mut u8).cast(),
+        Value::U32(value) => (value as *mut u32).cast(),
+        Value::U64(value) => (value as *mut u64).cast(),
+        Value::F32(value) => (value as *mut f32).cast(),
+        Value::Mem(value) => (&mut value.abi as *mut CatenaMem).cast(),
     }
 }

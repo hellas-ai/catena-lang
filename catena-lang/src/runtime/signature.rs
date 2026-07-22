@@ -7,21 +7,20 @@ use crate::{
 
 #[derive(Debug, Clone)]
 pub(crate) struct FunctionSignature {
+    pub(crate) symbol: String,
     pub(crate) inputs: Vec<ValueKind>,
     pub(crate) outputs: Vec<ValueKind>,
 }
 
-/// A lookup from source symbols to C functions & their signatures
-#[derive(Debug, Clone)]
-pub(crate) struct SignatureTable {
-    pub(crate) functions: HashMap<String, FunctionSignature>,
-    pub(crate) source_symbols: HashMap<String, String>,
-}
+/// Source-level program names and their generated C ABI signatures.
+pub(crate) type SignatureTable = HashMap<String, FunctionSignature>;
 
 pub(crate) fn signatures(modules: &GpuModuleMap) -> SignatureTable {
     let mut signatures = HashMap::new();
-    let mut source_symbols = HashMap::new();
     for module in modules.values() {
+        let Some(source_name) = &module.source_name else {
+            continue;
+        };
         let Some(inputs) = module
             .entry
             .sources
@@ -50,17 +49,15 @@ pub(crate) fn signatures(modules: &GpuModuleMap) -> SignatureTable {
         };
 
         signatures.insert(
-            module.entry.name.clone(),
-            FunctionSignature { inputs, outputs },
+            source_name.to_string(),
+            FunctionSignature {
+                symbol: module.entry.name.clone(),
+                inputs,
+                outputs,
+            },
         );
-        if let Some(source_name) = &module.source_name {
-            source_symbols.insert(source_name.to_string(), module.entry.name.clone());
-        }
     }
-    SignatureTable {
-        functions: signatures,
-        source_symbols,
-    }
+    signatures
 }
 
 fn value_kind(ty: &CType) -> Option<ValueKind> {

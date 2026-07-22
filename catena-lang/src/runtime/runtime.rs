@@ -10,10 +10,10 @@ use libloading::Library;
 use libloading::os::unix::{Library as UnixLibrary, RTLD_LAZY, RTLD_LOCAL};
 
 use super::artifact::{Artifact, ArtifactError};
-use super::executor::{CallFrame, ExecutorError};
+use super::executor::{Executor, ExecutorError};
 use super::mem::{GpuRuntime, Mem, MemError};
 use super::{
-    signature::{SignatureTable, signatures},
+    signature::{FunctionSignature, SignatureTable, signatures},
     value::{Value, ValueKind},
 };
 use crate::codegen::{GpuDialect, gpu::GpuRenderError, gpu::render_modules};
@@ -25,8 +25,8 @@ use metacat::theory::RawTheorySet;
 pub struct Runtime {
     // Keep the tempdir-backed shared object alive for as long as the library is loaded.
     _artifact: Artifact,
-    /// The loaded shared object
-    library: Library,
+    /// Prepared entry points in the loaded shared object.
+    executor: Executor,
     /// A handle to the loaded GPU runtime library, which we call for allocating memory.
     gpu: Arc<GpuRuntime>,
     /// Function signatures (runtime Rust ↔ C typechecking)
@@ -67,14 +67,18 @@ pub enum InitError {
         #[source]
         source: libloading::Error,
     },
+    #[error("failed to resolve generated symbol `{symbol}`: {source}")]
+    LoadSymbol {
+        symbol: String,
+        #[source]
+        source: libloading::Error,
+    },
     #[error(transparent)]
     Mem(#[from] MemError),
 }
 
 #[derive(Debug, Error)]
 pub enum ExecError {
-    #[error("Unknown function '{0}'")]
-    UnknownFunction(String),
     #[error("Unknown source function '{0}'")]
     UnknownSourceFunction(String),
     #[error("Argument {index} expected {expected:?}, got {actual:?}")]
@@ -95,8 +99,6 @@ pub enum ExecError {
         expected: usize,
         actual: usize,
     },
-    #[error("Executor error: {0}")]
-    Executor(#[from] ExecutorError),
 }
 
 impl Runtime {
@@ -146,19 +148,19 @@ impl Runtime {
         let artifact = super::artifact::compile(&cpp_path, dialect)?;
 
         let library = load_generated_library(artifact.path())?;
+        let executor = Executor::new(library, &signature_table).map_err(|error| match error {
+            ExecutorError::LoadSymbol { symbol, source } => {
+                InitError::LoadSymbol { symbol, source }
+            }
+        })?;
         let gpu = Arc::new(GpuRuntime::load(dialect)?);
 
         Ok(Self {
             _artifact: artifact,
-            library,
+            executor,
             gpu,
             signatures: signature_table,
         })
-    }
-
-    /// Look up the generated C symbol for a source-level `program` definition name.
-    pub fn symbol(&self, name: &str) -> Option<&str> {
-        self.signatures.source_symbols.get(name).map(String::as_str)
     }
 
     pub fn mem_u64(&self, values: &[u64]) -> Result<Value, MemError> {
@@ -175,35 +177,30 @@ impl Runtime {
         name: &str,
         args: [Value; M],
     ) -> Result<[Value; N], ExecError> {
-        let symbol = self
-            .symbol(name)
-            .ok_or_else(|| ExecError::UnknownSourceFunction(name.to_string()))?;
-        self.exec_symbol(symbol, args)
-    }
-
-    /// Run the generated C symbol, which must have M arguments, and return its N arguments.
-    pub fn exec_symbol<const M: usize, const N: usize>(
-        &self,
-        symbol: &str,
-        args: [Value; M],
-    ) -> Result<[Value; N], ExecError> {
         let signature = self
             .signatures
-            .functions
-            .get(symbol)
-            .ok_or_else(|| ExecError::UnknownFunction(symbol.to_string()))?;
+            .get(name)
+            .ok_or_else(|| ExecError::UnknownSourceFunction(name.to_string()))?;
+        self.exec_symbol(name, signature, args)
+    }
 
+    fn exec_symbol<const M: usize, const N: usize>(
+        &self,
+        name: &str,
+        signature: &FunctionSignature,
+        args: [Value; M],
+    ) -> Result<[Value; N], ExecError> {
         // Check arity/coarity lines up with what's in the function signature.
         if signature.inputs.len() != M {
             return Err(ExecError::InputArityMismatch {
-                name: symbol.to_string(),
+                name: name.to_string(),
                 expected: signature.inputs.len(),
                 actual: M,
             });
         }
         if signature.outputs.len() != N {
             return Err(ExecError::OutputArityMismatch {
-                name: symbol.to_string(),
+                name: name.to_string(),
                 expected: signature.outputs.len(),
                 actual: N,
             });
@@ -216,8 +213,6 @@ impl Runtime {
             .map(|kind| self.zeroed_value(kind))
             .collect();
 
-        // Construct the `ArgValue`s with which to call the function
-        let mut frame_args = Vec::with_capacity(M + N);
         for (index, (value, expected)) in args
             .iter()
             .zip(signature.inputs.iter().copied())
@@ -230,19 +225,10 @@ impl Runtime {
                     actual: value.kind(),
                 });
             }
-            frame_args.push(value.as_input_arg());
-        }
-        for value in &mut output_values {
-            frame_args.push(value.as_output_arg());
         }
 
-        super::executor::exec(
-            &self.library,
-            symbol,
-            CallFrame {
-                args: &mut frame_args,
-            },
-        )?;
+        self.executor
+            .call(&signature.symbol, &args, &mut output_values);
 
         Ok(output_values
             .try_into()

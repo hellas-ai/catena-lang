@@ -18,13 +18,16 @@
   # Reverse `ix`'s arguments so partial application can capture any buffer:
   #
   #   ix.flipped(buffer, index) = ix(index, buffer)
-  (arr ix.flipped :
+  (def ix.flipped :
     ([m n t.] {
       ([.m n t] buf val)
       ([.n] ix val)
     })
     ->
-    ([m n t . t] val))
+    ([m n t . t] val)
+  = ([input i.]
+    {[.i input]} ix
+  ))
 
   # Forget the index wrapper and expose the underlying runtime u64.
   (arr ix.to-u64 : ([n.] ([.n] ix val)) -> ([n.] (u64 val)))

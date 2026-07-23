@@ -460,6 +460,27 @@ fn verify_boundary(
     ))
 }
 
+/// Replace one forgotten named call with an instantiated copy of its definition.
+///
+/// Forgetting closures turns a source-level named closure call into a graph
+/// containing the function name, `eval`, and product/unit adapters:
+///
+/// ```text
+/// context ───────────────────────► name.f ──► function pointer ─┐
+///                                                               ▼
+/// flattened inputs ──► input adapters ──► packed input ──► eval
+///                                                               │
+///                                                               ▼
+/// flattened outputs ◄── output adapters ◄── packed output ─────┘
+/// ```
+///
+/// `recover_call_boundary` has already opened the adapters and returned the
+/// flattened inputs and outputs. This function removes the complete call
+/// fragment and splices the forgotten body of `f` directly at that boundary:
+///
+/// ```text
+/// flattened inputs ──► [ instantiated body of f ] ──► flattened outputs
+/// ```
 fn replace_call(
     term: &mut ClosureForgottenTerm,
     call: NamedCall,
@@ -476,10 +497,11 @@ fn replace_call(
     deleted.sort_by_key(|edge| edge.0);
     deleted.dedup();
 
-    // The call fragment owns intermediate function-pointer and adapter nodes
-    // which are not part of the recovered call boundary. Delete those nodes
-    // together with their edges instead of leaving zero-incidence remnants.
+    // Collect the edges forming the old `name.f -> eval` call and its adapters.
     let deleted_edges = deleted.iter().map(|edge| edge.0).collect::<BTreeSet<_>>();
+
+    // A node must survive if it is part of the enclosing definition, is one of
+    // the recovered splice boundaries, or is incident to an edge we keep.
     let retained_nodes = term
         .sources
         .iter()
@@ -496,6 +518,10 @@ fn replace_call(
         )
         .map(|node| node.0)
         .collect::<BTreeSet<_>>();
+
+    // Among nodes touched by the removed edges, delete only those private to
+    // the fragment. These are typically the function pointer produced by
+    // `name.f` and the intermediate packed product/unit adapter nodes.
     let deleted_nodes = deleted
         .iter()
         .flat_map(|edge| {
@@ -509,6 +535,9 @@ fn replace_call(
         .map(NodeId)
         .collect::<Vec<_>>();
 
+    // Removing hyperedges does not automatically remove their nodes, so delete
+    // the fragment-private nodes explicitly. Node deletion compacts the node
+    // array; use its witness map to translate boundaries saved with the old IDs.
     term.delete_edges(&deleted);
     let node_map = term.hypergraph.delete_nodes_witness(&deleted_nodes);
     let remap = |node: NodeId| {
@@ -523,6 +552,8 @@ fn replace_call(
     let inputs = inputs.into_iter().map(remap).collect::<Vec<_>>();
     let outputs = outputs.into_iter().map(remap).collect::<Vec<_>>();
 
+    // Append the instantiated body and identify its external boundary with the
+    // remapped boundary of the removed call.
     let (template_sources, template_targets) = term.append(template);
     for (outer, inner) in inputs.into_iter().zip(template_sources) {
         term.unify(outer, inner);

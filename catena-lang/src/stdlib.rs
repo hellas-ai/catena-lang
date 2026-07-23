@@ -55,6 +55,10 @@ pub const FILES: &[StdlibFile] = stdlib_files![
     "combinators.hex",
     "gpu.hex",
     "matrix.hex",
+    "tensor.hex",
+    "math.hex",
+    "sum.hex",
+    "nn.hex",
 ];
 
 pub fn sources() -> impl ExactSizeIterator<Item = &'static str> {

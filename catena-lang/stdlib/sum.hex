@@ -1,4 +1,4 @@
-# Examples using reducec for f32 buffer reductions.
+# f32 buffer reductions using reducec.
 
 ################################################################################
 # Sum

@@ -1,0 +1,182 @@
+# nn.sigmoid(x) = 1 / (1 + exp(-x))
+(def program nn.sigmoid : (f32 val) -> (f32 val) =
+  {[x.]
+    (f32.one [one.])
+
+    ([.x] f32.neg [neg_x.])
+    ([.neg_x] math.exp-approx [exp_neg_x.])
+    ([.one exp_neg_x] f32.add [denominator.])
+    ([.one denominator] f32.div [result.])
+    [.result]
+  }
+)
+
+# nn.silu(x) = x * nn.sigmoid(x)
+(def program nn.silu : (f32 val) -> (f32 val) =
+  {[x.]
+    ([.x] nn.sigmoid [gate.])
+    ([.x gate] f32.mul [result.])
+    [.result]
+  }
+)
+
+# nn.tanh(x) = 2 * nn.sigmoid(2x) - 1
+(def program nn.tanh : (f32 val) -> (f32 val) =
+  {[x.]
+    (f32.one [one.])
+    (const.u32.0x40000000 u32.bitcast-f32 [two.])
+
+    ([.x two] f32.mul [twice_x.])
+    ([.twice_x] nn.sigmoid [sigma.])
+    ([.sigma two] f32.mul [twice_sigma.])
+    ([.twice_sigma one] f32.sub [result.])
+    [.result]
+  }
+)
+
+# approx GELU(x) ≈ 0.5 * x * (1 + nn.tanh(math.sqrt(2/pi) * (x + 0.044715 * x^3)))
+(def program nn.gelu-approx : (f32 val) -> (f32 val) =
+  {[x.]
+    (f32.one [one.])
+    (const.u32.0x3F000000 u32.bitcast-f32 [half.])
+    (const.u32.0x3F4C422A u32.bitcast-f32 [sqrt_2_over_pi.])
+    (const.u32.0x3D372713 u32.bitcast-f32 [cubic_coeff.])
+
+    ([.x x] f32.mul [x2.])
+    ([.x2 x] f32.mul [x3.])
+    ([.x3 cubic_coeff] f32.mul [cubic_term.])
+    ([.x cubic_term] f32.add [inner.])
+    ([.inner sqrt_2_over_pi] f32.mul [scaled.])
+    ([.scaled] nn.tanh [shaped.])
+    ([.one shaped] f32.add [gate.])
+    ([.x gate] f32.mul [gated_x.])
+    ([.gated_x half] f32.mul [result.])
+    [.result]
+  }
+)
+
+# Read exp(x_i - max_x) from a buffer environment for a stable nn.softmax denominator.
+(def program nn.softmax-exp-shifted-at :
+  ([n.] {
+    ({({cap.ref [.n] f32} buf val) (f32 val)} *)
+    ([.n] ix val)
+  })
+  ->
+  ([n.] (f32 val))
+= {[env i.]
+  ([.env] *.elim [input max-x.])
+  ({[.i input]} ix [x-i.])
+  ([.x-i max-x] f32.sub [shifted.])
+  ([.shifted] math.exp-approx [result.])
+  [.result]
+})
+
+# Materialize exp(x_i - max_x) / denom for a stable nn.softmax output buffer.
+(def program nn.softmax-at :
+  ([n.] {
+    ({({({cap.ref [.n] f32} buf val) (f32 val)} *) (f32 val)} *)
+    ([.n] ix val)
+  })
+  ->
+  ([n.] (f32 val))
+= {[env i.]
+  ([.env] *.elim [input-and-max denom.])
+  ([.input-and-max] *.elim [input max-x.])
+  ({[.i input]} ix [x-i.])
+  ([.x-i max-x] f32.sub [shifted.])
+  ([.shifted] math.exp-approx [numerator.])
+  ([.numerator denom] f32.div [result.])
+  [.result]
+})
+
+# Stable nn.softmax over an f32 buffer. Caller must provide a non-empty input.
+(def program nn.softmax :
+  (cap.ref mem)
+  ->
+  (cap.own mem)
+= (
+  mem.cast.f32
+  [len input.]
+    {
+      ({
+        (const.u32.0xFF800000 u32.bitcast-f32)
+        unit.intro
+        name.f32.max-env
+        ({[.input] (([.len] :.param) name.f32-at)})
+        [.len]
+      } reducec [max-x.])
+      ({
+        (const.u32.0x00000000 u32.bitcast-f32)
+        unit.intro
+        name.f32.add-env
+        ({({[.input] [.max-x]} *.intro) (([.len] :.param) name.nn.softmax-exp-shifted-at)})
+        [.len]
+      } reducec [denom.])
+      {
+        [.len]
+        ({[.len] ({({[.input] [.max-x]} *.intro) [.denom]} *.intro) (([.len] :.param) name.nn.softmax-at)}
+          materializec)
+      }
+    }
+    buf.to-mem
+))
+
+# Read x_i^2 from a converted f32 buffer.
+(def program nn.squared-at :
+  ([n.] {
+    ({cap.ref [.n] f32} buf val)
+    ([.n] ix val)
+  })
+  ->
+  ([n.] (f32 val))
+= ([input i.]
+  ({[.i input]} ix [x-i.])
+  ([.x-i x-i] f32.mul [result.])
+  [.result]
+))
+
+# Materialize x_i / rms from a buffer environment for RMS normalization.
+(def program nn.rmsnorm-at :
+  ([n.] {
+    ({({cap.ref [.n] f32} buf val) (f32 val)} *)
+    ([.n] ix val)
+  })
+  ->
+  ([n.] (f32 val))
+= {[env i.]
+  ([.env] *.elim [input rms.])
+  ({[.i input]} ix [x-i.])
+  ([.x-i rms] f32.div [result.])
+  [.result]
+})
+
+# RMS normalization over an f32 buffer.
+(def program nn.rmsnorm :
+  (cap.ref mem)
+  ->
+  (cap.own mem)
+= (
+  mem.cast.f32
+  [len input.]
+    {
+      ({
+        (const.u32.0x00000000 u32.bitcast-f32)
+        unit.intro
+        name.f32.add-env
+        ({[.input] (([.len] :.param) name.nn.squared-at)})
+        [.len]
+      } reducec [sum-sq.])
+      ([.len] :.forget [len-val.])
+      ([.len-val] u64.to-f32 [len-f32.])
+      ([.sum-sq len-f32] f32.div [mean-sq.])
+      (const.u32.0x3727C5AC u32.bitcast-f32 [eps.])
+      ([.mean-sq eps] f32.add [mean-sq-plus-eps.])
+      ([.mean-sq-plus-eps] math.sqrt [rms.])
+      {
+        [.len]
+        ({[.len] ({[.input] [.rms]} *.intro) (([.len] :.param) name.nn.rmsnorm-at)}
+          materializec)
+      }
+    }
+    buf.to-mem
+))

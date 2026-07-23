@@ -1,0 +1,227 @@
+# Broadcast one f32 value into an owned buffer of length n.
+(def program tensor.broadcast-at :
+  ([n.] {(f32 val) ([.n] ix val)})
+  ->
+  ([n.] (f32 val))
+= ([value i.]
+  [.value]
+))
+
+(def program tensor.broadcast-f32 :
+  {(f32 val) ({[n] u64} :)}
+  ->
+  ([n.] (cap.own mem))
+= ([value len.]
+  {
+    [.len]
+    ({[.len] [.value] (([.len] :.param) name.tensor.broadcast-at)}
+      materializec)
+  }
+  buf.to-mem
+))
+
+# Materialize the runtime index itself as f32.
+(def program tensor.arange-at :
+  ([n.] {1 ([.n] ix val)})
+  ->
+  ([n.] (f32 val))
+= ([env i.]
+  ([.i] ix.to-u64 [i-u64.])
+  ([.i-u64] u64.to-f32 [result.])
+  [.result]
+))
+
+# Materialize [0, n) as f32.
+(def program tensor.arange-f32 :
+  ({[n] u64} :)
+  ->
+  ([n.] (cap.own mem))
+= ([len.]
+  {
+    [.len]
+    ({[.len] unit.intro (([.len] :.param) name.tensor.arange-at)}
+      materializec)
+  }
+  buf.to-mem
+))
+
+# Read one slice element by casting the input mem inside the producer.
+(def program tensor.slice-at :
+  ([n.] {
+    ({(cap.ref mem) (u64 val)} *)
+    ([.n] ix val)
+  })
+  ->
+  ([n.] (f32 val))
+= {[env i.]
+  ([.env] *.elim [input-mem start-val.])
+  ([.input-mem] mem.cast.f32 [input-len input.])
+  ([.i] ix.to-u64 [out-i-u64.])
+  ([.start-val out-i-u64] u64.add [input-i-u64.])
+  ([.input-i-u64] u64.name [input-i-u64-named.])
+  ([.input-len input-i-u64-named] u64.gt [in-bounds if-in-bounds _if-oob.])
+  ([.in-bounds if-in-bounds] assert-then [input-i-proof.])
+  ([.input-i-u64-named input-len input-i-proof] u64.to-ix [input-i.])
+  ({[.input-i input]} ix [result.])
+  [.result]
+})
+
+# Slice `len` f32 elements starting at `start`.
+(def program tensor.slice-f32 :
+  {(cap.ref mem) ({[start] u64} :) ({[len] u64} :)}
+  ->
+  ([start len.] (cap.own mem))
+= ([input-mem start len.]
+  ([.start] :.forget [start-val.])
+  {
+    [.len]
+    ({[.len] ({[.input-mem] [.start-val]} *.intro) (([.len] :.param) name.tensor.slice-at)}
+      materializec)
+  }
+  buf.to-mem
+))
+
+# Read a borrowed f32 buffer using an index relative to a runtime offset.
+(def program tensor.ref.f32.at-offset :
+  ([len.] {
+    ({
+      (u64 val)
+      ({({[.len] u64} :) ({cap.ref [.len] f32} buf val)} *)
+    } *)
+    (u64 val)
+  } *)
+  ->
+  ([len.] (f32 val))
+= ([arg.]
+  ([.arg] *.elim [env global-i-val.])
+  ([.env] *.elim [offset-val input.])
+  ([.input] *.elim [len-named buffer.])
+  ([.global-i-val offset-val] u64.sub [local-i-val.])
+  ([.local-i-val] u64.name [local-i-named.])
+  ([.len-named local-i-named] u64.gt [in-bounds if-in-bounds _if-oob.])
+  ([.in-bounds if-in-bounds] assert-then [local-i-proof.])
+  ([.local-i-named len-named local-i-proof] u64.to-ix [local-i.])
+  ({[.local-i buffer]} ix [result.])
+  [.result]
+))
+
+# Select the source buffer for one output index.
+(def program tensor.concat-f32-at :
+  ([left-len right-len total-len.] {
+    ({
+      ({({[.left-len] u64} :) ({cap.ref [.left-len] f32} buf val)} *)
+      ({({[.right-len] u64} :) ({cap.ref [.right-len] f32} buf val)} *)
+    } *)
+    ([.total-len] ix val)
+  })
+  ->
+  ([left-len right-len total-len.] (f32 val))
+= ([inputs output-i.]
+  ([.inputs] *.elim [left-input right-input.])
+  ([.left-input] *.elim [left-len-named left.])
+  ([.right-input] *.elim [right-len-named right.])
+  ([.output-i] ix.to-u64 [output-i-val.])
+  ([.left-len-named] :.forget [left-len-val.])
+  ([.output-i-val left-len-val] u64.lt [use-left-val.])
+  (const.u64.0x0000000000000000 [zero-val.])
+  ({[.zero-val] [.left-input]} *.intro [left-env.])
+  ({[.left-len-val] [.right-input]} *.intro [right-env.])
+  {
+    [.left-env]
+    (([.left-len-named] :.param) name.tensor.ref.f32.at-offset)
+    [.right-env]
+    (([.right-len-named] :.param) name.tensor.ref.f32.at-offset)
+    [.use-left-val]
+    [.output-i-val]
+  }
+  bool.ifc
+))
+
+# Concatenate two borrowed f32 buffers into one owned buffer.
+(def program tensor.concat-f32 :
+  {(cap.ref mem) (cap.ref mem)}
+  ->
+  (cap.own mem)
+= (
+  {mem.cast.f32 mem.cast.f32}
+  [left-len-named left right-len-named right.]
+    ([.left-len-named] :.forget [left-len-val.])
+    ([.right-len-named] :.forget [right-len-val.])
+    ([.left-len-val right-len-val] u64.add [total-len-val.])
+    ([.total-len-val] u64.name [total-len-named.])
+    ({[.left-len-named] [.left]} *.intro [left-input.])
+    ({[.right-len-named] [.right]} *.intro [right-input.])
+    ({[.left-input] [.right-input]} *.intro [inputs.])
+    {
+      [.total-len-named]
+      ({
+        [.total-len-named]
+        [.inputs]
+        ({
+          ([.left-len-named] :.param)
+          ([.right-len-named] :.param)
+          ([.total-len-named] :.param)
+        } name.tensor.concat-f32-at)
+      } materializec)
+    }
+    buf.to-mem
+))
+
+# Read one f32 element and pair it with its runtime position.
+(def program tensor.argmax-pair-at :
+  ([n.] {
+    ({cap.ref [.n] f32} buf val)
+    ([.n] ix val)
+  })
+  ->
+  ([n.] ({(u64 val) (f32 val)} *))
+= ([input i.]
+  ({[.i input]} ix [x-i.])
+  ([.i] ix.to-u64 [pos.])
+  ({[.pos] [.x-i]} *.intro [pair.])
+  [.pair]
+))
+
+# Choose the better of two (position, value) pairs, keeping the first on ties.
+(def program tensor.argmax-env :
+  {1 ({({(u64 val) (f32 val)} *) ({(u64 val) (f32 val)} *)} *)}
+  ->
+  ({(u64 val) (f32 val)} *)
+= ([env pair.]
+  ([.pair] *.elim [acc value.])
+  ([.acc] *.elim [acc-pos acc-max.])
+  ([.value] *.elim [value-pos value-max.])
+  {
+    ([.acc-max value-max] f32.gte [keep-acc.])
+    ([.keep-acc acc-pos value-pos] u64.select [result-pos.])
+    ([.keep-acc acc-max value-max] f32.select [result-max.])
+    ({[.result-pos] [.result-max]} *.intro [result.])
+    [.result]
+  }
+))
+
+# Argmax over an f32 buffer. Caller must provide a non-empty input.
+(def program tensor.argmax-f32 :
+  (cap.ref mem)
+  ->
+  (u64 val)
+= (
+  mem.cast.f32
+  [len input.]
+    {
+      ([.len] u64.assert-nz [nz-proof.])
+      ([.nz-proof] ix.zero [first-i.])
+      ({[.first-i input]} ix [first-x.])
+      ([.first-i] ix.to-u64 [first-pos.])
+      ({[.first-pos] [.first-x]} *.intro [init.])
+      ({
+        [.init]
+        unit.intro
+        name.tensor.argmax-env
+        ({[.input] (([.len] :.param) name.tensor.argmax-pair-at)})
+        [.len]
+      } reducec [result-pair.])
+      ([.result-pair] *.elim [result-pos _result-max.])
+      [.result-pos]
+    }
+))

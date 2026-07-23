@@ -1,4 +1,34 @@
-//! Elaborate uses of `partial.f.N` into CMC definitions which capture the first `N` inputs of `f`.
+//! Elaborate `partial.f.N` into a CMC closure that captures the first `N`
+//! ordinary inputs of `f`.
+//!
+//! Metavariables and ordinary inputs occupy different boundaries of an
+//! interpreted type map:
+//!
+//! - `source.sources` contains the leading metavariable context from syntax
+//!   such as `([n m.] ...)`.
+//! - `source.targets` contains the ordinary arrow inputs written inside the
+//!   source object.
+//!
+//! `N` counts only `source.targets`; metavariables are never included in the
+//! partial-application count. The generated arrow instead exposes the
+//! metavariable context before the captured input prefix:
+//!
+//! ```text
+//! partial.f.N :
+//!   metavariables × first-N-inputs
+//!     -> (remaining-inputs => outputs)
+//! ```
+//!
+//! For example, if `f` has metavariables `n, t` and ordinary inputs
+//! `buffer, index`, then `partial.f.1` is applied to
+//! `n-param, t-param, buffer` and returns a closure waiting for `index`.
+//! Runtime witnesses appearing among the ordinary inputs still count toward
+//! `N`; only the leading type-map context is excluded.
+//!
+//! The generated definition copies the metavariable context for both the
+//! captured side and `name.f`, packs the remaining inputs and outputs as
+//! needed, and connects them using `defer`, `tensor`, `compose`, and
+//! `name.f lift`.
 
 use hexpr::{Hexpr, Operation, Variable, try_interpret};
 use metacat::theory::{
@@ -24,7 +54,7 @@ struct PartialApplication {
     applied: usize,
 }
 
-type SyntaxTerm = OpenHypergraph<Option<()>, Operation>;
+type SyntaxTerm = OpenHypergraph<(), Operation>;
 
 pub fn elaborate(raw: &mut RawTheorySet) -> Result<(), ElaborateError> {
     let theory_names = raw.theories.keys().cloned().collect::<Vec<_>>();
@@ -143,24 +173,22 @@ fn partial_arrows(
     original: &RawTheoryArrow,
     partial: &PartialApplication,
 ) -> Result<Vec<RawTheoryArrow>, ElaborateError> {
-    let mut source =
-        try_interpret(&syntax.local_signature(), &original.type_maps.0).map_err(|error| {
-            ElaborateError::NameSourceTypeMapInterpretation {
-                theory: theory_name.to_string(),
-                arrow: original.name.to_string(),
-                map: original.type_maps.0.clone(),
-                error,
-            }
-        })?;
-    let mut target =
-        try_interpret(&syntax.local_signature(), &original.type_maps.1).map_err(|error| {
-            ElaborateError::NameTargetTypeMapInterpretation {
-                theory: theory_name.to_string(),
-                arrow: original.name.to_string(),
-                map: original.type_maps.1.clone(),
-                error,
-            }
-        })?;
+    let mut source = try_interpret(&syntax.local_signature(), &original.type_maps.0)
+        .map_err(|error| ElaborateError::NameSourceTypeMapInterpretation {
+            theory: theory_name.to_string(),
+            arrow: original.name.to_string(),
+            map: original.type_maps.0.clone(),
+            error,
+        })?
+        .map_nodes(|_| ());
+    let mut target = try_interpret(&syntax.local_signature(), &original.type_maps.1)
+        .map_err(|error| ElaborateError::NameTargetTypeMapInterpretation {
+            theory: theory_name.to_string(),
+            arrow: original.name.to_string(),
+            map: original.type_maps.1.clone(),
+            error,
+        })?
+        .map_nodes(|_| ());
     source.quotient().map_err(|_| {
         invalid_error(
             &partial.operation,
@@ -173,6 +201,8 @@ fn partial_arrows(
             "target type map has inconsistent named-wire equations",
         )
     })?;
+    // The open boundary separates type-map metavariables from arrow inputs.
+    // Only the latter participate in the `.N` count.
     let context_arity = source.sources.len();
     let arity = source.targets.len();
     if partial.applied > arity {
@@ -234,6 +264,9 @@ fn partial_source_map(
 ) -> Result<Hexpr, ElaborateError> {
     let mut vars = Vars::default();
     let context_vars = vars.many("context", context)?;
+    // A use of `partial.f.N` receives metavariable witnesses first, followed
+    // by the captured prefix. Copy the witnesses because the target closure
+    // type and the captured call to `f` both depend on them.
     let copied = Hexpr::Frobenius {
         sources: context_vars.clone(),
         targets: context_vars
@@ -628,6 +661,44 @@ mod tests {
         .expect("fixture should parse")
     }
 
+    fn dependent_fixture(arrows: &str) -> RawTheorySet {
+        RawTheorySet::from_text(&format!(
+            r#"
+            (theory type nat {{
+              (arr 1 : 0 -> 1)
+              (arr * : 2 -> 1)
+              (arr -> : 2 -> 1)
+              (arr => : 2 -> 1)
+              (arr val : 1 -> 1)
+              (arr : : 2 -> 1)
+              (arr bool : 0 -> 1)
+              (arr u64 : 0 -> 1)
+              (arr box : 1 -> 1)
+            }})
+            (theory program type {{
+              (arr unit.intro : [] -> 1)
+              (arr *.intro : [a b] -> *)
+              (arr defer : [a] -> ({{1 [a]}} =>))
+              (arr compose : {{[a b c.]
+                ([. a b] =>)
+                ([. b c] =>)
+              }} -> ([a b c . a c] =>))
+              (arr tensor : {{[a0 b0 a1 b1.]
+                ([. a0 b0] =>)
+                ([. a1 b1] =>)
+              }} -> {{[a0 b0 a1 b1.]
+                ([. a0 a1] * [src.])
+                ([. b0 b1] * [tgt.])
+                ([. src tgt] =>)
+              }})
+              (arr lift : (-> val) -> =>)
+              {arrows}
+            }})
+            "#
+        ))
+        .expect("dependent fixture should parse")
+    }
+
     #[test]
     fn generates_and_typechecks_a_used_partial_application() {
         let elaborated = elaborate(fixture("partial.f.2")).expect("partial should elaborate");
@@ -675,6 +746,88 @@ mod tests {
     }
 
     #[test]
+    fn metavariables_precede_captured_inputs_and_do_not_count_toward_n() {
+        let raw = dependent_fixture(
+            r#"
+            (arr f :
+              ([n m.] {
+                ([.n] box)
+                (bool val)
+              })
+              ->
+              ([n m.] ([.m] box)))
+            (def use :
+              ([n m.] {
+                [.n]
+                [.m]
+                ([.n] box)
+              })
+              ->
+              ([n m.] ({(bool val) ([.m] box)} =>))
+              = partial.f.1)
+            "#,
+        );
+
+        let elaborated = elaborate(raw).expect("dependent partial should elaborate");
+        let interpreted = TheorySet::from_raw(elaborated).expect("generated theory should load");
+        crate::check::check(&interpreted)
+            .expect("the generated arrow should accept n and m before the captured first input");
+    }
+
+    #[test]
+    fn applying_too_many_inputs_ignores_metavariables() {
+        let raw = dependent_fixture(
+            r#"
+            (arr f :
+              ([n m.] {
+                ([.n] box)
+                (bool val)
+              })
+              ->
+              ([n m.] ([.m] box)))
+            (def use : [] -> [] = partial.f.3)
+            "#,
+        );
+
+        let error = elaborate(raw).expect_err("two inputs plus two metavars still has arity two");
+        let ElaborateError::InvalidPartialApplication { reason, .. } = error else {
+            panic!("expected an invalid partial application");
+        };
+        assert!(
+            reason.contains("arrow with 2 inputs"),
+            "unexpected error: {reason}"
+        );
+    }
+
+    #[test]
+    fn runtime_witnesses_in_the_source_are_counted_toward_n() {
+        let raw = dependent_fixture(
+            r#"
+            (arr f :
+              ([n.] {
+                ({[.n] u64} :)
+                (bool val)
+              })
+              ->
+              ([n.] (bool val)))
+            (def use :
+              ([n.] {
+                [.n]
+                ({[.n] u64} :)
+              })
+              ->
+              ([n.] ({(bool val) (bool val)} =>))
+              = partial.f.1)
+            "#,
+        );
+
+        let elaborated = elaborate(raw).expect("runtime witness should be the captured input");
+        let interpreted = TheorySet::from_raw(elaborated).expect("generated theory should load");
+        crate::check::check(&interpreted)
+            .expect("partial.f.1 should leave only the bool input for the closure");
+    }
+
+    #[test]
     fn rejects_malformed_and_missing_partial_targets() {
         for operation in ["partial.f.nope", "partial.missing.1"] {
             let error = elaborate(fixture(operation)).expect_err("invalid partial should fail");
@@ -696,6 +849,7 @@ mod tests {
               (arr -> : 2 -> 1)
               (arr => : 2 -> 1)
               (arr val : 1 -> 1)
+              (arr box : 1 -> 1)
             })
             (theory program type {
               (arr unit.intro : [] -> 1)
@@ -714,8 +868,12 @@ mod tests {
                 ([. src tgt] =>)
               })
               (arr lift : (-> val) -> =>)
-              (arr f : ([a.] {[.a] [.a]}) -> [a . a])
-              (def use : ([a.] {[.a] [.a]}) -> ([a.] {[.a] [.a]} =>) = partial.f.1)
+              (arr f : ([a.] {([.a] box) ([.a] box)}) -> ([a.] ([.a] box)))
+              (def use :
+                ([a.] {[.a] ([.a] box)})
+                ->
+                ([a.] {([.a] box) ([.a] box)} =>)
+                = partial.f.1)
             })
             "#,
         )

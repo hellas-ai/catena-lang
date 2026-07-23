@@ -100,7 +100,18 @@ pub(in crate::codegen) fn is_runtime_value(value: &GpuValue) -> bool {
 pub(in crate::codegen) fn value_expr(value: &GpuValue) -> String {
     match value {
         GpuValue::Var(var) => var.name.clone(),
-        GpuValue::FnSymbol(symbol) => sanitize_ident(&format!("program.{}", symbol.target)),
+        GpuValue::FnSymbol(symbol) => function_symbol(&symbol.target),
+    }
+}
+
+fn function_symbol(target: &hexpr::Operation) -> String {
+    match target.as_str() {
+        // These primitive operations are callable functions supplied by the generated
+        // prelude. Other function symbols refer to generated `program_*` definitions.
+        "bool.not" | "bool.or" | "bool.and" | "bool.id" | "bool.copy" => {
+            sanitize_ident(target.as_str())
+        }
+        _ => sanitize_ident(&format!("program.{target}")),
     }
 }
 
@@ -177,5 +188,19 @@ mod tests {
 
         assert_eq!(single_value(&component).unwrap(), &var(0, "a"));
         assert_eq!(single_function(&component).unwrap(), &fn_symbol("g"));
+    }
+
+    #[test]
+    fn function_symbols_distinguish_prelude_primitives_from_programs() {
+        assert_eq!(value_expr(&fn_symbol("bool.not")), "bool_not");
+        assert_eq!(value_expr(&fn_symbol("bool.and")), "bool_and");
+        assert_eq!(value_expr(&fn_symbol("bool.or")), "bool_or");
+        assert_eq!(value_expr(&fn_symbol("bool.copy")), "bool_copy");
+
+        assert_eq!(value_expr(&fn_symbol("bool.li")), "program_bool_li");
+        assert_eq!(
+            value_expr(&fn_symbol("user-function")),
+            "program_user_function"
+        );
     }
 }

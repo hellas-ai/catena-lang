@@ -38,5 +38,17 @@
 
   # Feed a value into a closure
   # A ● (A => B) -> B
-  #(def evaluate : ([a b] {[.a] =>}) -> [a b . b] = ({defer [f]} compose run))
+  (def evaluate :
+    ([a b.] {
+      [.a]
+      ([.a b] =>)
+    })
+    ->
+    ([a b.] [.b])
+  = ([x f.]
+    ({
+      ([.x] defer)
+      [.f]
+    } compose run)
+  ))
 })

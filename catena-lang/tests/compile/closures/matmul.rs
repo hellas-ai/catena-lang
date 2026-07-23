@@ -3,14 +3,16 @@ use metacat::theory::Theory;
 use crate::support::*;
 
 /// The application-sized fixture builds matrix-view closures outside the
-/// materialization producer and partially applies the named closure-only
-/// `cell-at` definition. After forgetting, that named evaluation is specialized
-/// by inlining its forgotten body; nested reduction closures are converted
-/// inside-out before the outer materialization producer.
+/// materialization producer. It composes a partially applied row-major index
+/// decoder with a partially applied `cell-dot`; `cell-dot` in turn partially
+/// applies `product-at` to obtain its function of `k`. After forgetting, those
+/// named evaluations are specialized by inlining their forgotten bodies;
+/// nested reduction closures are converted inside-out before the outer
+/// materialization producer.
 ///
 /// ```text
 /// buf + buf ─▶ two closures ─┐
-///                            ├─▶ partially applied cell-at ─▶ materializec
+///                            ├─▶ indices ; partial cell-dot ─▶ materializec
 /// buf + id  ─▶ two closures ─┘
 /// ```
 #[test]
@@ -24,10 +26,6 @@ fn matmul_entry_points_share_inlined_closure_only_logic() {
         panic!("program should be a user theory");
     };
     for helper in [
-        "f32.matmul.cell-dot",
-        "f32.matrix.row-view",
-        "f32.matrix.col-view",
-        "f32.buf.view",
         "f32.row-major.matrix-view",
         "f32.matmul.row-major.materialize",
     ] {
@@ -37,8 +35,12 @@ fn matmul_entry_points_share_inlined_closure_only_logic() {
         );
     }
 
-    assert!(arrows.contains_key(&op("f32.matmul.row-major.cell-at")));
-    assert!(arrows.contains_key(&op("name.f32.matmul.row-major.cell-at")));
+    assert!(arrows.contains_key(&op("f32.matmul.cell-dot")));
+    assert!(arrows.contains_key(&op("name.f32.matmul.cell-dot")));
+    assert!(arrows.contains_key(&op("f32.matmul.product-at")));
+    assert!(arrows.contains_key(&op("name.f32.matmul.product-at")));
+    assert!(!arrows.contains_key(&op("f32.matmul.row-major.cell-at")));
+    assert!(!arrows.contains_key(&op("name.f32.matmul.row-major.cell-at")));
     assert!(!arrows.contains_key(&op("matmul-two-bufs-at")));
     assert!(!arrows.contains_key(&op("matmul-buf-identity-at")));
 
@@ -46,7 +48,7 @@ fn matmul_entry_points_share_inlined_closure_only_logic() {
         assert!(regions(entry_point).len() >= 3);
         assert_eq!(operation_count(final_term(entry_point), "materializec"), 1);
         assert_eq!(
-            operation_count(final_term(entry_point), "f32.matmul.row-major.cell-at"),
+            operation_count(final_term(entry_point), "f32.matmul.cell-dot"),
             0
         );
         assert_fully_lowered(entry_point);

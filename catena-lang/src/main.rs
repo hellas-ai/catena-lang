@@ -1,6 +1,6 @@
 use std::{fs, path::PathBuf};
 
-use catena_lang::report::DumpOptions;
+use catena_lang::report::ReportOptions;
 use clap::Parser;
 use metacat::theory::RawTheorySet;
 
@@ -28,18 +28,18 @@ fn main() -> anyhow::Result<()> {
     let mut all_sources: Vec<&str> = catena_lang::stdlib::sources().collect();
     all_sources.extend(sources.iter().map(String::as_str));
     let raw_theories = RawTheorySet::from_texts(all_sources)?;
-    let dump_options = DumpOptions {
+    let report_options = ReportOptions {
         generate_svgs: !cli.no_svg,
     };
     match catena_lang::compile::compile(raw_theories) {
         Ok(report) => {
-            report.dump_to_dir_with_options(&cli.output_dir, dump_options)?;
+            report.dump_to_dir_with_options(&cli.output_dir, report_options)?;
             Ok(())
         }
         Err(failure) => {
             failure
                 .report
-                .dump_to_dir_with_options(&cli.output_dir, dump_options)?;
+                .dump_to_dir_with_options(&cli.output_dir, report_options)?;
             Err(failure.into())
         }
     }

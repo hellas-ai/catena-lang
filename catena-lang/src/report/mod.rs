@@ -20,11 +20,11 @@ use crate::pass::record_boundary_sizes::OperationWithBoundarySizes;
 pub type TheoryTermMap<A = Operation> = BTreeMap<TheoryId, BTreeMap<Operation, AnnotatedTerm<A>>>;
 
 #[derive(Clone, Copy, Debug)]
-pub struct DumpOptions {
+pub struct ReportOptions {
     pub generate_svgs: bool,
 }
 
-impl Default for DumpOptions {
+impl Default for ReportOptions {
     fn default() -> Self {
         Self {
             generate_svgs: true,
@@ -63,13 +63,13 @@ impl CompileReport {
 
 impl CompileReport {
     pub fn dump_graphs_to_dir(&self, dir: impl AsRef<Path>) -> io::Result<()> {
-        self.dump_graphs_to_dir_with_options(dir, DumpOptions::default())
+        self.dump_graphs_to_dir_with_options(dir, ReportOptions::default())
     }
 
     pub fn dump_graphs_to_dir_with_options(
         &self,
         dir: impl AsRef<Path>,
-        options: DumpOptions,
+        options: ReportOptions,
     ) -> io::Result<()> {
         let dir = dir.as_ref();
         fs::create_dir_all(dir)?;
@@ -85,13 +85,13 @@ impl CompileReport {
     }
 
     pub fn dump_to_dir(&self, dir: impl AsRef<Path>) -> io::Result<()> {
-        self.dump_to_dir_with_options(dir, DumpOptions::default())
+        self.dump_to_dir_with_options(dir, ReportOptions::default())
     }
 
     pub fn dump_to_dir_with_options(
         &self,
         dir: impl AsRef<Path>,
-        options: DumpOptions,
+        options: ReportOptions,
     ) -> io::Result<()> {
         let dir = dir.as_ref();
         self.dump_graphs_to_dir_with_options(dir, options)?;

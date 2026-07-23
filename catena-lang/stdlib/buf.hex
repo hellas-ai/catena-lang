@@ -18,10 +18,6 @@
 
 
 (theory program type {
-  # Ownership-mode type literals used as erased generic parameters.
-  (arr cap.own.type : [] -> cap.own)
-  (arr cap.ref.type : [] -> cap.ref)
-
   ################################################################################
   # owned memory can be deallocated
   (arr free : (cap.own mem) -> [])

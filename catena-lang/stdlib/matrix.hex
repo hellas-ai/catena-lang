@@ -77,6 +77,19 @@
 #
 # These arrows adapt flat row-major storage to the generic matrix-view core.
 
+# Read a flat f32 buffer with the buffer first, so partial application can
+# capture it and produce an indexed flat view.
+(def program f32.row-major.flat-at :
+  ([n.] {
+    ({cap.ref [.n] f32} buf val)
+    ([.n] ix val)
+  })
+  ->
+  ([n.] (f32 val))
+= ([input i.]
+  {[.i input]} ix
+))
+
 # Read one element from a flat row-major view:
 #
 #   matrix-at(cols, flat-view, (i,j)) =

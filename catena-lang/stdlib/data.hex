@@ -26,9 +26,6 @@
 
   # Boolean type literal.
   (arr bool.type : [] -> bool)
-  (arr u64.type : [] -> u64)
-  (arr u32.type : [] -> u32)
-  (arr f32.type : [] -> f32)
 
   # Boolean operations
   (arr bool.t : [] -> (bool val))

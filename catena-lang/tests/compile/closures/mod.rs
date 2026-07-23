@@ -4,5 +4,6 @@ mod basic;
 mod context;
 mod materialize;
 mod matmul;
+mod named_calls;
 mod products;
 mod reduce;

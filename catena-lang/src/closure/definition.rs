@@ -249,8 +249,8 @@ fn build_body(
     // A `name.f -> eval` pair is the first-order encoding of a direct call to
     // `f`. Reconstruct that call in the generated function instead of copying
     // the temporary name and eval operations into its body.
-    let named_evals = named_evals(term, region)?;
-    let skipped_edges = named_evals
+    let named_calls = named_calls(term, region)?;
+    let skipped_edges = named_calls
         .iter()
         .flat_map(|pair| [pair.name, pair.eval])
         .collect::<HashSet<_>>();
@@ -260,7 +260,7 @@ fn build_body(
     // boundary and the nodes used by operations that we copy or reconstruct.
     let mut required_nodes = HashSet::from([region.domain, region.codomain]);
     required_nodes.extend(region.environment.iter().copied());
-    for pair in &named_evals {
+    for pair in &named_calls {
         let eval = &term.hypergraph.adjacency[pair.eval.0];
         required_nodes.extend(eval.sources.first().copied());
         required_nodes.extend(eval.targets.first().copied());
@@ -316,8 +316,8 @@ fn build_body(
         body.new_edge(operation.clone(), (sources, targets));
     }
 
-    for pair in named_evals {
-        inline_named_eval(&mut body, &node_map, arrows, term, pair)?;
+    for pair in named_calls {
+        inline_named_call(&mut body, &node_map, arrows, term, pair)?;
     }
 
     // Initially expose every captured value separately. Packing them creates a
@@ -354,15 +354,15 @@ fn build_body(
 }
 
 #[derive(Debug, Clone, Copy)]
-struct NamedEval {
+struct NamedCall {
     name: EdgeId,
     eval: EdgeId,
 }
 
-fn named_evals(
+fn named_calls(
     term: &ClosureForgottenTerm,
     region: &ClosureRegion,
-) -> Result<Vec<NamedEval>, DefineClosuresError> {
+) -> Result<Vec<NamedCall>, DefineClosuresError> {
     let included = region.edges.iter().copied().collect::<HashSet<_>>();
     let mut producers = vec![Vec::new(); term.hypergraph.nodes.len()];
     for &edge in &region.edges {
@@ -400,25 +400,25 @@ fn named_evals(
                         )
                 })
                 .ok_or(DefineClosuresError::EvalWithoutName { edge: eval.0 })?;
-            Ok(NamedEval { name, eval })
+            Ok(NamedCall { name, eval })
         })
         .collect()
 }
 
-fn inline_named_eval(
+fn inline_named_call(
     body: &mut AnnotatedTerm,
     node_map: &HashMap<NodeId, NodeId>,
     arrows: &BTreeMap<Operation, TheoryArrow>,
     term: &ClosureForgottenTerm,
-    pair: NamedEval,
+    pair: NamedCall,
 ) -> Result<(), DefineClosuresError> {
     let ClosureForgotten::Operation(name_operation) = &term.hypergraph.edges[pair.name.0] else {
-        unreachable!("named eval producer should be an operation");
+        unreachable!("named call producer should be an operation");
     };
     let operation: Operation = name_operation
         .as_str()
         .strip_prefix(NAME_PREFIX)
-        .expect("named eval producer should start with name prefix")
+        .expect("named call producer should start with name prefix")
         .parse()
         .expect("stripped generated name should parse");
     let arrow = arrows

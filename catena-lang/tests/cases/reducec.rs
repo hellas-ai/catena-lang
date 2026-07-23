@@ -2,7 +2,6 @@ use super::*;
 
 const BASIC_SOURCE: &str = include_str!("reducec/basic.hex");
 const NAMED_PRIMITIVE_SOURCE: &str = include_str!("reducec/named_primitive.hex");
-const SUM_SOURCE: &str = include_str!("reducec/sum.hex");
 
 #[test]
 fn sum_u64_exec() -> anyhow::Result<()> {
@@ -50,7 +49,7 @@ fn dot_u64_exec() -> anyhow::Result<()> {
 
 #[test]
 fn sum_f32_exec() -> anyhow::Result<()> {
-    let runtime = runtime_with(SUM_SOURCE)?;
+    let runtime = runtime_with("")?;
 
     let input = runtime.mem_f32(&[1.5_f32, -0.5, 2.0, 4.0])?;
     let [result] = runtime.exec("sum-f32", [input])?;
@@ -64,7 +63,7 @@ fn sum_f32_exec() -> anyhow::Result<()> {
 
 #[test]
 fn mean_f32_exec() -> anyhow::Result<()> {
-    let runtime = runtime_with(SUM_SOURCE)?;
+    let runtime = runtime_with("")?;
 
     let input = runtime.mem_f32(&[1.5_f32, -0.5, 2.0, 4.0])?;
     let [result] = runtime.exec("mean-f32", [input])?;
@@ -78,7 +77,7 @@ fn mean_f32_exec() -> anyhow::Result<()> {
 
 #[test]
 fn max_f32_exec() -> anyhow::Result<()> {
-    let runtime = runtime_with(SUM_SOURCE)?;
+    let runtime = runtime_with("")?;
 
     let input = runtime.mem_f32(&[1.5_f32, -0.5, 2.0, 4.0])?;
     let [result] = runtime.exec("max-f32", [input])?;

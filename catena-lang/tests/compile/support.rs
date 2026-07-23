@@ -23,6 +23,7 @@ pub fn report() -> &'static CompileReport {
         let sources = [
             include_str!("closures/fixtures/basic.hex"),
             include_str!("closures/fixtures/products.hex"),
+            include_str!("closures/fixtures/named_calls.hex"),
             include_str!("closures/fixtures/context.hex"),
             include_str!("closures/fixtures/reduce.hex"),
             include_str!("closures/fixtures/materialize.hex"),

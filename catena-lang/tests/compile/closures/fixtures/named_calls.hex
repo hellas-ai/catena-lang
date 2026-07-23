@@ -1,0 +1,46 @@
+# Post-forget named-call inlining fixtures.
+
+# The forgotten body of this definition contains the two closure markers used
+# to adapt its expanded closure inputs to bool.if's opaque closure ports.
+(def program choose-named-closures :
+  {({1 (bool val)} =>) ({1 (bool val)} =>) (bool val)}
+  ->
+  (bool val)
+= ([left right flag.]
+  {[.left] [.right] [.flag] unit.intro}
+  bool.if
+))
+
+# Inlining this named call exposes another closure-bearing named call. The
+# closure-conversion pre-step must restart and inline choose-named-closures too.
+(def program forward-named-closures :
+  {({1 (bool val)} =>) ({1 (bool val)} =>) (bool val)}
+  ->
+  (bool val)
+= ([left right flag.]
+  ({
+    ({
+      ({[.left] [.right]} *.intro)
+      [.flag]
+    } *.intro defer)
+    (name.choose-named-closures lift)
+  }
+  compose
+  run)
+))
+
+(def program run-forwarded-named-closures :
+  {(bool val) (bool val) (bool val)}
+  ->
+  (bool val)
+= ([left right flag.]
+  ({
+    ({
+      ({([.left] defer) ([.right] defer)} *.intro)
+      [.flag]
+    } *.intro defer)
+    (name.forward-named-closures lift)
+  }
+  compose
+  run)
+))

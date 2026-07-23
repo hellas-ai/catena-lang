@@ -1,5 +1,5 @@
 # Broadcast one f32 value into an owned buffer of length n.
-(def program broadcast-at :
+(def program tensor.broadcast-at :
   ([n.] {(f32 val) ([.n] ix val)})
   ->
   ([n.] (f32 val))
@@ -7,21 +7,21 @@
   [.value]
 ))
 
-(def program broadcast-f32 :
+(def program tensor.broadcast-f32 :
   {(f32 val) ({[n] u64} :)}
   ->
   ([n.] (cap.own mem))
 = ([value len.]
   {
     [.len]
-    ({[.len] [.value] (([.len] :.param) name.broadcast-at)}
+    ({[.len] [.value] (([.len] :.param) name.tensor.broadcast-at)}
       materializec)
   }
   buf.to-mem
 ))
 
 # Materialize the runtime index itself as f32.
-(def program arange-at :
+(def program tensor.arange-at :
   ([n.] {1 ([.n] ix val)})
   ->
   ([n.] (f32 val))
@@ -32,21 +32,21 @@
 ))
 
 # Materialize [0, n) as f32.
-(def program arange-f32 :
+(def program tensor.arange-f32 :
   ({[n] u64} :)
   ->
   ([n.] (cap.own mem))
 = ([len.]
   {
     [.len]
-    ({[.len] unit.intro (([.len] :.param) name.arange-at)}
+    ({[.len] unit.intro (([.len] :.param) name.tensor.arange-at)}
       materializec)
   }
   buf.to-mem
 ))
 
 # Read one slice element by casting the input mem inside the producer.
-(def program slice-at :
+(def program tensor.slice-at :
   ([n.] {
     ({(cap.ref mem) (u64 val)} *)
     ([.n] ix val)
@@ -67,7 +67,7 @@
 })
 
 # Slice `len` f32 elements starting at `start`.
-(def program slice-f32 :
+(def program tensor.slice-f32 :
   {(cap.ref mem) ({[start] u64} :) ({[len] u64} :)}
   ->
   ([start len.] (cap.own mem))
@@ -75,14 +75,14 @@
   ([.start] :.forget [start-val.])
   {
     [.len]
-    ({[.len] ({[.input-mem] [.start-val]} *.intro) (([.len] :.param) name.slice-at)}
+    ({[.len] ({[.input-mem] [.start-val]} *.intro) (([.len] :.param) name.tensor.slice-at)}
       materializec)
   }
   buf.to-mem
 ))
 
 # Read a borrowed f32 buffer using an index relative to a runtime offset.
-(def program ref.f32.at-offset :
+(def program tensor.ref.f32.at-offset :
   ([len.] {
     ({
       (u64 val)
@@ -106,7 +106,7 @@
 ))
 
 # Select the source buffer for one output index.
-(def program concat-f32-at :
+(def program tensor.concat-f32-at :
   ([left-len right-len total-len.] {
     ({
       ({({[.left-len] u64} :) ({cap.ref [.left-len] f32} buf val)} *)
@@ -128,9 +128,9 @@
   ({[.left-len-val] [.right-input]} *.intro [right-env.])
   {
     [.left-env]
-    (([.left-len-named] :.param) name.ref.f32.at-offset)
+    (([.left-len-named] :.param) name.tensor.ref.f32.at-offset)
     [.right-env]
-    (([.right-len-named] :.param) name.ref.f32.at-offset)
+    (([.right-len-named] :.param) name.tensor.ref.f32.at-offset)
     [.use-left-val]
     [.output-i-val]
   }
@@ -138,7 +138,7 @@
 ))
 
 # Concatenate two borrowed f32 buffers into one owned buffer.
-(def program concat-f32 :
+(def program tensor.concat-f32 :
   {(cap.ref mem) (cap.ref mem)}
   ->
   (cap.own mem)
@@ -161,14 +161,14 @@
           ([.left-len-named] :.param)
           ([.right-len-named] :.param)
           ([.total-len-named] :.param)
-        } name.concat-f32-at)
+        } name.tensor.concat-f32-at)
       } materializec)
     }
     buf.to-mem
 ))
 
 # Read one f32 element and pair it with its runtime position.
-(def program argmax-pair-at :
+(def program tensor.argmax-pair-at :
   ([n.] {
     ({cap.ref [.n] f32} buf val)
     ([.n] ix val)
@@ -183,7 +183,7 @@
 ))
 
 # Choose the better of two (position, value) pairs, keeping the first on ties.
-(def program argmax-env :
+(def program tensor.argmax-env :
   {1 ({({(u64 val) (f32 val)} *) ({(u64 val) (f32 val)} *)} *)}
   ->
   ({(u64 val) (f32 val)} *)
@@ -201,7 +201,7 @@
 ))
 
 # Argmax over an f32 buffer. Caller must provide a non-empty input.
-(def program argmax-f32 :
+(def program tensor.argmax-f32 :
   (cap.ref mem)
   ->
   (u64 val)
@@ -217,8 +217,8 @@
       ({
         [.init]
         unit.intro
-        name.argmax-env
-        ({[.input] (([.len] :.param) name.argmax-pair-at)})
+        name.tensor.argmax-env
+        ({[.input] (([.len] :.param) name.tensor.argmax-pair-at)})
         [.len]
       } reducec [result-pair.])
       ([.result-pair] *.elim [result-pos _result-max.])

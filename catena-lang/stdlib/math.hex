@@ -1,6 +1,6 @@
 # 4-term Taylor approximation around 0:
 # x - x^3/3! + x^5/5! - x^7/7!
-(def program sin-approx : (f32 val) -> (f32 val) =
+(def program math.sin-approx : (f32 val) -> (f32 val) =
   {[x.]
     ([.x x] f32.mul [x2.])
     ([.x2 x] f32.mul [x3.])
@@ -24,7 +24,7 @@
 
 # 4-term cosine approximation around 0:
 # 1 - x^2/2! + x^4/4! - x^6/6!
-(def program cos-approx : (f32 val) -> (f32 val) =
+(def program math.cos-approx : (f32 val) -> (f32 val) =
   {[x.]
     ([.x x] f32.mul [x2.])
     ([.x2 x2] f32.mul [x4.])
@@ -49,7 +49,7 @@
 # Cody-Waite style range reduction for non-negative inputs:
 # n = round(x * 2/pi), r = x - n * pio2_hi - n * pio2_lo
 # then choose sin/cos and sign from quadrant n mod 4.
-(def program sin-approx-full-nonneg : (f32 val) -> (f32 val) =
+(def program math.sin-approx-full-nonneg : (f32 val) -> (f32 val) =
   {[x.]
     (const.u32.0x3F22F983 u32.bitcast-f32 [inv_pio2.])
     (const.u32.0x3FC90FDA u32.bitcast-f32 [pio2_hi.])
@@ -64,8 +64,8 @@
     ([.x n_pio2_hi] f32.sub [r1.])
     ([.r1 n_pio2_lo] f32.sub [r.])
 
-    ([.r] sin-approx [sin_r.])
-    ([.r] cos-approx [cos_r.])
+    ([.r] math.sin-approx [sin_r.])
+    ([.r] math.cos-approx [cos_r.])
     ([.sin_r] f32.neg [neg_sin_r.])
     ([.cos_r] f32.neg [neg_cos_r.])
 
@@ -88,14 +88,14 @@
 
 # Extend the non-negative implementation using odd symmetry:
 # compute on |x|, then apply a final negate when x < 0.
-(def program sin-approx-full : (f32 val) -> (f32 val) =
+(def program math.sin-approx-full : (f32 val) -> (f32 val) =
   {[x.]
     (const.u32.0x00000000 u32.to-f32 [zero.])
     ([.x] f32.neg [neg_x.])
     ([.x zero] f32.lt [is_negative.])
     ([.is_negative neg_x x] f32.select [magnitude.])
 
-    ([.magnitude] sin-approx-full-nonneg [base_result.])
+    ([.magnitude] math.sin-approx-full-nonneg [base_result.])
     ([.base_result] f32.neg [negated_result.])
     ([.is_negative negated_result base_result] f32.select [result.])
     [.result]
@@ -107,7 +107,7 @@
 # with m in [0.5, 1), then approximate:
 #   log(x) ~= poly(m) + e * ln(2)
 
-(def program log-approx : (f32 val) -> (f32 val) =
+(def program math.log-approx : (f32 val) -> (f32 val) =
   {[x.]
     (const.u32.0x007FFFFF [frac_mask.])
     (const.u32.0x00000017 [exp_shift.])
@@ -145,7 +145,7 @@
 
 # Range-reduced exp approximation using split ln(2) constants and
 # a degree-3 minimax polynomial on the reduced interval.
-(def program exp-approx-nonneg : (f32 val) -> (f32 val) =
+(def program math.exp-approx-nonneg : (f32 val) -> (f32 val) =
   {[x.]
     (const.u32.0x3FB8AA3B u32.bitcast-f32 [inv_ln2.])
     (const.u32.0x3F317200 u32.bitcast-f32 [ln2_hi.])
@@ -182,7 +182,7 @@
   }
 )
 
-(def program exp-approx : (f32 val) -> (f32 val) =
+(def program math.exp-approx : (f32 val) -> (f32 val) =
   {[x.]
     (const.u32.0x00000000 u32.to-f32 [zero.])
     (const.u32.0x3F800000 u32.bitcast-f32 [one.])
@@ -191,7 +191,7 @@
     ([.x zero] f32.lt [is_negative.])
     ([.is_negative neg_x x] f32.select [magnitude.])
 
-    ([.magnitude] exp-approx-nonneg [base.])
+    ([.magnitude] math.exp-approx-nonneg [base.])
     ([.one base] f32.div [reciprocal.])
     ([.is_negative reciprocal base] f32.select [result.])
     [.result]
@@ -199,40 +199,40 @@
 )
 
 # exp2(x) = exp(x * ln(2))
-(def program exp2-approx : (f32 val) -> (f32 val) =
+(def program math.exp2-approx : (f32 val) -> (f32 val) =
   {[x.]
     (const.u32.0x3F317218 u32.bitcast-f32 [ln2.])
 
     ([.x ln2] f32.mul [scaled.])
-    ([.scaled] exp-approx [result.])
+    ([.scaled] math.exp-approx [result.])
     [.result]
   }
 )
 
 # log2(x) = log(x) / ln(2)
-(def program log2-approx : (f32 val) -> (f32 val) =
+(def program math.log2-approx : (f32 val) -> (f32 val) =
   {[x.]
     (const.u32.0x3FB8AA3B u32.bitcast-f32 [inv_ln2.])
 
-    ([.x] log-approx [ln_x.])
+    ([.x] math.log-approx [ln_x.])
     ([.ln_x inv_ln2] f32.mul [result.])
     [.result]
   }
 )
 
-# powf(x, y) = exp2(y * log2(x))
-(def program powf : {(f32 val) (f32 val)} -> (f32 val) =
+# math.powf(x, y) = exp2(y * log2(x))
+(def program math.powf : {(f32 val) (f32 val)} -> (f32 val) =
   {[x y.]
-    ([.x] log2-approx [log2_x.])
+    ([.x] math.log2-approx [log2_x.])
     ([.y log2_x] f32.mul [scaled.])
-    ([.scaled] exp2-approx [result.])
+    ([.scaled] math.exp2-approx [result.])
     [.result]
   }
 )
 
-# sqrt(x) by Newton-Raphson iteration
+# math.sqrt(x) by Newton-Raphson iteration
 # guess{n+1} = 0.5 * (guess{n} + x / guess{n})
-(def program sqrt : (f32 val) -> (f32 val) =
+(def program math.sqrt : (f32 val) -> (f32 val) =
   {[x.]
     (const.u32.0x00000000 u32.to-f32 [zero.])
     (const.u32.0x3F800000 u32.bitcast-f32 [one.])

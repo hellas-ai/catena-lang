@@ -293,15 +293,15 @@ fn sin_approx_test() -> anyhow::Result<()> {
 
     // Input range where the Taylor expansion is good enough
     for input in [0.0_f32, 0.5, 1.0, -0.5, -1.0] {
-        let [result] = runtime.exec("sin-approx", [input.into()])?;
+        let [result] = runtime.exec("math.sin-approx", [input.into()])?;
         let Value::F32(result) = result else {
-            anyhow::bail!("sin-approx returned non-f32 value: {result:?}");
+            anyhow::bail!("math.sin-approx returned non-f32 value: {result:?}");
         };
 
         let expected = input.sin();
         assert!(
             (result - expected).abs() < 1e-4,
-            "sin-approx({input}) = {result}, expected {expected}"
+            "math.sin-approx({input}) = {result}, expected {expected}"
         );
     }
 
@@ -315,15 +315,15 @@ fn sin_approx_full_test() -> anyhow::Result<()> {
     for input in [
         -200.0_f32, -100.0, -10.0, -6.0, -3.0, -1.9, -0.5, 0.0, 0.5, 3.0, 6.0, 10.0, 100.0, 200.0,
     ] {
-        let [result] = runtime.exec("sin-approx-full", [input.into()])?;
+        let [result] = runtime.exec("math.sin-approx-full", [input.into()])?;
         let Value::F32(result) = result else {
-            anyhow::bail!("sin-approx-full returned non-f32 value: {result:?}");
+            anyhow::bail!("math.sin-approx-full returned non-f32 value: {result:?}");
         };
 
         let expected = input.sin();
         assert!(
             (result - expected).abs() < 1e-4,
-            "sin-approx-full({input}) = {result}, expected {expected}"
+            "math.sin-approx-full({input}) = {result}, expected {expected}"
         );
     }
 
@@ -669,16 +669,16 @@ fn exp_approx_test() -> anyhow::Result<()> {
     let runtime = runtime_with("")?;
 
     for input in [-3.0_f32, -1.0, -0.5, 0.0, 0.5, 1.0, 3.0] {
-        let [result] = runtime.exec("exp-approx", [input.into()])?;
+        let [result] = runtime.exec("math.exp-approx", [input.into()])?;
         let Value::F32(result) = result else {
-            anyhow::bail!("exp-approx returned non-f32 value: {result:?}");
+            anyhow::bail!("math.exp-approx returned non-f32 value: {result:?}");
         };
 
         let expected = input.exp();
         let error = (result - expected).abs() / expected.max(1.0);
         assert!(
             error < 4e-3,
-            "exp-approx({input}) = {result}, expected {expected}, rel-ish error {error}"
+            "math.exp-approx({input}) = {result}, expected {expected}, rel-ish error {error}"
         );
     }
 
@@ -690,16 +690,16 @@ fn exp2_approx_test() -> anyhow::Result<()> {
     let runtime = runtime_with("")?;
 
     for input in [-3.0_f32, -1.0, -0.5, 0.0, 0.5, 1.0, 3.0] {
-        let [result] = runtime.exec("exp2-approx", [input.into()])?;
+        let [result] = runtime.exec("math.exp2-approx", [input.into()])?;
         let Value::F32(result) = result else {
-            anyhow::bail!("exp2-approx returned non-f32 value: {result:?}");
+            anyhow::bail!("math.exp2-approx returned non-f32 value: {result:?}");
         };
 
         let expected = input.exp2();
         let error = (result - expected).abs() / expected.max(1.0);
         assert!(
             error < 4e-3,
-            "exp2-approx({input}) = {result}, expected {expected}, rel-ish error {error}"
+            "math.exp2-approx({input}) = {result}, expected {expected}, rel-ish error {error}"
         );
     }
 
@@ -719,16 +719,16 @@ fn sigmoid_test() -> anyhow::Result<()> {
     let runtime = runtime_with("")?;
 
     for input in [-6.0_f32, -1.0, 0.0, 1.0, 6.0] {
-        let [result] = runtime.exec("sigmoid", [input.into()])?;
+        let [result] = runtime.exec("nn.sigmoid", [input.into()])?;
         let Value::F32(result) = result else {
-            anyhow::bail!("sigmoid returned non-f32 value: {result:?}");
+            anyhow::bail!("nn.sigmoid returned non-f32 value: {result:?}");
         };
 
         let expected = 1.0 / (1.0 + (-input).exp());
         let error = (result - expected).abs();
         assert!(
             error < 4e-3,
-            "sigmoid({input}) = {result}, expected {expected}, abs error {error}"
+            "nn.sigmoid({input}) = {result}, expected {expected}, abs error {error}"
         );
     }
 
@@ -740,9 +740,9 @@ fn silu_test() -> anyhow::Result<()> {
     let runtime = runtime_with("")?;
 
     for input in [-3.0_f32, -1.0, 0.0, 1.0, 3.0] {
-        let [result] = runtime.exec("silu", [input.into()])?;
+        let [result] = runtime.exec("nn.silu", [input.into()])?;
         let Value::F32(result) = result else {
-            anyhow::bail!("silu returned non-f32 value: {result:?}");
+            anyhow::bail!("nn.silu returned non-f32 value: {result:?}");
         };
 
         let sigmoid = 1.0 / (1.0 + (-input).exp());
@@ -750,7 +750,7 @@ fn silu_test() -> anyhow::Result<()> {
         let error = (result - expected).abs();
         assert!(
             error < 2e-2,
-            "silu({input}) = {result}, expected {expected}, abs error {error}"
+            "nn.silu({input}) = {result}, expected {expected}, abs error {error}"
         );
     }
 
@@ -762,16 +762,16 @@ fn tanh_test() -> anyhow::Result<()> {
     let runtime = runtime_with("")?;
 
     for input in [-3.0_f32, -1.0, 0.0, 1.0, 3.0] {
-        let [result] = runtime.exec("tanh", [input.into()])?;
+        let [result] = runtime.exec("nn.tanh", [input.into()])?;
         let Value::F32(result) = result else {
-            anyhow::bail!("tanh returned non-f32 value: {result:?}");
+            anyhow::bail!("nn.tanh returned non-f32 value: {result:?}");
         };
 
         let expected = input.tanh();
         let error = (result - expected).abs();
         assert!(
             error < 8e-3,
-            "tanh({input}) = {result}, expected {expected}, abs error {error}"
+            "nn.tanh({input}) = {result}, expected {expected}, abs error {error}"
         );
     }
 
@@ -783,9 +783,9 @@ fn gelu_approx_test() -> anyhow::Result<()> {
     let runtime = runtime_with("")?;
 
     for input in [-3.0_f32, -1.0, 0.0, 1.0, 3.0] {
-        let [result] = runtime.exec("gelu-approx", [input.into()])?;
+        let [result] = runtime.exec("nn.gelu-approx", [input.into()])?;
         let Value::F32(result) = result else {
-            anyhow::bail!("gelu-approx returned non-f32 value: {result:?}");
+            anyhow::bail!("nn.gelu-approx returned non-f32 value: {result:?}");
         };
 
         let sqrt_2_over_pi = (2.0_f32 / std::f32::consts::PI).sqrt();
@@ -794,7 +794,7 @@ fn gelu_approx_test() -> anyhow::Result<()> {
         let error = (result - expected).abs();
         assert!(
             error < 2e-2,
-            "gelu-approx({input}) = {result}, expected {expected}, abs error {error}"
+            "nn.gelu-approx({input}) = {result}, expected {expected}, abs error {error}"
         );
     }
 
@@ -806,16 +806,16 @@ fn sqrt_test() -> anyhow::Result<()> {
     let runtime = runtime_with("")?;
 
     for input in [0.0_f32, 0.25, 1.0, 2.0, 9.0, 100.0] {
-        let [result] = runtime.exec("sqrt", [input.into()])?;
+        let [result] = runtime.exec("math.sqrt", [input.into()])?;
         let Value::F32(result) = result else {
-            anyhow::bail!("sqrt returned non-f32 value: {result:?}");
+            anyhow::bail!("math.sqrt returned non-f32 value: {result:?}");
         };
 
         let expected = input.sqrt();
         let error = (result - expected).abs();
         assert!(
             error < 1e-4,
-            "sqrt({input}) = {result}, expected {expected}, abs error {error}"
+            "math.sqrt({input}) = {result}, expected {expected}, abs error {error}"
         );
     }
 
@@ -827,16 +827,16 @@ fn log_approx_test() -> anyhow::Result<()> {
     let runtime = runtime_with("")?;
 
     for input in [0.1_f32, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 8.0, 10.0] {
-        let [result] = runtime.exec("log-approx", [input.into()])?;
+        let [result] = runtime.exec("math.log-approx", [input.into()])?;
         let Value::F32(result) = result else {
-            anyhow::bail!("log-approx returned non-f32 value: {result:?}");
+            anyhow::bail!("math.log-approx returned non-f32 value: {result:?}");
         };
 
         let expected = input.ln();
         let error = (result - expected).abs();
         assert!(
             error < 6e-4,
-            "log-approx({input}) = {result}, expected {expected}, abs error {error}"
+            "math.log-approx({input}) = {result}, expected {expected}, abs error {error}"
         );
     }
 
@@ -848,16 +848,16 @@ fn log2_approx_test() -> anyhow::Result<()> {
     let runtime = runtime_with("")?;
 
     for input in [0.1_f32, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 8.0, 10.0] {
-        let [result] = runtime.exec("log2-approx", [input.into()])?;
+        let [result] = runtime.exec("math.log2-approx", [input.into()])?;
         let Value::F32(result) = result else {
-            anyhow::bail!("log2-approx returned non-f32 value: {result:?}");
+            anyhow::bail!("math.log2-approx returned non-f32 value: {result:?}");
         };
 
         let expected = input.log2();
         let error = (result - expected).abs();
         assert!(
             error < 1e-3,
-            "log2-approx({input}) = {result}, expected {expected}, abs error {error}"
+            "math.log2-approx({input}) = {result}, expected {expected}, abs error {error}"
         );
     }
 
@@ -877,16 +877,16 @@ fn powf_test() -> anyhow::Result<()> {
         (3.0_f32, 0.5_f32),
         (10.0_f32, 0.25_f32),
     ] {
-        let [result] = runtime.exec("powf", [base.into(), exponent.into()])?;
+        let [result] = runtime.exec("math.powf", [base.into(), exponent.into()])?;
         let Value::F32(result) = result else {
-            anyhow::bail!("powf returned non-f32 value: {result:?}");
+            anyhow::bail!("math.powf returned non-f32 value: {result:?}");
         };
 
         let expected = base.powf(exponent);
         let error = (result - expected).abs() / expected.abs().max(1.0);
         assert!(
             error < 8e-3,
-            "powf({base}, {exponent}) = {result}, expected {expected}, rel-ish error {error}"
+            "math.powf({base}, {exponent}) = {result}, expected {expected}, rel-ish error {error}"
         );
     }
 
@@ -899,9 +899,9 @@ fn softmax_test() -> anyhow::Result<()> {
 
     let input_values = [1.0_f32, 2.0, 4.0];
     let input = runtime.mem_f32(&input_values)?;
-    let [result] = runtime.exec("softmax", [input])?;
+    let [result] = runtime.exec("nn.softmax", [input])?;
     let Value::Mem(result) = result else {
-        anyhow::bail!("softmax returned non-mem value: {result:?}");
+        anyhow::bail!("nn.softmax returned non-mem value: {result:?}");
     };
 
     let values = result.to_f32_vec();
@@ -921,14 +921,14 @@ fn softmax_test() -> anyhow::Result<()> {
         let error = (actual - expected).abs();
         assert!(
             error < 6e-3,
-            "softmax output {actual} differed from expected {expected} by {error}"
+            "nn.softmax output {actual} differed from expected {expected} by {error}"
         );
     }
 
     let sum: f32 = values.iter().sum();
     assert!(
         (sum - 1.0).abs() < 6e-3,
-        "softmax outputs should sum to 1, got {sum}"
+        "nn.softmax outputs should sum to 1, got {sum}"
     );
     Ok(())
 }
@@ -939,9 +939,9 @@ fn rmsnorm_test() -> anyhow::Result<()> {
 
     let input_values = [1.0_f32, 2.0, 4.0, -1.0, -9.0, 13.29];
     let input = runtime.mem_f32(&input_values)?;
-    let [result] = runtime.exec("rmsnorm", [input])?;
+    let [result] = runtime.exec("nn.rmsnorm", [input])?;
     let Value::Mem(result) = result else {
-        anyhow::bail!("rmsnorm returned non-mem value: {result:?}");
+        anyhow::bail!("nn.rmsnorm returned non-mem value: {result:?}");
     };
 
     let values = result.to_f32_vec();
@@ -955,7 +955,7 @@ fn rmsnorm_test() -> anyhow::Result<()> {
         let error = (actual - expected).abs();
         assert!(
             error < 3e-3,
-            "rmsnorm output {actual} differed from expected {expected} by {error}"
+            "nn.rmsnorm output {actual} differed from expected {expected} by {error}"
         );
     }
 
@@ -963,7 +963,7 @@ fn rmsnorm_test() -> anyhow::Result<()> {
     let output_rms = output_mean_sq.sqrt();
     assert!(
         (output_rms - 1.0).abs() < 3e-3,
-        "rmsnorm outputs should have unit RMS, got {output_rms}"
+        "nn.rmsnorm outputs should have unit RMS, got {output_rms}"
     );
     Ok(())
 }
@@ -972,15 +972,15 @@ fn rmsnorm_test() -> anyhow::Result<()> {
 fn broadcast_f32_test() -> anyhow::Result<()> {
     let runtime = runtime_with("")?;
 
-    let [empty] = runtime.exec("broadcast-f32", [3.5_f32.into(), 0_u64.into()])?;
+    let [empty] = runtime.exec("tensor.broadcast-f32", [3.5_f32.into(), 0_u64.into()])?;
     let Value::Mem(empty) = empty else {
-        anyhow::bail!("broadcast-f32 returned non-mem value: {empty:?}");
+        anyhow::bail!("tensor.broadcast-f32 returned non-mem value: {empty:?}");
     };
     assert_eq!(empty.to_f32_vec(), Vec::<f32>::new());
 
-    let [result] = runtime.exec("broadcast-f32", [3.5_f32.into(), 4_u64.into()])?;
+    let [result] = runtime.exec("tensor.broadcast-f32", [3.5_f32.into(), 4_u64.into()])?;
     let Value::Mem(result) = result else {
-        anyhow::bail!("broadcast-f32 returned non-mem value: {result:?}");
+        anyhow::bail!("tensor.broadcast-f32 returned non-mem value: {result:?}");
     };
     assert_eq!(result.to_f32_vec(), vec![3.5, 3.5, 3.5, 3.5]);
     Ok(())
@@ -990,15 +990,15 @@ fn broadcast_f32_test() -> anyhow::Result<()> {
 fn arange_f32_test() -> anyhow::Result<()> {
     let runtime = runtime_with("")?;
 
-    let [empty] = runtime.exec("arange-f32", [0_u64.into()])?;
+    let [empty] = runtime.exec("tensor.arange-f32", [0_u64.into()])?;
     let Value::Mem(empty) = empty else {
-        anyhow::bail!("arange-f32 returned non-mem value: {empty:?}");
+        anyhow::bail!("tensor.arange-f32 returned non-mem value: {empty:?}");
     };
     assert_eq!(empty.to_f32_vec(), Vec::<f32>::new());
 
-    let [result] = runtime.exec("arange-f32", [5_u64.into()])?;
+    let [result] = runtime.exec("tensor.arange-f32", [5_u64.into()])?;
     let Value::Mem(result) = result else {
-        anyhow::bail!("arange-f32 returned non-mem value: {result:?}");
+        anyhow::bail!("tensor.arange-f32 returned non-mem value: {result:?}");
     };
     assert_eq!(result.to_f32_vec(), vec![0.0, 1.0, 2.0, 3.0, 4.0]);
     Ok(())
@@ -1009,7 +1009,7 @@ fn slice_f32_test() -> anyhow::Result<()> {
     let runtime = runtime_with("")?;
 
     let [result] = runtime.exec(
-        "slice-f32",
+        "tensor.slice-f32",
         [
             runtime.mem_f32(&[10.0_f32, 20.0, 30.0, 40.0])?,
             0_u64.into(),
@@ -1017,12 +1017,12 @@ fn slice_f32_test() -> anyhow::Result<()> {
         ],
     )?;
     let Value::Mem(result) = result else {
-        anyhow::bail!("slice-f32 returned non-mem value: {result:?}");
+        anyhow::bail!("tensor.slice-f32 returned non-mem value: {result:?}");
     };
     assert_eq!(result.to_f32_vec(), vec![10.0, 20.0]);
 
     let [result] = runtime.exec(
-        "slice-f32",
+        "tensor.slice-f32",
         [
             runtime.mem_f32(&[10.0_f32, 20.0, 30.0, 40.0])?,
             1_u64.into(),
@@ -1030,12 +1030,12 @@ fn slice_f32_test() -> anyhow::Result<()> {
         ],
     )?;
     let Value::Mem(result) = result else {
-        anyhow::bail!("slice-f32 returned non-mem value: {result:?}");
+        anyhow::bail!("tensor.slice-f32 returned non-mem value: {result:?}");
     };
     assert_eq!(result.to_f32_vec(), vec![20.0, 30.0]);
 
     let [result] = runtime.exec(
-        "slice-f32",
+        "tensor.slice-f32",
         [
             runtime.mem_f32(&[10.0_f32, 20.0, 30.0, 40.0])?,
             2_u64.into(),
@@ -1043,12 +1043,12 @@ fn slice_f32_test() -> anyhow::Result<()> {
         ],
     )?;
     let Value::Mem(result) = result else {
-        anyhow::bail!("slice-f32 returned non-mem value: {result:?}");
+        anyhow::bail!("tensor.slice-f32 returned non-mem value: {result:?}");
     };
     assert_eq!(result.to_f32_vec(), Vec::<f32>::new());
 
     let [result] = runtime.exec(
-        "slice-f32",
+        "tensor.slice-f32",
         [
             runtime.mem_f32(&[10.0_f32, 20.0, 30.0, 40.0])?,
             0_u64.into(),
@@ -1056,7 +1056,7 @@ fn slice_f32_test() -> anyhow::Result<()> {
         ],
     )?;
     let Value::Mem(result) = result else {
-        anyhow::bail!("slice-f32 returned non-mem value: {result:?}");
+        anyhow::bail!("tensor.slice-f32 returned non-mem value: {result:?}");
     };
     assert_eq!(result.to_f32_vec(), vec![10.0, 20.0, 30.0, 40.0]);
     Ok(())
@@ -1082,16 +1082,16 @@ fn concat_f32_test() -> anyhow::Result<()> {
         (vec![], vec![], vec![]),
     ] {
         let [result] = runtime.exec(
-            "concat-f32",
+            "tensor.concat-f32",
             [runtime.mem_f32(&left)?, runtime.mem_f32(&right)?],
         )?;
         let Value::Mem(result) = result else {
-            anyhow::bail!("concat-f32 returned non-mem value: {result:?}");
+            anyhow::bail!("tensor.concat-f32 returned non-mem value: {result:?}");
         };
         assert_eq!(
             result.to_f32_vec(),
             expected,
-            "concat-f32({left:?}, {right:?})"
+            "tensor.concat-f32({left:?}, {right:?})"
         );
     }
 
@@ -1111,11 +1111,11 @@ fn argmax_f32_test() -> anyhow::Result<()> {
         (vec![3.0_f32, 3.0, 3.0], 0_u64),
     ] {
         let input = runtime.mem_f32(&input_values)?;
-        let [result] = runtime.exec("argmax-f32", [input])?;
+        let [result] = runtime.exec("tensor.argmax-f32", [input])?;
         let Value::U64(result) = result else {
-            anyhow::bail!("argmax-f32 returned non-u64 value: {result:?}");
+            anyhow::bail!("tensor.argmax-f32 returned non-u64 value: {result:?}");
         };
-        assert_eq!(result, expected, "argmax-f32({input_values:?})");
+        assert_eq!(result, expected, "tensor.argmax-f32({input_values:?})");
     }
 
     Ok(())

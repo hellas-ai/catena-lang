@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt, fs, io, path::Path};
+use std::{fmt, fs, io, path::Path};
 
 use hexpr::Operation;
 use metacat::theory::{Theory, TheoryId};
@@ -7,7 +7,7 @@ use open_hypergraphs::lax::{NodeId, OpenHypergraph};
 use open_hypergraphs_dot::{Options, svg::to_svg_with};
 
 use crate::{
-    closure::{Conversion, definition::closure_operation, region::ClosureRegion},
+    closure::{Conversion, region::ClosureRegion},
     pass::forget_closures::{ClosureForgotten, ClosureForgottenTerm},
     report::CompileReport,
 };
@@ -193,64 +193,12 @@ fn dump_closure_conversion_trace(
         )
     })?;
 
-    let generated_bodies = conversion
-        .generated_functions
-        .get(theory_id)
-        .ok_or_else(|| invalid_data(format!("missing converted theory `{theory_id}`")))?;
     let mut index_document = format!(
         "# Closure conversion: `{theory_id}.{definition_name}`\n\n\
          1. [Closure-forgotten input](closure_conversion_00_input.svg) \
             ([hex](closure_conversion_00_input.hex))\n\
          2. [Colored region overview](closure_conversion_10_regions.svg)\n"
     );
-
-    for (index, region) in regions.iter().enumerate() {
-        let extracted = labelled_extracted_region(term, region, index, syntax_theory)?;
-        let svg = to_svg_with(&extracted, &Options::default().display().lr())?;
-        let svg = colorize_svg(
-            svg,
-            (0..extracted.hypergraph.nodes.len())
-                .map(|node| (format!("n_{node}"), region_color(index))),
-            (0..extracted.hypergraph.edges.len())
-                .map(|edge| (format!("e_{edge}"), region_color(index))),
-        )?;
-        let region_stage = format!("closure_conversion_11_region_{index}");
-        let path = definition_dir.join(format!("{region_stage}.svg"));
-        fs::write(&path, svg).map_err(|error| {
-            io::Error::new(
-                error.kind(),
-                format!("failed to write {}: {error}", path.display()),
-            )
-        })?;
-
-        let closure_name = closure_operation(definition_name, region.closure);
-        let closure_body = generated_bodies
-            .get(&closure_name)
-            .ok_or_else(|| invalid_data(format!("missing generated closure `{closure_name}`")))?;
-        let closure_stage = format!("closure_conversion_20_closure_{index}");
-        let closure_svg = render_typed_svg(closure_body, syntax_theory)?;
-        let closure_path = definition_dir.join(format!("{closure_stage}.svg"));
-        fs::write(&closure_path, closure_svg).map_err(|error| {
-            io::Error::new(
-                error.kind(),
-                format!("failed to write {}: {error}", closure_path.display()),
-            )
-        })?;
-        dump_typed_stage_hex(
-            closure_body,
-            &closure_stage,
-            definition_dir,
-            |operation| operation.clone(),
-            syntax_theory,
-        )?;
-
-        index_document.push_str(&format!(
-            "   - Region {index}: `{closure_name}` \
-             ([region](closure_conversion_11_region_{index}.svg), \
-              [body](closure_conversion_20_closure_{index}.svg), \
-              [body hex](closure_conversion_20_closure_{index}.hex))\n"
-        ));
-    }
 
     dump_typed_stage_svg(
         &Some(conversion.rewritten_definitions.clone()),
@@ -390,66 +338,6 @@ fn labelled_region_overview(
                 .map(|region| (format!("e_{edge}"), region_color(region)))
         });
     colorize_svg(svg, node_colors, edge_colors)
-}
-
-fn labelled_extracted_region(
-    term: &ClosureForgottenTerm,
-    region: &ClosureRegion,
-    region_index: usize,
-    syntax_theory: &Theory,
-) -> io::Result<OpenHypergraph<String, String>> {
-    let mut extracted = OpenHypergraph::empty();
-    let mut node_map = HashMap::new();
-
-    for &node in &region.nodes {
-        let ty = pretty_type(&term.hypergraph.nodes[node.0], syntax_theory)?;
-        let mut roles = Vec::new();
-        if node == region.domain {
-            roles.push("domain");
-        }
-        if node == region.codomain {
-            roles.push("codomain");
-        }
-        if region.environment.contains(&node) {
-            roles.push("env");
-        }
-        let copied = extracted.new_node(format!(
-            "R{region_index} w{}: {ty}\n{}",
-            node.0,
-            roles.join(", ")
-        ));
-        node_map.insert(node, copied);
-    }
-
-    for &edge in &region.edges {
-        let boundary = &term.hypergraph.adjacency[edge.0];
-        let sources = remap_region_nodes(&node_map, &boundary.sources)?;
-        let targets = remap_region_nodes(&node_map, &boundary.targets)?;
-        extracted.new_edge(
-            format!("{}\nR{region_index}:body", term.hypergraph.edges[edge.0]),
-            (sources, targets),
-        );
-    }
-
-    extracted.sources = remap_region_nodes(&node_map, &region.environment)?;
-    extracted.sources.push(node_map[&region.domain]);
-    extracted.targets = vec![node_map[&region.codomain]];
-    Ok(extracted)
-}
-
-fn remap_region_nodes(
-    node_map: &HashMap<NodeId, NodeId>,
-    nodes: &[NodeId],
-) -> io::Result<Vec<NodeId>> {
-    nodes
-        .iter()
-        .map(|node| {
-            node_map
-                .get(node)
-                .copied()
-                .ok_or_else(|| invalid_data(format!("region is missing node w{}", node.0)))
-        })
-        .collect()
 }
 
 const REGION_COLORS: [&str; 8] = [

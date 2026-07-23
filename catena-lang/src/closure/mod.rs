@@ -1,18 +1,17 @@
 //! Closure conversion over graphs produced by `forget_closures`.
 //!
-//! The conversion is deliberately split into three stages: discover a delimited
-//! control-flow region, turn that region into a definition, and replace the
-//! original region with an explicit environment and function pointer.
+//! The conversion first inlines named calls with closure-bearing interfaces, then discovers
+//! delimited control-flow regions, turns them into definitions, and replaces
+//! them with explicit environments and function pointers.
 
 use hexpr::Operation;
-use metacat::theory::{Theory, TheorySet};
+use metacat::theory::TheorySet;
 use thiserror::Error;
 
 use crate::{
     check::{CheckError, DefinitionTypes, PartialDefinitionTypes, partial_definition_types},
     pass::forget_closures::ClosureForgotten,
     report::TheoryTermMap,
-    stdlib::constants::FN_HOM_TYPE,
 };
 
 /// Find regions by following closure domains to their codomains.
@@ -22,13 +21,15 @@ pub mod region;
 pub mod definition;
 
 mod context;
+mod inline_named_calls;
+mod region_conversion;
 /// Replace regions with explicit environments, function pointers, and context operations.
 pub mod replace;
 
-/// Complete output of closure conversion, including its debugging snapshots.
+/// Complete output of closure conversion.
 #[derive(Debug, Clone)]
 pub struct Conversion {
-    /// Closure-forgotten graph on which conversion operates.
+    /// Closure-forgotten graph after closure-bearing named calls are inlined.
     pub closure_forgotten_definitions: TheoryTermMap<ClosureForgotten<Operation>>,
     /// Regions discovered in the closure-forgotten input.
     pub regions: region::ClosureRegionMap,
@@ -62,6 +63,10 @@ pub enum ConversionError {
     ReplaceClosures(#[from] replace::ReplaceClosuresError),
     #[error(transparent)]
     EraseContexts(#[from] context::EraseContextsError),
+    #[error(transparent)]
+    InlineNamedCalls(#[from] inline_named_calls::InlineNamedCallsError),
+    #[error("no closure region is ready for extraction while {markers} markers remain")]
+    NoRegionReadyForExtraction { markers: usize },
 }
 
 /// Closure-convert graphs produced by `forget_closures` as one compiler pass.
@@ -73,95 +78,40 @@ pub fn run(
     theory_set: &TheorySet,
     forgotten: &TheoryTermMap<ClosureForgotten<Operation>>,
 ) -> Result<Conversion, ConversionError> {
-    assert_closure_boundary_definitions_are_inlined(theory_set);
+    // Forgetting exposes `name.f -> eval`. Inline the complete call adapter
+    // when `f` has closures on its interface, before discovering regions.
+    let inlined_definitions = inline_named_calls::run(theory_set, forgotten)?;
+    let closure_forgotten_definitions = inlined_definitions.clone();
 
-    let regions = region::run(forgotten)?;
-    let definition::DefinedClosures {
-        generated_theory,
+    // Discover and replace the actual ClosureMarker regions.
+    let region_conversion::RegionConversion {
+        terms: working,
+        initial_regions: regions,
+        theory: generated_theory,
         generated_functions,
-        closure_contexts,
-    } = definition::run(theory_set, forgotten, &regions)?;
+    } = region_conversion::run(theory_set, inlined_definitions)?;
+
+    // Validate the completed generated theory, finish primitive rewriting, and
+    // erase compile-time context projections.
     let generated_types = crate::check::check(&generated_theory).map_err(|error| {
         ConversionError::CheckDefinitions {
             partial_definition_types: partial_definition_types(&error),
             error,
         }
     })?;
-    let replacement = replace::run(
-        &generated_theory,
-        forgotten,
-        &generated_functions,
-        &regions,
-        &closure_contexts,
-    )?;
-    let rewritten_definitions = replacement.terms;
+    let rewritten_definitions =
+        replace::build_rewritten_definitions(&working, &generated_functions)?;
     let runtime_functions = context::erase(&rewritten_definitions)?;
+    let replacement_theory = generated_theory.clone();
 
     Ok(Conversion {
-        closure_forgotten_definitions: forgotten.clone(),
+        closure_forgotten_definitions,
         regions,
         generated_theory,
         generated_types,
         generated_functions,
         rewritten_definitions,
         runtime_functions,
-        replacement_theory: replacement.theory_set,
+        replacement_theory,
     })
-}
-
-/// Region discovery assumes that calls to definitions with closure-typed
-/// interfaces have already been expanded by the early inlining pass.
-fn assert_closure_boundary_definitions_are_inlined(theory_set: &TheorySet) {
-    for (theory_id, theory) in &theory_set.theories {
-        let Theory::Theory { arrows, .. } = theory else {
-            continue;
-        };
-
-        for (definition_name, arrow) in arrows {
-            if arrow.definition.is_none() {
-                continue;
-            }
-
-            assert!(
-                !contains_closure(&arrow.type_maps.0) && !contains_closure(&arrow.type_maps.1),
-                "closure conversion requires closure-boundary definitions to be inlined first; `{theory_id}.{definition_name}` still has a closure on its global interface"
-            );
-        }
-    }
-}
-
-fn contains_closure(type_map: &metacat::theory::Term) -> bool {
-    type_map
-        .hypergraph
-        .edges
-        .iter()
-        .any(|operation| operation.as_str() == FN_HOM_TYPE)
-}
-
-#[cfg(test)]
-mod tests {
-    use std::collections::BTreeMap;
-
-    use metacat::theory::{RawTheorySet, TheorySet};
-
-    /// This is an internal stage invariant rather than a compile integration
-    /// case: callers may not skip closure-boundary inlining before conversion.
-    #[test]
-    #[should_panic(
-        expected = "closure conversion requires closure-boundary definitions to be inlined first"
-    )]
-    fn rejects_uninlined_closure_boundary_definitions() {
-        let source = r#"
-            (def program returns-closure :
-              (bool val) -> ({1 (bool val)} =>)
-            = ([captured.] ([.captured] defer)))
-        "#;
-        let raw = RawTheorySet::from_texts(crate::stdlib::sources().chain([source]))
-            .expect("test theories should parse");
-        let elaborated = crate::elaborate::elaborate(raw).expect("test theory should elaborate");
-        let theory_set = TheorySet::from_raw(elaborated).expect("test theory should interpret");
-
-        super::run(&theory_set, &BTreeMap::new())
-            .expect("the inlining invariant should panic before conversion");
-    }
 }

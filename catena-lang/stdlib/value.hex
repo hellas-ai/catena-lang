@@ -37,3 +37,101 @@
     ([.ph ps] ==> |-)      # |- (φ → ψ)
   } -> ([ph ps . ps] |-)) # |- ψ
 })
+
+# Exact-arity structural helpers for typed `u64` values. Their definitions perform
+# contraction at the wire level through `:.ty`; callers receive distinct value
+# wires and request no surplus runtime outputs.
+(def program u64.copies2 :
+  ([x.] ({[.x] u64} :))
+  ->
+  ([x.] {({[.x] u64} :) ({[.x] u64} :)})
+= ([value.]
+  ([.value] :.ty [copy-a _param-a.]
+    ([.copy-a] :.ty [copy-b _param-b.]
+      {[.copy-a] [.copy-b]}
+    )
+  )
+))
+
+(def program u64.copies3 :
+  ([x.] ({[.x] u64} :))
+  ->
+  ([x.] {({[.x] u64} :) ({[.x] u64} :) ({[.x] u64} :)})
+= ([value.]
+  ([.value] :.ty [copy-a _param-a.]
+    ([.copy-a] :.ty [copy-b _param-b.]
+      ([.copy-b] :.ty [copy-c _param-c.]
+        {[.copy-a] [.copy-b] [.copy-c]}
+      )
+    )
+  )
+))
+
+(def program u64.copies6 :
+  ([x.] ({[.x] u64} :))
+  ->
+  ([x.] {
+    ({[.x] u64} :)
+    ({[.x] u64} :)
+    ({[.x] u64} :)
+    ({[.x] u64} :)
+    ({[.x] u64} :)
+    ({[.x] u64} :)
+  })
+= ([value.]
+  ([.value] :.ty [copy-a _param-a.]
+    ([.copy-a] :.ty [copy-b _param-b.]
+      ([.copy-b] :.ty [copy-c _param-c.]
+        ([.copy-c] :.ty [copy-d _param-d.]
+          ([.copy-d] :.ty [copy-e _param-e.]
+            ([.copy-e] :.ty [copy-f _param-f.]
+              {[.copy-a] [.copy-b] [.copy-c] [.copy-d] [.copy-e] [.copy-f]}
+            )
+          )
+        )
+      )
+    )
+  )
+))
+
+(def program u64.copies2-param :
+  ([x.] ({[.x] u64} :))
+  ->
+  ([x.] {({[.x] u64} :) ({[.x] u64} :) [.x]})
+= ([value.]
+  ([.value] :.ty [copy-a param.]
+    ([.copy-a] :.ty [copy-b _param-b.]
+      {[.copy-a] [.copy-b] [.param]}
+    )
+  )
+))
+
+(def program u64.copy-param :
+  ([x.] ({[.x] u64} :))
+  ->
+  ([x.] {({[.x] u64} :) [.x]})
+= ([value.]
+  ([.value] :.ty [copy param.] {[.copy] [.param]})
+))
+
+(def program u64.params3 :
+  ([x.] ({[.x] u64} :))
+  ->
+  ([x.] {[.x] [.x] [.x]})
+= ([value.]
+  {([.value] :.param) ([.value] :.param) ([.value] :.param)}
+))
+
+(def program u64.copy-params3 :
+  ([x.] ({[.x] u64} :))
+  ->
+  ([x.] {({[.x] u64} :) [.x] [.x] [.x]})
+= ([value.]
+  ([.value] :.ty [copy-a param-a.]
+    ([.copy-a] :.ty [copy-b param-b.]
+      ([.copy-b] :.ty [copy-c param-c.]
+        {[.copy-c] [.param-a] [.param-b] [.param-c]}
+      )
+    )
+  )
+))

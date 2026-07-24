@@ -8,8 +8,8 @@ use metacat::theory::{
 use crate::{
     elaborate::{ElaborateError, NAT_THEORY},
     prefixes::{
-        CONST_PREFIX, GENERATED_CONTEXT_PREFIX, GENERATED_PARTIAL_PREFIX,
-        GENERATED_VARIABLE_PREFIX, NAME_PREFIX, PARTIAL_PREFIX,
+        CONST_PREFIX, GENERATED_OPERATION_PREFIX, GENERATED_VARIABLE_PREFIX, NAME_PREFIX,
+        PARTIAL_PREFIX,
     },
 };
 
@@ -17,13 +17,13 @@ const RESERVED_OPERATION_PREFIXES: &[&str] = &[
     NAME_PREFIX,
     PARTIAL_PREFIX,
     CONST_PREFIX,
-    GENERATED_CONTEXT_PREFIX,
-    GENERATED_PARTIAL_PREFIX,
+    GENERATED_OPERATION_PREFIX,
 ];
 const RESERVED_VARIABLE_PREFIXES: &[&str] = &[GENERATED_VARIABLE_PREFIX];
 
 pub(crate) fn pre_elaboration_invariants(raw: &RawTheorySet) -> Result<(), ElaborateError> {
     check_reserved_operation_prefixes(raw)?;
+    check_reserved_operation_references(raw)?;
     check_reserved_variable_prefixes(raw)?;
     check_type_map_domains(raw)?;
     Ok(())
@@ -41,6 +41,51 @@ fn check_type_map_domains(raw: &RawTheorySet) -> Result<(), ElaborateError> {
         }
     }
 
+    Ok(())
+}
+
+fn check_reserved_operation_references(raw: &RawTheorySet) -> Result<(), ElaborateError> {
+    for (theory_name, theory) in &raw.theories {
+        for (arrow_name, arrow) in &theory.arrows {
+            for map in [&arrow.type_maps.0, &arrow.type_maps.1] {
+                check_reserved_operations_in_hexpr(theory_name, arrow_name, map)?;
+            }
+            if let Some(definition) = &arrow.definition {
+                check_reserved_operations_in_hexpr(theory_name, arrow_name, definition)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn check_reserved_operations_in_hexpr(
+    theory_name: &Operation,
+    arrow_name: &Operation,
+    expr: &Hexpr,
+) -> Result<(), ElaborateError> {
+    match expr {
+        Hexpr::Composition(exprs) | Hexpr::Tensor(exprs) => {
+            for expr in exprs {
+                check_reserved_operations_in_hexpr(theory_name, arrow_name, expr)?;
+            }
+        }
+        Hexpr::Operation(operation) => {
+            let name = operation.as_str();
+            let generated_name = name
+                .strip_prefix(NAME_PREFIX)
+                .or_else(|| name.strip_prefix(PARTIAL_PREFIX))
+                .unwrap_or(name);
+            if generated_name.starts_with(GENERATED_OPERATION_PREFIX) {
+                return Err(ElaborateError::ReservedOperationReference {
+                    theory: theory_name.to_string(),
+                    arrow: arrow_name.to_string(),
+                    operation: operation.to_string(),
+                    prefix: GENERATED_OPERATION_PREFIX,
+                });
+            }
+        }
+        Hexpr::Frobenius { .. } => {}
+    }
     Ok(())
 }
 

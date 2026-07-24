@@ -36,10 +36,11 @@ use metacat::theory::{
     ast::{RawTheory, RawTheoryArrow},
     transitive_dependency_subset,
 };
-use open_hypergraphs::lax::OpenHypergraph;
+use open_hypergraphs::lax::{NodeId, OpenHypergraph};
 
 use crate::{
     elaborate::{ElaborateError, packing},
+    hexpr::term_to_hexpr,
     prefixes::{GENERATED_PARTIAL_PREFIX, GENERATED_VARIABLE_PREFIX, NAME_PREFIX, PARTIAL_PREFIX},
     stdlib::constants::{
         COMPOSE, DEFER, FN_HOM_TYPE, LIFT, PRODUCT_INTRO, PRODUCT_TYPE, TENSOR, UNIT_INTRO,
@@ -408,7 +409,9 @@ fn with_left_unit_map(remaining: Hexpr) -> Result<Hexpr, ElaborateError> {
         remaining,
         Hexpr::Tensor(vec![
             op(UNIT_TYPE)?,
-            identity(vec![parse_var("unit_payload")?]),
+            identity(vec![parse_var(&format!(
+                "{GENERATED_VARIABLE_PREFIX}partial_unit_payload"
+            ))?]),
         ]),
         op(PRODUCT_TYPE)?,
     ]))
@@ -454,90 +457,132 @@ fn partial_definition(
     identity_name: &Operation,
     with_unit_name: &Operation,
 ) -> Result<Hexpr, ElaborateError> {
-    let context_vars = (0..context)
-        .map(|index| parse_var(&format!("partial_context_{index}")))
-        .collect::<Result<Vec<_>, _>>()?;
-    let arguments = (0..applied)
-        .map(|index| parse_var(&format!("partial_argument_{index}")))
-        .collect::<Result<Vec<_>, _>>()?;
-    let inputs = context_vars
-        .iter()
-        .chain(&arguments)
-        .cloned()
+    let mut term = OpenHypergraph::empty();
+    let inputs = (0..context + applied)
+        .map(|_| term.new_node(()))
         .collect::<Vec<_>>();
-    let consume_inputs = Hexpr::Frobenius {
-        sources: inputs,
-        targets: vec![],
-    };
-    let original_closure = named_closure(&original.name, &context_vars)?;
+    term.sources = inputs.clone();
+    let (context_inputs, captured_inputs) = inputs.split_at(context);
+
+    // Reusing these context node IDs on each named operation is the graph-level
+    // representation of copying the metavariable context.
+    //
+    //   context ──▶ name.f ──▶ function pointer ──▶ lift ──▶ (P * R => B)
+    let original_closure = add_named_closure(&mut term, &original.name, context_inputs)?;
 
     let body = if applied == 0 {
         // Nothing is captured: partial.f.0 is simply the lifted name of f.
+        //
+        //   context ──▶ name.f ──▶ lift ──▶ (P * R => B)
         original_closure
     } else {
         // Pack the supplied prefix P into one object, then capture it as a
         // closure 1 => P.
-        let captured = Hexpr::Composition(vec![pack_values(&arguments)?, op(DEFER)?]);
+        //
+        //   p0 ─┐
+        //   p1 ─┼─▶ *.intro ... ──▶ P ──▶ defer ──▶ (1 => P)
+        //   .. ─┤
+        //   pN ─┘
+        let captured_value = pack_value_nodes(&mut term, captured_inputs)?;
+        let captured = add_graph_operation(&mut term, DEFER, vec![captured_value])?;
         if applied == arity {
             // There is no remaining R. Compose 1 => P with P => B directly,
             // producing the fully captured closure 1 => B.
-            Hexpr::Composition(vec![
-                Hexpr::Tensor(vec![captured, original_closure]),
-                op(COMPOSE)?,
-            ])
+            //
+            //   (1 => P) ─┐
+            //             ├─▶ compose ──▶ (1 => B)
+            //   (P => B) ─┘
+            add_graph_operation(&mut term, COMPOSE, vec![captured, original_closure])?
         } else {
             // These are the generalized `index-id` and `index-with-unit`
             // arrows from the motivating matrix example.
-            let identity_closure = named_closure(identity_name, &context_vars)?;
-            let with_unit_closure = named_closure(with_unit_name, &context_vars)?;
+            //
+            //   context ──▶ name.identity-R ──▶ lift ──▶ (R => R)
+            let identity_closure = add_named_closure(&mut term, identity_name, context_inputs)?;
+
+            //   context ──▶ name.with-left-unit-R ──▶ lift ──▶ (R => 1 * R)
+            let with_unit_closure = add_named_closure(&mut term, with_unit_name, context_inputs)?;
 
             // (1 => P) tensor (R => R) gives (1 * R) => (P * R).
-            let append_capture = Hexpr::Composition(vec![
-                Hexpr::Tensor(vec![captured, identity_closure]),
-                op(TENSOR)?,
-            ]);
+            //
+            //   (1 => P) ─┐
+            //             ├─▶ tensor ──▶ (1 * R => P * R)
+            //   (R => R) ─┘
+            let append_capture =
+                add_graph_operation(&mut term, TENSOR, vec![captured, identity_closure])?;
 
             // Precompose with R => (1 * R), obtaining R => (P * R).
-            let prepare = Hexpr::Composition(vec![
-                Hexpr::Tensor(vec![with_unit_closure, append_capture]),
-                op(COMPOSE)?,
-            ]);
+            //
+            //   (R => 1 * R)      ─┐
+            //                      ├─▶ compose ──▶ (R => P * R)
+            //   (1 * R => P * R) ─┘
+            let prepare =
+                add_graph_operation(&mut term, COMPOSE, vec![with_unit_closure, append_capture])?;
 
             // Finally compose R => (P * R) with the lifted original function
             // (P * R) => B.
-            Hexpr::Composition(vec![
-                Hexpr::Tensor(vec![prepare, original_closure]),
-                op(COMPOSE)?,
-            ])
+            //
+            //   (R => P * R) ─┐
+            //                 ├─▶ compose ──▶ (R => B)
+            //   (P * R => B) ─┘
+            add_graph_operation(&mut term, COMPOSE, vec![prepare, original_closure])?
         }
     };
-    Ok(Hexpr::Composition(vec![consume_inputs, body]))
+    term.targets = vec![body];
+    Ok(term_to_hexpr(&term))
 }
 
-fn named_closure(name: &Operation, context_vars: &[Variable]) -> Result<Hexpr, ElaborateError> {
-    Ok(Hexpr::Composition(vec![
-        reference(context_vars),
-        op(&format!("{NAME_PREFIX}{name}"))?,
-        op(LIFT)?,
-    ]))
+fn add_named_closure(
+    term: &mut OpenHypergraph<(), Operation>,
+    name: &Operation,
+    context_inputs: &[NodeId],
+) -> Result<NodeId, ElaborateError> {
+    //   context... ──▶ name.<operation> ──▶ pointer ──▶ lift ──▶ closure
+    let pointer = add_graph_operation(
+        term,
+        &format!("{NAME_PREFIX}{name}"),
+        context_inputs.to_vec(),
+    )?;
+    add_graph_operation(term, LIFT, vec![pointer])
 }
 
-fn pack_values(values: &[Variable]) -> Result<Hexpr, ElaborateError> {
+fn pack_value_nodes(
+    term: &mut OpenHypergraph<(), Operation>,
+    values: &[NodeId],
+) -> Result<NodeId, ElaborateError> {
     match values {
-        [] => op(UNIT_INTRO),
-        [only] => Ok(reference(std::slice::from_ref(only))),
-        [head @ .., last] => Ok(Hexpr::Composition(vec![
-            Hexpr::Tensor(vec![
-                pack_values(head)?,
-                reference(std::slice::from_ref(last)),
-            ]),
-            op(PRODUCT_INTRO)?,
-        ])),
+        //   ∅ ──▶ unit.intro ──▶ 1
+        [] => add_graph_operation(term, UNIT_INTRO, vec![]),
+
+        //   value ─────────────────▶ value
+        [only] => Ok(*only),
+
+        //   head... ──▶ packed-head ─┐
+        //                            ├─▶ *.intro ──▶ packed values
+        //   last ────────────────────┘
+        [head @ .., last] => {
+            let packed_head = pack_value_nodes(term, head)?;
+            add_graph_operation(term, PRODUCT_INTRO, vec![packed_head, *last])
+        }
     }
 }
 
+fn add_graph_operation(
+    term: &mut OpenHypergraph<(), Operation>,
+    name: &str,
+    sources: Vec<NodeId>,
+) -> Result<NodeId, ElaborateError> {
+    //   source 0 ─┐
+    //   source 1 ─┼─▶ operation ──▶ fresh target
+    //   ...      ─┘
+    let target = term.new_node(());
+    term.new_edge(parse_op(name)?, (sources, vec![target]));
+    Ok(target)
+}
+
 fn identity_definition() -> Result<Hexpr, ElaborateError> {
-    let wire = parse_var("partial_identity")?;
+    //   R ─────────────────▶ R
+    let wire = parse_var(&format!("{GENERATED_VARIABLE_PREFIX}partial_identity"))?;
     Ok(Hexpr::Frobenius {
         sources: vec![wire.clone()],
         targets: vec![wire],
@@ -545,7 +590,10 @@ fn identity_definition() -> Result<Hexpr, ElaborateError> {
 }
 
 fn with_left_unit_definition() -> Result<Hexpr, ElaborateError> {
-    let wire = parse_var("partial_with_unit")?;
+    //   ∅ ──▶ unit.intro ──▶ 1 ─┐
+    //                           ├─▶ *.intro ──▶ 1 * R
+    //   R ──────────────────────┘
+    let wire = parse_var(&format!("{GENERATED_VARIABLE_PREFIX}partial_with_unit"))?;
     Ok(Hexpr::Composition(vec![
         Hexpr::Frobenius {
             sources: vec![wire.clone()],
@@ -577,8 +625,11 @@ fn identity(vars: Vec<Variable>) -> Hexpr {
 }
 
 fn op(name: &str) -> Result<Hexpr, ElaborateError> {
+    Ok(Hexpr::Operation(parse_op(name)?))
+}
+
+fn parse_op(name: &str) -> Result<Operation, ElaborateError> {
     name.parse()
-        .map(Hexpr::Operation)
         .map_err(|_| ElaborateError::InvalidGeneratedOperation(name.to_string()))
 }
 

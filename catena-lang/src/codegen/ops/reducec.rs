@@ -20,12 +20,13 @@
 //! ```
 
 use crate::codegen::{
-    GpuAssign, GpuValue,
+    GpuAssign, GpuValue, GpuVar,
     components::{
-        Component, input_components, is_runtime_value, output_components, runtime_values,
-        single_function, single_value, value_expr,
+        Component, input_components, is_runtime_value, output_components, single_function,
+        single_value, value_expr,
     },
-    gpu::GpuRenderError,
+    gpu::{GpuRenderError, render_function_application},
+    lower_types::{CType, LoweredType},
     render_utils::{c_type, invalid_outputs},
     runtime_type,
 };
@@ -88,44 +89,41 @@ pub(in crate::codegen) fn render(
         out.push_str(&format!("            {} {next};\n", c_type(ty)));
     }
 
-    // The producer closure is called with its runtime environment, the current
-    // index, and an out-pointer for the element at that index.
-    let mut get_args = runtime_args(get_env);
-    get_args.push(i.clone());
-    get_args.extend(
-        values
-            .iter()
-            .map(|(_output, _ty, value, _next)| format!("&{value}")),
-    );
-    out.push_str(&format!(
-        "            {}({});\n",
-        value_expr(get_fn),
-        get_args.join(", ")
-    ));
+    // The producer closure is called with its environment and the current
+    // index. Primitive function symbols are rendered inline by the same
+    // primitive table used for direct assignments.
+    let mut get_inputs = get_env.to_vec();
+    get_inputs.push(GpuValue::Var(GpuVar {
+        node: outputs[0].node,
+        name: i.clone(),
+        lowered: LoweredType::Runtime(CType::U64),
+    }));
+    let get_outputs = values
+        .iter()
+        .map(|(output, _ty, value, _next)| GpuVar {
+            name: value.clone(),
+            ..(*output).clone()
+        })
+        .collect::<Vec<_>>();
+    render_function_application(out, "            ", get_fn, &get_inputs, &get_outputs)?;
 
-    // The accumulator closure receives its runtime environment, the current
-    // accumulator, the freshly produced element, and an out-pointer for `next`.
-    let mut add_args = runtime_args(add_env);
-    add_args.extend(
+    // The accumulator closure receives its environment, the current
+    // accumulator, and the freshly produced element.
+    let mut add_inputs = add_env.to_vec();
+    add_inputs.extend(
         values
             .iter()
-            .map(|(output, _ty, _value, _next)| output.name.clone()),
+            .map(|(output, _ty, _value, _next)| GpuValue::Var((*output).clone())),
     );
-    add_args.extend(
-        values
-            .iter()
-            .map(|(_output, _ty, value, _next)| value.clone()),
-    );
-    add_args.extend(
-        values
-            .iter()
-            .map(|(_output, _ty, _value, next)| format!("&{next}")),
-    );
-    out.push_str(&format!(
-        "            {}({});\n",
-        value_expr(add_fn),
-        add_args.join(", ")
-    ));
+    add_inputs.extend(get_outputs.iter().cloned().map(GpuValue::Var));
+    let add_outputs = values
+        .iter()
+        .map(|(output, _ty, _value, next)| GpuVar {
+            name: next.clone(),
+            ..(*output).clone()
+        })
+        .collect::<Vec<_>>();
+    render_function_application(out, "            ", add_fn, &add_inputs, &add_outputs)?;
     for (output, _ty, _value, next) in &values {
         out.push_str(&format!("            {} = {next};\n", output.name));
     }
@@ -196,10 +194,6 @@ fn invalid_component_count(
     }
 }
 
-fn runtime_args(values: Component<'_>) -> Vec<String> {
-    runtime_values(values).map(value_expr).collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -261,6 +255,34 @@ mod tests {
                 "program_add(add_env0, add_env1, out, reduce_value_out, &reduce_next_out);"
             )
         );
+    }
+
+    #[test]
+    fn primitive_accumulator_function_renders_inline() {
+        let output = GpuVar {
+            node: NodeId(9),
+            name: "out".to_string(),
+            lowered: LoweredType::Runtime(CType::U64),
+        };
+        let assignment = GpuAssign {
+            op: op("reducec"),
+            input_sizes: vec![1, 0, 1, 0, 1, 1],
+            output_sizes: vec![1],
+            call_symbol: None,
+            inputs: vec![
+                var(0, "zero"),
+                fn_symbol("u64.add"),
+                fn_symbol("get"),
+                var(1, "n"),
+            ],
+            outputs: vec![output],
+        };
+
+        let mut out = String::new();
+        render(&mut out, &assignment).unwrap();
+
+        assert!(out.contains("reduce_next_out = out + reduce_value_out;"));
+        assert!(!out.contains("program_u64_add"));
     }
 
     #[test]

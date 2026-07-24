@@ -3,11 +3,9 @@
 use crate::codegen::{
     GpuAssign, GpuValue,
     components::{
-        Component, OutputComponent, input_components, output_components, runtime_values,
-        single_function, single_value, value_expr,
+        Component, input_components, output_components, single_function, single_value, value_expr,
     },
-    gpu::GpuRenderError,
-    runtime_type,
+    gpu::{GpuRenderError, render_function_application},
 };
 
 pub(in crate::codegen) fn render(
@@ -24,16 +22,21 @@ pub(in crate::codegen) fn render(
     };
     let (true_env, true_fn, false_env, false_fn, flag, argument) = parts(assignment)?;
 
-    let true_args = call_args(true_env, argument, outputs);
-    let false_args = call_args(false_env, argument, outputs);
-    out.push_str(&format!(
-        "    if ({flag}) {{ {true_fn}({true_args}); }} else {{ {false_fn}({false_args}); }}\n",
-        flag = value_expr(flag),
-        true_fn = value_expr(true_fn),
-        true_args = true_args.join(", "),
-        false_fn = value_expr(false_fn),
-        false_args = false_args.join(", "),
-    ));
+    let true_inputs = true_env
+        .iter()
+        .chain(argument.iter())
+        .cloned()
+        .collect::<Vec<_>>();
+    let false_inputs = false_env
+        .iter()
+        .chain(argument.iter())
+        .cloned()
+        .collect::<Vec<_>>();
+    out.push_str(&format!("    if ({}) {{\n", value_expr(flag)));
+    render_function_application(out, "        ", true_fn, &true_inputs, outputs)?;
+    out.push_str("    } else {\n");
+    render_function_application(out, "        ", false_fn, &false_inputs, outputs)?;
+    out.push_str("    }\n");
     Ok(())
 }
 
@@ -77,23 +80,6 @@ fn invalid_component_count(
         expected: 1,
         actual,
     }
-}
-
-fn call_args(
-    environment: Component<'_>,
-    argument: Component<'_>,
-    outputs: OutputComponent<'_>,
-) -> Vec<String> {
-    runtime_values(environment)
-        .map(value_expr)
-        .chain(runtime_values(argument).map(value_expr))
-        .chain(
-            outputs
-                .iter()
-                .filter(|output| runtime_type(output).is_some())
-                .map(|output| format!("&{}", output.name)),
-        )
-        .collect()
 }
 
 #[cfg(test)]
@@ -210,5 +196,32 @@ mod tests {
 
         assert!(out.contains("program_true(true_env0, true_env1, &output0, &output1)"));
         assert!(out.contains("program_false(false_env0, false_env1, &output0, &output1)"));
+    }
+
+    #[test]
+    fn primitive_function_branches_render_inline() {
+        let assignment = GpuAssign {
+            op: op("bool.ifc"),
+            input_sizes: vec![1, 1, 1, 1, 1, 1],
+            output_sizes: vec![1],
+            call_symbol: None,
+            inputs: vec![
+                var(0, "true_value"),
+                fn_symbol("bool.and"),
+                var(1, "false_value"),
+                fn_symbol("bool.or"),
+                var(2, "flag"),
+                var(3, "argument"),
+            ],
+            outputs: vec![output(4, "output")],
+        };
+
+        let mut out = String::new();
+        render(&mut out, &assignment).unwrap();
+
+        assert!(out.contains("output = true_value && argument;"));
+        assert!(out.contains("output = false_value || argument;"));
+        assert!(!out.contains("program_bool_and"));
+        assert!(!out.contains("program_bool_or"));
     }
 }

@@ -1,9 +1,13 @@
 /// Add name.{f} for each arrow f
 pub(crate) mod name_symbols;
 
+/// Add partial.{f}.{n} for partial applications used by definitions.
+mod partial_applications;
+
 /// Add const.{type}.{c} arrows for each constant c required.
 mod constants;
 
+mod packing;
 mod validate;
 
 use hexpr::{Hexpr, interpret::Error as HexprInterpretError};
@@ -35,6 +39,15 @@ pub enum ElaborateError {
         arrow: String,
         prefix: &'static str,
     },
+    #[error(
+        "operation `{theory}.{arrow}` references reserved operation `{operation}` with prefix `{prefix}`"
+    )]
+    ReservedOperationReference {
+        theory: String,
+        arrow: String,
+        operation: String,
+        prefix: &'static str,
+    },
     #[error("variable `{theory}.{arrow}:{variable}` uses reserved prefix `{prefix}`")]
     ReservedVariablePrefix {
         theory: String,
@@ -44,6 +57,16 @@ pub enum ElaborateError {
     },
     #[error("invalid integer constant `{operation}`: {reason}")]
     InvalidConstant { operation: String, reason: String },
+    #[error("invalid partial application `{operation}`: {reason}")]
+    InvalidPartialApplication { operation: String, reason: String },
+    #[error(
+        "partial application `{operation}` refers to missing arrow `{arrow}` in theory `{theory}`"
+    )]
+    MissingPartialApplicationArrow {
+        theory: String,
+        operation: String,
+        arrow: String,
+    },
     #[error(
         "failed to interpret source type map for `name.{theory}.{arrow}` from `{map}`: {error}"
     )]
@@ -78,6 +101,7 @@ pub fn elaborate(mut raw: RawTheorySet) -> Result<RawTheorySet, ElaborateError> 
     validate::pre_elaboration_invariants(&raw)?;
     constants::elaborate(&mut raw, constants::U64)?;
     constants::elaborate(&mut raw, constants::U32)?;
+    partial_applications::elaborate(&mut raw)?;
 
     let theory_names: Vec<_> = raw
         .theories
@@ -97,7 +121,7 @@ pub fn elaborate(mut raw: RawTheorySet) -> Result<RawTheorySet, ElaborateError> 
 mod tests {
     use metacat::theory::RawTheorySet;
 
-    use crate::prefixes::GENERATED_VARIABLE_PREFIX;
+    use crate::prefixes::{GENERATED_OPERATION_PREFIX, GENERATED_VARIABLE_PREFIX};
 
     use super::{ElaborateError, elaborate};
 
@@ -131,5 +155,70 @@ mod tests {
                 && variable == "__catena_p0"
                 && prefix == GENERATED_VARIABLE_PREFIX
         ));
+    }
+
+    #[test]
+    fn user_declarations_cannot_use_catena_generated_operation_prefix() {
+        let raw = RawTheorySet::from_text(
+            r#"
+            (theory type nat {
+              (arr val : 1 -> 1)
+              (arr bool : 0 -> 1)
+            })
+
+            (theory program type {
+              (arr __catena_partial.identity : (bool val) -> (bool val))
+            })
+            "#,
+        )
+        .expect("test theory should parse");
+
+        let error = elaborate(raw).expect_err("reserved operation should be rejected");
+        assert!(matches!(
+            error,
+            ElaborateError::ReservedOperationPrefix {
+                theory,
+                arrow,
+                prefix,
+            } if theory == "program"
+                && arrow == "__catena_partial.identity"
+                && prefix == GENERATED_OPERATION_PREFIX
+        ));
+    }
+
+    #[test]
+    fn user_definitions_cannot_reference_catena_generated_operations() {
+        for operation in [
+            "__catena_partial.identity.partial.f.1",
+            "name.__catena_partial.identity.partial.f.1",
+        ] {
+            let raw = RawTheorySet::from_text(&format!(
+                r#"
+                (theory type nat {{
+                  (arr val : 1 -> 1)
+                  (arr bool : 0 -> 1)
+                }})
+
+                (theory program type {{
+                  (def bad : (bool val) -> (bool val) = {operation})
+                }})
+                "#
+            ))
+            .expect("test theory should parse");
+
+            let error = elaborate(raw).expect_err("reserved operation reference should fail");
+            assert!(matches!(
+                error,
+                ElaborateError::ReservedOperationReference {
+                    theory,
+                    arrow,
+                    operation: rejected,
+                    prefix,
+                } if theory == "program"
+                    && arrow == "bad"
+                    && rejected == operation
+                    && prefix == GENERATED_OPERATION_PREFIX
+            ));
+        }
     }
 }

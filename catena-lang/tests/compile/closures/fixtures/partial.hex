@@ -1,0 +1,9 @@
+# `partial.u64.add.1` is synthesized during elaboration. It captures `lhs` in
+# a closure; composing that closure with the deferred `rhs` fully applies add.
+(def program partially-applied-add :
+  {(u64 val) (u64 val)}
+  ->
+  (u64 val)
+= ([lhs rhs.]
+  ({([.rhs] defer) ([.lhs] partial.u64.add.1)} compose run)
+))

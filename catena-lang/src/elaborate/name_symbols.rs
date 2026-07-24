@@ -8,9 +8,9 @@ use metacat::theory::{
 };
 
 use crate::{
-    elaborate::ElaborateError,
+    elaborate::{ElaborateError, packing},
     prefixes::{GENERATED_VARIABLE_PREFIX, NAME_PREFIX},
-    stdlib::constants::{FN_REF_TYPE, PRODUCT_TYPE, UNIT_TYPE, VALUE_TYPE},
+    stdlib::constants::{FN_REF_TYPE, VALUE_TYPE},
 };
 
 #[derive(Default)]
@@ -143,14 +143,12 @@ fn target_type_map(
         targets: copied_metavars,
     };
 
-    let pack_s = Hexpr::Composition(vec![
-        raw.type_maps.0.clone(),
-        pack_object(&mut generated, "s", interpreted_source.targets.len())?,
-    ]);
-    let pack_t = Hexpr::Composition(vec![
-        raw.type_maps.1.clone(),
-        pack_object(&mut generated, "t", interpreted_target.targets.len())?,
-    ]);
+    let packed_source =
+        packing::pack_object(interpreted_source.targets.len(), &mut || generated.var("s"))?;
+    let packed_target =
+        packing::pack_object(interpreted_target.targets.len(), &mut || generated.var("t"))?;
+    let pack_s = Hexpr::Composition(vec![raw.type_maps.0.clone(), packed_source]);
+    let pack_t = Hexpr::Composition(vec![raw.type_maps.1.clone(), packed_target]);
 
     Ok(Hexpr::Composition(vec![
         copy,
@@ -160,35 +158,9 @@ fn target_type_map(
     ]))
 }
 
-fn pack_object(
-    generated: &mut GeneratedVars,
-    stem: &str,
-    object_size: usize,
-) -> Result<Hexpr, ElaborateError> {
-    match object_size {
-        0 => parse_operation_hexpr(UNIT_TYPE),
-        1 => Ok(identity_var(generated.var(stem)?)),
-        2 => parse_operation_hexpr(PRODUCT_TYPE),
-        n => Ok(Hexpr::Composition(vec![
-            Hexpr::Tensor(vec![
-                pack_object(generated, stem, n - 1)?,
-                identity_var(generated.var(stem)?),
-            ]),
-            parse_operation_hexpr(PRODUCT_TYPE)?,
-        ])),
-    }
-}
-
 fn parse_variable(name: &str) -> Result<Variable, ElaborateError> {
     name.parse()
         .map_err(|_| ElaborateError::InvalidGeneratedVariable(name.to_string()))
-}
-
-fn identity_var(var: Variable) -> Hexpr {
-    Hexpr::Frobenius {
-        sources: vec![var.clone()],
-        targets: vec![var],
-    }
 }
 
 fn parse_operation(name: &str) -> Result<Operation, ElaborateError> {

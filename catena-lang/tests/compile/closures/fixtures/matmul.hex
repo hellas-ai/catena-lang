@@ -18,9 +18,9 @@
   ([.n-len] u64.copies2 [a-rows materialize-n.]
     ([.m-len] u64.copies2 [b-cols materialize-m.]
       ([.k-len] u64.copies3 [a-cols b-rows materialize-k.]
-        ({[.nk-len] [.a]} f32.buf.view [a-flat-view.]
+        ({([.nk-len] :.param) [.a]} partial.f32.row-major.flat-at.1 [a-flat-view.]
           ({[.a-rows] [.a-cols] [.a-flat-view]} f32.row-major.matrix-view [a-view.]
-            ({[.km-len] [.b]} f32.buf.view [b-flat-view.]
+            ({([.km-len] :.param) [.b]} partial.f32.row-major.flat-at.1 [b-flat-view.]
               ({[.b-rows] [.b-cols] [.b-flat-view]} f32.row-major.matrix-view [b-view.]
                 ({
                   [.materialize-n]
@@ -36,8 +36,7 @@
         )
       )
     )
-  )
-))
+)))
 
 # Materialize A * I from one concrete row-major buffer.
 (def program matmul-buf-and-identity :
@@ -51,9 +50,9 @@
 = ([n-len nn-len a.]
   ([.n-len] u64.copies6 [view-rows view-cols identity-n materialize-n materialize-m materialize-k.]
     ([.nn-len] u64.copies2 [flat-view-len output-len.]
-      ({[.flat-view-len] [.a]} f32.buf.view [flat-view.]
+      ({([.flat-view-len] :.param) [.a]} partial.f32.row-major.flat-at.1 [flat-view.]
         ({[.view-rows] [.view-cols] [.flat-view]} f32.row-major.matrix-view [a-view.]
-          ([.identity-n] f32.matrix.identity [identity-view.]
+          (([.identity-n] :.param) name.f32.matrix.identity-at lift [identity-view.]
             ({
               [.materialize-n]
               [.materialize-m]
@@ -66,5 +65,4 @@
         )
       )
     )
-  )
-))
+)))

@@ -28,6 +28,7 @@ pub fn report() -> &'static CompileReport {
             include_str!("closures/fixtures/reduce.hex"),
             include_str!("closures/fixtures/materialize.hex"),
             include_str!("closures/fixtures/matmul.hex"),
+            include_str!("closures/fixtures/partial.hex"),
         ];
         let report =
             crate::compile_with_sources(sources).expect("closure compile fixtures should compile");

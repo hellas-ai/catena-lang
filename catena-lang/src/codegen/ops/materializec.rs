@@ -23,12 +23,12 @@
 //!
 
 use crate::codegen::{
-    GpuAssign, GpuDialect, GpuFunction, GpuValue,
+    GpuAssign, GpuDialect, GpuFunction, GpuValue, GpuVar,
     components::{
         Component, input_components, runtime_values, single_function, single_value, value_expr,
     },
-    gpu::GpuRenderError,
-    lower_types::CType,
+    gpu::{GpuRenderError, render_function_application},
+    lower_types::{CType, LoweredType},
     render_utils::{c_type, invalid_outputs, param_decl},
     runtime_type,
 };
@@ -64,19 +64,18 @@ pub(in crate::codegen) fn render_kernel(
     out.push_str("    uint64_t i = (uint64_t)blockIdx.x * blockDim.x + threadIdx.x;\n");
     out.push_str("    if (i >= len) { return; }\n");
     out.push_str(&format!("    {} value;\n", c_type(element)));
-    out.push_str("    ");
-    out.push_str(&value_expr(func));
-    out.push('(');
-    let mut call_args = runtime_values(env)
-        .filter_map(|arg| match arg {
-            GpuValue::Var(var) => Some(var.name.clone()),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    call_args.push("i".to_string());
-    call_args.push("&value".to_string());
-    out.push_str(&call_args.join(", "));
-    out.push_str(");\n");
+    let mut producer_inputs = env.to_vec();
+    producer_inputs.push(GpuValue::Var(GpuVar {
+        node: output.node,
+        name: "i".to_string(),
+        lowered: LoweredType::Runtime(CType::U64),
+    }));
+    let producer_output = GpuVar {
+        node: output.node,
+        name: "value".to_string(),
+        lowered: LoweredType::Runtime(element.as_ref().clone()),
+    };
+    render_function_application(out, "    ", func, &producer_inputs, &[producer_output])?;
     out.push_str("    out[i] = value;\n");
     out.push_str("}\n");
     Ok(())
@@ -201,5 +200,48 @@ fn invalid_component_count(
         description,
         expected: 1,
         actual,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::codegen::fn_ptrs::FnPtrSymbol;
+    use hexpr::Operation;
+    use open_hypergraphs::lax::NodeId;
+
+    fn op(name: &str) -> Operation {
+        name.parse().unwrap()
+    }
+
+    #[test]
+    fn primitive_producer_function_renders_inline() {
+        let assignment = GpuAssign {
+            op: op("materializec"),
+            input_sizes: vec![1, 0, 1],
+            output_sizes: vec![1],
+            call_symbol: None,
+            inputs: vec![
+                GpuValue::Var(GpuVar {
+                    node: NodeId(0),
+                    name: "len".to_string(),
+                    lowered: LoweredType::Runtime(CType::U64),
+                }),
+                GpuValue::FnSymbol(FnPtrSymbol {
+                    target: op("ix.to-u64"),
+                }),
+            ],
+            outputs: vec![GpuVar {
+                node: NodeId(1),
+                name: "out".to_string(),
+                lowered: LoweredType::Runtime(CType::Pointer(Box::new(CType::U64))),
+            }],
+        };
+
+        let mut out = String::new();
+        render_kernel(&mut out, "materialize_test", &assignment).unwrap();
+
+        assert!(out.contains("value = i;"));
+        assert!(!out.contains("program_ix_to_u64"));
     }
 }

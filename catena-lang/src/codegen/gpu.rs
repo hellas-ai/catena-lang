@@ -9,7 +9,7 @@ use crate::codegen::{
     gpu_placement::{
         GpuFunctionPlacement, direct_function_placement, function_placement, function_placements,
     },
-    lower_types::CType,
+    lower_types::{CType, LoweredType},
     ops::{ifc, materializec, reducec, row_major},
     prelude::render_gpu_prelude,
     render_utils::{c_type, invalid_inputs, invalid_outputs, param_decl},
@@ -294,6 +294,35 @@ fn render_assignment(
         return render_call(out, symbol, assignment);
     }
 
+    if render_primitive_assignment(out, assignment)? {
+        return Ok(());
+    }
+
+    match assignment.op.as_str() {
+        "bool.ifc" => ifc::render(out, assignment)?,
+        "eval" => render_eval(out, assignment)?,
+        "reducec" => reducec::render(out, assignment)?,
+        "gpu.materialize" => render_materialize_call(out, function, assignment, dialect)?,
+        "materializec" => materializec::render_call(out, function, assignment, dialect)?,
+        op => {
+            return Err(GpuRenderError::UnsupportedOp(
+                op.parse().unwrap_or_else(|_| assignment.op.clone()),
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Render one primitive operation.
+///
+/// Both an ordinary assignment such as `f32.add` and a function-valued use such
+/// as `name.f32.add` are lowered through this table. Returning `false` means
+/// that `assignment.op` is not a primitive and may instead name a generated
+/// program function or a structural operation such as `eval`.
+fn render_primitive_assignment(
+    out: &mut String,
+    assignment: &GpuAssign,
+) -> Result<bool, GpuRenderError> {
     match assignment.op.as_str() {
         "bool.t" => {
             let [] = assignment.inputs.as_slice() else {
@@ -322,9 +351,24 @@ fn render_assignment(
             };
             out.push_str(&format!("    {} = !{};\n", output.name, value_expr(input)));
         }
+        "bool.id" => render_forget(out, assignment)?,
+        "bool.copy" => {
+            let [input] = assignment.inputs.as_slice() else {
+                return Err(invalid_inputs(assignment, 1));
+            };
+            let [left, right] = assignment.outputs.as_slice() else {
+                return Err(invalid_outputs(assignment, 2));
+            };
+            out.push_str(&format!(
+                "    {} = {};\n    {} = {};\n",
+                left.name,
+                value_expr(input),
+                right.name,
+                value_expr(input)
+            ));
+        }
         "bool.and" => render_binary_bool(out, assignment, "&&")?,
         "bool.or" => render_binary_bool(out, assignment, "||")?,
-        "bool.ifc" => ifc::render(out, assignment)?,
         "unit.intro" => {}
         "ax-mp" | "assert-then" | ":.param" => {}
         ":.ty" => render_ty_ascription(out, assignment)?,
@@ -391,23 +435,15 @@ fn render_assignment(
         "row-major-row" => row_major::render_row(out, assignment)?,
         "row-major-col" => row_major::render_col(out, assignment)?,
         "u64.to-ix" => render_u64_to_ix(out, assignment)?,
-        "eval" => render_eval(out, assignment)?,
-        "reducec" => reducec::render(out, assignment)?,
-        "gpu.materialize" => render_materialize_call(out, function, assignment, dialect)?,
-        "materializec" => materializec::render_call(out, function, assignment, dialect)?,
         op if op.starts_with(CONST_U64_PREFIX) => {
             render_int_const(out, assignment, CONST_U64_PREFIX, "ULL")?
         }
         op if op.starts_with(CONST_U32_PREFIX) => {
             render_int_const(out, assignment, CONST_U32_PREFIX, "U")?
         }
-        op => {
-            return Err(GpuRenderError::UnsupportedOp(
-                op.parse().unwrap_or_else(|_| assignment.op.clone()),
-            ));
-        }
+        _ => return Ok(false),
     }
-    Ok(())
+    Ok(true)
 }
 
 fn render_assert(out: &mut String, assignment: &GpuAssign) -> Result<(), GpuRenderError> {
@@ -879,6 +915,59 @@ fn render_call(
     Ok(())
 }
 
+/// Apply either a primitive function symbol or a generated program function.
+///
+/// Primitive symbols are lowered by `render_primitive_assignment`, exactly like
+/// direct primitive assignments. Non-primitive symbols retain the generated
+/// `program_*` calling convention.
+pub(in crate::codegen) fn render_function_application(
+    out: &mut String,
+    indent: &str,
+    function: &GpuValue,
+    inputs: &[GpuValue],
+    outputs: &[GpuVar],
+) -> Result<(), GpuRenderError> {
+    if let GpuValue::FnSymbol(symbol) = function {
+        let primitive = GpuAssign {
+            op: symbol.target.clone(),
+            input_sizes: Vec::new(),
+            output_sizes: vec![outputs.len()],
+            call_symbol: None,
+            inputs: inputs.to_vec(),
+            outputs: outputs.to_vec(),
+        };
+        let mut rendered = String::new();
+        if render_primitive_assignment(&mut rendered, &primitive)? {
+            for line in rendered.lines() {
+                out.push_str(indent);
+                out.push_str(line.strip_prefix("    ").unwrap_or(line));
+                out.push('\n');
+            }
+            return Ok(());
+        }
+    }
+
+    let mut call_args = inputs
+        .iter()
+        .filter_map(|input| match input {
+            GpuValue::Var(var) if runtime_type(var).is_some() => Some(var.name.clone()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    call_args.extend(
+        outputs
+            .iter()
+            .filter(|output| runtime_type(output).is_some())
+            .map(|output| format!("&{}", output.name)),
+    );
+    out.push_str(&format!(
+        "{indent}{}({});\n",
+        value_expr(function),
+        call_args.join(", ")
+    ));
+    Ok(())
+}
+
 fn render_binary_bool(
     out: &mut String,
     assignment: &GpuAssign,
@@ -903,50 +992,7 @@ fn render_eval(out: &mut String, assignment: &GpuAssign) -> Result<(), GpuRender
     let Some((func, args)) = assignment.inputs.split_last() else {
         return Err(invalid_inputs(assignment, 1));
     };
-    if let GpuValue::FnSymbol(symbol) = func
-        && render_primitive_eval(out, assignment, &symbol.target, args)?
-    {
-        return Ok(());
-    }
-    let mut call_args = args.iter().map(value_expr).collect::<Vec<_>>();
-    call_args.extend(
-        assignment
-            .outputs
-            .iter()
-            .filter(|output| runtime_type(output).is_some())
-            .map(|output| format!("&{}", output.name)),
-    );
-    out.push_str(&format!(
-        "    {}({});\n",
-        value_expr(func),
-        call_args.join(", ")
-    ));
-    Ok(())
-}
-
-fn render_primitive_eval(
-    out: &mut String,
-    assignment: &GpuAssign,
-    target: &Operation,
-    args: &[GpuValue],
-) -> Result<bool, GpuRenderError> {
-    let primitive = GpuAssign {
-        op: target.clone(),
-        input_sizes: Vec::new(),
-        output_sizes: assignment.output_sizes.clone(),
-        call_symbol: None,
-        inputs: args.to_vec(),
-        outputs: assignment.outputs.clone(),
-    };
-    match target.as_str() {
-        "f32.add" => render_binary(out, &primitive, "+")?,
-        "f32.mul" => render_binary(out, &primitive, "*")?,
-        "row-major-index" => row_major::render_index(out, &primitive)?,
-        "row-major-row" => row_major::render_row(out, &primitive)?,
-        "row-major-col" => row_major::render_col(out, &primitive)?,
-        _ => return Ok(false),
-    }
-    Ok(true)
+    render_function_application(out, "    ", func, args, &assignment.outputs)
 }
 
 fn render_materialize_kernel(
@@ -985,18 +1031,34 @@ fn render_materialize_kernel(
     out.push_str("    catena_gpu_state_t state = 0;\n");
     out.push_str("    catena_gpu_state_t next_state = 0;\n");
     out.push_str(&format!("    {} value;\n", c_type(element)));
-    out.push_str("    ");
-    out.push_str(&value_expr(func));
-    out.push_str("(env, state");
+    let mut kernel_inputs = vec![
+        GpuValue::Var(GpuVar {
+            node: output.node,
+            name: "env".to_string(),
+            lowered: LoweredType::Runtime(CType::Named("catena_gpu_env_t".to_string())),
+        }),
+        GpuValue::Var(GpuVar {
+            node: output.node,
+            name: "state".to_string(),
+            lowered: LoweredType::Runtime(CType::Named("catena_gpu_state_t".to_string())),
+        }),
+    ];
     for arg in args {
-        if let GpuValue::Var(var) = arg
-            && runtime_type(var).is_some()
-        {
-            out.push_str(", ");
-            out.push_str(&var.name);
-        }
+        kernel_inputs.push(arg.clone());
     }
-    out.push_str(", &next_state, &value);\n");
+    let kernel_outputs = [
+        GpuVar {
+            node: output.node,
+            name: "next_state".to_string(),
+            lowered: LoweredType::Runtime(CType::Named("catena_gpu_state_t".to_string())),
+        },
+        GpuVar {
+            node: output.node,
+            name: "value".to_string(),
+            lowered: LoweredType::Runtime(element.as_ref().clone()),
+        },
+    ];
+    render_function_application(out, "    ", func, &kernel_inputs, &kernel_outputs)?;
     out.push_str("    out[thread_id] = value;\n");
     out.push_str("}\n");
     Ok(())
@@ -1281,6 +1343,49 @@ mod tests {
 
         assert!(source.contains("    flat = row * cols + col;\n"));
         assert!(!source.contains("program_row_major_index"));
+    }
+
+    #[test]
+    fn direct_and_function_valued_primitives_share_rendering() {
+        for (primitive_name, input_count, output_count) in
+            [("bool.not", 1, 1), ("bool.copy", 1, 2), ("f32.add", 2, 1)]
+        {
+            let inputs = (0..input_count)
+                .map(|index| GpuValue::Var(var(index, &format!("in{index}"), CType::U64)))
+                .collect::<Vec<_>>();
+            let outputs = (0..output_count)
+                .map(|index| var(input_count + index, &format!("out{index}"), CType::U64))
+                .collect::<Vec<_>>();
+            let assignment = GpuAssign {
+                op: op(primitive_name),
+                input_sizes: vec![input_count],
+                output_sizes: vec![output_count],
+                call_symbol: None,
+                inputs: inputs.clone(),
+                outputs: outputs.clone(),
+            };
+
+            let mut direct = String::new();
+            assert!(render_primitive_assignment(&mut direct, &assignment).unwrap());
+
+            let mut function_valued = String::new();
+            render_function_application(
+                &mut function_valued,
+                "    ",
+                &GpuValue::FnSymbol(FnPtrSymbol {
+                    target: op(primitive_name),
+                }),
+                &inputs,
+                &outputs,
+            )
+            .unwrap();
+
+            assert_eq!(function_valued, direct, "{primitive_name}");
+            assert!(
+                !function_valued.contains(&format!("program_{}", primitive_name.replace('.', "_"))),
+                "{primitive_name}"
+            );
+        }
     }
 
     #[test]

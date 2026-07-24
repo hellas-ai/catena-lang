@@ -61,31 +61,6 @@ __host__ __device__ static inline uint64_t catena_launch_len(catena_launch_param
         * params.block_dim.x * params.block_dim.y * params.block_dim.z;
 }}
 
-__host__ __device__ static inline void bool_not(uint8_t arg0, uint8_t *out1) {{
-    *out1 = !arg0;
-}}
-
-__host__ __device__ static inline void bool_or(uint8_t arg0, uint8_t arg1, uint8_t *out2) {{
-    *out2 = arg0 || arg1;
-}}
-
-__host__ __device__ static inline void bool_and(uint8_t arg0, uint8_t arg1, uint8_t *out2) {{
-    *out2 = arg0 && arg1;
-}}
-
-__host__ __device__ static inline void bool_id(uint8_t arg0, uint8_t *out1) {{
-    *out1 = arg0;
-}}
-
-__host__ __device__ static inline void bool_copy(uint8_t arg0, uint8_t *out1, uint8_t *out2) {{
-    *out1 = arg0;
-    *out2 = arg0;
-}}
-
-__host__ __device__ static inline void bool_li(uint8_t arg0, uint8_t *out1) {{
-    *out1 = arg0;
-}}
-
 __host__ __device__ static inline float catena_u32_bitcast_f32(uint32_t bits) {{
     union {{
         uint32_t u;

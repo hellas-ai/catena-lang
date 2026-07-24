@@ -460,27 +460,105 @@ fn verify_boundary(
     ))
 }
 
+/// Replace one forgotten named call with an instantiated copy of its definition.
+///
+/// Forgetting closures turns a source-level named closure call into a graph
+/// containing the function name, `eval`, and product/unit adapters:
+///
+/// ```text
+/// context ───────────────────────► name.f ──► function pointer ─┐
+///                                                               ▼
+/// flattened inputs ──► input adapters ──► packed input ──► eval
+///                                                               │
+///                                                               ▼
+/// flattened outputs ◄── output adapters ◄── packed output ─────┘
+/// ```
+///
+/// `recover_call_boundary` has already opened the adapters and returned the
+/// flattened inputs and outputs. This function removes the complete call
+/// fragment and splices the forgotten body of `f` directly at that boundary:
+///
+/// ```text
+/// flattened inputs ──► [ instantiated body of f ] ──► flattened outputs
+/// ```
 fn replace_call(
     term: &mut ClosureForgottenTerm,
     call: NamedCall,
     boundary: CallBoundary,
     template: ClosureForgottenTerm,
 ) {
-    let mut deleted = boundary
-        .adapter_edges
-        .into_iter()
-        .map(EdgeId)
-        .collect::<Vec<_>>();
+    let CallBoundary {
+        inputs,
+        outputs,
+        adapter_edges,
+    } = boundary;
+    let mut deleted = adapter_edges.into_iter().map(EdgeId).collect::<Vec<_>>();
     deleted.extend([call.name, call.eval]);
     deleted.sort_by_key(|edge| edge.0);
     deleted.dedup();
-    term.delete_edges(&deleted);
 
+    // Collect the edges forming the old `name.f -> eval` call and its adapters.
+    let deleted_edges = deleted.iter().map(|edge| edge.0).collect::<BTreeSet<_>>();
+
+    // A node must survive if it is part of the enclosing definition, is one of
+    // the recovered splice boundaries, or is incident to an edge we keep.
+    let retained_nodes = term
+        .sources
+        .iter()
+        .chain(&term.targets)
+        .chain(&inputs)
+        .chain(&outputs)
+        .chain(
+            term.hypergraph
+                .adjacency
+                .iter()
+                .enumerate()
+                .filter(|(index, _)| !deleted_edges.contains(index))
+                .flat_map(|(_, edge)| edge.sources.iter().chain(&edge.targets)),
+        )
+        .map(|node| node.0)
+        .collect::<BTreeSet<_>>();
+
+    // Among nodes touched by the removed edges, delete only those private to
+    // the fragment. These are typically the function pointer produced by
+    // `name.f` and the intermediate packed product/unit adapter nodes.
+    let deleted_nodes = deleted
+        .iter()
+        .flat_map(|edge| {
+            let adjacency = &term.hypergraph.adjacency[edge.0];
+            adjacency.sources.iter().chain(&adjacency.targets)
+        })
+        .filter(|node| !retained_nodes.contains(&node.0))
+        .map(|node| node.0)
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .map(NodeId)
+        .collect::<Vec<_>>();
+
+    // Removing hyperedges does not automatically remove their nodes, so delete
+    // the fragment-private nodes explicitly. Node deletion compacts the node
+    // array; use its witness map to translate boundaries saved with the old IDs.
+    term.delete_edges(&deleted);
+    let node_map = term.hypergraph.delete_nodes_witness(&deleted_nodes);
+    let remap = |node: NodeId| {
+        NodeId(node_map[node.0].expect("retained call boundary node should survive deletion"))
+    };
+    term.sources
+        .iter_mut()
+        .for_each(|node| *node = remap(*node));
+    term.targets
+        .iter_mut()
+        .for_each(|node| *node = remap(*node));
+    let inputs = inputs.into_iter().map(remap).collect::<Vec<_>>();
+    let outputs = outputs.into_iter().map(remap).collect::<Vec<_>>();
+
+    // Append the instantiated body and identify its external boundary with the
+    // remapped boundary of the removed call.
     let (template_sources, template_targets) = term.append(template);
-    for (outer, inner) in boundary.inputs.into_iter().zip(template_sources) {
+    for (outer, inner) in inputs.into_iter().zip(template_sources) {
         term.unify(outer, inner);
     }
-    for (inner, outer) in template_targets.into_iter().zip(boundary.outputs) {
+    for (inner, outer) in template_targets.into_iter().zip(outputs) {
         term.unify(inner, outer);
     }
     term.quotient().ok();
@@ -642,7 +720,10 @@ fn boundary_mismatch(
 mod tests {
     use metacat::theory::{RawTheorySet, TheorySet};
 
-    use crate::{pass::forget_closures::ClosureForgotten, prefixes::NAME_PREFIX};
+    use crate::{
+        pass::forget_closures::{ClosureForgotten, ClosureForgottenTerm},
+        prefixes::NAME_PREFIX,
+    };
 
     #[test]
     fn replaces_the_complete_named_call_fragment_with_the_forgotten_body() {
@@ -693,5 +774,22 @@ mod tests {
                     || operation.as_str() == format!("{NAME_PREFIX}{apply_closure}"))
         }));
         assert!(!specialized[&program].contains_key(&apply_closure));
+        assert_no_isolated_internal_nodes(after);
+    }
+
+    fn assert_no_isolated_internal_nodes(term: &ClosureForgottenTerm) {
+        let mut referenced = vec![false; term.hypergraph.nodes.len()];
+        for node in term.sources.iter().chain(&term.targets).chain(
+            term.hypergraph
+                .adjacency
+                .iter()
+                .flat_map(|edge| edge.sources.iter().chain(&edge.targets)),
+        ) {
+            referenced[node.0] = true;
+        }
+        assert!(
+            referenced.into_iter().all(|referenced| referenced),
+            "named-call inlining left isolated internal nodes"
+        );
     }
 }

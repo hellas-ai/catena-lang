@@ -48,6 +48,14 @@
   u64.mul
 ))
 
+# Assert a scalar condition in generated host code. The proof output is erased
+# from the runtime ABI.
+(def program require-true :
+  ({[b] bool} :)
+  ->
+  ({[b] bool.t} = |-)
+= assert)
+
 # generate the constant 0xDEADBEEFDEADBEEF
 (def program deadbeef : [] -> (u64 val) = const.u64.0xDEADBEEFDEADBEEF)
 (def program deadbeef32 : [] -> (u32 val) = const.u32.0xDEADBEEF)

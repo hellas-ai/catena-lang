@@ -39,7 +39,7 @@ use metacat::theory::{
 use open_hypergraphs::lax::OpenHypergraph;
 
 use crate::{
-    elaborate::ElaborateError,
+    elaborate::{ElaborateError, packing},
     prefixes::{GENERATED_PARTIAL_PREFIX, GENERATED_VARIABLE_PREFIX, NAME_PREFIX, PARTIAL_PREFIX},
     stdlib::constants::{
         COMPOSE, DEFER, FN_HOM_TYPE, LIFT, PRODUCT_INTRO, PRODUCT_TYPE, TENSOR, UNIT_INTRO,
@@ -399,22 +399,8 @@ fn slice_map(
 }
 
 fn pack_after(map: Hexpr, count: usize, vars: &mut Vars) -> Result<Hexpr, ElaborateError> {
-    Ok(Hexpr::Composition(vec![map, pack_object(vars, count)?]))
-}
-
-fn pack_object(vars: &mut Vars, count: usize) -> Result<Hexpr, ElaborateError> {
-    match count {
-        0 => op(UNIT_TYPE),
-        1 => Ok(identity(vec![vars.one("pack")?])),
-        2 => op(PRODUCT_TYPE),
-        n => Ok(Hexpr::Composition(vec![
-            Hexpr::Tensor(vec![
-                pack_object(vars, n - 1)?,
-                identity(vec![vars.one("pack")?]),
-            ]),
-            op(PRODUCT_TYPE)?,
-        ])),
-    }
+    let packed = packing::pack_object(count, &mut || vars.one("pack"))?;
+    Ok(Hexpr::Composition(vec![map, packed]))
 }
 
 fn with_left_unit_map(remaining: Hexpr) -> Result<Hexpr, ElaborateError> {

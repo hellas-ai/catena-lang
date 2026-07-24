@@ -7,6 +7,7 @@ mod partial_applications;
 /// Add const.{type}.{c} arrows for each constant c required.
 mod constants;
 
+mod packing;
 mod validate;
 
 use hexpr::{Hexpr, interpret::Error as HexprInterpretError};

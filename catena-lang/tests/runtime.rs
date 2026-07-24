@@ -51,6 +51,81 @@ fn not_false() -> anyhow::Result<()> {
 }
 
 #[test]
+fn bool_not_function_value_exec() -> anyhow::Result<()> {
+    let runtime = runtime_with(
+        r#"
+        (def program not-via-function-value : (bool val) -> (bool val) = (
+          {defer (name.bool.not lift)}
+          compose
+          run
+        ))
+        "#,
+    )?;
+
+    for (input, expected) in [(false, 1_u8), (true, 0_u8)] {
+        let [result] = runtime.exec("not-via-function-value", [input.into()])?;
+        let Value::Bool(result) = result else {
+            anyhow::bail!("not-via-function-value returned non-bool value: {result:?}");
+        };
+        assert_eq!(result, expected, "not-via-function-value({input})");
+    }
+    Ok(())
+}
+
+#[test]
+fn bool_ifc_primitive_function_values_exec() -> anyhow::Result<()> {
+    let runtime = runtime_with(
+        r#"
+        (def program bool-ifc-primitives :
+          {(bool val) (bool val)} -> (bool val)
+        = ([flag arg.]
+          {bool.t name.bool.and bool.t name.bool.or [.flag arg]}
+          bool.ifc
+        ))
+        "#,
+    )?;
+
+    for (flag, arg, expected) in [
+        (true, false, 0_u8),
+        (true, true, 1_u8),
+        (false, false, 1_u8),
+        (false, true, 1_u8),
+    ] {
+        let [result] = runtime.exec("bool-ifc-primitives", [flag.into(), arg.into()])?;
+        let Value::Bool(result) = result else {
+            anyhow::bail!("bool-ifc-primitives returned non-bool value: {result:?}");
+        };
+        assert_eq!(result, expected, "bool-ifc-primitives({flag}, {arg})");
+    }
+    Ok(())
+}
+
+#[test]
+fn bool_copy_function_value_exec() -> anyhow::Result<()> {
+    let runtime = runtime_with(
+        r#"
+        (def program copy-via-function-value :
+          [] -> ({(bool val) (bool val)} *)
+        = (
+          {(bool.t defer) (name.bool.copy lift)}
+          compose
+          run
+        ))
+        "#,
+    )?;
+
+    let [left, right] = runtime.exec("copy-via-function-value", [])?;
+    let Value::Bool(left) = left else {
+        anyhow::bail!("copy-via-function-value returned non-bool left value: {left:?}");
+    };
+    let Value::Bool(right) = right else {
+        anyhow::bail!("copy-via-function-value returned non-bool right value: {right:?}");
+    };
+    assert_eq!((left, right), (1, 1));
+    Ok(())
+}
+
+#[test]
 fn exec_validates_source_name_and_signature() -> anyhow::Result<()> {
     use catena_lang::runtime::runtime::ExecError;
 

@@ -18,6 +18,20 @@ use crate::pass::record_boundary_sizes::OperationWithBoundarySizes;
 
 /// Generic storage for per-theory, per-definition graph results produced by compiler passes.
 pub type TheoryTermMap<A = Operation> = BTreeMap<TheoryId, BTreeMap<Operation, AnnotatedTerm<A>>>;
+
+#[derive(Clone, Copy, Debug)]
+pub struct ReportOptions {
+    pub generate_svgs: bool,
+}
+
+impl Default for ReportOptions {
+    fn default() -> Self {
+        Self {
+            generate_svgs: true,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct CompileReport {
     pub raw_theories: RawTheorySet,
@@ -49,6 +63,14 @@ impl CompileReport {
 
 impl CompileReport {
     pub fn dump_graphs_to_dir(&self, dir: impl AsRef<Path>) -> io::Result<()> {
+        self.dump_graphs_to_dir_with_options(dir, ReportOptions::default())
+    }
+
+    pub fn dump_graphs_to_dir_with_options(
+        &self,
+        dir: impl AsRef<Path>,
+        options: ReportOptions,
+    ) -> io::Result<()> {
         let dir = dir.as_ref();
         fs::create_dir_all(dir)?;
         fs::write(
@@ -56,13 +78,23 @@ impl CompileReport {
             self.raw_theories.to_hexpr_text(),
         )?;
         elaboration::dump_elaboration(self, dir)?;
-        svg::dump_svgs(self, &dir.join("svgs"))?;
+        if options.generate_svgs {
+            svg::dump_svgs(self, &dir.join("svgs"))?;
+        }
         Ok(())
     }
 
     pub fn dump_to_dir(&self, dir: impl AsRef<Path>) -> io::Result<()> {
+        self.dump_to_dir_with_options(dir, ReportOptions::default())
+    }
+
+    pub fn dump_to_dir_with_options(
+        &self,
+        dir: impl AsRef<Path>,
+        options: ReportOptions,
+    ) -> io::Result<()> {
         let dir = dir.as_ref();
-        self.dump_graphs_to_dir(dir)?;
+        self.dump_graphs_to_dir_with_options(dir, options)?;
         gpu::dump_gpu(self, &dir.join("gpu"))?;
         Ok(())
     }

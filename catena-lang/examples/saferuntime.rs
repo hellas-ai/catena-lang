@@ -2,15 +2,21 @@ use std::{env, path::PathBuf};
 
 use catena_lang::{
     codegen::GpuDialect,
-    runtime::{Runtime, Value},
+    runtime::{SafeExecError, SafeRuntime, Value, run_safe_runtime_child_if_requested},
     stdlib,
 };
 
 const GPU_DIALECT_ENV: &str = "CATENA_GPU_DIALECT";
 
 fn main() -> anyhow::Result<()> {
+    // If child mode is enabled after being spawned by the parent, run the child loop.
+    // Otherwise, continue with the normal runtime execution as a parent process.
+    if run_safe_runtime_child_if_requested()? {
+        return Ok(());
+    }
+
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let runtime = Runtime::new(
+    let runtime = SafeRuntime::new(
         stdlib::paths_from(&root).chain([root.join("examples/example.hex")]),
         configured_gpu_dialect()?,
     )?;
@@ -24,30 +30,18 @@ fn main() -> anyhow::Result<()> {
 
     let [] = runtime.exec("require-true", [true.into()])?;
 
-    // Input values for `array-head-u64`
-    let values = [0x123456789abcdef0_u64, 7, 11];
-    println!(
-        "array-head input: [{}]",
-        values
-            .iter()
-            .map(|value| format!("0x{value:x}"))
-            .collect::<Vec<_>>()
-            .join(", ")
-    );
-
-    // Execute array-head-u64 with values above
-    let input = runtime.mem_u64(&values)?;
-    let [head] = runtime.exec("array-head-u64", [input])?;
-    let Value::U64(head) = head else {
-        anyhow::bail!("array-head-u64 returned non-u64 value: {head:?}");
-    };
-
-    println!("array-head-u64: 0x{head:x} (expected 0x{:x})", values[0]);
-    anyhow::ensure!(
-        head == values[0],
-        "array head mismatch: got 0x{head:x}, expected 0x{:x}",
-        values[0]
-    );
+    match runtime.exec::<1, 0>("require-true", [false.into()]) {
+        Err(SafeExecError::ChildTerminated { status, stderr }) => {
+            anyhow::ensure!(!status.success(), "asserting child exited successfully");
+            anyhow::ensure!(
+                stderr.contains("catena assertion failed"),
+                "asserting child did not report the expected failure: {stderr:?}"
+            );
+        }
+        Err(error) => anyhow::bail!("require-true(false) returned the wrong error: {error}"),
+        Ok([]) => anyhow::bail!("require-true(false) unexpectedly returned successfully"),
+    }
+    println!("require-true(false): child assertion isolated");
 
     Ok(())
 }

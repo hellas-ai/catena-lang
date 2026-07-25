@@ -8,6 +8,7 @@ use std::{
 
 use libloading::Library;
 use libloading::os::unix::{Library as UnixLibrary, RTLD_LAZY, RTLD_LOCAL};
+use serde::{Deserialize, Serialize};
 
 use super::artifact::{Artifact, ArtifactError};
 use super::executor::{Executor, ExecutorError};
@@ -77,7 +78,7 @@ pub enum InitError {
     Mem(#[from] MemError),
 }
 
-#[derive(Debug, Error)]
+#[derive(Debug, Error, Serialize, Deserialize)]
 pub enum ExecError {
     #[error("Unknown source function '{0}'")]
     UnknownSourceFunction(String),
@@ -177,32 +178,43 @@ impl Runtime {
         name: &str,
         args: [Value; M],
     ) -> Result<[Value; N], ExecError> {
+        self.exec_values(name, args.into(), N)
+            .map(|values| values.try_into().expect("output arity already validated"))
+    }
+
+    pub(crate) fn exec_values(
+        &self,
+        name: &str,
+        args: Vec<Value>,
+        output_count: usize,
+    ) -> Result<Vec<Value>, ExecError> {
         let signature = self
             .signatures
             .get(name)
             .ok_or_else(|| ExecError::UnknownSourceFunction(name.to_string()))?;
-        self.exec_symbol(name, signature, args)
+        self.exec_symbol(name, signature, args, output_count)
     }
 
-    fn exec_symbol<const M: usize, const N: usize>(
+    fn exec_symbol(
         &self,
         name: &str,
         signature: &FunctionSignature,
-        args: [Value; M],
-    ) -> Result<[Value; N], ExecError> {
+        args: Vec<Value>,
+        output_count: usize,
+    ) -> Result<Vec<Value>, ExecError> {
         // Check arity/coarity lines up with what's in the function signature.
-        if signature.inputs.len() != M {
+        if signature.inputs.len() != args.len() {
             return Err(ExecError::InputArityMismatch {
                 name: name.to_string(),
                 expected: signature.inputs.len(),
-                actual: M,
+                actual: args.len(),
             });
         }
-        if signature.outputs.len() != N {
+        if signature.outputs.len() != output_count {
             return Err(ExecError::OutputArityMismatch {
                 name: name.to_string(),
                 expected: signature.outputs.len(),
-                actual: N,
+                actual: output_count,
             });
         }
 
@@ -230,9 +242,7 @@ impl Runtime {
         self.executor
             .call(&signature.symbol, &args, &mut output_values);
 
-        Ok(output_values
-            .try_into()
-            .expect("output arity already validated"))
+        Ok(output_values)
     }
 
     fn zeroed_value(&self, kind: ValueKind) -> Value {

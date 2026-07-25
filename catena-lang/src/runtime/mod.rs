@@ -18,10 +18,18 @@ pub mod runtime;
 /// Runtime-call signature metadata
 pub mod signature;
 
+mod protocol;
+
+/// Run compiled Catena programs in an isolated child process.
+pub mod safe_runtime;
+
 //#[cfg(test)]
 //mod tests;
 
 pub use runtime::InitError;
 pub use runtime::Runtime;
+pub use safe_runtime::{
+    ChildMainError, SafeExecError, SafeInitError, SafeRuntime, run_safe_runtime_child_if_requested,
+};
 pub use value::Value;
 pub use value::ValueKind;

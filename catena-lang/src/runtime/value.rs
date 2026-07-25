@@ -1,4 +1,5 @@
 use super::mem::Mem;
+use serde::{Deserialize, Serialize};
 
 /// Public Catena runtime values accepted at program boundaries.
 #[derive(Debug)]
@@ -11,7 +12,7 @@ pub enum Value {
 }
 
 /// Semantic kinds of public runtime values.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ValueKind {
     Bool,
     U32,

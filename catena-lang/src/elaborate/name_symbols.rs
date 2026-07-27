@@ -1,6 +1,6 @@
 //! Elaborate a theory by adding a symbol `name.f : I -> (A -> B)` for each arrow `f : A -> B`.
 //! This follows from "finitary closed monoidal categories".
-use hexpr::{Hexpr, Operation, Variable, try_interpret};
+use hexpr::{Hexpr, LVar, Operation, try_interpret};
 use metacat::theory::{
     RawTheorySet, Theory, TheoryId, TheorySet,
     ast::{RawTheory, RawTheoryArrow},
@@ -21,13 +21,13 @@ struct GeneratedVars {
 }
 
 impl GeneratedVars {
-    fn var(&mut self, stem: &str) -> Result<Variable, ElaborateError> {
+    fn var(&mut self, stem: &str) -> Result<LVar, ElaborateError> {
         let name = format!("{GENERATED_VARIABLE_PREFIX}{stem}{}", self.next);
         self.next += 1;
         parse_variable(&name)
     }
 
-    fn vars(&mut self, stem: &str, arity: usize) -> Result<Vec<Variable>, ElaborateError> {
+    fn vars(&mut self, stem: &str, arity: usize) -> Result<Vec<LVar>, ElaborateError> {
         (0..arity).map(|_| self.var(stem)).collect()
     }
 }
@@ -160,7 +160,7 @@ fn target_type_map(
     ]))
 }
 
-fn parse_variable(name: &str) -> Result<Variable, ElaborateError> {
+fn parse_variable(name: &str) -> Result<LVar, ElaborateError> {
     name.parse()
         .map_err(|_| ElaborateError::InvalidGeneratedVariable(name.to_string()))
 }

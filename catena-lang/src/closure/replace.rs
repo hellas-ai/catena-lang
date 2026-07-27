@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use hexpr::{Hexpr, Operation, Variable, interpret::Error as HexprInterpretError, try_interpret};
+use hexpr::{Hexpr, LVar, Operation, interpret::Error as HexprInterpretError, try_interpret};
 use metacat::{
     check::eval_type,
     dual::Dual,
@@ -933,7 +933,7 @@ fn context_operation(definition: &Operation, closure: NodeId) -> Operation {
     .expect("generated context operation should parse")
 }
 
-fn context_vars(arity: usize) -> Vec<Variable> {
+fn context_vars(arity: usize) -> Vec<LVar> {
     (0..arity)
         .map(|index| {
             format!("{GENERATED_VARIABLE_PREFIX}closure_ctx{index}")

@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
-use hexpr::{Hexpr, Operation, Variable, interpret::Error as HexprInterpretError, try_interpret};
+use hexpr::{Hexpr, LVar, Operation, interpret::Error as HexprInterpretError, try_interpret};
 use metacat::{
     theory::{
         Term, Theory, TheoryArrow, TheoryId, TheorySet, ast::RawTheoryArrow, model::SignatureError,
@@ -626,7 +626,7 @@ fn collect_leaf_indices(object: &Obj, indices: &mut impl Extend<usize>) {
     }
 }
 
-fn context_vars(arity: usize) -> Vec<Variable> {
+fn context_vars(arity: usize) -> Vec<LVar> {
     (0..arity)
         .map(|index| {
             format!("{GENERATED_VARIABLE_PREFIX}closure_ctx{index}")

@@ -7,11 +7,11 @@
 //! For theoretical background, see
 //! [String Diagrams for Strictification and Coherence](https://arxiv.org/abs/2201.11738)
 
-use hexpr::Operation;
+use hexpr::{Hexpr, Operation, Variable};
 use metacat::tree::Tree;
 use open_hypergraphs::{
     category::Arrow,
-    lax::{Hyperedge, Hypergraph, OpenHypergraph},
+    lax::{Hyperedge, Hypergraph, NodeId, OpenHypergraph},
 };
 
 use crate::stdlib::constants::{
@@ -21,6 +21,62 @@ use crate::stdlib::constants::{
 pub(crate) type Obj = Tree<(), Operation>;
 pub(crate) type Arr = Operation;
 pub(crate) type Term = OpenHypergraph<Obj, Arr>;
+
+/// Build the type map from a strict tensor boundary to its canonical packed
+/// object. Packing is right-associated, as it is for [`to_packer`].
+pub(crate) fn packed_type_map<E>(
+    object_count: usize,
+    fresh_variable: &mut impl FnMut() -> Result<Variable, E>,
+) -> Result<Hexpr, E> {
+    match object_count {
+        0 => Ok(Hexpr::Operation(op(UNIT_TYPE))),
+        1 => Ok(identity_hexpr(fresh_variable()?)),
+        2 => Ok(Hexpr::Operation(op(PRODUCT_TYPE))),
+        n => Ok(Hexpr::Composition(vec![
+            Hexpr::Tensor(vec![
+                identity_hexpr(fresh_variable()?),
+                packed_type_map(n - 1, fresh_variable)?,
+            ]),
+            Hexpr::Operation(op(PRODUCT_TYPE)),
+        ])),
+    }
+}
+
+/// Add operations which pack `nodes` into one right-associated output node.
+///
+/// This is shared by type maps (`1` and `*`) and program terms
+/// (`unit.intro` and `*.intro`) so both representations use the same shape.
+pub(crate) fn pack_nodes<O: Clone>(
+    term: &mut OpenHypergraph<O, Operation>,
+    nodes: &[NodeId],
+    node_label: O,
+    unit_operation: &str,
+    product_operation: &str,
+) -> NodeId {
+    match nodes {
+        [] => {
+            let packed = term.new_node(node_label);
+            term.new_edge(op(unit_operation), (vec![], vec![packed]));
+            packed
+        }
+        [only] => *only,
+        [head, tail @ ..] => {
+            let packed_tail = pack_nodes(
+                term,
+                tail,
+                node_label.clone(),
+                unit_operation,
+                product_operation,
+            );
+            let packed = term.new_node(node_label);
+            term.new_edge(
+                op(product_operation),
+                (vec![*head, packed_tail], vec![packed]),
+            );
+            packed
+        }
+    }
+}
 
 /// Compute the size of an object: equivalent to `size` in
 /// [String Diagrams for Strictification and Coherence](https://arxiv.org/abs/2201.11738)
@@ -114,7 +170,7 @@ fn packer_for(objects: &[Obj]) -> Term {
     }
 }
 
-fn pack_objects(objects: &[Obj]) -> Obj {
+pub(crate) fn pack_objects(objects: &[Obj]) -> Obj {
     match objects {
         [] => Tree::Node(op(UNIT_TYPE), 0, vec![]),
         [only] => only.clone(),
@@ -189,10 +245,17 @@ pub(crate) fn unpack_packed_object(object: &Obj, arity: usize) -> Vec<Obj> {
             let [left, right] = children.as_slice() else {
                 panic!("product object should have exactly two children");
             };
-            let mut unpacked = unpack_packed_object(left, arity - 1);
-            unpacked.push(right.clone());
+            let mut unpacked = vec![left.clone()];
+            unpacked.extend(unpack_packed_object(right, arity - 1));
             unpacked
         }
+    }
+}
+
+fn identity_hexpr(variable: Variable) -> Hexpr {
+    Hexpr::Frobenius {
+        sources: vec![variable.clone()],
+        targets: vec![variable],
     }
 }
 
@@ -210,6 +273,29 @@ mod tests {
 
     fn product(left: Obj, right: Obj) -> Obj {
         Tree::Node(op(PRODUCT_TYPE), 0, vec![left, right])
+    }
+
+    #[test]
+    fn type_map_packing_uses_the_canonical_right_association() {
+        let mut next = 0;
+        let packed = packed_type_map(3, &mut || {
+            let variable = format!("p{next}").parse::<Variable>().unwrap();
+            next += 1;
+            Ok::<_, ()>(variable)
+        })
+        .unwrap();
+
+        let Hexpr::Composition(parts) = packed else {
+            panic!("three objects should require a composite type map");
+        };
+        let [Hexpr::Tensor(children), Hexpr::Operation(product)] = parts.as_slice() else {
+            panic!("three objects should pack as A * (B * C)");
+        };
+        assert!(matches!(children[0], Hexpr::Frobenius { .. }));
+        assert!(
+            matches!(&children[1], Hexpr::Operation(operation) if operation.as_str() == PRODUCT_TYPE)
+        );
+        assert_eq!(product.as_str(), PRODUCT_TYPE);
     }
 
     #[test]
@@ -319,12 +405,12 @@ mod tests {
         let a = object("A");
         let b = object("B");
         let c = object("C");
-        let ab = product(a.clone(), b.clone());
-        let packed = product(ab.clone(), c.clone());
+        let bc = product(b.clone(), c.clone());
+        let packed = product(a.clone(), bc.clone());
 
         assert_eq!(
             unpack_packed_object(&packed, 2),
-            vec![ab.clone(), c.clone()]
+            vec![a.clone(), bc.clone()]
         );
         assert_eq!(unpack_packed_object(&packed, 3), vec![a, b, c]);
     }

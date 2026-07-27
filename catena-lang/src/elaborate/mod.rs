@@ -7,7 +7,6 @@ mod partial_applications;
 /// Add const.{type}.{c} arrows for each constant c required.
 mod constants;
 
-mod packing;
 mod validate;
 
 use hexpr::{Hexpr, interpret::Error as HexprInterpretError};
@@ -189,8 +188,8 @@ mod tests {
     #[test]
     fn user_definitions_cannot_reference_catena_generated_operations() {
         for operation in [
-            "__catena_partial.identity.partial.f.1",
-            "name.__catena_partial.identity.partial.f.1",
+            "__catena_partial.identity.0.partial.f.1",
+            "name.__catena_partial.identity.0.partial.f.1",
         ] {
             let raw = RawTheorySet::from_text(&format!(
                 r#"

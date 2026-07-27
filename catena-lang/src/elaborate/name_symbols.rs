@@ -8,7 +8,8 @@ use metacat::theory::{
 };
 
 use crate::{
-    elaborate::{ElaborateError, packing},
+    elaborate::ElaborateError,
+    nonstrict::packed_type_map,
     prefixes::{GENERATED_VARIABLE_PREFIX, NAME_PREFIX},
     stdlib::constants::{FN_REF_TYPE, VALUE_TYPE},
 };
@@ -144,9 +145,9 @@ fn target_type_map(
     };
 
     let packed_source =
-        packing::pack_object(interpreted_source.targets.len(), &mut || generated.var("s"))?;
+        packed_type_map(interpreted_source.targets.len(), &mut || generated.var("s"))?;
     let packed_target =
-        packing::pack_object(interpreted_target.targets.len(), &mut || generated.var("t"))?;
+        packed_type_map(interpreted_target.targets.len(), &mut || generated.var("t"))?;
     let pack_s = Hexpr::Composition(vec![raw.type_maps.0.clone(), packed_source]);
     let pack_t = Hexpr::Composition(vec![raw.type_maps.1.clone(), packed_target]);
 

@@ -30,18 +30,19 @@
 //! needed, and connects them using `defer`, `tensor`, `compose`, and
 //! `name.f lift`.
 
-use hexpr::{Hexpr, Operation, Variable, try_interpret};
+use hexpr::{Hexpr, Operation, try_interpret};
 use metacat::theory::{
     RawTheorySet, Theory, TheoryId, TheorySet,
     ast::{RawTheory, RawTheoryArrow},
     transitive_dependency_subset,
 };
-use open_hypergraphs::lax::{NodeId, OpenHypergraph};
+use open_hypergraphs::lax::{EdgeId, NodeId, OpenHypergraph};
 
 use crate::{
-    elaborate::{ElaborateError, packing},
+    elaborate::ElaborateError,
     hexpr::term_to_hexpr,
-    prefixes::{GENERATED_PARTIAL_PREFIX, GENERATED_VARIABLE_PREFIX, NAME_PREFIX, PARTIAL_PREFIX},
+    nonstrict::pack_nodes,
+    prefixes::{GENERATED_PARTIAL_PREFIX, NAME_PREFIX, PARTIAL_PREFIX},
     stdlib::constants::{
         COMPOSE, DEFER, FN_HOM_TYPE, LIFT, PRODUCT_INTRO, PRODUCT_TYPE, TENSOR, UNIT_INTRO,
         UNIT_TYPE,
@@ -168,6 +169,27 @@ fn invalid_error(operation: &Operation, reason: &str) -> ElaborateError {
     }
 }
 
+/// Generate the arrows needed to implement one use of `partial.f.N`.
+///
+/// The main generated arrow captures the first `N` inputs of `f`:
+///
+/// ```text
+/// partial.f.N : A_0, ..., A_(N-1) -> (R => B)
+/// ```
+///
+/// where `R = pack(A_N, ..., A_(k-1))` is the packed remainder of `f`'s
+/// domain.
+///
+/// When the captured prefix and `R` are both nonempty, let
+/// `D_i = pack(A_(i+1), ..., A_(k-1))`. For each captured input `A_i`, the CMC
+/// construction also needs two ordinary functions which can be named and
+/// lifted into closures:
+///
+/// ```text
+/// __catena_partial.identity.i.partial.f.N       : D_i -> D_i
+/// __catena_partial.with-left-unit.i.partial.f.N : D_i -> 1 * D_i
+/// ```
+///
 fn partial_arrows(
     syntax: &Theory,
     theory_name: &Operation,
@@ -226,15 +248,24 @@ fn partial_arrows(
         target.targets.len(),
     )?;
 
-    let identity_name = generated_helper_name("identity", &partial.operation)?;
-    let with_unit_name = generated_helper_name("with-left-unit", &partial.operation)?;
+    let helper_names = if partial.applied < arity {
+        (0..partial.applied)
+            .map(|index| {
+                Ok((
+                    generated_helper_name(&format!("identity.{index}"), &partial.operation)?,
+                    generated_helper_name(&format!("with-left-unit.{index}"), &partial.operation)?,
+                ))
+            })
+            .collect::<Result<Vec<_>, ElaborateError>>()?
+    } else {
+        Vec::new()
+    };
     let definition = partial_definition(
         original,
         context_arity,
         arity,
         partial.applied,
-        &identity_name,
-        &with_unit_name,
+        &helper_names,
     )?;
     let mut arrows = vec![RawTheoryArrow {
         name: partial.operation.clone(),
@@ -243,17 +274,20 @@ fn partial_arrows(
     }];
 
     if partial.applied < arity && partial.applied > 0 {
-        let remaining = packed_slice_map(&source, partial.applied, arity)?;
-        arrows.push(RawTheoryArrow {
-            name: identity_name,
-            type_maps: (remaining.clone(), remaining.clone()),
-            definition: Some(identity_definition()?),
-        });
-        arrows.push(RawTheoryArrow {
-            name: with_unit_name,
-            type_maps: (remaining.clone(), with_left_unit_map(remaining)?),
-            definition: Some(with_left_unit_definition()?),
-        });
+        for (index, (identity_name, with_unit_name)) in helper_names.into_iter().enumerate() {
+            let suffix = packed_slice_term(&source, index + 1, arity);
+            let suffix_map = term_to_hexpr(&suffix);
+            arrows.push(RawTheoryArrow {
+                name: identity_name,
+                type_maps: (suffix_map.clone(), suffix_map),
+                definition: Some(identity_definition()),
+            });
+            arrows.push(RawTheoryArrow {
+                name: with_unit_name,
+                type_maps: (term_to_hexpr(&suffix), with_left_unit_map(suffix.clone())?),
+                definition: Some(with_left_unit_definition()?),
+            });
+        }
     }
     Ok(arrows)
 }
@@ -263,24 +297,18 @@ fn partial_source_map(
     context: usize,
     applied: usize,
 ) -> Result<Hexpr, ElaborateError> {
-    let mut vars = Vars::default();
-    let context_vars = vars.many("context", context)?;
+    let mut prefix = slice_term(source, 0, applied);
+    debug_assert_eq!(prefix.sources.len(), context);
     // A use of `partial.f.N` receives metavariable witnesses first, followed
     // by the captured prefix. Copy the witnesses because the target closure
     // type and the captured call to `f` both depend on them.
-    let copied = Hexpr::Frobenius {
-        sources: context_vars.clone(),
-        targets: context_vars
-            .iter()
-            .cloned()
-            .chain(context_vars.clone())
-            .collect(),
-    };
-    let prefix = slice_map(source, 0, applied, &mut vars)?;
-    Ok(Hexpr::Composition(vec![
-        copied,
-        Hexpr::Tensor(vec![identity(context_vars), prefix]),
-    ]))
+    prefix.targets = prefix
+        .sources
+        .iter()
+        .copied()
+        .chain(prefix.targets)
+        .collect();
+    Ok(term_to_hexpr(&prefix))
 }
 
 fn partial_target_map(
@@ -291,52 +319,50 @@ fn partial_target_map(
     applied: usize,
     target_arity: usize,
 ) -> Result<Hexpr, ElaborateError> {
-    let mut vars = Vars::default();
-    let context_vars = vars.many("context", context)?;
-    let copied = Hexpr::Frobenius {
-        sources: context_vars.clone(),
-        targets: context_vars
-            .iter()
-            .cloned()
-            .chain(context_vars.clone())
-            .collect(),
+    let mut term = packed_slice_term(source, applied, arity);
+    let target = packed_slice_term(target, 0, target_arity);
+    let (target_sources, target_targets) = term.append(target);
+    assert_eq!(
+        term.sources.len(),
+        context,
+        "source type-map context should retain its original arity"
+    );
+    assert_eq!(
+        target_sources.len(),
+        context,
+        "source and target type maps should have matching contexts"
+    );
+    for (source, target_source) in term.sources.clone().into_iter().zip(target_sources) {
+        term.unify(source, target_source);
+    }
+
+    let [remaining] = term.targets.as_slice() else {
+        unreachable!("a packed source slice should have one target");
     };
-    let remaining = pack_after(
-        slice_map(source, applied, arity, &mut vars)?,
-        arity - applied,
-        &mut vars,
-    )?;
-    let target = pack_after(
-        slice_map(target, 0, target_arity, &mut vars)?,
-        target_arity,
-        &mut vars,
-    )?;
-    Ok(Hexpr::Composition(vec![
-        copied,
-        Hexpr::Tensor(vec![remaining, target]),
-        op(FN_HOM_TYPE)?,
-    ]))
+    let remaining = *remaining;
+    let [target] = target_targets.as_slice() else {
+        unreachable!("a packed target slice should have one target");
+    };
+    let target = *target;
+    let function = add_graph_operation(&mut term, FN_HOM_TYPE, vec![remaining, target])?;
+    term.targets = vec![function];
+    term.quotient()
+        .expect("unit-labeled syntax graphs should always quotient");
+    Ok(term_to_hexpr(&term))
 }
 
-fn packed_slice_map(
-    source: &SyntaxTerm,
-    start: usize,
-    end: usize,
-) -> Result<Hexpr, ElaborateError> {
-    let mut vars = Vars::default();
-    let slice = slice_map(source, start, end, &mut vars)?;
-    pack_after(slice, end - start, &mut vars)
+fn packed_slice_term(source: &SyntaxTerm, start: usize, end: usize) -> SyntaxTerm {
+    let mut slice = slice_term(source, start, end);
+    pack_targets(&mut slice);
+    slice
 }
 
-fn slice_map(
-    term: &SyntaxTerm,
-    start: usize,
-    end: usize,
-    vars: &mut Vars,
-) -> Result<Hexpr, ElaborateError> {
-    let node_vars = vars.many("wire", term.hypergraph.nodes.len())?;
+fn slice_term(term: &SyntaxTerm, start: usize, end: usize) -> SyntaxTerm {
     let selected_targets = &term.targets[start..end];
     let mut retained_nodes = vec![false; term.hypergraph.nodes.len()];
+    for node in &term.sources {
+        retained_nodes[node.0] = true;
+    }
     for node in selected_targets {
         retained_nodes[node.0] = true;
     }
@@ -358,93 +384,73 @@ fn slice_map(
         }
     }
 
-    let mut expressions = vec![Hexpr::Frobenius {
-        sources: term
-            .sources
-            .iter()
-            .map(|node| node_vars[node.0].clone())
-            .collect(),
-        targets: vec![],
-    }];
-    for (index, operation) in term.hypergraph.edges.iter().enumerate() {
-        if !retained_edges[index] {
-            continue;
+    // A retained multi-output operation brings all of its incident nodes into
+    // the subgraph, even when only some outputs are exposed at the boundary.
+    for (index, boundary) in term.hypergraph.adjacency.iter().enumerate() {
+        if retained_edges[index] {
+            for node in boundary.sources.iter().chain(&boundary.targets) {
+                retained_nodes[node.0] = true;
+            }
         }
-        let boundary = &term.hypergraph.adjacency[index];
-        expressions.push(Hexpr::Composition(vec![
-            reference(
-                &boundary
-                    .sources
-                    .iter()
-                    .map(|node| node_vars[node.0].clone())
-                    .collect::<Vec<_>>(),
-            ),
-            Hexpr::Operation(operation.clone()),
-            Hexpr::Frobenius {
-                sources: boundary
-                    .targets
-                    .iter()
-                    .map(|node| node_vars[node.0].clone())
-                    .collect(),
-                targets: vec![],
-            },
-        ]));
     }
-    expressions.push(reference(
-        &selected_targets
-            .iter()
-            .map(|node| node_vars[node.0].clone())
-            .collect::<Vec<_>>(),
-    ));
-    Ok(Hexpr::Composition(expressions))
+
+    let mut slice = term.clone();
+    slice.targets = selected_targets.to_vec();
+    let discarded_edges = retained_edges
+        .iter()
+        .enumerate()
+        .filter_map(|(index, retained)| (!retained).then_some(EdgeId(index)))
+        .collect::<Vec<_>>();
+    slice.delete_edges(&discarded_edges);
+    let discarded_nodes = retained_nodes
+        .iter()
+        .enumerate()
+        .filter_map(|(index, retained)| (!retained).then_some(NodeId(index)))
+        .collect::<Vec<_>>();
+    slice.delete_nodes(&discarded_nodes);
+    slice
 }
 
-fn pack_after(map: Hexpr, count: usize, vars: &mut Vars) -> Result<Hexpr, ElaborateError> {
-    let packed = packing::pack_object(count, &mut || vars.one("pack"))?;
-    Ok(Hexpr::Composition(vec![map, packed]))
+fn pack_targets(term: &mut SyntaxTerm) {
+    let targets = term.targets.clone();
+    let packed = pack_nodes(term, &targets, (), UNIT_TYPE, PRODUCT_TYPE);
+    term.targets = vec![packed];
 }
 
-fn with_left_unit_map(remaining: Hexpr) -> Result<Hexpr, ElaborateError> {
-    Ok(Hexpr::Composition(vec![
-        remaining,
-        Hexpr::Tensor(vec![
-            op(UNIT_TYPE)?,
-            identity(vec![parse_var(&format!(
-                "{GENERATED_VARIABLE_PREFIX}partial_unit_payload"
-            ))?]),
-        ]),
-        op(PRODUCT_TYPE)?,
-    ]))
+fn with_left_unit_map(mut remaining: SyntaxTerm) -> Result<Hexpr, ElaborateError> {
+    let [payload] = remaining.targets.as_slice() else {
+        unreachable!("a packed remaining-input map should have one target");
+    };
+    let payload = *payload;
+    let unit = add_graph_operation(&mut remaining, UNIT_TYPE, vec![])?;
+    let product = add_graph_operation(&mut remaining, PRODUCT_TYPE, vec![unit, payload])?;
+    remaining.targets = vec![product];
+    Ok(term_to_hexpr(&remaining))
 }
 
 /// Build the CMC term implementing `partial.f.N`.
 ///
-/// Write the packed domain of `f` as `P * R`, where `P` contains the first
-/// `N` arguments and `R` contains the remaining arguments. For the nontrivial
-/// case `0 < N < arity(f)`, the generated term has the following shape:
+/// Write the canonical domain of `f` as
+/// `A_0 * (A_1 * ... * (A_(N-1) * R))`, where `R` contains the remaining
+/// arguments. For the nontrivial case `0 < N < arity(f)`, repeatedly prepend
+/// one deferred captured argument:
 ///
 /// ```text
-/// {
-///   ({
-///     (name.with-left-unit-R lift)
-///     ({
-///       (P defer)
-///       (name.identity-R lift)
-///     } tensor)
-///   } compose)
-///   (name.f lift)
-/// }
-/// compose
+/// prepend_i =
+///   (name.with-left-unit.D_i lift);
+///   ((A_i defer) tensor (name.identity.D_i lift))
+///
+/// partial.f.N =
+///   prepend_N; ...; prepend_1; (name.f lift)
 /// ```
 ///
-/// Its types make the construction a little clearer:
+/// Each prepend step has the following type:
 ///
 /// ```text
-/// with-left-unit-R              : R       => 1 * R
-/// defer(P) tensor identity-R    : 1 * R   => P * R
-/// f                             : P * R   => B
-/// ------------------------------------------------
-/// partial.f.N(P)                : R       => B
+/// with-left-unit-D_i              : D_i       => 1 * D_i
+/// defer(A_i) tensor identity-D_i  : 1 * D_i   => A_i * D_i
+/// --------------------------------------------------------
+/// prepend_i                       : D_i       => A_i * D_i
 /// ```
 ///
 /// This is the general form of the hand-written matrix construction using
@@ -454,8 +460,7 @@ fn partial_definition(
     context: usize,
     arity: usize,
     applied: usize,
-    identity_name: &Operation,
-    with_unit_name: &Operation,
+    helper_names: &[(Operation, Operation)],
 ) -> Result<Hexpr, ElaborateError> {
     let mut term = OpenHypergraph::empty();
     let inputs = (0..context + applied)
@@ -467,25 +472,21 @@ fn partial_definition(
     // Reusing these context node IDs on each named operation is the graph-level
     // representation of copying the metavariable context.
     //
-    //   context ──▶ name.f ──▶ function pointer ──▶ lift ──▶ (P * R => B)
+    //   context ──▶ name.f ──▶ function pointer
+    //              ──▶ lift ──▶ (pack(A_0, ..., A_(k-1)) => B)
     let original_closure = add_named_closure(&mut term, &original.name, context_inputs)?;
 
     let body = if applied == 0 {
         // Nothing is captured: partial.f.0 is simply the lifted name of f.
         //
-        //   context ──▶ name.f ──▶ lift ──▶ (P * R => B)
+        //   context ──▶ name.f ──▶ lift
+        //              ──▶ (pack(A_0, ..., A_(k-1)) => B)
         original_closure
     } else {
-        // Pack the supplied prefix P into one object, then capture it as a
-        // closure 1 => P.
-        //
-        //   p0 ─┐
-        //   p1 ─┼─▶ *.intro ... ──▶ P ──▶ defer ──▶ (1 => P)
-        //   .. ─┤
-        //   pN ─┘
-        let captured_value = pack_value_nodes(&mut term, captured_inputs)?;
-        let captured = add_graph_operation(&mut term, DEFER, vec![captured_value])?;
         if applied == arity {
+            // Pack the full supplied domain and capture it as one closure.
+            let captured_value = pack_value_nodes(&mut term, captured_inputs);
+            let captured = add_graph_operation(&mut term, DEFER, vec![captured_value])?;
             // There is no remaining R. Compose 1 => P with P => B directly,
             // producing the fully captured closure 1 => B.
             //
@@ -494,37 +495,37 @@ fn partial_definition(
             //   (P => B) ─┘
             add_graph_operation(&mut term, COMPOSE, vec![captured, original_closure])?
         } else {
-            // These are the generalized `index-id` and `index-with-unit`
-            // arrows from the motivating matrix example.
-            //
-            //   context ──▶ name.identity-R ──▶ lift ──▶ (R => R)
-            let identity_closure = add_named_closure(&mut term, identity_name, context_inputs)?;
+            debug_assert_eq!(captured_inputs.len(), helper_names.len());
+            let mut prepare = None;
+            for (captured_input, (identity_name, with_unit_name)) in
+                captured_inputs.iter().zip(helper_names).rev()
+            {
+                let captured = add_graph_operation(&mut term, DEFER, vec![*captured_input])?;
+                let identity_closure = add_named_closure(&mut term, identity_name, context_inputs)?;
+                let with_unit_closure =
+                    add_named_closure(&mut term, with_unit_name, context_inputs)?;
+                let append_capture =
+                    add_graph_operation(&mut term, TENSOR, vec![captured, identity_closure])?;
+                let prepend = add_graph_operation(
+                    &mut term,
+                    COMPOSE,
+                    vec![with_unit_closure, append_capture],
+                )?;
+                prepare = Some(match prepare {
+                    None => prepend,
+                    Some(previous) => {
+                        add_graph_operation(&mut term, COMPOSE, vec![previous, prepend])?
+                    }
+                });
+            }
+            let prepare = prepare.expect("a nontrivial partial captures at least one input");
 
-            //   context ──▶ name.with-left-unit-R ──▶ lift ──▶ (R => 1 * R)
-            let with_unit_closure = add_named_closure(&mut term, with_unit_name, context_inputs)?;
-
-            // (1 => P) tensor (R => R) gives (1 * R) => (P * R).
+            // Finally compose R => pack(A_1, ..., A_k) with the lifted
+            // original function.
             //
-            //   (1 => P) ─┐
-            //             ├─▶ tensor ──▶ (1 * R => P * R)
-            //   (R => R) ─┘
-            let append_capture =
-                add_graph_operation(&mut term, TENSOR, vec![captured, identity_closure])?;
-
-            // Precompose with R => (1 * R), obtaining R => (P * R).
-            //
-            //   (R => 1 * R)      ─┐
-            //                      ├─▶ compose ──▶ (R => P * R)
-            //   (1 * R => P * R) ─┘
-            let prepare =
-                add_graph_operation(&mut term, COMPOSE, vec![with_unit_closure, append_capture])?;
-
-            // Finally compose R => (P * R) with the lifted original function
-            // (P * R) => B.
-            //
-            //   (R => P * R) ─┐
-            //                 ├─▶ compose ──▶ (R => B)
-            //   (P * R => B) ─┘
+            //   (R => pack(A_0, ..., A_(k-1))) ─┐
+            //                                   ├─▶ compose ──▶ (R => B)
+            //   (pack(A_0, ..., A_(k-1)) => B) ─┘
             add_graph_operation(&mut term, COMPOSE, vec![prepare, original_closure])?
         }
     };
@@ -546,25 +547,8 @@ fn add_named_closure(
     add_graph_operation(term, LIFT, vec![pointer])
 }
 
-fn pack_value_nodes(
-    term: &mut OpenHypergraph<(), Operation>,
-    values: &[NodeId],
-) -> Result<NodeId, ElaborateError> {
-    match values {
-        //   ∅ ──▶ unit.intro ──▶ 1
-        [] => add_graph_operation(term, UNIT_INTRO, vec![]),
-
-        //   value ─────────────────▶ value
-        [only] => Ok(*only),
-
-        //   head... ──▶ packed-head ─┐
-        //                            ├─▶ *.intro ──▶ packed values
-        //   last ────────────────────┘
-        [head @ .., last] => {
-            let packed_head = pack_value_nodes(term, head)?;
-            add_graph_operation(term, PRODUCT_INTRO, vec![packed_head, *last])
-        }
-    }
+fn pack_value_nodes(term: &mut OpenHypergraph<(), Operation>, values: &[NodeId]) -> NodeId {
+    pack_nodes(term, values, (), UNIT_INTRO, PRODUCT_INTRO)
 }
 
 fn add_graph_operation(
@@ -580,28 +564,26 @@ fn add_graph_operation(
     Ok(target)
 }
 
-fn identity_definition() -> Result<Hexpr, ElaborateError> {
+fn identity_definition() -> Hexpr {
     //   R ─────────────────▶ R
-    let wire = parse_var(&format!("{GENERATED_VARIABLE_PREFIX}partial_identity"))?;
-    Ok(Hexpr::Frobenius {
-        sources: vec![wire.clone()],
-        targets: vec![wire],
-    })
+    let mut term = OpenHypergraph::empty();
+    let wire = term.new_node(());
+    term.sources = vec![wire];
+    term.targets = vec![wire];
+    term_to_hexpr(&term)
 }
 
 fn with_left_unit_definition() -> Result<Hexpr, ElaborateError> {
     //   ∅ ──▶ unit.intro ──▶ 1 ─┐
     //                           ├─▶ *.intro ──▶ 1 * R
     //   R ──────────────────────┘
-    let wire = parse_var(&format!("{GENERATED_VARIABLE_PREFIX}partial_with_unit"))?;
-    Ok(Hexpr::Composition(vec![
-        Hexpr::Frobenius {
-            sources: vec![wire.clone()],
-            targets: vec![],
-        },
-        Hexpr::Tensor(vec![op(UNIT_INTRO)?, reference(&[wire])]),
-        op(PRODUCT_INTRO)?,
-    ]))
+    let mut term = OpenHypergraph::empty();
+    let wire = term.new_node(());
+    term.sources = vec![wire];
+    let unit = add_graph_operation(&mut term, UNIT_INTRO, vec![])?;
+    let product = add_graph_operation(&mut term, PRODUCT_INTRO, vec![unit, wire])?;
+    term.targets = vec![product];
+    Ok(term_to_hexpr(&term))
 }
 
 fn generated_helper_name(kind: &str, partial: &Operation) -> Result<Operation, ElaborateError> {
@@ -610,50 +592,9 @@ fn generated_helper_name(kind: &str, partial: &Operation) -> Result<Operation, E
         .map_err(|_| ElaborateError::InvalidGeneratedOperation(partial.to_string()))
 }
 
-fn reference(vars: &[Variable]) -> Hexpr {
-    Hexpr::Frobenius {
-        sources: vec![],
-        targets: vars.to_vec(),
-    }
-}
-
-fn identity(vars: Vec<Variable>) -> Hexpr {
-    Hexpr::Frobenius {
-        sources: vars.clone(),
-        targets: vars,
-    }
-}
-
-fn op(name: &str) -> Result<Hexpr, ElaborateError> {
-    Ok(Hexpr::Operation(parse_op(name)?))
-}
-
 fn parse_op(name: &str) -> Result<Operation, ElaborateError> {
     name.parse()
         .map_err(|_| ElaborateError::InvalidGeneratedOperation(name.to_string()))
-}
-
-fn parse_var(name: &str) -> Result<Variable, ElaborateError> {
-    name.parse()
-        .map_err(|_| ElaborateError::InvalidGeneratedVariable(name.to_string()))
-}
-
-#[derive(Default)]
-struct Vars(usize);
-
-impl Vars {
-    fn one(&mut self, stem: &str) -> Result<Variable, ElaborateError> {
-        let variable = parse_var(&format!(
-            "{GENERATED_VARIABLE_PREFIX}partial_{stem}_{}",
-            self.0
-        ))?;
-        self.0 += 1;
-        Ok(variable)
-    }
-
-    fn many(&mut self, stem: &str, count: usize) -> Result<Vec<Variable>, ElaborateError> {
-        (0..count).map(|_| self.one(stem)).collect()
-    }
 }
 
 #[cfg(test)]
@@ -743,6 +684,18 @@ mod tests {
         let partial: hexpr::Operation = "partial.f.2".parse().unwrap();
         let arrow = &elaborated.theories[&program].arrows[&partial];
         assert!(arrow.definition.is_some());
+        for helper in [
+            "__catena_partial.identity.0.partial.f.2",
+            "__catena_partial.with-left-unit.0.partial.f.2",
+            "__catena_partial.identity.1.partial.f.2",
+            "__catena_partial.with-left-unit.1.partial.f.2",
+        ] {
+            let helper: hexpr::Operation = helper.parse().unwrap();
+            assert!(
+                elaborated.theories[&program].arrows.contains_key(&helper),
+                "missing suffix-specialized helper {helper}"
+            );
+        }
         let interpreted = TheorySet::from_raw(elaborated).expect("generated theory should load");
         crate::check::check(&interpreted).expect("generated CMC definition should typecheck");
     }

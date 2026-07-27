@@ -19,9 +19,25 @@ pub fn objects_to_hexpr(objects: &[Obj]) -> Hexpr {
 /// Node labels are irrelevant to the serialization: sharing is represented by
 /// reusing the variable assigned to the corresponding node.
 pub fn term_to_hexpr<O>(term: &OpenHypergraph<O, Operation>) -> Hexpr {
+    let mut next = 0;
+    term_to_hexpr_with(term, &mut || {
+        let variable = var(&format!("{GENERATED_VARIABLE_PREFIX}w{next}"));
+        next += 1;
+        Ok::<_, std::convert::Infallible>(variable)
+    })
+    .expect("generating internal Hexpr variables is infallible")
+}
+
+/// Serialize a lax open hypergraph to Hexpr using caller-provided fresh
+/// variables. Use this when multiple serialized graphs will be embedded in one
+/// Hexpr so their node variables cannot accidentally alias.
+pub fn term_to_hexpr_with<O, E>(
+    term: &OpenHypergraph<O, Operation>,
+    fresh_variable: &mut impl FnMut() -> Result<Variable, E>,
+) -> Result<Hexpr, E> {
     let node_vars = (0..term.hypergraph.nodes.len())
-        .map(|index| var(&format!("{GENERATED_VARIABLE_PREFIX}w{index}")))
-        .collect::<Vec<_>>();
+        .map(|_| fresh_variable())
+        .collect::<Result<Vec<_>, _>>()?;
     let mut parts = Vec::new();
 
     parts.push(Hexpr::Frobenius {
@@ -48,7 +64,7 @@ pub fn term_to_hexpr<O>(term: &OpenHypergraph<O, Operation>) -> Hexpr {
         targets: vars_for(&node_vars, &term.targets),
     });
 
-    Hexpr::Composition(parts)
+    Ok(Hexpr::Composition(parts))
 }
 
 fn object_to_hexpr(object: &Obj) -> Hexpr {

@@ -7,7 +7,7 @@
 //! For theoretical background, see
 //! [String Diagrams for Strictification and Coherence](https://arxiv.org/abs/2201.11738)
 
-use hexpr::{Hexpr, Operation, Variable};
+use hexpr::Operation;
 use metacat::tree::Tree;
 use open_hypergraphs::{
     category::Arrow,
@@ -21,26 +21,6 @@ use crate::stdlib::constants::{
 pub(crate) type Obj = Tree<(), Operation>;
 pub(crate) type Arr = Operation;
 pub(crate) type Term = OpenHypergraph<Obj, Arr>;
-
-/// Build the type map from a strict tensor boundary to its canonical packed
-/// object. Packing is right-associated, as it is for [`to_packer`].
-pub(crate) fn packed_type_map<E>(
-    object_count: usize,
-    fresh_variable: &mut impl FnMut() -> Result<Variable, E>,
-) -> Result<Hexpr, E> {
-    match object_count {
-        0 => Ok(Hexpr::Operation(op(UNIT_TYPE))),
-        1 => Ok(identity_hexpr(fresh_variable()?)),
-        2 => Ok(Hexpr::Operation(op(PRODUCT_TYPE))),
-        n => Ok(Hexpr::Composition(vec![
-            Hexpr::Tensor(vec![
-                identity_hexpr(fresh_variable()?),
-                packed_type_map(n - 1, fresh_variable)?,
-            ]),
-            Hexpr::Operation(op(PRODUCT_TYPE)),
-        ])),
-    }
-}
 
 /// Add operations which pack `nodes` into one right-associated output node.
 ///
@@ -76,6 +56,19 @@ pub(crate) fn pack_nodes<O: Clone>(
             packed
         }
     }
+}
+
+/// Build the type-map graph from a strict tensor boundary to its canonical
+/// packed object. Serialization to surface Hexpr belongs to the caller.
+pub(crate) fn to_type_packer(object_count: usize) -> OpenHypergraph<(), Operation> {
+    let mut term = OpenHypergraph::empty();
+    let sources = (0..object_count)
+        .map(|_| term.new_node(()))
+        .collect::<Vec<_>>();
+    term.sources = sources.clone();
+    let packed = pack_nodes(&mut term, &sources, (), UNIT_TYPE, PRODUCT_TYPE);
+    term.targets = vec![packed];
+    term
 }
 
 /// Compute the size of an object: equivalent to `size` in
@@ -252,13 +245,6 @@ pub(crate) fn unpack_packed_object(object: &Obj, arity: usize) -> Vec<Obj> {
     }
 }
 
-fn identity_hexpr(variable: Variable) -> Hexpr {
-    Hexpr::Frobenius {
-        sources: vec![variable.clone()],
-        targets: vec![variable],
-    }
-}
-
 fn op(name: &str) -> Operation {
     name.parse().expect("generated operation should parse")
 }
@@ -277,25 +263,20 @@ mod tests {
 
     #[test]
     fn type_map_packing_uses_the_canonical_right_association() {
-        let mut next = 0;
-        let packed = packed_type_map(3, &mut || {
-            let variable = format!("p{next}").parse::<Variable>().unwrap();
-            next += 1;
-            Ok::<_, ()>(variable)
-        })
-        .unwrap();
-
-        let Hexpr::Composition(parts) = packed else {
-            panic!("three objects should require a composite type map");
-        };
-        let [Hexpr::Tensor(children), Hexpr::Operation(product)] = parts.as_slice() else {
-            panic!("three objects should pack as A * (B * C)");
-        };
-        assert!(matches!(children[0], Hexpr::Frobenius { .. }));
-        assert!(
-            matches!(&children[1], Hexpr::Operation(operation) if operation.as_str() == PRODUCT_TYPE)
+        let packed = to_type_packer(3);
+        assert_eq!(packed.sources.len(), 3);
+        assert_eq!(packed.targets.len(), 1);
+        assert_eq!(
+            packed.hypergraph.edges,
+            vec![op(PRODUCT_TYPE), op(PRODUCT_TYPE)]
         );
-        assert_eq!(product.as_str(), PRODUCT_TYPE);
+
+        let tail_product = &packed.hypergraph.adjacency[0];
+        assert_eq!(tail_product.sources, packed.sources[1..]);
+        let outer_product = &packed.hypergraph.adjacency[1];
+        assert_eq!(outer_product.sources[0], packed.sources[0]);
+        assert_eq!(outer_product.sources[1], tail_product.targets[0]);
+        assert_eq!(packed.targets, outer_product.targets);
     }
 
     #[test]

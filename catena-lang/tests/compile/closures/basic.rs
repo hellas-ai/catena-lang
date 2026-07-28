@@ -37,6 +37,27 @@ fn composed_defer_and_run_lower_without_a_region() {
     assert_fully_lowered("deferred-identity");
 }
 
+/// Demand-driven partial application elaborates to CMC operations, which the
+/// normal closure pipeline then erases back to the underlying direct call.
+#[test]
+fn partial_application_compiles_through_the_full_pipeline() {
+    let elaborated = report()
+        .elaborated
+        .as_ref()
+        .expect("elaboration should run");
+    let partial = op("partial.u64.add.1");
+    assert!(
+        elaborated.theories[&op("program")]
+            .arrows
+            .contains_key(&partial)
+    );
+
+    let final_graph = final_term("partially-applied-add");
+    assert_eq!(operation_count(final_graph, "name.u64.add"), 1);
+    assert_eq!(operation_count(final_graph, "partial.u64.add.1"), 0);
+    assert_fully_lowered("partially-applied-add");
+}
+
 /// Named branches have no captured runtime values. Forgetting must delimit two
 /// empty-environment regions and conversion must replace `bool.if` with one
 /// explicit `bool.ifc` call backed by two generated bodies and names.

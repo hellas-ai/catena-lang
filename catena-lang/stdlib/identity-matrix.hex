@@ -1,0 +1,28 @@
+# Identity matrices represented as indexed f32 views.
+
+#   identity-at(i,j) = if i == j then 1.0 else 0.0
+#
+# A complete identity-matrix view is `name.f32.matrix.identity-at lift`
+# specialized with the matrix dimension parameter.
+(def program f32.matrix.identity-at :
+  ([n.] ({([.n] ix val) ([.n] ix val)} *))
+  ->
+  ([n.] (f32 val))
+= ([ij.]
+  ([.ij] *.elim [i j.]
+    ([.i] ix.to-u64 [i-u64.]
+      ([.j] ix.to-u64 [j-u64.]
+        ({[.i-u64 j-u64]} u64.ne [different.]
+          ([.different] bool.not [same.]
+            {
+              [.same]
+              f32.one
+              (const.u32.0x00000000 u32.bitcast-f32)
+            }
+            f32.select
+          )
+        )
+      )
+    )
+  )
+))

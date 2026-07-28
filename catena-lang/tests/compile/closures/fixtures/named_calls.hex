@@ -19,10 +19,7 @@
   (bool val)
 = ([left right flag.]
   ({
-    ({
-      ({[.left] [.right]} *.intro)
-      [.flag]
-    } *.intro defer)
+    ({[.left] ({[.right] [.flag]} *.intro)} *.intro defer)
     (name.choose-named-closures lift)
   }
   compose
@@ -35,10 +32,7 @@
   (bool val)
 = ([left right flag.]
   ({
-    ({
-      ({([.left] defer) ([.right] defer)} *.intro)
-      [.flag]
-    } *.intro defer)
+    ({([.left] defer) ({([.right] defer) [.flag]} *.intro)} *.intro defer)
     (name.forward-named-closures lift)
   }
   compose

@@ -59,7 +59,7 @@ can denote zero, one, or many wires. So it packs them as follows:
 - `0` wires becomes `1`
 - `1` wire stays as-is
 - `2` wires becomes `*`
-- `n > 2` wires becomes a left-associated product built from `*`
+- `n > 2` wires becomes a right-associated product built from `*`
 
 So a binary function like:
 
@@ -99,4 +99,3 @@ Later passes build on that, especially:
 - checking
 - `forget_closures`
 - codegen
-

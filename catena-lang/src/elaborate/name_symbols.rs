@@ -9,8 +9,10 @@ use metacat::theory::{
 
 use crate::{
     elaborate::ElaborateError,
+    hexpr::term_to_hexpr_with,
+    nonstrict::to_type_packer,
     prefixes::{GENERATED_VARIABLE_PREFIX, NAME_PREFIX},
-    stdlib::constants::{FN_REF_TYPE, PRODUCT_TYPE, UNIT_TYPE, VALUE_TYPE},
+    stdlib::constants::{FN_REF_TYPE, VALUE_TYPE},
 };
 
 #[derive(Default)]
@@ -143,14 +145,12 @@ fn target_type_map(
         targets: copied_metavars,
     };
 
-    let pack_s = Hexpr::Composition(vec![
-        raw.type_maps.0.clone(),
-        pack_object(&mut generated, "s", interpreted_source.targets.len())?,
-    ]);
-    let pack_t = Hexpr::Composition(vec![
-        raw.type_maps.1.clone(),
-        pack_object(&mut generated, "t", interpreted_target.targets.len())?,
-    ]);
+    let source_packer = to_type_packer(interpreted_source.targets.len());
+    let packed_source = term_to_hexpr_with(&source_packer, &mut || generated.var("s"))?;
+    let target_packer = to_type_packer(interpreted_target.targets.len());
+    let packed_target = term_to_hexpr_with(&target_packer, &mut || generated.var("t"))?;
+    let pack_s = Hexpr::Composition(vec![raw.type_maps.0.clone(), packed_source]);
+    let pack_t = Hexpr::Composition(vec![raw.type_maps.1.clone(), packed_target]);
 
     Ok(Hexpr::Composition(vec![
         copy,
@@ -160,35 +160,9 @@ fn target_type_map(
     ]))
 }
 
-fn pack_object(
-    generated: &mut GeneratedVars,
-    stem: &str,
-    object_size: usize,
-) -> Result<Hexpr, ElaborateError> {
-    match object_size {
-        0 => parse_operation_hexpr(UNIT_TYPE),
-        1 => Ok(identity_var(generated.var(stem)?)),
-        2 => parse_operation_hexpr(PRODUCT_TYPE),
-        n => Ok(Hexpr::Composition(vec![
-            Hexpr::Tensor(vec![
-                pack_object(generated, stem, n - 1)?,
-                identity_var(generated.var(stem)?),
-            ]),
-            parse_operation_hexpr(PRODUCT_TYPE)?,
-        ])),
-    }
-}
-
 fn parse_variable(name: &str) -> Result<Variable, ElaborateError> {
     name.parse()
         .map_err(|_| ElaborateError::InvalidGeneratedVariable(name.to_string()))
-}
-
-fn identity_var(var: Variable) -> Hexpr {
-    Hexpr::Frobenius {
-        sources: vec![var.clone()],
-        targets: vec![var],
-    }
 }
 
 fn parse_operation(name: &str) -> Result<Operation, ElaborateError> {
@@ -202,18 +176,22 @@ fn parse_operation_hexpr(name: &str) -> Result<Hexpr, ElaborateError> {
 
 #[cfg(test)]
 mod tests {
-    use metacat::theory::RawTheorySet;
+    use hexpr::try_interpret;
+    use metacat::theory::{RawTheorySet, TheoryId, TheorySet};
 
     use crate::elaborate::elaborate;
 
     fn assert_generated_arrow_type_maps(raw_text: &str, expected_text: &str, arrow_name: &str) {
         let raw = RawTheorySet::from_text(raw_text).expect("test theory should parse");
         let elaborated = elaborate(raw).expect("test theory should elaborate");
+        let interpreted =
+            TheorySet::from_raw(elaborated.clone()).expect("elaborated theory should load");
         let expected =
             RawTheorySet::from_text(expected_text).expect("expected theory should parse");
 
         let program: super::Operation = "program".parse().unwrap();
         let arrow_name: super::Operation = arrow_name.parse().unwrap();
+        let syntax = &interpreted.theories[&TheoryId("type".parse().unwrap())];
         let actual_arrow = elaborated
             .theories
             .get(&program)
@@ -225,7 +203,24 @@ mod tests {
             .and_then(|theory| theory.arrows.get(&arrow_name))
             .expect("expected arrow should exist");
 
-        assert_eq!(actual_arrow.type_maps, expected_arrow.type_maps);
+        for (actual, expected) in [
+            (&actual_arrow.type_maps.0, &expected_arrow.type_maps.0),
+            (&actual_arrow.type_maps.1, &expected_arrow.type_maps.1),
+        ] {
+            let mut actual = try_interpret(&syntax.local_signature(), actual)
+                .expect("actual type map should interpret")
+                .map_nodes(|_| ());
+            actual
+                .quotient()
+                .expect("actual type map should have consistent equations");
+            let mut expected = try_interpret(&syntax.local_signature(), expected)
+                .expect("expected type map should interpret")
+                .map_nodes(|_| ());
+            expected
+                .quotient()
+                .expect("expected type map should have consistent equations");
+            assert_eq!(actual, expected);
+        }
     }
 
     #[test]

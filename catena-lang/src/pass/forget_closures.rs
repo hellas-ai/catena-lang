@@ -15,7 +15,7 @@ use thiserror::Error;
 
 use crate::{
     check::{AnnotatedTerm, DefinitionTypes},
-    nonstrict::{to_flatteners, to_packer, to_unpacker, unpack_packed_object},
+    nonstrict::{pack_objects, to_flatteners, to_packer, to_unpacker, unpack_packed_object},
     prefixes::{GENERATED_CONTEXT_PREFIX, NAME_PREFIX},
     report::TheoryTermMap,
     stdlib::constants::{
@@ -427,16 +427,6 @@ fn closure_erased_operation_object(object: &Obj) -> Vec<Obj> {
 
 fn pack_closure_erased_operation_objects(object: &Obj) -> Obj {
     pack_objects(&closure_erased_operation_object(object))
-}
-
-fn pack_objects(objects: &[Obj]) -> Obj {
-    match objects {
-        [] => Tree::Node(op(UNIT_TYPE), 0, vec![]),
-        [only] => only.clone(),
-        [head, tail @ ..] => {
-            Tree::Node(op(PRODUCT_TYPE), 0, vec![head.clone(), pack_objects(tail)])
-        }
-    }
 }
 
 #[derive(Clone, Copy)]

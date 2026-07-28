@@ -11,7 +11,7 @@ use hexpr::Operation;
 use metacat::tree::Tree;
 use open_hypergraphs::{
     category::Arrow,
-    lax::{Hyperedge, Hypergraph, OpenHypergraph},
+    lax::{Hyperedge, Hypergraph, NodeId, OpenHypergraph},
 };
 
 use crate::stdlib::constants::{
@@ -21,6 +21,55 @@ use crate::stdlib::constants::{
 pub(crate) type Obj = Tree<(), Operation>;
 pub(crate) type Arr = Operation;
 pub(crate) type Term = OpenHypergraph<Obj, Arr>;
+
+/// Add operations which pack `nodes` into one right-associated output node.
+///
+/// This is shared by type maps (`1` and `*`) and program terms
+/// (`unit.intro` and `*.intro`) so both representations use the same shape.
+pub(crate) fn pack_nodes<O: Clone>(
+    term: &mut OpenHypergraph<O, Operation>,
+    nodes: &[NodeId],
+    node_label: O,
+    unit_operation: &str,
+    product_operation: &str,
+) -> NodeId {
+    match nodes {
+        [] => {
+            let packed = term.new_node(node_label);
+            term.new_edge(op(unit_operation), (vec![], vec![packed]));
+            packed
+        }
+        [only] => *only,
+        [head, tail @ ..] => {
+            let packed_tail = pack_nodes(
+                term,
+                tail,
+                node_label.clone(),
+                unit_operation,
+                product_operation,
+            );
+            let packed = term.new_node(node_label);
+            term.new_edge(
+                op(product_operation),
+                (vec![*head, packed_tail], vec![packed]),
+            );
+            packed
+        }
+    }
+}
+
+/// Build the type-map graph from a strict tensor boundary to its canonical
+/// packed object. Serialization to surface Hexpr belongs to the caller.
+pub(crate) fn to_type_packer(object_count: usize) -> OpenHypergraph<(), Operation> {
+    let mut term = OpenHypergraph::empty();
+    let sources = (0..object_count)
+        .map(|_| term.new_node(()))
+        .collect::<Vec<_>>();
+    term.sources = sources.clone();
+    let packed = pack_nodes(&mut term, &sources, (), UNIT_TYPE, PRODUCT_TYPE);
+    term.targets = vec![packed];
+    term
+}
 
 /// Compute the size of an object: equivalent to `size` in
 /// [String Diagrams for Strictification and Coherence](https://arxiv.org/abs/2201.11738)
@@ -114,7 +163,7 @@ fn packer_for(objects: &[Obj]) -> Term {
     }
 }
 
-fn pack_objects(objects: &[Obj]) -> Obj {
+pub(crate) fn pack_objects(objects: &[Obj]) -> Obj {
     match objects {
         [] => Tree::Node(op(UNIT_TYPE), 0, vec![]),
         [only] => only.clone(),
@@ -189,8 +238,8 @@ pub(crate) fn unpack_packed_object(object: &Obj, arity: usize) -> Vec<Obj> {
             let [left, right] = children.as_slice() else {
                 panic!("product object should have exactly two children");
             };
-            let mut unpacked = unpack_packed_object(left, arity - 1);
-            unpacked.push(right.clone());
+            let mut unpacked = vec![left.clone()];
+            unpacked.extend(unpack_packed_object(right, arity - 1));
             unpacked
         }
     }
@@ -210,6 +259,24 @@ mod tests {
 
     fn product(left: Obj, right: Obj) -> Obj {
         Tree::Node(op(PRODUCT_TYPE), 0, vec![left, right])
+    }
+
+    #[test]
+    fn type_map_packing_uses_the_canonical_right_association() {
+        let packed = to_type_packer(3);
+        assert_eq!(packed.sources.len(), 3);
+        assert_eq!(packed.targets.len(), 1);
+        assert_eq!(
+            packed.hypergraph.edges,
+            vec![op(PRODUCT_TYPE), op(PRODUCT_TYPE)]
+        );
+
+        let tail_product = &packed.hypergraph.adjacency[0];
+        assert_eq!(tail_product.sources, packed.sources[1..]);
+        let outer_product = &packed.hypergraph.adjacency[1];
+        assert_eq!(outer_product.sources[0], packed.sources[0]);
+        assert_eq!(outer_product.sources[1], tail_product.targets[0]);
+        assert_eq!(packed.targets, outer_product.targets);
     }
 
     #[test]
@@ -319,12 +386,12 @@ mod tests {
         let a = object("A");
         let b = object("B");
         let c = object("C");
-        let ab = product(a.clone(), b.clone());
-        let packed = product(ab.clone(), c.clone());
+        let bc = product(b.clone(), c.clone());
+        let packed = product(a.clone(), bc.clone());
 
         assert_eq!(
             unpack_packed_object(&packed, 2),
-            vec![ab.clone(), c.clone()]
+            vec![a.clone(), bc.clone()]
         );
         assert_eq!(unpack_packed_object(&packed, 3), vec![a, b, c]);
     }

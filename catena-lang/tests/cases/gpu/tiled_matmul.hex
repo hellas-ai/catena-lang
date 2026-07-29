@@ -57,6 +57,13 @@
     u64.eq [a-compatible if-a-compatible _if-a-incompatible.])
   ({[.a-compatible] [.if-a-compatible]} assert-then [a-size-proof.])
   ({[.a-buffer] [.a-size-proof]} gpu.global.alloc-from-buf [a.])
+
+  # A has shape rows × inner. This constructs:
+  #
+  #   a-view : (Ix rows × Ix inner) => f32
+  #   a-view(row, k) = a[row * inner + k]
+  #
+  # The formula is the current row-major layout hidden behind the view.
   ({[.a-view-rows] [.a-view-inner] [.a]}
     gpu.f32.global.row-major.view [a-view.])
 
@@ -65,6 +72,13 @@
     u64.eq [b-compatible if-b-compatible _if-b-incompatible.])
   ({[.b-compatible] [.if-b-compatible]} assert-then [b-size-proof.])
   ({[.b-buffer] [.b-size-proof]} gpu.global.alloc-from-buf [b.])
+
+  # B has shape inner × cols. This constructs:
+  #
+  #   b-view : (Ix inner × Ix cols) => f32
+  #   b-view(k, col) = b[k * cols + col]
+  #
+  # The formula is the current row-major layout hidden behind the view.
   ({[.b-view-inner] [.b-view-cols] [.b]}
     gpu.f32.global.row-major.view [b-view.])
 

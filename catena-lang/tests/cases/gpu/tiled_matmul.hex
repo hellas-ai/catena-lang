@@ -52,9 +52,9 @@
     ({[.inner] u64} :)
     ({[.cols] u64} :)
 
-    ({({[.rows] [.inner]} nat.mul) u64} :)
-    ({({[.inner] [.cols]} nat.mul) u64} :)
-    ({({[.rows] [.cols]} nat.mul) u64} :)
+    ({({[.rows] [.inner]} *) u64} :)
+    ({({[.inner] [.cols]} *) u64} :)
+    ({({[.rows] [.cols]} *) u64} :)
 
     ({[.grid-rows] u64} :)
     ({[.grid-cols] u64} :)
@@ -70,56 +70,45 @@
   grid-rows grid-cols
   block-rows block-cols
 .]
-  ([.grid-rows] u64.copy-param [launch-grid-rows grid-rows-param.])
-  ([.grid-cols] u64.copy-param [launch-grid-cols grid-cols-param.])
-  ([.block-rows] u64.copy-param [launch-block-rows block-rows-param.])
-  ([.block-cols] u64.copy-param [launch-block-cols block-cols-param.])
-  ([.inner] u64.copy-param [persistent-inner inner-param.])
   ([.c-size] u64.copies2 [c-alloc-size c-result-size.])
+  ([.rows] u64.copies2 [a-view-rows materialize-rows.])
+  ([.inner] u64.copies3 [a-view-inner b-view-inner materialize-inner.])
+  ([.cols] u64.copies2 [b-view-cols materialize-cols.])
 
   ([.a-mem] mem.cast.f32 [actual-a-size a-buffer.])
   ([.a-size actual-a-size]
     u64.eq [a-compatible if-a-compatible _if-a-incompatible.])
   ({[.a-compatible] [.if-a-compatible]} assert-then [a-size-proof.])
   ({[.a-buffer] [.a-size-proof]} gpu.global.alloc-from-buf [a.])
+  ({[.a-view-rows] [.a-view-inner] [.a]}
+    gpu.f32.global.row-major.view [a-view.])
 
   ([.b-mem] mem.cast.f32 [actual-b-size b-buffer.])
   ([.b-size actual-b-size]
     u64.eq [b-compatible if-b-compatible _if-b-incompatible.])
   ({[.b-compatible] [.if-b-compatible]} assert-then [b-size-proof.])
   ({[.b-buffer] [.b-size-proof]} gpu.global.alloc-from-buf [b.])
-
-  ({[.c-alloc-size] f32.type} gpu.global.alloc [c.])
-
-  ({[.persistent-inner] [.cols]} *.intro [inner-cols.])
-  ({[.rows] [.inner-cols]} *.intro [dimensions.])
-  ({[.c] [.dimensions]} *.intro [c-and-dimensions.])
-  ({[.b] [.c-and-dimensions]} *.intro [b-and-rest.])
-  ({[.a] [.b-and-rest]} *.intro [persistent.])
+  ({[.b-view-inner] [.b-view-cols] [.b]}
+    gpu.f32.global.row-major.view [b-view.])
 
   ({
-    [.launch-grid-rows]
-    [.launch-grid-cols]
-    [.launch-block-rows]
-    [.launch-block-cols]
+    [.grid-rows]
+    [.grid-cols]
+    [.block-rows]
+    [.block-cols]
   } tiled-matmul-launch-params [params.])
 
   ({
     [.params]
-    [.persistent]
-    ({
-      [.grid-rows-param]
-      [.grid-cols-param]
-      [.block-rows-param]
-      [.block-cols-param]
-      [.inner-param]
-    } name.gpu.f32.tiled-matmul)
-  } gpu.launch [next-persistent.])
+    [.a-view]
+    [.b-view]
+    [.materialize-rows]
+    [.materialize-inner]
+    [.materialize-cols]
+    [.c-alloc-size]
+  } gpu.f32.tiled-matmul.row-major.materialize [c.])
 
-  ([.next-persistent] *.elim [_a next-b-and-rest.])
-  ([.next-b-and-rest] *.elim [_b next-c-and-dimensions.])
-  ([.next-c-and-dimensions] *.elim [next-c _dimensions.])
-  ([.next-c] gpu.global.to-buf [result-buffer.])
+  ([.c] gpu.global.to-buf [result-buffer.])
   ({[.c-result-size] [.result-buffer]} buf.to-mem [result.])
   [.result]
 ))

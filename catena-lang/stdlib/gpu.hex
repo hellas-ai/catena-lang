@@ -43,6 +43,12 @@
 })
 
 (theory program type {
+  # Index linear global storage.
+  (arr gpu.global.ix : {[m n t.]
+    ([.n] ix val)
+    ({[.m n t]} gpu.global val)
+  } -> ([m n t . t] val))
+
   # Allocate global storage and initialize it from a buffer. The proof
   # transports the actual buffer length p to the requested global length n.
   (arr gpu.global.alloc-from-buf : {[m n p t.]
@@ -89,6 +95,26 @@
     ([.grid] gpu.launch_params val)
   })
 
+  # Preserve 2D launch parameters while exposing their erased extents for
+  # specializing a named kernel.
+  (arr gpu.launch_params.2d-2d.params : {[grid-x grid-y block-x block-y.]
+    ({
+      ({[.grid-x] [.grid-y]} 2d)
+      ({[.block-x] [.block-y]} 2d)
+    } gpu.grid [grid.])
+    ([.grid] gpu.launch_params val)
+  } -> {[grid-x grid-y block-x block-y.]
+    ({
+      ({[.grid-x] [.grid-y]} 2d)
+      ({[.block-x] [.block-y]} 2d)
+    } gpu.grid [grid.])
+    ([.grid] gpu.launch_params val)
+    [.grid-x]
+    [.grid-y]
+    [.block-x]
+    [.block-y]
+  })
+
   # Inspect the hardware coordinates of the current kernel invocation.
   #
   # The returned environment preserves this read-only resource for subsequent
@@ -127,20 +153,20 @@
   #
   #   gpu.launch :
   #     launch_params
-  #       × P
-  #       × val(env × state × (P × S)
-  #             -> state × (P × S))
-  #       -> P
-  (arr gpu.launch : {[grid p s.]
-    ({[.p] [.s]} * [resources.])
+  #       × X
+  #       × val(env × state × (X × S)
+  #             -> state × (Y × S))
+  #       -> Y
+  (arr gpu.launch : {[grid x y s.]
+    ({[.x] [.s]} * [resources.])
     ({gpu.state [.resources]} * [state-resources.])
     ({([.grid] gpu.env) [.state-resources]} * [kernel-args.])
 
-    ({[.p] [.s]} * [next-resources.])
+    ({[.y] [.s]} * [next-resources.])
     ({gpu.state [.next-resources]} * [kernel-coargs.])
 
     ([.grid] gpu.launch_params val)
-    ([.p])
+    ([.x])
     ({[.kernel-args kernel-coargs]} -> val)
-  } -> ([grid p s.p]))
+  } -> ([grid x y s.y]))
 })

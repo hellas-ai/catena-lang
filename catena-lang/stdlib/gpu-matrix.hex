@@ -1,0 +1,77 @@
+# gpu.f32.tiled-matmul :
+#
+#   env(grid2d) × state × (
+#     global.ref f32[rows * inner] ×
+#     global.ref f32[inner * cols] ×
+#     global.own f32[rows * cols] ×
+#     (rows × inner × cols) ×
+#     (shared f32[block-rows * block-cols])²
+#   )
+#   ->
+#   state × the same global and shared resources
+#
+#   rows = grid-rows * block-rows
+#   cols = grid-cols * block-cols
+#
+# No synchronization barriers.
+(theory program type {
+  (arr gpu.f32.tiled-matmul : {[
+    grid-rows grid-cols
+    block-rows block-cols
+    inner
+  .]
+    ({[.grid-rows] [.block-rows]} nat.mul [rows.])
+    ({[.grid-cols] [.block-cols]} nat.mul [cols.])
+
+    ({
+      ({[.grid-cols] [.grid-rows]} 2d)
+      ({[.block-cols] [.block-rows]} 2d)
+    } gpu.grid [grid.])
+
+    ({
+      cap.ref
+      ({[.rows] [.inner]} nat.mul)
+      f32
+    } gpu.global val [a.])
+    ({
+      cap.ref
+      ({[.inner] [.cols]} nat.mul)
+      f32
+    } gpu.global val [b.])
+    ({
+      cap.own
+      ({[.rows] [.cols]} nat.mul)
+      f32
+    } gpu.global val [c.])
+
+    ({[.inner] u64} : [inner-value.])
+    ({[.cols] u64} : [cols-value.])
+    ({[.inner-value] [.cols-value]} * [inner-cols.])
+    ({[.rows] u64} : [rows-value.])
+    ({[.rows-value] [.inner-cols]} * [dimensions.])
+
+    ({[.c] [.dimensions]} * [c-and-dimensions.])
+    ({[.b] [.c-and-dimensions]} * [b-and-rest.])
+    ({[.a] [.b-and-rest]} * [persistent.])
+
+    ({
+      ({[.block-rows] [.block-cols]} nat.mul [shared-len.])
+      ({[.shared-len] f32} gpu.shared val)
+      ({[.shared-len] f32} gpu.shared val)
+    } * [shared.])
+
+    ({[.persistent] [.shared]} * [resources.])
+    ({gpu.state [.resources]} * [state-resources.])
+    ({([.grid] gpu.env) [.state-resources]} * [kernel-args.])
+
+    ({[.persistent] [.shared]} * [next-resources.])
+    ({gpu.state [.next-resources]} * [kernel-coargs.])
+
+    ([.kernel-args])
+  } -> ([
+    grid-rows grid-cols
+    block-rows block-cols
+    inner
+  .]
+    ([.kernel-coargs])))
+})

@@ -1,16 +1,10 @@
-# Tiled matrix multiplication launch fixture.
+# tiled-matmul-launch-params :
 #
-# Global and shared memory are linear. `rows`, `inner`, and `cols` are ordinary
-# kernel data; a later access-pattern closure will interpret the linear buffers
-# as A[rows, inner], B[inner, cols], and C[rows, cols].
-
-# Matmul-specific launch policy, expressed as an ordinary definition.
-#
-# The public sizes use matrix order (rows, cols). gpu.dimensions uses hardware
-# order (x, y), hence the deliberate reversal:
-#
-#   grid  = dim3(grid-cols, grid-rows)
-#   block = dim3(block-cols, block-rows)
+#   (grid-rows × grid-cols × block-rows × block-cols)
+#   ->
+#   launch-params(
+#     grid2d(grid-cols, grid-rows),
+#     block2d(block-cols, block-rows))
 (def program tiled-matmul-launch-params :
   ([grid-rows grid-cols block-rows block-cols.] {
     ({[.grid-rows] u64} :)
@@ -32,85 +26,20 @@
   [.params]
 ))
 
-(theory program type {
-  (arr tiled-matmul-placeholder-kernel : {[
-    grid-rows grid-cols
-    block-rows block-cols
-    inner
-  .]
-    ({[.grid-rows] [.block-rows]} nat.mul [rows.])
-    ({[.grid-cols] [.block-cols]} nat.mul [cols.])
-
-    ({
-      ({[.grid-cols] [.grid-rows]} 2d)
-      ({[.block-cols] [.block-rows]} 2d)
-    } gpu.grid [grid.])
-
-    ({
-      cap.ref
-      ({[.rows] [.inner]} nat.mul)
-      f32
-    } gpu.global val [a.])
-    ({
-      cap.ref
-      ({[.inner] [.cols]} nat.mul)
-      f32
-    } gpu.global val [b.])
-    ({
-      cap.own
-      ({[.rows] [.cols]} nat.mul)
-      f32
-    } gpu.global val [c.])
-
-    ({[.inner] u64} : [inner-value.])
-    ({[.cols] u64} : [cols-value.])
-    ({[.inner-value] [.cols-value]} * [inner-cols.])
-    ({[.rows] u64} : [rows-value.])
-    ({[.rows-value] [.inner-cols]} * [dimensions.])
-
-    ({[.c] [.dimensions]} * [c-and-dimensions.])
-    ({[.b] [.c-and-dimensions]} * [b-and-rest.])
-    ({[.a] [.b-and-rest]} * [persistent.])
-
-    ({
-      ({[.block-rows] [.block-cols]} nat.mul [shared-len.])
-      ({[.shared-len] f32} gpu.shared val)
-      ({[.shared-len] f32} gpu.shared val)
-    } * [shared.])
-
-    ({[.persistent] [.shared]} * [resources.])
-    ({gpu.state [.resources]} * [state-resources.])
-    ({([.grid] gpu.env) [.state-resources]} * [kernel-args.])
-
-    ({[.persistent] [.shared]} * [next-resources.])
-    ({gpu.state [.next-resources]} * [kernel-coargs.])
-
-    ([.kernel-args])
-  } -> ([
-    grid-rows grid-cols
-    block-rows block-cols
-    inner
-  .]
-    ([.kernel-coargs])))
-})
-
-# Runtime boundary corresponding to:
+# tiled-matmul-via-mem :
 #
-#   tiled_matmul_via_mem(
-#       f, g,
-#       rows, inner, cols,
-#       rows*inner, inner*cols, rows*cols,
-#       grid_rows, grid_cols,
-#       block_rows, block_cols)
+#   mem.ref A × mem.ref B ×
+#   rows × inner × cols ×
+#   (rows * inner) × (inner * cols) × (rows * cols) ×
+#   grid-rows × grid-cols × block-rows × block-cols
+#   ->
+#   mem.own C
 #
-#   h = gpu.global.alloc(rows*cols, f32)
-#   launch_matmul(f, g, h, ...)
+#   rows = grid-rows * block-rows
+#   cols = grid-cols * block-cols
 #
-# All global storage is allocated by this caller of gpu.launch. A and B arrive
-# as borrowed ABI memory and initialize their global allocations. C is allocated
-# here from its rows*cols size without initialization. The usual mem.cast.f32
-# recovers typed input buffers, and runtime equality assertions produce the
-# proofs consumed by gpu.global.alloc-from-buf.
+# A and B initialize global storage after size checks. C is allocated
+# uninitialized and returned through the mem ABI.
 (def program tiled-matmul-via-mem :
   ([grid-rows grid-cols block-rows block-cols inner.] {
     ({[.grid-rows] [.block-rows]} nat.mul [rows.])
@@ -184,7 +113,7 @@
       [.block-rows-param]
       [.block-cols-param]
       [.inner-param]
-    } name.tiled-matmul-placeholder-kernel)
+    } name.gpu.f32.tiled-matmul)
   } gpu.launch [next-persistent.])
 
   ([.next-persistent] *.elim [_a next-b-and-rest.])

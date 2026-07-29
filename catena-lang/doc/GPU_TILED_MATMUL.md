@@ -18,7 +18,7 @@ The launch dimensions are:
 
 ```text
 grid  = (grid-cols, grid-rows)
-block = (block-cols, block-rows)
+block = (tile-size, tile-size)
 ```
 
 Each thread is identified by:
@@ -49,32 +49,55 @@ grid-rows  1 | C tile    | C tile    | C tile    |
 The C tile has the same shape as the thread block:
 
 ```text
-C tile shape = block-rows x block-cols
+C tile shape = tile-size x tile-size
 ```
 
 Each thread computes exactly one cell in that C tile:
 
 ```text
-One C tile computed by a 2 x 3 thread block
+One C tile computed by a 2 x 2 thread block
 
-                         thread-col
-                 0           1           2
-             +-----------+-----------+-----------+
-           0 | thread    | thread    | thread    |
-             | computes  | computes  | computes  |
-             | one cell  | one cell  | one cell  |
-             +-----------+-----------+-----------+
-thread-row 1 | thread    | thread    | thread    |
-             | computes  | computes  | computes  |
-             | one cell  | one cell  | one cell  |
-             +-----------+-----------+-----------+
+                    thread-col
+                 0           1
+             +-----------+-----------+
+           0 | thread    | thread    |
+             | computes  | computes  |
+             | one cell  | one cell  |
+             +-----------+-----------+
+thread-row 1 | thread    | thread    |
+             | computes  | computes  |
+             | one cell  | one cell  |
+             +-----------+-----------+
 ```
 
-Consequently:
+With perfect tiling:
 
 ```text
-matrix-rows = grid-rows x block-rows
-matrix-cols = grid-cols x block-cols
+rows = grid-rows x tile-size
+cols = grid-cols x tile-size
+
+grid-rows = rows / tile-size
+grid-cols = cols / tile-size
+
+number-of-blocks = grid-rows x grid-cols
+```
+
+For example:
+
+```text
+rows      = 32
+cols      = 48
+inner     = 64
+tile-size = 16
+
+grid-rows        = 32 / 16 = 2
+grid-cols        = 48 / 16 = 3
+inner-tile-count = 64 / 16 = 4
+
+block = (16, 16)
+grid  = (3, 2)
+
+number-of-blocks = 2 x 3 = 6
 ```
 
 Each C tile cell corresponds to one thread. All threads in a block collectively
@@ -86,8 +109,8 @@ For block `(block-row, block-col)` and thread
 `(thread-row, thread-col)`, the output coordinates are:
 
 ```text
-C-row = block-row x block-rows + thread-row
-C-col = block-col x block-cols + thread-col
+C-row = block-row x tile-size + thread-row
+C-col = block-col x tile-size + thread-col
 ```
 
 For example, with `16 x 16` thread blocks, block `(0, 1)` computes
@@ -111,6 +134,14 @@ rows  0..15 |             |          X          |
 A and B tiles are matrix regions used to compute a C tile. They are data tiles,
 not additional GPU blocks.
 
+The matrix shapes are:
+
+```text
+A: rows x inner
+B: inner x cols
+C: rows x cols
+```
+
 Matrix multiplication computes:
 
 ```text
@@ -118,19 +149,19 @@ C[row, col] = sum over k of A[row, k] * B[k, col]
 ```
 
 The `k` dimension is the inner dimension shared by A and B. It is divided into
-chunks of `tile-inner` elements:
+square tiles of `tile-size` elements:
 
 ```text
-matrix-inner = k-tile-count x tile-inner
+inner = inner-tile-count x tile-size
 ```
 
 `q` identifies one of those chunks:
 
 ```text
-q = 0 .. k-tile-count - 1
+q = 0 .. inner-tile-count - 1
 
-first-k = q x tile-inner
-last-k  = first-k + tile-inner - 1
+first-k = q x tile-size
+last-k  = first-k + tile-size - 1
 ```
 
 For C tile `(block-row, block-col)`, the three coordinates select the input
@@ -153,35 +184,24 @@ More explicitly:
 
 ```text
 A tile:
-  rows block-row * block-rows
-       .. block-row * block-rows + block-rows - 1
-  cols q * tile-inner
-       .. q * tile-inner + tile-inner - 1
+  rows block-row * tile-size
+       .. block-row * tile-size + tile-size - 1
+  cols q * tile-size
+       .. q * tile-size + tile-size - 1
 
 B tile:
-  rows q * tile-inner
-       .. q * tile-inner + tile-inner - 1
-  cols block-col * block-cols
-       .. block-col * block-cols + block-cols - 1
+  rows q * tile-size
+       .. q * tile-size + tile-size - 1
+  cols block-col * tile-size
+       .. block-col * tile-size + tile-size - 1
 ```
 
 Their shapes are:
 
 ```text
-A-tile :
-  block-rows x tile-inner
-
-B-tile :
-  tile-inner x block-cols
-
-C-tile :
-  block-rows x block-cols
-```
-
-For a square tiled kernel:
-
-```text
-block-rows = block-cols = tile-inner = TILE
+A tile: tile-size x tile-size
+B tile: tile-size x tile-size
+C tile: tile-size x tile-size
 ```
 
 Suppose block `(1, 1)` computes C tile `(1, 1)`. Over all inner iterations, it
@@ -233,7 +253,7 @@ C[row,col] =
     A[row,0] * B[0,col]
   + A[row,1] * B[1,col]
   + ...
-  + A[row,matrix-inner-1] * B[matrix-inner-1,col]
+  + A[row,inner-1] * B[inner-1,col]
 ```
 
 With tiling, the same thread computes the same sum, but splits the `k` values
@@ -266,12 +286,11 @@ the selected tiles, not the complete matrices.
 Each thread block allocates two flat shared-memory regions:
 
 ```text
-A shared size = block-rows x tile-inner
-B shared size = tile-inner x block-cols
+A shared size = tile-size x tile-size
+B shared size = tile-size x tile-size
 ```
 
-For the square kernel, `block-rows`, `block-cols`, and `tile-inner` are all
-`TILE`. For each inner tile `q`:
+For each inner tile `q`:
 
 1. Every thread loads one value from the selected A tile into shared memory.
 2. Every thread loads one value from the selected B tile into shared memory.
@@ -300,7 +319,7 @@ thread `(thread-row, thread-col)` computes:
 ```text
 partial = 0
 
-for k in 0 .. tile-inner:
+for k in 0 .. tile-size:
     partial +=
         A-shared-tile(thread-row, k)
       * B-shared-tile(k, thread-col)
@@ -309,8 +328,8 @@ for k in 0 .. tile-inner:
 The shared tiles have these shapes:
 
 ```text
-A-shared-tile: block-rows x tile-inner
-B-shared-tile: tile-inner x block-cols
+A-shared-tile: tile-size x tile-size
+B-shared-tile: tile-size x tile-size
 ```
 
 Before the next iteration overwrites shared memory:
@@ -533,10 +552,8 @@ For `32 x 32` matrices and `TILE = 16`:
 ```text
 grid-rows   = 2
 grid-cols   = 2
-block-rows  = 16
-block-cols  = 16
-tile-inner  = 16
-k-tile-count = 2
+tile-size   = 16
+inner-tile-count = 2
 ```
 
 Block `(0, 1)`, thread `(3, 5)` computes `C[3,21]`.

@@ -18,6 +18,10 @@ Importantly, note that in the short term we will include direct CUDA codegen fro
 because two developers are working concurrently.
 So our job is to implement the full pipeline `catena-dsl -> CUDA` without going via IR for now.
 
+GPU design notes:
+
+- [GPU tiled matrix multiplication layout](GPU_TILED_MATMUL.md)
+
 # High-level overview of DSL and IR
 
 The Catena DSL models *dataflow with higher-order linear functions*.

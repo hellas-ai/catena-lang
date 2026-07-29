@@ -1,14 +1,13 @@
-# Row-major views over linear GPU global storage.
+# GPU tiled matrix multiplication over logical matrix views.
 #
-# gpu.f32.tiled-matmul :
-#
+# gpu.f32.tiled-matmul.kernel :
 #   A-view × B-view × dimensions ×
 #   (state × ((row × col) × (shared-A × shared-B)))
 #   ->
 #   state × (C[row,col] × (shared-A × shared-B))
 (theory program type {
-  # Layout-independent tiled cell producer.
-  (def gpu.f32.tiled-matmul : {[rows cols inner tile-size.]
+  # Compute one logical C cell.
+  (def gpu.f32.tiled-matmul.kernel : {[rows cols inner tile-size.]
     ({({([.rows] ix val) ([.inner] ix val)} *) (f32 val)} =>)
     ({({([.inner] ix val) ([.cols] ix val)} *) (f32 val)} =>)
 
@@ -62,31 +61,9 @@
     ({[.state] [.next-resources]} *.intro)
   ))
 
-  # Map a 2D invocation to logical matrix indices and a flat row-major index.
-  (arr gpu.row-major.indexer.2d : {[
-    rows cols grid-rows grid-cols tile-size
-  .]
-    ({
-      ({[.grid-cols] [.grid-rows]} 2d)
-      ({[.tile-size] [.tile-size]} 2d)
-    } gpu.grid [grid.])
-
-    ([.grid] gpu.env)
-  } -> {[
-    rows cols grid-rows grid-cols tile-size
-  .]
-    ({
-      ({[.grid-cols] [.grid-rows]} 2d)
-      ({[.tile-size] [.tile-size]} 2d)
-    } gpu.grid [grid.])
-
-    ({([.rows] ix val) ([.cols] ix val)} * [logical-index.])
-    ({[.logical-index] (({[.rows] [.cols]} *) ix val)} *)
-  })
-
 })
 
-# Divide one named dimension by another and assert that the division is exact.
+# Exact dimension division.
 (def program u64.perfect-div :
   ([n divisor.] {
     ({[.n] u64} :)
@@ -104,8 +81,7 @@
   [.quotient]
 ))
 
-# Compute the launch geometry for square, perfectly tiled matrix
-# multiplication. All three logical dimensions must be exact multiples.
+# Launch geometry for square, perfectly tiled matrix multiplication.
 (def program gpu.tiled-matmul.perfect-launch-params :
   ([rows cols inner tile-size.] {
     ({[.rows] u64} :)
@@ -146,8 +122,9 @@
   {[.params] [.inner-tile-count]}
 ))
 
-# Read a flat f32 global allocation with the allocation first, so partial
-# application produces an indexed flat view.
+# Row-major global views.
+
+# Read one element from linear global storage.
 (def program gpu.f32.global.row-major.flat-at :
   ([rows cols.] {
     ({
@@ -163,7 +140,7 @@
   {[.i] [.global]} gpu.global.ix
 ))
 
-# Adapt linear global storage to the ordinary row-major matrix-view definition.
+# Present linear global storage as a row-major matrix.
 (def program gpu.f32.global.row-major.view :
   ([rows cols.] {
     ({[.rows] u64} :)
@@ -194,8 +171,22 @@
   } f32.row-major.matrix-view)
 ))
 
+# Row-major tiled-matmul materialization.
+(def program gpu.f32.tiled-matmul.shared.identity : {[tile-size.]
+  ({
+    ({[.tile-size] [.tile-size]} nat.mul [shared-len.])
+    ({[.shared-len] f32} gpu.shared val)
+    ({[.shared-len] f32} gpu.shared val)
+  } *)
+} -> ([tile-size.]
+  ({
+    ({[.tile-size] [.tile-size]} nat.mul [shared-len.])
+    ({[.shared-len] f32} gpu.shared val)
+    ({[.shared-len] f32} gpu.shared val)
+  } *))
+= [shared])
+
 # gpu.f32.tiled-matmul.row-major.materialize :
-#
 #   launch-params × A-view × B-view × dimensions
 #   ->
 #   C-global
@@ -227,41 +218,47 @@
     dimensions-rows c-size-rows rows-param.
   ])
   ([.inner] u64.copy-param [dimensions-inner inner-param.])
-  ([.cols] u64.copies2-param [
-    dimensions-cols c-size-cols cols-param.
+  ([.cols] u64.copies3 [
+    dimensions-cols c-size-cols indices-cols.
   ])
+  ([.indices-cols] u64.copy-param [indices-cols-len cols-param.])
   ({[.c-size-rows] [.c-size-cols]} u64.product [c-size.])
 
   ([.params] gpu.launch_params.2d-2d.params [
     materialize-params
-    grid-cols-param grid-rows-param
+    _grid-cols-param _grid-rows-param
     tile-size-param _tile-size-param.
   ])
 
-  (({
-    [.rows-param]
-    [.cols-param]
-    [.grid-rows-param]
-    [.grid-cols-param]
-    [.tile-size-param]
-  } name.gpu.row-major.indexer.2d) lift [indexer.])
-
   ({
-    [.rows-param]
-    [.cols-param]
-    [.inner-param]
-    [.tile-size-param]
-    [.a-view]
-    [.b-view]
-    [.dimensions-rows]
-    [.dimensions-inner]
-    [.dimensions-cols]
-  } partial.gpu.f32.tiled-matmul.5 [producer.])
+    ({
+      (name.gpu.state.identity lift)
+      ({
+        ({
+          [.rows-param]
+          [.cols-param]
+          [.indices-cols-len]
+        } partial.f32.row-major.indices.1)
+        (([.tile-size-param]
+          name.gpu.f32.tiled-matmul.shared.identity) lift)
+      } tensor)
+    } tensor)
+    ({
+      [.rows-param]
+      [.cols-param]
+      [.inner-param]
+      [.tile-size-param]
+      [.a-view]
+      [.b-view]
+      [.dimensions-rows]
+      [.dimensions-inner]
+      [.dimensions-cols]
+    } partial.gpu.f32.tiled-matmul.kernel.5)
+  } compose [kernel.])
 
   ({
     [.materialize-params]
     [.c-size]
-    [.indexer]
-    [.producer]
+    [.kernel]
   } gpu.materialize)
 ))

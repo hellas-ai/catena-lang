@@ -1,13 +1,6 @@
-# General GPU kernel interfaces.
+# GPU memory and kernel interfaces.
 #
-# A launch has two boundaries:
-#
-#   - persistent resources are supplied by the caller and survive the launch;
-#   - shared resources are declared by the kernel signature, instantiated once
-#     per block by codegen, and cannot escape the launch.
-#
-# Global and shared memory are linear. Logical shapes and physical access
-# patterns will be represented by ordinary closures over these buffers.
+# Global and shared memory are linear; logical layouts are expressed by views.
 
 (theory type nat {
   # Ranked launch dimensions. These describe execution geometry, not memory.
@@ -43,6 +36,8 @@
 })
 
 (theory program type {
+  (def gpu.state.identity : gpu.state -> gpu.state = [state])
+
   # Index linear global storage.
   (arr gpu.global.ix : {[m n t.]
     ([.n] ix val)
@@ -170,23 +165,22 @@
     ({[.kernel-args kernel-coargs]} -> val)
   } -> ([grid x y s.y]))
 
-  # Materialize one global element per kernel invocation.
+  # Materialize one global element per logical thread index.
   #
-  # The indexer maps the invocation environment to a logical index I and a
-  # physical output index. The producer computes the value for I and may use
-  # block-local shared storage S.
-  (arr gpu.materialize : {[grid n i s t.]
-    ({[.i] [.s]} * [producer-resources.])
-    ({gpu.state [.producer-resources]} * [producer-args.])
+  #   gpu.materialize :
+  #     launch-params
+  #       × (n : u64)
+  #       × (state × (Ix n × S) => state × (T × S)) # kernel
+  #       -> global(cap.own, n, T)
+  (arr gpu.materialize : {[grid n s t.]
+    ({([.n] ix val) [.s]} * [kernel-resources.])
+    ({gpu.state [.kernel-resources]} * [kernel-args.])
 
-    ({([.t] val) [.s]} * [next-producer-resources.])
-    ({gpu.state [.next-producer-resources]} * [producer-coargs.])
-
-    ({[.i] ([.n] ix val)} * [indexed.])
+    ({([.t] val) [.s]} * [next-kernel-resources.])
+    ({gpu.state [.next-kernel-resources]} * [kernel-coargs.])
 
     ([.grid] gpu.launch_params val)
     ({[.n] u64} :)
-    ({([.grid] gpu.env) [.indexed]} =>)
-    ({[.producer-args] [.producer-coargs]} =>)
-  } -> ([grid n i s t.] ({cap.own [.n t]} gpu.global val)))
+    ({[.kernel-args] [.kernel-coargs]} =>)
+  } -> ([grid n s t.] ({cap.own [.n t]} gpu.global val)))
 })

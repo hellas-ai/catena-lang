@@ -49,8 +49,7 @@
 
   ({[.a-size-rows] [.a-size-inner]} u64.product [a-size.])
   ({[.b-size-inner] [.b-size-cols]} u64.product [b-size.])
-  ({[.c-size-rows] [.c-size-cols]} u64.product [c-size.])
-  ([.c-size] u64.copies2 [c-alloc-size c-result-size.])
+  ({[.c-size-rows] [.c-size-cols]} u64.product [c-result-size.])
 
   ([.a-mem] mem.cast.f32 [actual-a-size a-buffer.])
   ([.a-size actual-a-size]
@@ -98,7 +97,6 @@
     [.materialize-rows]
     [.materialize-inner]
     [.materialize-cols]
-    [.c-alloc-size]
   } gpu.f32.tiled-matmul.row-major.materialize [c.])
 
   ([.c] gpu.global.to-buf [result-buffer.])

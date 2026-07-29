@@ -213,7 +213,6 @@
     ({[.rows] u64} :)
     ({[.inner] u64} :)
     ({[.cols] u64} :)
-    ({({[.rows] [.cols]} *) u64} :)
 
   })
   ->
@@ -222,11 +221,16 @@
 = ([
   params
   a-view b-view
-  rows inner cols c-size
+  rows inner cols
 .]
-  ([.rows] u64.copy-param [dimensions-rows rows-param.])
+  ([.rows] u64.copies2-param [
+    dimensions-rows c-size-rows rows-param.
+  ])
   ([.inner] u64.copy-param [dimensions-inner inner-param.])
-  ([.cols] u64.copy-param [dimensions-cols cols-param.])
+  ([.cols] u64.copies2-param [
+    dimensions-cols c-size-cols cols-param.
+  ])
+  ({[.c-size-rows] [.c-size-cols]} u64.product [c-size.])
 
   ([.params] gpu.launch_params.2d-2d.params [
     materialize-params

@@ -27,6 +27,10 @@
   # Boolean type literal.
   (arr bool.type : [] -> bool)
 
+  # Scalar type literal used by operations, such as uninitialized allocation,
+  # that cannot infer their element type from an input value.
+  (arr f32.type : [] -> f32)
+
   # Boolean operations
   (arr bool.t : [] -> (bool val))
   (arr bool.f : [] -> (bool val))

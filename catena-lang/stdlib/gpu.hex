@@ -1,50 +1,146 @@
-# Cooperative thread execution primitives
+# General GPU kernel interfaces.
+#
+# A launch has two boundaries:
+#
+#   - persistent resources are supplied by the caller and survive the launch;
+#   - shared resources are declared by the kernel signature, instantiated once
+#     per block by codegen, and cannot escape the launch.
+#
+# Global and shared memory are linear. Logical shapes and physical access
+# patterns will be represented by ordinary closures over these buffers.
 
 (theory type nat {
-  # the read-only *environment* available to a GPU kernel.
-  # Consists of:
-  #   - Thread ID
-  #   - Block sizes
-  (arr gpu.env : 0 -> 1)
+  # Ranked launch dimensions. These describe execution geometry, not memory.
+  (arr 1d : 1 -> 1)
+  (arr 2d : 2 -> 1)
+  (arr 3d : 3 -> 1)
 
-  # A unique type which allows us to force ordering.
-  # This of this as a resource which may not ever be consumed or copied.
+  # Type-level multiplication used to relate execution extents.
+  (arr nat.mul : 2 -> 1)
+
+  # Linear global memory: ownership capability × length × element type.
+  (arr gpu.global : 3 -> 1)
+
+  # Linear shared memory: length × element type. It is block-local and has no
+  # host-visible ownership capability because it never escapes a launch.
+  (arr gpu.shared : 2 -> 1)
+
+  # The physical execution grid: grid shape × block shape.
+  (arr gpu.grid : 2 -> 1)
+
+  # Read-only information supplied implicitly to a running kernel. Indexing the
+  # environment by its grid contract ties kernel coordinates to the launch.
+  (arr gpu.env : 1 -> 1)
+
+  # Linear token used to order effects within a kernel.
   (arr gpu.state : 0 -> 1)
 
-  # TODO: add lengths!
-  (arr gpu.buf : 1 -> 1)
-
-  # Kernel launch parameters: grid dim and block dim (for now)
-  (arr gpu.3d : 0 -> 1)
-  (arr gpu.launch_params : 0 -> 1)
+  # Runtime dimension vectors and coordinates indexed by their rank/extent.
+  # CUDA/HIP lowers each supported rank to dim3, filling absent axes with one.
+  (arr gpu.dimensions : 1 -> 1)
+  (arr gpu.coordinate : 1 -> 1)
+  (arr gpu.launch_params : 1 -> 1)
 })
 
 (theory program type {
-  # Launch parameter construction
-  (arr gpu.3d.intro : (u64 val [x . x x x]) -> gpu.3d)
-  (arr gpu.launch_params.intro : (gpu.3d val [x . x x]) -> (gpu.launch_params val))
+  # Allocate global storage and initialize it from a buffer. The proof
+  # transports the actual buffer length p to the requested global length n.
+  (arr gpu.global.alloc-from-buf : {[m n p t.]
+    ({[.m p t]} buf val)
+    ([.n p] = |-)
+  } -> ([m n p t.] ({[.m n t]} gpu.global val)))
 
-  # store a value to global memory
-  #(arr gpu.global.store : gpu.state -> gpu.state)
+  # Allocate owned global storage without initializing it. The element type is
+  # supplied as an erased type witness because there is no initializer from
+  # which it could be inferred.
+  (arr gpu.global.alloc : {[n t.]
+    ({[.n] u64} :)
+    ([.t])
+  } -> ([n t.] ({cap.own [.n t]} gpu.global val)))
 
-  # Materialize a buffer by cooperative execution of a kernel `k`,
-  # where k is a function pointer of the following type
+  # End global use and recover its contents as an owned or borrowed buffer.
+  (arr gpu.global.to-buf : {[m n t.]
+    ({[.m n t]} gpu.global val)
+  } -> ([m n t.] ({[.m n t]} buf val)))
+
+  # Construct ranked runtime dimensions.
+  (arr gpu.dimensions.1d.intro : {[x.]
+    ({[.x] u64} :)
+  } -> ([x.] (([.x] 1d) gpu.dimensions val)))
+
+  (arr gpu.dimensions.2d.intro : {[x y.]
+    ({[.x] u64} :)
+    ({[.y] u64} :)
+  } -> ([x y.] (({[.x] [.y]} 2d) gpu.dimensions val)))
+
+  (arr gpu.dimensions.3d.intro : {[x y z.]
+    ({[.x] u64} :)
+    ({[.y] u64} :)
+    ({[.z] u64} :)
+  } -> ([x y z.] (({[.x] [.y] [.z]} 3d) gpu.dimensions val)))
+
+  # Grid and block dimensions are constructed independently, so their ranks do
+  # not need to match: for example, a 2D grid may launch 1D blocks.
+  (arr gpu.launch_params.intro : {[grid-shape block-shape.]
+    ([.grid-shape] gpu.dimensions val)
+    ([.block-shape] gpu.dimensions val)
+  } -> {[grid-shape block-shape.]
+    ({[.grid-shape] [.block-shape]} gpu.grid [grid.])
+    ([.grid] gpu.launch_params val)
+  })
+
+  # Inspect the hardware coordinates of the current kernel invocation.
   #
-  #   k : gpu.env × gpu.state × X → gpu.state × B
-  #
-  # Where `X` is the explicitly-passed *environment* of the kernel (common to
-  # all threads).
-  #
-  # gpu.materialize : gpu.launch_params × (gpu.env × gpu.state × X -> gpu.state × B) -> gpu.buf B
-  (arr gpu.materialize : {[x b.]
-    ({gpu.state [.x]} * [args_tail.])
-    ({gpu.env [.args_tail]} * [args.])
+  # The returned environment preserves this read-only resource for subsequent
+  # queries without requiring contraction.
+  (arr gpu.env.coordinates : {[grid-shape block-shape.]
+    ({[.grid-shape] [.block-shape]} gpu.grid [grid.])
+    ([.grid] gpu.env)
+  } -> {[grid-shape block-shape.]
+    ([.grid] gpu.env)
+    ([.grid-shape] gpu.coordinate val)  # block index
+    ([.block-shape] gpu.coordinate val) # thread index
+    ([.grid-shape] gpu.dimensions val)
+    ([.block-shape] gpu.dimensions val)
+  })
 
-    ({gpu.state [.b]} * [coargs.])
+  (arr gpu.coordinate.1d.elim :
+    (([x] 1d) gpu.coordinate val)
+    ->
+    ([x.] (u64 val)))
 
-    (gpu.launch_params val)
-    ([.args coargs] ->)
-  }
-  ->
-  ([x b.b] gpu.buf val))
+  (arr gpu.coordinate.2d.elim :
+    (({[x] [y]} 2d) gpu.coordinate val)
+    ->
+    ([x y.] {(u64 val) (u64 val)}))
+
+  (arr gpu.coordinate.3d.elim :
+    (({[x] [y] [z]} 3d) gpu.coordinate val)
+    ->
+    ([x y z.] {(u64 val) (u64 val) (u64 val)}))
+
+  # General kernel launch.
+  #
+  #   S is the shared environment found in the kernel signature.
+  #   Codegen creates S independently for every block. S is present in the
+  #   kernel function but absent from gpu.launch's runtime inputs and outputs.
+  #
+  #   gpu.launch :
+  #     launch_params
+  #       × P
+  #       × val(env × state × (P × S)
+  #             -> state × (P × S))
+  #       -> P
+  (arr gpu.launch : {[grid p s.]
+    ({[.p] [.s]} * [resources.])
+    ({gpu.state [.resources]} * [state-resources.])
+    ({([.grid] gpu.env) [.state-resources]} * [kernel-args.])
+
+    ({[.p] [.s]} * [next-resources.])
+    ({gpu.state [.next-resources]} * [kernel-coargs.])
+
+    ([.grid] gpu.launch_params val)
+    ([.p])
+    ({[.kernel-args kernel-coargs]} -> val)
+  } -> ([grid p s.p]))
 })

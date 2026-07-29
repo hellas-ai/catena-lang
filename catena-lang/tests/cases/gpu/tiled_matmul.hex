@@ -1,0 +1,196 @@
+# Tiled matrix multiplication launch fixture.
+#
+# Global and shared memory are linear. `rows`, `inner`, and `cols` are ordinary
+# kernel data; a later access-pattern closure will interpret the linear buffers
+# as A[rows, inner], B[inner, cols], and C[rows, cols].
+
+# Matmul-specific launch policy, expressed as an ordinary definition.
+#
+# The public sizes use matrix order (rows, cols). gpu.dimensions uses hardware
+# order (x, y), hence the deliberate reversal:
+#
+#   grid  = dim3(grid-cols, grid-rows)
+#   block = dim3(block-cols, block-rows)
+(def program tiled-matmul-launch-params :
+  ([grid-rows grid-cols block-rows block-cols.] {
+    ({[.grid-rows] u64} :)
+    ({[.grid-cols] u64} :)
+    ({[.block-rows] u64} :)
+    ({[.block-cols] u64} :)
+  })
+  ->
+  ([grid-rows grid-cols block-rows block-cols.]
+    ({
+      ({[.grid-cols] [.grid-rows]} 2d)
+      ({[.block-cols] [.block-rows]} 2d)
+    } gpu.grid [grid.])
+    ([.grid] gpu.launch_params val))
+= ([grid-rows grid-cols block-rows block-cols.]
+  ({[.grid-cols] [.grid-rows]} gpu.dimensions.2d.intro [grid.])
+  ({[.block-cols] [.block-rows]} gpu.dimensions.2d.intro [block.])
+  ({[.grid] [.block]} gpu.launch_params.intro [params.])
+  [.params]
+))
+
+(theory program type {
+  (arr tiled-matmul-placeholder-kernel : {[
+    grid-rows grid-cols
+    block-rows block-cols
+    inner
+  .]
+    ({[.grid-rows] [.block-rows]} nat.mul [rows.])
+    ({[.grid-cols] [.block-cols]} nat.mul [cols.])
+
+    ({
+      ({[.grid-cols] [.grid-rows]} 2d)
+      ({[.block-cols] [.block-rows]} 2d)
+    } gpu.grid [grid.])
+
+    ({
+      cap.ref
+      ({[.rows] [.inner]} nat.mul)
+      f32
+    } gpu.global val [a.])
+    ({
+      cap.ref
+      ({[.inner] [.cols]} nat.mul)
+      f32
+    } gpu.global val [b.])
+    ({
+      cap.own
+      ({[.rows] [.cols]} nat.mul)
+      f32
+    } gpu.global val [c.])
+
+    ({[.inner] u64} : [inner-value.])
+    ({[.cols] u64} : [cols-value.])
+    ({[.inner-value] [.cols-value]} * [inner-cols.])
+    ({[.rows] u64} : [rows-value.])
+    ({[.rows-value] [.inner-cols]} * [dimensions.])
+
+    ({[.c] [.dimensions]} * [c-and-dimensions.])
+    ({[.b] [.c-and-dimensions]} * [b-and-rest.])
+    ({[.a] [.b-and-rest]} * [persistent.])
+
+    ({
+      ({[.block-rows] [.block-cols]} nat.mul [shared-len.])
+      ({[.shared-len] f32} gpu.shared val)
+      ({[.shared-len] f32} gpu.shared val)
+    } * [shared.])
+
+    ({[.persistent] [.shared]} * [resources.])
+    ({gpu.state [.resources]} * [state-resources.])
+    ({([.grid] gpu.env) [.state-resources]} * [kernel-args.])
+
+    ({[.persistent] [.shared]} * [next-resources.])
+    ({gpu.state [.next-resources]} * [kernel-coargs.])
+
+    ([.kernel-args])
+  } -> ([
+    grid-rows grid-cols
+    block-rows block-cols
+    inner
+  .]
+    ([.kernel-coargs])))
+})
+
+# Runtime boundary corresponding to:
+#
+#   tiled_matmul_via_mem(
+#       f, g,
+#       rows, inner, cols,
+#       rows*inner, inner*cols, rows*cols,
+#       grid_rows, grid_cols,
+#       block_rows, block_cols)
+#
+#   h = gpu.global.alloc(rows*cols, f32)
+#   launch_matmul(f, g, h, ...)
+#
+# All global storage is allocated by this caller of gpu.launch. A and B arrive
+# as borrowed ABI memory and initialize their global allocations. C is allocated
+# here from its rows*cols size without initialization. The usual mem.cast.f32
+# recovers typed input buffers, and runtime equality assertions produce the
+# proofs consumed by gpu.global.alloc-from-buf.
+(def program tiled-matmul-via-mem :
+  ([grid-rows grid-cols block-rows block-cols inner.] {
+    ({[.grid-rows] [.block-rows]} nat.mul [rows.])
+    ({[.grid-cols] [.block-cols]} nat.mul [cols.])
+
+    (cap.ref mem)
+    (cap.ref mem)
+
+    ({[.rows] u64} :)
+    ({[.inner] u64} :)
+    ({[.cols] u64} :)
+
+    ({({[.rows] [.inner]} nat.mul) u64} :)
+    ({({[.inner] [.cols]} nat.mul) u64} :)
+    ({({[.rows] [.cols]} nat.mul) u64} :)
+
+    ({[.grid-rows] u64} :)
+    ({[.grid-cols] u64} :)
+    ({[.block-rows] u64} :)
+    ({[.block-cols] u64} :)
+  })
+  ->
+  ([grid-rows grid-cols block-rows block-cols inner.] (cap.own mem))
+= ([
+  a-mem b-mem
+  rows inner cols
+  a-size b-size c-size
+  grid-rows grid-cols
+  block-rows block-cols
+.]
+  ([.grid-rows] u64.copy-param [launch-grid-rows grid-rows-param.])
+  ([.grid-cols] u64.copy-param [launch-grid-cols grid-cols-param.])
+  ([.block-rows] u64.copy-param [launch-block-rows block-rows-param.])
+  ([.block-cols] u64.copy-param [launch-block-cols block-cols-param.])
+  ([.inner] u64.copy-param [persistent-inner inner-param.])
+  ([.c-size] u64.copies2 [c-alloc-size c-result-size.])
+
+  ([.a-mem] mem.cast.f32 [actual-a-size a-buffer.])
+  ([.a-size actual-a-size]
+    u64.eq [a-compatible if-a-compatible _if-a-incompatible.])
+  ({[.a-compatible] [.if-a-compatible]} assert-then [a-size-proof.])
+  ({[.a-buffer] [.a-size-proof]} gpu.global.alloc-from-buf [a.])
+
+  ([.b-mem] mem.cast.f32 [actual-b-size b-buffer.])
+  ([.b-size actual-b-size]
+    u64.eq [b-compatible if-b-compatible _if-b-incompatible.])
+  ({[.b-compatible] [.if-b-compatible]} assert-then [b-size-proof.])
+  ({[.b-buffer] [.b-size-proof]} gpu.global.alloc-from-buf [b.])
+
+  ({[.c-alloc-size] f32.type} gpu.global.alloc [c.])
+
+  ({[.persistent-inner] [.cols]} *.intro [inner-cols.])
+  ({[.rows] [.inner-cols]} *.intro [dimensions.])
+  ({[.c] [.dimensions]} *.intro [c-and-dimensions.])
+  ({[.b] [.c-and-dimensions]} *.intro [b-and-rest.])
+  ({[.a] [.b-and-rest]} *.intro [persistent.])
+
+  ({
+    [.launch-grid-rows]
+    [.launch-grid-cols]
+    [.launch-block-rows]
+    [.launch-block-cols]
+  } tiled-matmul-launch-params [params.])
+
+  ({
+    [.params]
+    [.persistent]
+    ({
+      [.grid-rows-param]
+      [.grid-cols-param]
+      [.block-rows-param]
+      [.block-cols-param]
+      [.inner-param]
+    } name.tiled-matmul-placeholder-kernel)
+  } gpu.launch [next-persistent.])
+
+  ([.next-persistent] *.elim [_a next-b-and-rest.])
+  ([.next-b-and-rest] *.elim [_b next-c-and-dimensions.])
+  ([.next-c-and-dimensions] *.elim [next-c _dimensions.])
+  ([.next-c] gpu.global.to-buf [result-buffer.])
+  ({[.c-result-size] [.result-buffer]} buf.to-mem [result.])
+  [.result]
+))

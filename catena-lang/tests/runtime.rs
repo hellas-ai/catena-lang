@@ -786,6 +786,9 @@ mod materializec;
 
 #[path = "cases/materialize.rs"]
 mod materialize;
+
+#[path = "cases/gpu.rs"]
+mod gpu;
 #[path = "cases/matrix.rs"]
 mod matrix;
 

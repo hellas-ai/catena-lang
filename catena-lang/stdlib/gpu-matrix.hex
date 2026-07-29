@@ -1,10 +1,14 @@
 # Row-major views over linear GPU global storage.
+#
+# gpu.f32.tiled-matmul :
+#
+#   A-view × B-view × dimensions ×
+#   (state × ((row × col) × (shared-A × shared-B)))
+#   ->
+#   state × (C[row,col] × (shared-A × shared-B))
 (theory program type {
-  # Layout-independent tiled kernel.
-  #
-  # A and B are matrix views. C is private to the row-major materializer.
-  # Shared storage remains explicit because it is allocated once per block.
-  (arr gpu.f32.tiled-matmul : {[
+  # Layout-independent tiled cell producer.
+  (def gpu.f32.tiled-matmul : {[
     grid-rows grid-cols
     block-rows block-cols
     inner
@@ -12,29 +16,14 @@
     ({[.grid-rows] [.block-rows]} nat.mul [rows.])
     ({[.grid-cols] [.block-cols]} nat.mul [cols.])
 
-    ({
-      ({[.grid-cols] [.grid-rows]} 2d)
-      ({[.block-cols] [.block-rows]} 2d)
-    } gpu.grid [grid.])
+    ({({([.rows] ix val) ([.inner] ix val)} *) (f32 val)} =>)
+    ({({([.inner] ix val) ([.cols] ix val)} *) (f32 val)} =>)
 
-    ({({([.rows] ix val) ([.inner] ix val)} *) (f32 val)} => [a-view.])
-    ({({([.inner] ix val) ([.cols] ix val)} *) (f32 val)} => [b-view.])
+    ({[.rows] u64} :)
+    ({[.inner] u64} :)
+    ({[.cols] u64} :)
 
-    ({
-      cap.own
-      ({[.rows] [.cols]} *)
-      f32
-    } gpu.global val [c.])
-
-    ({[.inner] u64} : [inner-value.])
-    ({[.cols] u64} : [cols-value.])
-    ({[.inner-value] [.cols-value]} * [inner-cols.])
-    ({[.rows] u64} : [rows-value.])
-    ({[.rows-value] [.inner-cols]} * [dimensions.])
-
-    ({[.c] [.dimensions]} * [c-and-dimensions.])
-    ({[.b-view] [.c-and-dimensions]} * [b-and-rest.])
-    ({[.a-view] [.b-and-rest]} * [inputs.])
+    ({([.rows] ix val) ([.cols] ix val)} * [logical-index.])
 
     ({
       ({[.block-rows] [.block-cols]} nat.mul [shared-len.])
@@ -42,11 +31,10 @@
       ({[.shared-len] f32} gpu.shared val)
     } * [shared.])
 
-    ({[.inputs] [.shared]} * [resources.])
-    ({gpu.state [.resources]} * [state-resources.])
-    ({([.grid] gpu.env) [.state-resources]} * [kernel-args.])
+    ({[.logical-index] [.shared]} * [resources.])
+    ({gpu.state [.resources]} * [kernel-args.])
 
-    ({[.c] [.shared]} * [next-resources.])
+    ({(f32 val) [.shared]} * [next-resources.])
     ({gpu.state [.next-resources]} * [kernel-coargs.])
 
     ([.kernel-args])
@@ -55,7 +43,59 @@
     block-rows block-cols
     inner
   .]
-    ([.kernel-coargs])))
+    ({
+      ({[.block-rows] [.block-cols]} nat.mul [shared-len.])
+      ({[.shared-len] f32} gpu.shared val)
+      ({[.shared-len] f32} gpu.shared val)
+    } * [shared.])
+
+    ({(f32 val) [.shared]} * [next-resources.])
+    ({gpu.state [.next-resources]} * [kernel-coargs.])
+
+    ([.kernel-coargs]))
+  = ([a-view b-view rows inner cols kernel-args.]
+    ([.kernel-args] *.elim [state resources.])
+    ([.resources] *.elim [logical-index shared.])
+
+    ([.rows] :.param [row-param.])
+    ([.cols] :.param [col-param.])
+
+    ({
+      [.row-param]
+      [.col-param]
+      [.inner]
+      [.a-view]
+      [.b-view]
+      [.logical-index]
+    } f32.matmul.cell-dot [value.])
+
+    ({[.value] [.shared]} *.intro [next-resources.])
+    ({[.state] [.next-resources]} *.intro)
+  ))
+
+  # Map a 2D invocation to logical matrix indices and a flat row-major index.
+  (arr gpu.row-major.indexer.2d : {[grid-rows grid-cols block-rows block-cols.]
+    ({[.grid-rows] [.block-rows]} nat.mul [rows.])
+    ({[.grid-cols] [.block-cols]} nat.mul [cols.])
+
+    ({
+      ({[.grid-cols] [.grid-rows]} 2d)
+      ({[.block-cols] [.block-rows]} 2d)
+    } gpu.grid [grid.])
+
+    ([.grid] gpu.env)
+  } -> {[grid-rows grid-cols block-rows block-cols.]
+    ({[.grid-rows] [.block-rows]} nat.mul [rows.])
+    ({[.grid-cols] [.block-cols]} nat.mul [cols.])
+
+    ({
+      ({[.grid-cols] [.grid-rows]} 2d)
+      ({[.block-cols] [.block-rows]} 2d)
+    } gpu.grid [grid.])
+
+    ({([.rows] ix val) ([.cols] ix val)} * [logical-index.])
+    ({[.logical-index] (({[.rows] [.cols]} *) ix val)} *)
+  })
 })
 
 # Read a flat f32 global allocation with the allocation first, so partial
@@ -147,31 +187,37 @@
   rows inner cols c-size
 .]
   ([.inner] u64.copy-param [dimensions-inner inner-param.])
+
   ([.params] gpu.launch_params.2d-2d.params [
-    launch-params
+    materialize-params
     grid-cols-param grid-rows-param
     block-cols-param block-rows-param.
   ])
 
-  ({[.c-size] f32.type} gpu.global.alloc [c.])
-
-  ({[.dimensions-inner] [.cols]} *.intro [inner-cols.])
-  ({[.rows] [.inner-cols]} *.intro [dimensions.])
-  ({[.c] [.dimensions]} *.intro [c-and-dimensions.])
-  ({[.b-view] [.c-and-dimensions]} *.intro [b-and-rest.])
-  ({[.a-view] [.b-and-rest]} *.intro [inputs.])
+  (({
+    [.grid-rows-param]
+    [.grid-cols-param]
+    [.block-rows-param]
+    [.block-cols-param]
+  } name.gpu.row-major.indexer.2d) lift [indexer.])
 
   ({
-    [.launch-params]
-    [.inputs]
-    ({
-      [.grid-rows-param]
-      [.grid-cols-param]
-      [.block-rows-param]
-      [.block-cols-param]
-      [.inner-param]
-    } name.gpu.f32.tiled-matmul)
-  } gpu.launch [result.])
+    [.grid-rows-param]
+    [.grid-cols-param]
+    [.block-rows-param]
+    [.block-cols-param]
+    [.inner-param]
+    [.a-view]
+    [.b-view]
+    [.rows]
+    [.dimensions-inner]
+    [.cols]
+  } partial.gpu.f32.tiled-matmul.5 [producer.])
 
-  [.result]
+  ({
+    [.materialize-params]
+    [.c-size]
+    [.indexer]
+    [.producer]
+  } gpu.materialize)
 ))

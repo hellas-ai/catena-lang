@@ -169,4 +169,24 @@
     ([.x])
     ({[.kernel-args kernel-coargs]} -> val)
   } -> ([grid x y s.y]))
+
+  # Materialize one global element per kernel invocation.
+  #
+  # The indexer maps the invocation environment to a logical index I and a
+  # physical output index. The producer computes the value for I and may use
+  # block-local shared storage S.
+  (arr gpu.materialize : {[grid n i s t.]
+    ({[.i] [.s]} * [producer-resources.])
+    ({gpu.state [.producer-resources]} * [producer-args.])
+
+    ({([.t] val) [.s]} * [next-producer-resources.])
+    ({gpu.state [.next-producer-resources]} * [producer-coargs.])
+
+    ({[.i] ([.n] ix val)} * [indexed.])
+
+    ([.grid] gpu.launch_params val)
+    ({[.n] u64} :)
+    ({([.grid] gpu.env) [.indexed]} =>)
+    ({[.producer-args] [.producer-coargs]} =>)
+  } -> ([grid n i s t.] ({cap.own [.n t]} gpu.global val)))
 })

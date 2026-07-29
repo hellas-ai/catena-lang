@@ -11,6 +11,9 @@
   (arr u64 : 0 -> 1)
   (arr u32 : 0 -> 1)
   (arr f32 : 0 -> 1)
+
+  # Type-level quotient used to name the result of runtime u64 division.
+  (arr nat.div : 2 -> 1)
 })
 
 (theory program type {
@@ -105,6 +108,19 @@
   (arr u64.lte  : {(u64 val) (u64 val)} -> (bool val))
   (arr u64.gte  : {(u64 val) (u64 val)} -> (bool val))
   (arr u64.mul  : {(u64 val) (u64 val)} -> (u64 val))
+  (arr u64.product : {[x y.]
+    ({[.x] u64} :)
+    ({[.y] u64} :)
+  } -> ([x y.] ({({[.x] [.y]} *) u64} :)))
+  # Divide and report whether the quotient exactly covers the dividend.
+  (arr u64.div : {[x y exact.]
+    ({[.x] u64} :)
+    ({[.y] u64} :)
+    ({[.y] 0} > |-)
+  } -> {[x y exact.]
+    ({({[.x] [.y]} nat.div) u64} :)
+    ({[.exact] bool} :)
+  })
   (arr u64.select : {(bool val) (u64 val) (u64 val)} -> (u64 val))
   (arr u64.name : {[x.] (u64 val)} -> ([x.] ({[.x] u64} :)))
 

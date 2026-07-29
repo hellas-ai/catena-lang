@@ -67,6 +67,30 @@
   )
 ))
 
+(def program u64.copies5 :
+  ([x.] ({[.x] u64} :))
+  ->
+  ([x.] {
+    ({[.x] u64} :)
+    ({[.x] u64} :)
+    ({[.x] u64} :)
+    ({[.x] u64} :)
+    ({[.x] u64} :)
+  })
+= ([value.]
+  ([.value] :.ty [copy-a _param-a.]
+    ([.copy-a] :.ty [copy-b _param-b.]
+      ([.copy-b] :.ty [copy-c _param-c.]
+        ([.copy-c] :.ty [copy-d _param-d.]
+          ([.copy-d] :.ty [copy-e _param-e.]
+            {[.copy-a] [.copy-b] [.copy-c] [.copy-d] [.copy-e]}
+          )
+        )
+      )
+    )
+  )
+))
+
 (def program u64.copies6 :
   ([x.] ({[.x] u64} :))
   ->

@@ -1,79 +1,56 @@
-# tiled-matmul-launch-params :
-#
-#   (grid-rows × grid-cols × block-rows × block-cols)
-#   ->
-#   launch-params(
-#     grid2d(grid-cols, grid-rows),
-#     block2d(block-cols, block-rows))
-(def program tiled-matmul-launch-params :
-  ([grid-rows grid-cols block-rows block-cols.] {
-    ({[.grid-rows] u64} :)
-    ({[.grid-cols] u64} :)
-    ({[.block-rows] u64} :)
-    ({[.block-cols] u64} :)
-  })
-  ->
-  ([grid-rows grid-cols block-rows block-cols.]
-    ({
-      ({[.grid-cols] [.grid-rows]} 2d)
-      ({[.block-cols] [.block-rows]} 2d)
-    } gpu.grid [grid.])
-    ([.grid] gpu.launch_params val))
-= ([grid-rows grid-cols block-rows block-cols.]
-  ({[.grid-cols] [.grid-rows]} gpu.dimensions.2d.intro [grid.])
-  ({[.block-cols] [.block-rows]} gpu.dimensions.2d.intro [block.])
-  ({[.grid] [.block]} gpu.launch_params.intro [params.])
-  [.params]
-))
-
 # tiled-matmul-via-mem :
 #
 #   mem.ref A × mem.ref B ×
-#   rows × inner × cols ×
-#   (rows * inner) × (inner * cols) × (rows * cols) ×
-#   grid-rows × grid-cols × block-rows × block-cols
+#   rows × cols × inner × tile-size
 #   ->
 #   mem.own C
 #
-#   rows = grid-rows * block-rows
-#   cols = grid-cols * block-cols
+#   grid-rows        = rows / tile-size
+#   grid-cols        = cols / tile-size
+#   inner-tile-count = inner / tile-size
 #
-# A and B initialize global storage after size checks. C is allocated
-# uninitialized and returned through the mem ABI.
 (def program tiled-matmul-via-mem :
-  ([grid-rows grid-cols block-rows block-cols inner.] {
-    ({[.grid-rows] [.block-rows]} nat.mul [rows.])
-    ({[.grid-cols] [.block-cols]} nat.mul [cols.])
-
+  ([rows cols inner tile-size.] {
     (cap.ref mem)
     (cap.ref mem)
 
     ({[.rows] u64} :)
-    ({[.inner] u64} :)
     ({[.cols] u64} :)
-
-    ({({[.rows] [.inner]} *) u64} :)
-    ({({[.inner] [.cols]} *) u64} :)
-    ({({[.rows] [.cols]} *) u64} :)
-
-    ({[.grid-rows] u64} :)
-    ({[.grid-cols] u64} :)
-    ({[.block-rows] u64} :)
-    ({[.block-cols] u64} :)
+    ({[.inner] u64} :)
+    ({[.tile-size] u64} :)
   })
   ->
-  ([grid-rows grid-cols block-rows block-cols inner.] (cap.own mem))
+  ([rows cols inner tile-size.] (cap.own mem))
 = ([
   a-mem b-mem
-  rows inner cols
-  a-size b-size c-size
-  grid-rows grid-cols
-  block-rows block-cols
+  rows cols inner tile-size
 .]
+  ([.rows] u64.copies5 [
+    a-size-rows
+    c-size-rows
+    a-view-rows
+    materialize-rows
+    launch-rows.
+  ])
+
+  ([.cols] u64.copies5 [
+    b-size-cols
+    c-size-cols
+    b-view-cols
+    materialize-cols
+    launch-cols.
+  ])
+
+  ([.inner] u64.copies6 [
+    a-size-inner b-size-inner
+    a-view-inner b-view-inner
+    materialize-inner launch-inner.
+  ])
+
+  ({[.a-size-rows] [.a-size-inner]} u64.product [a-size.])
+  ({[.b-size-inner] [.b-size-cols]} u64.product [b-size.])
+  ({[.c-size-rows] [.c-size-cols]} u64.product [c-size.])
   ([.c-size] u64.copies2 [c-alloc-size c-result-size.])
-  ([.rows] u64.copies2 [a-view-rows materialize-rows.])
-  ([.inner] u64.copies3 [a-view-inner b-view-inner materialize-inner.])
-  ([.cols] u64.copies2 [b-view-cols materialize-cols.])
 
   ([.a-mem] mem.cast.f32 [actual-a-size a-buffer.])
   ([.a-size actual-a-size]
@@ -92,11 +69,13 @@
     gpu.f32.global.row-major.view [b-view.])
 
   ({
-    [.grid-rows]
-    [.grid-cols]
-    [.block-rows]
-    [.block-cols]
-  } tiled-matmul-launch-params [params.])
+    [.launch-rows]
+    [.launch-cols]
+    [.launch-inner]
+    [.tile-size]
+  } gpu.tiled-matmul.perfect-launch-params [
+    params _inner-tile-count.
+  ])
 
   ({
     [.params]

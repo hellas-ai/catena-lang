@@ -134,12 +134,21 @@ rows  0..15 |             |          X          |
 A and B tiles are matrix regions used to compute a C tile. They are data tiles,
 not additional GPU blocks.
 
-The matrix shapes are:
+The matrices are two-dimensional:
 
 ```text
-A: rows x inner
-B: inner x cols
-C: rows x cols
+A shape: rows x inner
+B shape: inner x cols
+C shape: rows x cols
+
+A element: A[row, inner-col]
+B element: B[inner-row, col]
+C element: C[row, col]
+
+0 <= row       < rows
+0 <= col       < cols
+0 <= inner-row < inner
+0 <= inner-col < inner
 ```
 
 Matrix multiplication computes:
@@ -283,35 +292,61 @@ the selected tiles, not the complete matrices.
 
 ## What the kernel does
 
-Each thread block allocates two flat shared-memory regions:
+Each thread block allocates two shared tiles:
 
 ```text
-A shared size = tile-size x tile-size
-B shared size = tile-size x tile-size
+A-shared-tile[tile-row, tile-k]
+B-shared-tile[tile-k, tile-col]
+
+0 <= tile-row < tile-size
+0 <= tile-col < tile-size
+0 <= tile-k   < tile-size
 ```
 
-For each inner tile `q`:
-
-1. Every thread loads one value from the selected A tile into shared memory.
-2. Every thread loads one value from the selected B tile into shared memory.
-3. The threads use the A and B tiles in shared memory to compute their partial
-   C cells.
-4. Each thread adds that partial value to its accumulator.
-
-For the square kernel, thread `(thread-row, thread-col)` loads:
+The block also has `tile-size x tile-size` threads:
 
 ```text
-A[block-row * TILE + thread-row,
-  q * TILE + thread-col]
-
-B[q * TILE + thread-row,
-  block-col * TILE + thread-col]
+0 <= thread-row < tile-size
+0 <= thread-col < tile-size
 ```
 
-After the tiles have been loaded into shared memory:
+Tile indices are local matrix coordinates. During loading, they correspond
+one-to-one with thread IDs because there is exactly one thread per tile cell:
 
 ```text
-# A block synchronization is required here.
+A tile:
+  tile-row = thread-row
+  tile-k   = thread-col
+
+B tile:
+  tile-k   = thread-row
+  tile-col = thread-col
+```
+
+For inner-tile iteration `q`, thread `(thread-row, thread-col)` copies:
+
+```text
+A-row       = block-row * tile-size + thread-row
+A-inner-col = q * tile-size + thread-col
+
+B-inner-row = q * tile-size + thread-row
+B-col       = block-col * tile-size + thread-col
+
+A-shared-tile[thread-row, thread-col] =
+    A[A-row, A-inner-col]
+
+B-shared-tile[thread-row, thread-col] =
+    B[B-inner-row, B-col]
+```
+
+Each thread loads one cell of each tile. Collectively, all
+`tile-size x tile-size` threads fill both complete tiles.
+
+The shared allocations are created once per block. Each `q` loads a new logical
+A tile and B tile into the same shared storage, overwriting the previous tiles.
+
+```text
+# A block synchronization is required after filling the tiles.
 ```
 
 thread `(thread-row, thread-col)` computes:
@@ -319,17 +354,10 @@ thread `(thread-row, thread-col)` computes:
 ```text
 partial = 0
 
-for k in 0 .. tile-size:
+for k with 0 <= k < tile-size:
     partial +=
-        A-shared-tile(thread-row, k)
-      * B-shared-tile(k, thread-col)
-```
-
-The shared tiles have these shapes:
-
-```text
-A-shared-tile: tile-size x tile-size
-B-shared-tile: tile-size x tile-size
+        A-shared-tile[thread-row, k]
+      * B-shared-tile[k, thread-col]
 ```
 
 Before the next iteration overwrites shared memory:
@@ -343,7 +371,7 @@ to its one C cell.
 
 ## Worked example from the output point of view
 
-Consider these `4 x 4` matrices with `TILE = 2`:
+Consider these `4 x 4` matrices with `tile-size = 2`:
 
 ```text
 A                           B
@@ -395,7 +423,7 @@ thread-row  0 | thread (0,0)    | thread (0,1)    |
 ```
 
 Every thread starts its accumulator at zero. Because the inner dimension has
-length four and `TILE = 2`, the block performs two inner-tile iterations.
+length four and `tile-size = 2`, the block performs two inner-tile iterations.
 
 Here `q` selects a two-element chunk of the `k` dimension:
 
@@ -547,7 +575,7 @@ From the output point of view:
 
 ## 32 x 32 layout example
 
-For `32 x 32` matrices and `TILE = 16`:
+For `32 x 32` matrices and `tile-size = 16`:
 
 ```text
 grid-rows   = 2

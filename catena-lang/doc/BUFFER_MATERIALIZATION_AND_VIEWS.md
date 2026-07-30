@@ -121,6 +121,10 @@ inner-col-buffer =
     cooperative-materialize(inner-col-tile)
 ```
 
+This interface is not initialization-safe if it returns the buffers before
+block synchronization. Each thread has written only its assigned elements, so
+other entries may still be uninitialized when the returned buffer is accessed.
+
 After block synchronization, row-major views expose the buffers as matrices:
 
 ```text

@@ -1051,33 +1051,19 @@ fn render_materialize_kernel(
     out.push_str("    uint64_t global_width = (uint64_t)gridDim.x * blockDim.x;\n");
     out.push_str("    uint64_t thread_id = global_y * global_width + global_x;\n");
     out.push_str("    if (thread_id >= len) { return; }\n");
-    out.push_str("    catena_gpu_state_t state = 0;\n");
-    out.push_str("    catena_gpu_state_t next_state = 0;\n");
     out.push_str(&format!("    {} value;\n", c_type(element)));
-    let state = GpuValue::Var(GpuVar {
-        node: output.node,
-        name: "state".to_string(),
-        lowered: LoweredType::Runtime(CType::Named("catena_gpu_state_t".to_string())),
-    });
     let thread_id = GpuValue::Var(GpuVar {
         node: output.node,
         name: "thread_id".to_string(),
         lowered: LoweredType::Runtime(CType::U64),
     });
     let mut kernel_inputs = parts.kernel_env.to_vec();
-    kernel_inputs.extend([state, thread_id]);
-    let kernel_outputs = [
-        GpuVar {
-            node: output.node,
-            name: "next_state".to_string(),
-            lowered: LoweredType::Runtime(CType::Named("catena_gpu_state_t".to_string())),
-        },
-        GpuVar {
-            node: output.node,
-            name: "value".to_string(),
-            lowered: LoweredType::Runtime(element.as_ref().clone()),
-        },
-    ];
+    kernel_inputs.push(thread_id);
+    let kernel_outputs = [GpuVar {
+        node: output.node,
+        name: "value".to_string(),
+        lowered: LoweredType::Runtime(element.as_ref().clone()),
+    }];
     render_function_application(out, "    ", parts.kernel, &kernel_inputs, &kernel_outputs)?;
     out.push_str("    out[thread_id] = value;\n");
     out.push_str("}\n");
@@ -1570,10 +1556,9 @@ mod tests {
 
         assert!(source.contains("uint64_t out_len = c_size;"));
         assert!(source.contains("uint64_t thread_id = global_y * global_width + global_x;"));
-        assert!(source.contains(
-            "program_value_kernel(kernel_capture, state, thread_id, &next_state, &value);"
-        ));
+        assert!(source.contains("program_value_kernel(kernel_capture, thread_id, &value);"));
         assert!(source.contains("out[thread_id] = value;"));
         assert!(!source.contains("invocation_indexer"));
+        assert!(!source.contains("catena_gpu_state_t state"));
     }
 }

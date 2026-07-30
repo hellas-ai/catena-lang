@@ -2,9 +2,9 @@
 #
 # gpu.f32.tiled-matmul.kernel :
 #   A-view × B-view × dimensions ×
-#   (state × ((row × col) × (shared-A × shared-B)))
+#   (row × col)
 #   ->
-#   state × (C[row,col] × (shared-A × shared-B))
+#   C[row,col]
 (theory program type {
   # Compute one logical C cell.
   (def gpu.f32.tiled-matmul.kernel : {[rows cols inner tile-size.]
@@ -14,36 +14,16 @@
     ({[.rows] u64} :)
     ({[.inner] u64} :)
     ({[.cols] u64} :)
+    ({[.tile-size] u64} :)
+    ({([.rows] ix val) ([.cols] ix val)} *)
+  } -> ([rows cols inner tile-size.] (f32 val))
+  = ([a-view b-view rows inner cols tile-size logical-index.]
+    ([.tile-size] u64.copies2 [tile-rows tile-cols.])
+    ({[.tile-rows] [.tile-cols]} u64.product [shared-len.])
+    ([.shared-len] u64.copies2 [a-shared-len b-shared-len.])
 
-    ({([.rows] ix val) ([.cols] ix val)} * [logical-index.])
-
-    ({
-      ({[.tile-size] [.tile-size]} nat.mul [shared-len.])
-      ({[.shared-len] f32} gpu.shared val)
-      ({[.shared-len] f32} gpu.shared val)
-    } * [shared.])
-
-    ({[.logical-index] [.shared]} * [resources.])
-    ({gpu.state [.resources]} * [kernel-args.])
-
-    ({(f32 val) [.shared]} * [next-resources.])
-    ({gpu.state [.next-resources]} * [kernel-coargs.])
-
-    ([.kernel-args])
-  } -> ([rows cols inner tile-size.]
-    ({
-      ({[.tile-size] [.tile-size]} nat.mul [shared-len.])
-      ({[.shared-len] f32} gpu.shared val)
-      ({[.shared-len] f32} gpu.shared val)
-    } * [shared.])
-
-    ({(f32 val) [.shared]} * [next-resources.])
-    ({gpu.state [.next-resources]} * [kernel-coargs.])
-
-    ([.kernel-coargs]))
-  = ([a-view b-view rows inner cols kernel-args.]
-    ([.kernel-args] *.elim [state resources.])
-    ([.resources] *.elim [logical-index shared.])
+    ([.a-shared-len] gpu.shared.alloc [a-shared.])
+    ([.b-shared-len] gpu.shared.alloc [b-shared.])
 
     ([.rows] :.param [row-param.])
     ([.cols] :.param [col-param.])
@@ -57,8 +37,9 @@
       [.logical-index]
     } f32.matmul.cell-dot [value.])
 
-    ({[.value] [.shared]} *.intro [next-resources.])
-    ({[.state] [.next-resources]} *.intro)
+    ([.b-shared] gpu.shared.end [_b-shared-len-param.])
+    ([.a-shared] gpu.shared.end [_a-shared-len-param.])
+    [.value]
   ))
 
 })
@@ -172,20 +153,6 @@
 ))
 
 # Row-major tiled-matmul materialization.
-(def program gpu.f32.tiled-matmul.shared.identity : {[tile-size.]
-  ({
-    ({[.tile-size] [.tile-size]} nat.mul [shared-len.])
-    ({[.shared-len] f32} gpu.shared val)
-    ({[.shared-len] f32} gpu.shared val)
-  } *)
-} -> ([tile-size.]
-  ({
-    ({[.tile-size] [.tile-size]} nat.mul [shared-len.])
-    ({[.shared-len] f32} gpu.shared val)
-    ({[.shared-len] f32} gpu.shared val)
-  } *))
-= [shared])
-
 # gpu.f32.tiled-matmul.row-major.materialize :
 #   launch-params × A-view × B-view × dimensions
 #   ->
@@ -204,6 +171,7 @@
     ({[.rows] u64} :)
     ({[.inner] u64} :)
     ({[.cols] u64} :)
+    ({[.tile-size] u64} :)
 
   })
   ->
@@ -212,7 +180,7 @@
 = ([
   params
   a-view b-view
-  rows inner cols
+  rows inner cols tile-size
 .]
   ([.rows] u64.copies2-param [
     dimensions-rows c-size-rows rows-param.
@@ -232,17 +200,10 @@
 
   ({
     ({
-      (name.gpu.state.identity lift)
-      ({
-        ({
-          [.rows-param]
-          [.cols-param]
-          [.indices-cols-len]
-        } partial.f32.row-major.indices.1)
-        (([.tile-size-param]
-          name.gpu.f32.tiled-matmul.shared.identity) lift)
-      } tensor)
-    } tensor)
+      [.rows-param]
+      [.cols-param]
+      [.indices-cols-len]
+    } partial.f32.row-major.indices.1)
     ({
       [.rows-param]
       [.cols-param]
@@ -253,7 +214,8 @@
       [.dimensions-rows]
       [.dimensions-inner]
       [.dimensions-cols]
-    } partial.gpu.f32.tiled-matmul.kernel.5)
+      [.tile-size]
+    } partial.gpu.f32.tiled-matmul.kernel.6)
   } compose [kernel.])
 
   ({

@@ -47,6 +47,10 @@
     materialize-inner launch-inner.
   ])
 
+  ([.tile-size] u64.copies2 [
+    launch-tile-size materialize-tile-size.
+  ])
+
   ({[.a-size-rows] [.a-size-inner]} u64.product [a-size.])
   ({[.b-size-inner] [.b-size-cols]} u64.product [b-size.])
   ({[.c-size-rows] [.c-size-cols]} u64.product [c-result-size.])
@@ -85,7 +89,7 @@
     [.launch-rows]
     [.launch-cols]
     [.launch-inner]
-    [.tile-size]
+    [.launch-tile-size]
   } gpu.tiled-matmul.perfect-launch-params [
     params _inner-tile-count.
   ])
@@ -97,6 +101,7 @@
     [.materialize-rows]
     [.materialize-inner]
     [.materialize-cols]
+    [.materialize-tile-size]
   } gpu.f32.tiled-matmul.row-major.materialize [c.])
 
   ([.c] gpu.global.to-buf [result-buffer.])

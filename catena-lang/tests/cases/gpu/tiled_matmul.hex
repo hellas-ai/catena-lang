@@ -91,7 +91,7 @@
     [.launch-inner]
     [.launch-tile-size]
   } gpu.tiled-matmul.perfect-launch-params [
-    params _inner-tile-count.
+    params inner-tile-count.
   ])
 
   ({
@@ -102,6 +102,7 @@
     [.materialize-inner]
     [.materialize-cols]
     [.materialize-tile-size]
+    [.inner-tile-count]
   } gpu.f32.tiled-matmul.row-major.materialize [c.])
 
   ([.c] gpu.global.to-buf [result-buffer.])

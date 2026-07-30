@@ -75,9 +75,11 @@
   } -> ([rows cols t.]
     ({({[.rows] [.cols]} *) [.t]} gpu.shared val)))
 
-  (arr gpu.shared.end : {[n.]
-    ({[.n f32]} gpu.shared val)
-  } -> ([n.] [.n]))
+  # Index linear block-local shared storage.
+  (arr gpu.shared.ix : {[n t.]
+    ([.n] ix val)
+    ({[.n t]} gpu.shared val)
+  } -> ([n t . t] val))
 
   # Construct ranked runtime dimensions.
   (arr gpu.dimensions.1d.intro : {[x.]

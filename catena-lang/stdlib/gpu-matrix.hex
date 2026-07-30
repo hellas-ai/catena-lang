@@ -381,60 +381,11 @@
   {[.params] [.inner-tile-count]}
 ))
 
-# Row-major global views.
-
-# Read one element from linear global storage.
-(def program gpu.f32.global.row-major.flat-at :
-  ([rows cols.] {
-    ({
-      cap.ref
-      ({[.rows] [.cols]} *)
-      f32
-    } gpu.global val)
-    (({[.rows] [.cols]} *) ix val)
-  })
-  ->
-  ([rows cols.] (f32 val))
-= ([global i.]
-  {[.i] [.global]} gpu.global.ix
-))
-
-# Present linear global storage as a row-major matrix.
-(def program gpu.f32.global.row-major.view :
-  ([rows cols.] {
-    ({[.rows] u64} :)
-    ({[.cols] u64} :)
-    ({
-      cap.ref
-      ({[.rows] [.cols]} *)
-      f32
-    } gpu.global val)
-  })
-  ->
-  ([rows cols.]
-    ({({([.rows] ix val) ([.cols] ix val)} *) (f32 val)} =>))
-= ([rows cols global.]
-  ([.rows] u64.copy-param [view-rows rows-param.])
-  ([.cols] u64.copy-param [view-cols cols-param.])
-
-  ({
-    [.rows-param]
-    [.cols-param]
-    [.global]
-  } partial.gpu.f32.global.row-major.flat-at.1 [flat-view.])
-
-  ({
-    [.view-rows]
-    [.view-cols]
-    [.flat-view]
-  } f32.row-major.matrix-view)
-))
-
 # Row-major tiled-matmul materialization.
 # gpu.f32.tiled-matmul.row-major.materialize :
 #   launch-params × A-view × B-view × dimensions
 #   ->
-#   C-global
+#   C-buffer
 (def program gpu.f32.tiled-matmul.row-major.materialize :
   ([rows cols inner tile-size inner-tile-count grid-rows grid-cols.] {
     ({
@@ -454,7 +405,7 @@
   })
   ->
   ([rows cols inner tile-size inner-tile-count grid-rows grid-cols.]
-    ({cap.own ({[.rows] [.cols]} *) f32} gpu.global val))
+    ({cap.own ({[.rows] [.cols]} *) f32} buf val))
 = ([
   params
   a-view b-view

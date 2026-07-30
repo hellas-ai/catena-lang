@@ -1123,6 +1123,10 @@ fn render_materialize_call(
         }
     }
     out.push_str(");\n");
+    out.push_str(&format!(
+        "    catena_host_gpu_check({synchronize_fn}());\n",
+        synchronize_fn = dialect.synchronize_fn(),
+    ));
     out.push_str(&format!("    {} = {}_data;\n", output.name, output.name));
     Ok(())
 }
@@ -1558,6 +1562,7 @@ mod tests {
         assert!(source.contains("uint64_t thread_id = global_y * global_width + global_x;"));
         assert!(source.contains("program_value_kernel(kernel_capture, thread_id, &value);"));
         assert!(source.contains("out[thread_id] = value;"));
+        assert!(source.contains("catena_host_gpu_check(hipDeviceSynchronize());"));
         assert!(!source.contains("invocation_indexer"));
         assert!(!source.contains("catena_gpu_state_t state"));
     }

@@ -132,6 +132,33 @@
   )
 ))
 
+# Present a flat borrowed buffer as a row-major matrix.
+(def program f32.row-major.buffer-view :
+  ([n m.] {
+    ({[.n] u64} :)
+    ({[.m] u64} :)
+    ({cap.ref ({[.n] [.m]} *) f32} buf val)
+  })
+  ->
+  ([n m.] ({({([.n] ix val) ([.m] ix val)} *) (f32 val)} =>))
+= ([n-len m-len input.]
+  ([.n-len] u64.copies2 [view-n flat-n.])
+  ([.m-len] u64.copies2 [view-m flat-m.])
+  ({[.flat-n] [.flat-m]} u64.product [flat-len.])
+  ([.flat-len] :.param [flat-len-param.])
+
+  ({
+    [.flat-len-param]
+    [.input]
+  } partial.f32.row-major.flat-at.1 [flat-view.])
+
+  ({
+    [.view-n]
+    [.view-m]
+    [.flat-view]
+  } f32.row-major.matrix-view)
+))
+
 # Convert one flat row-major index into its row and column indices.
 (def program f32.row-major.indices :
   ([n m.] {

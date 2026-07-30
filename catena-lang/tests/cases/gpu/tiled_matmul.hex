@@ -59,7 +59,7 @@
   ([.a-size actual-a-size]
     u64.eq [a-compatible if-a-compatible _if-a-incompatible.])
   ({[.a-compatible] [.if-a-compatible]} assert-then [a-size-proof.])
-  ({[.a-buffer] [.a-size-proof]} gpu.global.alloc-from-buf [a.])
+  ({[.a-buffer] [.a-size-proof]} buf.f32.cast-same-length [a.])
 
   # A has shape rows × inner. This constructs:
   #
@@ -68,13 +68,13 @@
   #
   # The formula is the current row-major layout hidden behind the view.
   ({[.a-view-rows] [.a-view-inner] [.a]}
-    gpu.f32.global.row-major.view [a-view.])
+    f32.row-major.buffer-view [a-view.])
 
   ([.b-mem] mem.cast.f32 [actual-b-size b-buffer.])
   ([.b-size actual-b-size]
     u64.eq [b-compatible if-b-compatible _if-b-incompatible.])
   ({[.b-compatible] [.if-b-compatible]} assert-then [b-size-proof.])
-  ({[.b-buffer] [.b-size-proof]} gpu.global.alloc-from-buf [b.])
+  ({[.b-buffer] [.b-size-proof]} buf.f32.cast-same-length [b.])
 
   # B has shape inner × cols. This constructs:
   #
@@ -83,7 +83,7 @@
   #
   # The formula is the current row-major layout hidden behind the view.
   ({[.b-view-inner] [.b-view-cols] [.b]}
-    gpu.f32.global.row-major.view [b-view.])
+    f32.row-major.buffer-view [b-view.])
 
   ({
     [.launch-rows]
@@ -105,7 +105,6 @@
     [.inner-tile-count]
   } gpu.f32.tiled-matmul.row-major.materialize [c.])
 
-  ([.c] gpu.global.to-buf [result-buffer.])
-  ({[.c-result-size] [.result-buffer]} buf.to-mem [result.])
+  ({[.c-result-size] [.c]} buf.to-mem [result.])
   [.result]
 ))

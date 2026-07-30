@@ -1,6 +1,7 @@
 # GPU memory and kernel interfaces.
 #
-# Global and shared memory are linear; logical layouts are expressed by views.
+# Buffers captured by kernels use managed global storage. Shared memory remains
+# block-local, and logical layouts are expressed by views.
 
 (theory type nat {
   # Ranked launch dimensions. These describe execution geometry, not memory.
@@ -10,9 +11,6 @@
 
   # Type-level multiplication used to relate execution extents.
   (arr nat.mul : 2 -> 1)
-
-  # Linear global memory: ownership capability × length × element type.
-  (arr gpu.global : 3 -> 1)
 
   # Linear shared memory: length × element type. It is block-local and has no
   # host-visible ownership capability because it never escapes a launch.
@@ -36,32 +34,6 @@
 })
 
 (theory program type {
-  # Index linear global storage.
-  (arr gpu.global.ix : {[m n t.]
-    ([.n] ix val)
-    ({[.m n t]} gpu.global val)
-  } -> ([m n t . t] val))
-
-  # Allocate global storage and initialize it from a buffer. The proof
-  # transports the actual buffer length p to the requested global length n.
-  (arr gpu.global.alloc-from-buf : {[m n p t.]
-    ({[.m p t]} buf val)
-    ([.n p] = |-)
-  } -> ([m n p t.] ({[.m n t]} gpu.global val)))
-
-  # Allocate owned global storage without initializing it. The element type is
-  # supplied as an erased type witness because there is no initializer from
-  # which it could be inferred.
-  (arr gpu.global.alloc : {[n t.]
-    ({[.n] u64} :)
-    ([.t])
-  } -> ([n t.] ({cap.own [.n t]} gpu.global val)))
-
-  # End global use and recover its contents as an owned or borrowed buffer.
-  (arr gpu.global.to-buf : {[m n t.]
-    ({[.m n t]} gpu.global val)
-  } -> ([m n t.] ({[.m n t]} buf val)))
-
   # Cooperatively materialize a block-local 2D view into linear shared storage.
   # Each block thread supplies the element at its own logical 2D thread index.
   #
@@ -182,16 +154,16 @@
     ({[.kernel-args kernel-coargs]} -> val)
   } -> ([grid x y s.y]))
 
-  # Materialize one global element per logical thread index.
+  # Materialize one buffer element per logical thread index.
   #
   #   gpu.materialize :
   #     launch-params
   #       × (n : u64)
   #       × (Ix n => T) # kernel
-  #       -> global(cap.own, n, T)
+  #       -> buf(cap.own, n, T)
   (arr gpu.materialize : {[grid n t.]
     ([.grid] gpu.launch_params val)
     ({[.n] u64} :)
     ({([.n] ix val) ([.t] val)} =>)
-  } -> ([grid n t.] ({cap.own [.n t]} gpu.global val)))
+  } -> ([grid n t.] ({cap.own [.n t]} buf val)))
 })

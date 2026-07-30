@@ -1,9 +1,7 @@
 # GPU tiled matrix multiplication over logical matrix views.
 #
 # gpu.f32.tiled-matmul.kernel :
-#   A-view × B-view × dimensions × state × (row × col)
-#   ->
-#   state × C[row,col]
+#   A-view × B-view × dimensions × state × (row × col) -> C[row,col]
 (theory program type {
   # Map a block-local thread index to the corresponding logical A tile index:
   #
@@ -121,10 +119,9 @@
   #       (output-col / tile-size) * tile-size + thread-col)
   #
   #   row-inner-shared =
-  #     cooperative-materialize(row-inner-tile)
+  #     materialize(sync(cooperative-load(row-inner-slot, row-inner-tile)))
   #   inner-col-shared =
-  #     cooperative-materialize(inner-col-tile)
-  #   synchronize-block()
+  #     materialize(sync(cooperative-load(inner-col-slot, inner-col-tile)))
   #
   #   tile-value = 0
   #   for local-inner in 0 .. tile-size:
@@ -134,7 +131,8 @@
   #
   #   synchronize-block()
   (def gpu.f32.tiled-matmul.tile-dot : {[
-    rows cols inner tile-size inner-tile-count.
+    rows cols inner tile-size inner-tile-count
+    row-inner-slot inner-col-slot.
   ]
     ({({([.rows] ix val) ([.inner] ix val)} *) (f32 val)} =>)
     ({({([.inner] ix val) ([.cols] ix val)} *) (f32 val)} =>)
@@ -143,12 +141,37 @@
     ({[.inner] u64} :)
     ({[.cols] u64} :)
     ({[.tile-size] u64} :)
+    ({
+      ({
+        [.inner-col-slot]
+        ({
+          [.row-inner-slot]
+          gpu.initial
+        } gpu.shared.allocated)
+      } gpu.shared.allocated)
+      gpu.initial
+    } gpu.state)
+    ({
+      [.row-inner-slot]
+      ({[.tile-size] [.tile-size]} *)
+      f32
+    } gpu.shared.slot val)
+    ({
+      [.inner-col-slot]
+      ({[.tile-size] [.tile-size]} *)
+      f32
+    } gpu.shared.slot val)
     ({([.rows] ix val) ([.cols] ix val)} *)
     ([.inner-tile-count] ix val)
-  } -> ([rows cols inner tile-size inner-tile-count.] (f32 val))
+  } -> ([
+    rows cols inner tile-size inner-tile-count
+    row-inner-slot inner-col-slot.
+  ] (f32 val))
   = ([
     row-inner-view inner-col-view
-    rows inner cols tile-size logical-index inner-tile-index.
+    rows inner cols tile-size
+    allocated-state row-inner-slot inner-col-slot
+    logical-index inner-tile-index.
   ]
     ([.rows] :.param [a-rows-param.])
     ([.inner] u64.copies2 [a-inner-source b-inner-source.])
@@ -185,6 +208,9 @@
     ([.logical-row] ix.copy [reindex-logical-row local-logical-row.])
     ([.logical-col] ix.copy [reindex-logical-col local-logical-col.])
     ([.inner-tile-index] ix.copy [
+      idempotency-key tile-q.
+    ])
+    ([.tile-q] ix.copy [
       row-inner-tile-index inner-col-tile-index.
     ])
     ([.row-inner-tile-index] ix.to-u64 [row-inner-tile-index-value.])
@@ -217,17 +243,69 @@
     } compose [inner-col-tile-source.])
 
     ({
+      [.allocated-state]
+      [.idempotency-key]
+    } gpu.state.admit-keyed [state.])
+    ({[.state] [.row-inner-slot]} gpu.shared.admit-allocated-at [
+      state-for-row-load row-inner-allocated row-inner-load-slot.
+    ])
+    ({
+      [.state-for-row-load]
+      [.row-inner-allocated]
+      [.row-inner-load-slot]
       [.a-tile-rows]
       [.a-tile-cols]
       [.row-inner-tile-source]
-    } gpu.shared.cooperative-materialize.2d [row-inner-shared.])
+    } gpu.shared.cooperative-load.row-major [
+      row-loaded-state row-loaded-slot.
+    ])
+
     ({
+      [.row-loaded-state]
+      [.inner-col-slot]
+    } gpu.shared.admit-allocated-at [
+      state-for-col-load inner-col-allocated inner-col-load-slot.
+    ])
+    ({
+      [.state-for-col-load]
+      [.inner-col-allocated]
+      [.inner-col-load-slot]
       [.b-tile-rows]
       [.b-tile-cols]
       [.inner-col-tile-source]
-    } gpu.shared.cooperative-materialize.2d [inner-col-shared.])
+    } gpu.shared.cooperative-load.row-major [
+      loaded-state col-loaded-slot.
+    ])
 
-    # Block synchronization happens here, after both cooperative loads.
+    ([.loaded-state] gpu.sync [synchronized-state.])
+
+    ({
+      [.synchronized-state]
+      [.row-loaded-slot]
+    } gpu.shared.admit-ready-at [
+      state-for-row-materialize row-inner-ready row-inner-ready-slot.
+    ])
+    ({
+      [.state-for-row-materialize]
+      [.row-inner-ready]
+      [.row-inner-ready-slot]
+    } gpu.shared.materialize [
+      row-materialized-state row-inner-shared.
+    ])
+
+    ({
+      [.row-materialized-state]
+      [.col-loaded-slot]
+    } gpu.shared.admit-ready-at [
+      state-for-col-materialize inner-col-ready inner-col-ready-slot.
+    ])
+    ({
+      [.state-for-col-materialize]
+      [.inner-col-ready]
+      [.inner-col-ready-slot]
+    } gpu.shared.materialize [
+      materialized-state inner-col-shared.
+    ])
 
     ({
       [.a-shared-rows]
@@ -259,8 +337,11 @@
       [.local-index]
     } f32.matmul.cell-dot [tile-value.])
 
-    # Block synchronization happens here before the next cooperative load.
-    [.tile-value]
+    ([.materialized-state] gpu.sync [completed-state.])
+    ({
+      [.completed-state]
+      [.tile-value]
+    } gpu.state.discard-with-f32)
   ))
 
   # Compute one logical output cell by accumulating every inner tile:
@@ -274,8 +355,7 @@
   #       inner-tile-index)
   #   return accumulator
   (def gpu.f32.tiled-matmul.kernel : {[
-    rows cols inner tile-size inner-tile-count
-    last-event stage.
+    rows cols inner tile-size inner-tile-count.
   ]
     ({({([.rows] ix val) ([.inner] ix val)} *) (f32 val)} =>)
     ({({([.inner] ix val) ([.cols] ix val)} *) (f32 val)} =>)
@@ -285,15 +365,11 @@
     ({[.cols] u64} :)
     ({[.tile-size] u64} :)
     ({[.inner-tile-count] u64} :)
-    ({[.last-event] [.stage]} gpu.state)
+    ({gpu.initial gpu.initial} gpu.state)
     ({([.rows] ix val) ([.cols] ix val)} *)
   } -> ([
-    rows cols inner tile-size inner-tile-count
-    last-event stage.
-  ] {
-    ({[.last-event] [.stage]} gpu.state)
-    (f32 val)
-  })
+    rows cols inner tile-size inner-tile-count.
+  ] (f32 val))
   = ([
     row-inner-view inner-col-view
     rows inner cols tile-size inner-tile-count
@@ -302,9 +378,33 @@
     ([.rows] u64.copy-param [producer-rows rows-param.])
     ([.inner] u64.copy-param [producer-inner inner-param.])
     ([.cols] u64.copy-param [producer-cols cols-param.])
-    ([.tile-size] u64.copy-param [producer-tile-size tile-size-param.])
+    ([.tile-size] u64.copy-param [tile-size-values tile-size-param.])
+    ([.tile-size-values] u64.copies2 [
+      producer-tile-size shared-tile-size.
+    ])
+    ([.shared-tile-size] u64.copies2 [
+      shared-tile-rows shared-tile-cols.
+    ])
+    ({[.shared-tile-rows] [.shared-tile-cols]}
+      u64.product [shared-tile-length.])
+    ([.shared-tile-length] u64.copies2 [
+      row-inner-slot-length inner-col-slot-length.
+    ])
     ([.inner-tile-count] u64.copy-param [
       reduce-inner-tile-count inner-tile-count-param.
+    ])
+
+    ({
+      [.state]
+      [.row-inner-slot-length]
+    } gpu.shared.alloc [
+      row-inner-slot-id row-inner-allocated-state row-inner-slot.
+    ])
+    ({
+      [.row-inner-allocated-state]
+      [.inner-col-slot-length]
+    } gpu.shared.alloc [
+      inner-col-slot-id producer-state inner-col-slot.
     ])
 
     ({
@@ -316,17 +416,22 @@
         [.inner-param]
         [.tile-size-param]
         [.inner-tile-count-param]
+        [.row-inner-slot-id]
+        [.inner-col-slot-id]
         [.row-inner-view]
         [.inner-col-view]
         [.producer-rows]
         [.producer-inner]
         [.producer-cols]
         [.producer-tile-size]
+        [.producer-state]
+        [.row-inner-slot]
+        [.inner-col-slot]
         [.logical-index]
-      } partial.gpu.f32.tiled-matmul.tile-dot.7)
+      } partial.gpu.f32.tiled-matmul.tile-dot.10)
       [.reduce-inner-tile-count]
     } reduce [value.])
-    {[.state] [.value]}
+    [.value]
   ))
 
 })
@@ -397,8 +502,7 @@
 #   C-buffer
 (def program gpu.f32.tiled-matmul.row-major.materialize :
   ([
-    rows cols inner tile-size inner-tile-count grid-rows grid-cols
-    last-event stage.
+    rows cols inner tile-size inner-tile-count grid-rows grid-cols.
   ] {
     ({
       ({[.grid-cols] [.grid-rows]} 2d)
@@ -417,8 +521,7 @@
   })
   ->
   ([
-    rows cols inner tile-size inner-tile-count grid-rows grid-cols
-    last-event stage.
+    rows cols inner tile-size inner-tile-count grid-rows grid-cols.
   ]
     ({cap.own ({[.rows] [.cols]} *) f32} buf val))
 = ([
@@ -447,10 +550,7 @@
 
   ({
     ({
-      ({
-        [.last-event]
-        [.stage]
-      } partial.gpu.state.forward.0)
+      (partial.gpu.state.initial.forward.0)
       ({
         [.rows-param]
         [.cols-param]
@@ -463,8 +563,6 @@
       [.inner-param]
       [.tile-size-param]
       [.inner-tile-count-param]
-      [.last-event]
-      [.stage]
       [.a-view]
       [.b-view]
       [.dimensions-rows]

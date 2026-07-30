@@ -16,6 +16,23 @@
   # host-visible ownership capability because it never escapes a launch.
   (arr gpu.shared : 2 -> 1)
 
+  # An allocated shared-memory slot: identity × length × element type.
+  (arr gpu.shared.slot : 3 -> 1)
+
+  # Generate a fresh identity for a persistent GPU resource.
+  (arr gpu.id : 0 -> 1)
+
+  # Events form a trace by retaining the preceding event.
+  (arr gpu.shared.allocated : 2 -> 1)
+  (arr gpu.shared.loaded : 2 -> 1)
+  (arr gpu.shared.materialized : 2 -> 1)
+  (arr gpu.synchronized : 1 -> 1)
+  (arr gpu.keyed : 2 -> 1)
+
+  # Proofs about a particular slot at a particular input state.
+  (arr gpu.shared.allocated-at : 3 -> 1)
+  (arr gpu.shared.ready-at : 3 -> 1)
+
   # The physical execution grid: grid shape × block shape.
   (arr gpu.grid : 2 -> 1)
 
@@ -23,9 +40,12 @@
   # environment by its grid contract ties kernel coordinates to the launch.
   (arr gpu.env : 1 -> 1)
 
-  # Erased linear proof of block state: last completed event × stage.
+  # Erased linear proof of block state: last completed event × idempotency key.
   # Event names describe executed instructions with past participles.
   (arr gpu.state : 2 -> 1)
+
+  # Fixed initialization tag used at a kernel boundary.
+  (arr gpu.initial : 0 -> 1)
 
   # Runtime dimension vectors and coordinates indexed by their rank/extent.
   # CUDA/HIP lowers each supported rank to dim3, filling absent axes with one.
@@ -35,25 +55,126 @@
 })
 
 (theory program type {
-  # Preserve block state while composing it with a pure kernel input mapping.
-  (def gpu.state.forward : {[last-event stage.]
-    ({[.last-event] [.stage]} gpu.state)
-  } -> ([last-event stage.]
-    ({[.last-event] [.stage]} gpu.state))
+  # Preserve the concrete state supplied at a kernel boundary.
+  (def gpu.state.initial.forward :
+    ({gpu.initial gpu.initial} gpu.state)
+    ->
+    ({gpu.initial gpu.initial} gpu.state)
   = ([state.] [.state]))
 
-  # Cooperatively materialize a block-local 2D view into linear shared storage.
-  # Each block thread supplies the element at its own logical 2D thread index.
-  #
-  #   cooperative-materialize.2d :
-  #     rows × cols × ((Ix rows × Ix cols) => T)
-  #       -> shared(rows * cols, T)
-  (arr gpu.shared.cooperative-materialize.2d : {[rows cols t.]
+  # Allocate one block-local f32 shared-memory slot.
+  (arr gpu.shared.alloc : {[
+    n last-event key.
+  ]
+    ({[.last-event] [.key]} gpu.state)
+    ({[.n] u64} :)
+  } -> ([n last-event key.] {
+    (gpu.id [slot-id.])
+    [.slot-id]
+    ({
+      ({[.slot-id] [.last-event]} gpu.shared.allocated)
+      [.key]
+    } gpu.state)
+    ({[.slot-id] [.n] f32} gpu.shared.slot val)
+  }))
+
+  # Cooperatively load a logical 2D view into an allocated row-major slot.
+  (arr gpu.shared.cooperative-load.row-major : {[
+    rows cols t slot last-event key.
+  ]
+    ({[.last-event] [.key]} gpu.state)
+    ({[.slot] [.last-event] [.key]} gpu.shared.allocated-at |-)
+    ({[.slot] ({[.rows] [.cols]} *) [.t]} gpu.shared.slot val)
     ({[.rows] u64} :)
     ({[.cols] u64} :)
     ({({([.rows] ix val) ([.cols] ix val)} *) ([.t] val)} =>)
-  } -> ([rows cols t.]
-    ({({[.rows] [.cols]} *) [.t]} gpu.shared val)))
+  } -> ([rows cols t slot last-event key.] {
+    ({
+      ({[.slot] [.last-event]} gpu.shared.loaded)
+      [.key]
+    } gpu.state)
+    ({[.slot] ({[.rows] [.cols]} *) [.t]} gpu.shared.slot val)
+  }))
+
+  # Expose a ready slot as initialized shared storage.
+  (arr gpu.shared.materialize : {[
+    n t slot last-event key.
+  ]
+    ({[.last-event] [.key]} gpu.state)
+    ({[.slot] [.last-event] [.key]} gpu.shared.ready-at |-)
+    ({[.slot] [.n] [.t]} gpu.shared.slot val)
+  } -> ([n t slot last-event key.] {
+    ({
+      ({[.slot] [.last-event]} gpu.shared.materialized)
+      [.key]
+    } gpu.state)
+    ({[.n] [.t]} gpu.shared val)
+  }))
+
+  # Synchronize all threads in the block.
+  (arr gpu.sync : {[last-event key.]
+    ({[.last-event] [.key]} gpu.state)
+  } -> ([last-event key.] {
+    ({
+      ([.last-event] gpu.synchronized)
+      [.key]
+    } gpu.state)
+  }))
+
+  # Temporary proof axioms. These will eventually be derived from execution
+  # facts rather than assumed.
+  # Admit that the current trace contains the allocation of this slot.
+  (arr gpu.shared.admit-allocated-at : {[
+    slot n t last-event key.
+  ]
+    ({[.last-event] [.key]} gpu.state)
+    ({[.slot] [.n] [.t]} gpu.shared.slot val)
+  } -> ([slot n t last-event key.] {
+    ({[.last-event] [.key]} gpu.state)
+    ({[.slot] [.last-event] [.key]} gpu.shared.allocated-at |-)
+    ({[.slot] [.n] [.t]} gpu.shared.slot val)
+  }))
+
+  # Admit that synchronization made every entry in this slot ready.
+  (arr gpu.shared.admit-ready-at : {[
+    slot n t last-event key.
+  ]
+    ({[.last-event] [.key]} gpu.state)
+    ({[.slot] [.n] [.t]} gpu.shared.slot val)
+  } -> ([slot n t last-event key.] {
+    ({[.last-event] [.key]} gpu.state)
+    ({[.slot] [.last-event] [.key]} gpu.shared.ready-at |-)
+    ({[.slot] [.n] [.t]} gpu.shared.slot val)
+  }))
+
+  # Temporary state axioms used while the reduction interface is pure.
+  # Admit weakening the proof state independently of runtime values.
+  (arr gpu.state.admit-discard : {[last-event key.]
+    ({[.last-event] [.key]} gpu.state)
+  } -> ([last-event key.] []))
+
+  # Sequencing adapter: apply admitted state weakening and forward the f32.
+  (arr gpu.state.discard-with-f32 : {[last-event key.]
+    ({[.last-event] [.key]} gpu.state)
+    (f32 val)
+  } -> ([last-event key.] (f32 val))
+  )
+
+  # Temporarily admit a trace continued under a new idempotency key.
+  (arr gpu.state.admit-keyed : {[
+    last-event current-key next-key.
+  ]
+    ({[.last-event] [.current-key]} gpu.state)
+    ([.next-key])
+  } -> ([last-event current-key next-key.] {
+    ({
+      ({
+        [.next-key]
+        [.last-event]
+      } gpu.keyed)
+      [.next-key]
+    } gpu.state)
+  }))
 
   # Index linear block-local shared storage.
   (arr gpu.shared.ix : {[n t.]
@@ -151,19 +272,19 @@
   #       -> Y
   (arr gpu.launch : {[
     grid x y s
-    last-event stage
-    next-last-event next-stage.
+    last-event key
+    next-last-event next-key.
   ]
     ({[.x] [.s]} * [resources.])
     ({
-      ({[.last-event] [.stage]} gpu.state)
+      ({[.last-event] [.key]} gpu.state)
       [.resources]
     } * [state-and-resources.])
     ({([.grid] gpu.env) [.state-and-resources]} * [kernel-args.])
 
     ({[.y] [.s]} * [next-resources.])
     ({
-      ({[.next-last-event] [.next-stage]} gpu.state)
+      ({[.next-last-event] [.next-key]} gpu.state)
       [.next-resources]
     } * [kernel-coargs.])
 
@@ -172,8 +293,8 @@
     ({[.kernel-args kernel-coargs]} -> val)
   } -> ([
     grid x y s
-    last-event stage
-    next-last-event next-stage
+    last-event key
+    next-last-event next-key
     .y
   ]))
 
@@ -182,21 +303,18 @@
   #   gpu.materialize :
   #     launch-params
   #       × (n : u64)
-  #       × (state × Ix n => state × T) # kernel
+  #       × (state(initial, initial) × Ix n => T) # kernel
   #       -> buf(cap.own, n, T)
-  (arr gpu.materialize : {[grid n t last-event stage.]
+  (arr gpu.materialize : {[grid n t.]
     ([.grid] gpu.launch_params val)
     ({[.n] u64} :)
     ({
       ({
-        ({[.last-event] [.stage]} gpu.state)
+        ({gpu.initial gpu.initial} gpu.state)
         ([.n] ix val)
       } *)
-      ({
-        ({[.last-event] [.stage]} gpu.state)
-        ([.t] val)
-      } *)
+      ([.t] val)
     } =>)
-  } -> ([grid n t last-event stage.]
+  } -> ([grid n t.]
     ({cap.own [.n t]} buf val)))
 })

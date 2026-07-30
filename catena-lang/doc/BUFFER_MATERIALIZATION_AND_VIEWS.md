@@ -2,9 +2,31 @@
 
 This note separates three related concepts:
 
+- `mem` is the untyped runtime memory passed across program boundaries;
 - a buffer stores values;
 - materialization populates a buffer;
 - a view describes how logical indices access stored values.
+
+## Memory
+
+`mem` is an untyped, sized runtime memory value:
+
+```text
+mem = pointer + byte length
+```
+
+The runtime allocates its storage with `cudaMallocManaged` or
+`hipMallocManaged`. The resulting pointer is accessible by both host code and
+GPU kernels.
+
+Casting memory to a typed buffer does not allocate or copy storage:
+
+```text
+mem.cast.f32 : mem -> length × buf(capability, length, f32)
+```
+
+It reuses the memory pointer and computes the element length from the byte
+length.
 
 ## Buffers
 

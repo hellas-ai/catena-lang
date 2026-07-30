@@ -224,10 +224,7 @@ fn expect_ternary<'a>(
 }
 
 fn is_gpu_control_type(name: &str) -> bool {
-    matches!(
-        name,
-        "gpu.3d" | "gpu.env" | "gpu.launch_params" | "gpu.state"
-    )
+    matches!(name, "gpu.3d" | "gpu.env" | "gpu.launch_params")
 }
 
 fn c_name_for_gpu_control(name: &str) -> String {
@@ -235,7 +232,6 @@ fn c_name_for_gpu_control(name: &str) -> String {
         "gpu.3d" => "catena_dim3_t",
         "gpu.env" => "catena_gpu_env_t",
         "gpu.launch_params" => "catena_launch_params_t",
-        "gpu.state" => "catena_gpu_state_t",
         _ => unreachable!("checked by is_gpu_control_type"),
     }
     .to_string()
@@ -260,6 +256,13 @@ mod tests {
             LoweredType::Erased
         );
         assert_eq!(lower_type(&leaf(0)).unwrap(), LoweredType::Erased);
+    }
+
+    #[test]
+    fn gpu_state_is_an_erased_proof() {
+        let state = node("gpu.state", vec![leaf(0), leaf(1)]);
+        assert_eq!(lower_type(&state).unwrap(), LoweredType::Erased);
+        assert_eq!(lower_interface(&state).unwrap(), Vec::<CType>::new());
     }
 
     #[test]

@@ -8,7 +8,6 @@ pub fn render_gpu_prelude(dialect: GpuDialect) -> String {
 #include <stdio.h>
 
 typedef uint8_t catena_unit_t;
-typedef uint8_t catena_gpu_state_t;
 
 typedef struct {{
     uint32_t x;

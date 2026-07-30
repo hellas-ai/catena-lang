@@ -23,8 +23,9 @@
   # environment by its grid contract ties kernel coordinates to the launch.
   (arr gpu.env : 1 -> 1)
 
-  # Linear token used to order effects within a kernel.
-  (arr gpu.state : 0 -> 1)
+  # Erased linear proof of block state: last completed event × stage.
+  # Event names describe executed instructions with past participles.
+  (arr gpu.state : 2 -> 1)
 
   # Runtime dimension vectors and coordinates indexed by their rank/extent.
   # CUDA/HIP lowers each supported rank to dim3, filling absent axes with one.
@@ -34,6 +35,13 @@
 })
 
 (theory program type {
+  # Preserve block state while composing it with a pure kernel input mapping.
+  (def gpu.state.forward : {[last-event stage.]
+    ({[.last-event] [.stage]} gpu.state)
+  } -> ([last-event stage.]
+    ({[.last-event] [.stage]} gpu.state))
+  = ([state.] [.state]))
+
   # Cooperatively materialize a block-local 2D view into linear shared storage.
   # Each block thread supplies the element at its own logical 2D thread index.
   #
@@ -141,29 +149,54 @@
   #       × val(env × state × (X × S)
   #             -> state × (Y × S))
   #       -> Y
-  (arr gpu.launch : {[grid x y s.]
+  (arr gpu.launch : {[
+    grid x y s
+    last-event stage
+    next-last-event next-stage.
+  ]
     ({[.x] [.s]} * [resources.])
-    ({gpu.state [.resources]} * [state-resources.])
-    ({([.grid] gpu.env) [.state-resources]} * [kernel-args.])
+    ({
+      ({[.last-event] [.stage]} gpu.state)
+      [.resources]
+    } * [state-and-resources.])
+    ({([.grid] gpu.env) [.state-and-resources]} * [kernel-args.])
 
     ({[.y] [.s]} * [next-resources.])
-    ({gpu.state [.next-resources]} * [kernel-coargs.])
+    ({
+      ({[.next-last-event] [.next-stage]} gpu.state)
+      [.next-resources]
+    } * [kernel-coargs.])
 
     ([.grid] gpu.launch_params val)
     ([.x])
     ({[.kernel-args kernel-coargs]} -> val)
-  } -> ([grid x y s.y]))
+  } -> ([
+    grid x y s
+    last-event stage
+    next-last-event next-stage
+    .y
+  ]))
 
   # Materialize one buffer element per logical thread index.
   #
   #   gpu.materialize :
   #     launch-params
   #       × (n : u64)
-  #       × (Ix n => T) # kernel
+  #       × (state × Ix n => state × T) # kernel
   #       -> buf(cap.own, n, T)
-  (arr gpu.materialize : {[grid n t.]
+  (arr gpu.materialize : {[grid n t last-event stage.]
     ([.grid] gpu.launch_params val)
     ({[.n] u64} :)
-    ({([.n] ix val) ([.t] val)} =>)
-  } -> ([grid n t.] ({cap.own [.n t]} buf val)))
+    ({
+      ({
+        ({[.last-event] [.stage]} gpu.state)
+        ([.n] ix val)
+      } *)
+      ({
+        ({[.last-event] [.stage]} gpu.state)
+        ([.t] val)
+      } *)
+    } =>)
+  } -> ([grid n t last-event stage.]
+    ({cap.own [.n t]} buf val)))
 })

@@ -1564,6 +1564,6 @@ mod tests {
         assert!(source.contains("out[thread_id] = value;"));
         assert!(source.contains("catena_host_gpu_check(hipDeviceSynchronize());"));
         assert!(!source.contains("invocation_indexer"));
-        assert!(!source.contains("catena_gpu_state_t state"));
+        assert!(!source.contains("catena_gpu_state_t"));
     }
 }

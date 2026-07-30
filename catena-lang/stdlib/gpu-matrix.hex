@@ -1,10 +1,9 @@
 # GPU tiled matrix multiplication over logical matrix views.
 #
 # gpu.f32.tiled-matmul.kernel :
-#   A-view × B-view × dimensions ×
-#   (row × col)
+#   A-view × B-view × dimensions × state × (row × col)
 #   ->
-#   C[row,col]
+#   state × C[row,col]
 (theory program type {
   # Map a block-local thread index to the corresponding logical A tile index:
   #
@@ -275,7 +274,8 @@
   #       inner-tile-index)
   #   return accumulator
   (def gpu.f32.tiled-matmul.kernel : {[
-    rows cols inner tile-size inner-tile-count.
+    rows cols inner tile-size inner-tile-count
+    last-event stage.
   ]
     ({({([.rows] ix val) ([.inner] ix val)} *) (f32 val)} =>)
     ({({([.inner] ix val) ([.cols] ix val)} *) (f32 val)} =>)
@@ -285,11 +285,19 @@
     ({[.cols] u64} :)
     ({[.tile-size] u64} :)
     ({[.inner-tile-count] u64} :)
+    ({[.last-event] [.stage]} gpu.state)
     ({([.rows] ix val) ([.cols] ix val)} *)
-  } -> ([rows cols inner tile-size inner-tile-count.] (f32 val))
+  } -> ([
+    rows cols inner tile-size inner-tile-count
+    last-event stage.
+  ] {
+    ({[.last-event] [.stage]} gpu.state)
+    (f32 val)
+  })
   = ([
     row-inner-view inner-col-view
-    rows inner cols tile-size inner-tile-count logical-index.
+    rows inner cols tile-size inner-tile-count
+    state logical-index.
   ]
     ([.rows] u64.copy-param [producer-rows rows-param.])
     ([.inner] u64.copy-param [producer-inner inner-param.])
@@ -299,7 +307,7 @@
       reduce-inner-tile-count inner-tile-count-param.
     ])
 
-    {
+    ({
       (const.u32.0x00000000 u32.bitcast-f32)
       (name.f32.add lift)
       ({
@@ -317,7 +325,8 @@
         [.logical-index]
       } partial.gpu.f32.tiled-matmul.tile-dot.7)
       [.reduce-inner-tile-count]
-    } reduce
+    } reduce [value.])
+    {[.state] [.value]}
   ))
 
 })
@@ -387,7 +396,10 @@
 #   ->
 #   C-buffer
 (def program gpu.f32.tiled-matmul.row-major.materialize :
-  ([rows cols inner tile-size inner-tile-count grid-rows grid-cols.] {
+  ([
+    rows cols inner tile-size inner-tile-count grid-rows grid-cols
+    last-event stage.
+  ] {
     ({
       ({[.grid-cols] [.grid-rows]} 2d)
       ({[.tile-size] [.tile-size]} 2d)
@@ -404,7 +416,10 @@
     ({[.inner-tile-count] u64} :)
   })
   ->
-  ([rows cols inner tile-size inner-tile-count grid-rows grid-cols.]
+  ([
+    rows cols inner tile-size inner-tile-count grid-rows grid-cols
+    last-event stage.
+  ]
     ({cap.own ({[.rows] [.cols]} *) f32} buf val))
 = ([
   params
@@ -432,16 +447,24 @@
 
   ({
     ({
-      [.rows-param]
-      [.cols-param]
-      [.indices-cols-len]
-    } partial.f32.row-major.indices.1)
+      ({
+        [.last-event]
+        [.stage]
+      } partial.gpu.state.forward.0)
+      ({
+        [.rows-param]
+        [.cols-param]
+        [.indices-cols-len]
+      } partial.f32.row-major.indices.1)
+    } tensor)
     ({
       [.rows-param]
       [.cols-param]
       [.inner-param]
       [.tile-size-param]
       [.inner-tile-count-param]
+      [.last-event]
+      [.stage]
       [.a-view]
       [.b-view]
       [.dimensions-rows]

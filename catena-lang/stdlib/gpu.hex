@@ -62,10 +62,18 @@
     ({[.m n t]} gpu.global val)
   } -> ([m n t.] ({[.m n t]} buf val)))
 
-  # Allocate f32 block-local shared storage and close its scope in a kernel.
-  (arr gpu.shared.alloc : {[n.]
-    ({[.n] u64} :)
-  } -> ([n.] ({[.n f32]} gpu.shared val)))
+  # Cooperatively materialize a block-local 2D view into linear shared storage.
+  # Each block thread supplies the element at its own logical 2D thread index.
+  #
+  #   cooperative-materialize.2d :
+  #     rows × cols × ((Ix rows × Ix cols) => T)
+  #       -> shared(rows * cols, T)
+  (arr gpu.shared.cooperative-materialize.2d : {[rows cols t.]
+    ({[.rows] u64} :)
+    ({[.cols] u64} :)
+    ({({([.rows] ix val) ([.cols] ix val)} *) ([.t] val)} =>)
+  } -> ([rows cols t.]
+    ({({[.rows] [.cols]} *) [.t]} gpu.shared val)))
 
   (arr gpu.shared.end : {[n.]
     ({[.n f32]} gpu.shared val)

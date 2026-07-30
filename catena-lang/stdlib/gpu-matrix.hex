@@ -6,7 +6,70 @@
 #   ->
 #   C[row,col]
 (theory program type {
-  # Compute one logical C cell.
+  # Map a block-local thread index to the corresponding logical A tile index:
+  #
+  #   (thread-row, thread-col) ->
+  #   (block-row * tile-size + thread-row,
+  #    inner-tile-index * tile-size + thread-col)
+  (def gpu.tiled-matmul.row-inner-tile-reindex : {[rows inner tile-size.]
+    ({[.inner] u64} :)
+    ({[.tile-size] u64} :)
+    ([.rows] ix val)
+    (u64 val)
+    ({([.tile-size] ix val) ([.tile-size] ix val)} *)
+  } -> ([rows inner tile-size.]
+    ({([.rows] ix val) ([.inner] ix val)} *))
+  = ([inner tile-size output-row inner-tile-index thread-index.]
+    ([.tile-size] u64.copies2 [
+      row-tile-size inner-tile-size.
+    ])
+    ([.thread-index] *.elim [thread-row thread-col.])
+    ({
+      [.row-tile-size]
+      [.output-row]
+      [.thread-row]
+    } ix.same-tile-coordinate [a-row.])
+    ({
+      [.inner]
+      [.inner-tile-size]
+      [.inner-tile-index]
+      [.thread-col]
+    } ix.tile-offset-coordinate [a-inner.])
+    ({[.a-row] [.a-inner]} *.intro)
+  ))
+
+  # Map a block-local thread index to the corresponding logical B tile index:
+  #
+  #   (thread-row, thread-col) ->
+  #   (inner-tile-index * tile-size + thread-row,
+  #    block-col * tile-size + thread-col)
+  (def gpu.tiled-matmul.inner-col-tile-reindex : {[cols inner tile-size.]
+    ({[.inner] u64} :)
+    ({[.tile-size] u64} :)
+    ([.cols] ix val)
+    (u64 val)
+    ({([.tile-size] ix val) ([.tile-size] ix val)} *)
+  } -> ([cols inner tile-size.]
+    ({([.inner] ix val) ([.cols] ix val)} *))
+  = ([inner tile-size output-col inner-tile-index thread-index.]
+    ([.tile-size] u64.copies2 [
+      inner-tile-size col-tile-size.
+    ])
+    ([.thread-index] *.elim [thread-row thread-col.])
+    ({
+      [.inner]
+      [.inner-tile-size]
+      [.inner-tile-index]
+      [.thread-row]
+    } ix.tile-offset-coordinate [b-inner.])
+    ({
+      [.col-tile-size]
+      [.output-col]
+      [.thread-col]
+    } ix.same-tile-coordinate [b-col.])
+    ({[.b-inner] [.b-col]} *.intro)
+  ))
+
   (def gpu.f32.tiled-matmul.kernel : {[rows cols inner tile-size.]
     ({({([.rows] ix val) ([.inner] ix val)} *) (f32 val)} =>)
     ({({([.inner] ix val) ([.cols] ix val)} *) (f32 val)} =>)
@@ -18,24 +81,74 @@
     ({([.rows] ix val) ([.cols] ix val)} *)
   } -> ([rows cols inner tile-size.] (f32 val))
   = ([a-view b-view rows inner cols tile-size logical-index.]
-    ([.tile-size] u64.copies2 [tile-rows tile-cols.])
-    ({[.tile-rows] [.tile-cols]} u64.product [shared-len.])
-    ([.shared-len] u64.copies2 [a-shared-len b-shared-len.])
+    ([.rows] :.param [a-rows-param.])
+    ([.inner] u64.copies2 [a-inner-source b-inner-source.])
+    ([.a-inner-source] u64.copy-param [a-inner a-inner-param.])
+    ([.b-inner-source] u64.copy-param [b-inner b-inner-param.])
+    ([.cols] :.param [b-cols-param.])
+    ([.tile-size] u64.copies6 [
+      a-tile-rows a-tile-cols
+      b-tile-rows b-tile-cols
+      a-reindex-tile b-reindex-tile.
+    ])
+    ([.a-reindex-tile] u64.copy-param [
+      a-reindex-tile-size a-tile-size-param.
+    ])
+    ([.b-reindex-tile] u64.copy-param [
+      b-reindex-tile-size b-tile-size-param.
+    ])
 
-    ([.a-shared-len] gpu.shared.alloc [a-shared.])
-    ([.b-shared-len] gpu.shared.alloc [b-shared.])
+    ([.logical-index] *.elim [logical-row logical-col.])
 
-    ([.rows] :.param [row-param.])
-    ([.cols] :.param [col-param.])
+    # This is the first tile iteration; the inner-tile loop will supply this
+    # index once it is introduced.
+    (u64.zero [inner-tile-index-named.])
+    ([.inner-tile-index-named] u64.copies2 [
+      a-inner-tile-index-named b-inner-tile-index-named.
+    ])
+    ([.a-inner-tile-index-named] :.forget [a-inner-tile-index.])
+    ([.b-inner-tile-index-named] :.forget [b-inner-tile-index.])
 
     ({
-      [.row-param]
-      [.col-param]
-      [.inner]
+      ({
+        [.a-rows-param]
+        [.a-inner-param]
+        [.a-tile-size-param]
+        [.a-inner]
+        [.a-reindex-tile-size]
+        [.logical-row]
+        [.a-inner-tile-index]
+      } partial.gpu.tiled-matmul.row-inner-tile-reindex.4)
       [.a-view]
+    } compose [a-tile-source.])
+
+    ({
+      ({
+        [.b-cols-param]
+        [.b-inner-param]
+        [.b-tile-size-param]
+        [.b-inner]
+        [.b-reindex-tile-size]
+        [.logical-col]
+        [.b-inner-tile-index]
+      } partial.gpu.tiled-matmul.inner-col-tile-reindex.4)
       [.b-view]
-      [.logical-index]
-    } f32.matmul.cell-dot [value.])
+    } compose [b-tile-source.])
+
+    ({
+      [.a-tile-rows]
+      [.a-tile-cols]
+      [.a-tile-source]
+    } gpu.shared.cooperative-materialize.2d [a-shared.])
+    ({
+      [.b-tile-rows]
+      [.b-tile-cols]
+      [.b-tile-source]
+    } gpu.shared.cooperative-materialize.2d [b-shared.])
+
+    # Block synchronization happens here, after both cooperative loads.
+
+    (const.u32.0x00000000 u32.bitcast-f32 [value.])
 
     ([.b-shared] gpu.shared.end [_b-shared-len-param.])
     ([.a-shared] gpu.shared.end [_a-shared-len-param.])

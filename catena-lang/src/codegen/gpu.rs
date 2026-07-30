@@ -855,7 +855,7 @@ fn render_ix(out: &mut String, assignment: &GpuAssign) -> Result<(), GpuRenderEr
         return Err(invalid_outputs(assignment, 1));
     };
     out.push_str(&format!(
-        "    {} = {}[{}];\n",
+        "    {} = catena_device_buffer_load({}, {});\n",
         output.name,
         value_expr(buffer),
         value_expr(index)
@@ -1094,16 +1094,20 @@ fn render_materialize_call(
         name = output.name
     ));
     out.push_str(&format!(
-        "    catena_host_gpu_check({managed_alloc_fn}((void **)&{name}_data, {name}_len * sizeof({element})));\n",
+        "    if ({name}_len != 0) {{\n",
+        name = output.name
+    ));
+    out.push_str(&format!(
+        "        catena_host_gpu_check({device_alloc_fn}((void **)&{name}_data, {name}_len * sizeof({element})));\n",
         name = output.name,
         element = c_type(element),
-        managed_alloc_fn = dialect.managed_alloc_fn(),
+        device_alloc_fn = dialect.device_alloc_fn(),
     ));
     out.push_str(&format!(
-        "    {kernel_name}<<<dim3({launch}.grid_dim.x, {launch}.grid_dim.y, {launch}.grid_dim.z), dim3({launch}.block_dim.x, {launch}.block_dim.y, {launch}.block_dim.z)>>>\n"
+        "        {kernel_name}<<<dim3({launch}.grid_dim.x, {launch}.grid_dim.y, {launch}.grid_dim.z), dim3({launch}.block_dim.x, {launch}.block_dim.y, {launch}.block_dim.z)>>>\n"
     ));
     out.push_str(&format!(
-        "        ({name}_data, {name}_len",
+        "            ({name}_data, {name}_len",
         name = output.name
     ));
     for arg in args {
@@ -1115,6 +1119,11 @@ fn render_materialize_call(
         }
     }
     out.push_str(");\n");
+    out.push_str(&format!(
+        "        catena_host_gpu_check({synchronize_fn}());\n",
+        synchronize_fn = dialect.synchronize_fn()
+    ));
+    out.push_str("    }\n");
     out.push_str(&format!("    {} = {}_data;\n", output.name, output.name));
     Ok(())
 }
@@ -1469,7 +1478,7 @@ mod tests {
         assert!(source.contains(
             "#ifndef __HIP_DEVICE_COMPILE__\nextern \"C\" __host__ void program_materialize(uint64_t len, uint64_t * *out_out) {"
         ));
-        assert!(source.contains("catena_host_gpu_check(hipMallocManaged"));
+        assert!(source.contains("catena_host_gpu_check(hipMalloc((void **)"));
         assert!(source.contains("catena_host_gpu_check(hipDeviceSynchronize"));
         assert!(!source.contains("catena_gpu_check"));
     }

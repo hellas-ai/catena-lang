@@ -6,6 +6,9 @@ pub mod value;
 /// Helpers for creating and freeing Catena memory values on program boundaries
 pub mod mem;
 
+/// Explicit GPU allocations and legacy cross-process IPC mappings.
+pub mod device_mem;
+
 /// Compile generated GPU C++ to a shared object.
 pub mod artifact;
 
@@ -26,8 +29,9 @@ pub mod safe_runtime;
 //#[cfg(test)]
 //mod tests;
 
-pub use runtime::InitError;
-pub use runtime::Runtime;
+pub use device_mem::{DeviceAllocator, DeviceBuffer, IpcMemoryHandle};
+pub use mem::{Mem, MemError};
+pub use runtime::{ExecError, InitError, Runtime};
 pub use safe_runtime::{
     ChildMainError, SafeExecError, SafeInitError, SafeRuntime, run_safe_runtime_child_if_requested,
 };

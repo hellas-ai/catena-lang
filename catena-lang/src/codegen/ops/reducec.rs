@@ -72,6 +72,9 @@ pub(in crate::codegen) fn render(
 
     // Keep the accumulator in the output slot itself. This makes the final
     // assignment to the function's out-pointer use the usual renderer path.
+    // Device-backed producers that use `ix` currently perform a synchronous
+    // device-to-host scalar copy per iteration. This correctness fallback can
+    // be replaced when `reducec` is lowered to a GPU kernel.
     out.push_str("    {\n");
     for ((output, _ty, _value, _next), zero_value) in values.iter().zip(zero.iter()) {
         out.push_str(&format!(

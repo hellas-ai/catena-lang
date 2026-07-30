@@ -82,10 +82,10 @@ impl GpuDialect {
         }
     }
 
-    pub fn managed_alloc_fn(self) -> &'static str {
+    pub(crate) fn device_alloc_fn(self) -> &'static str {
         match self {
-            Self::Hip => "hipMallocManaged",
-            Self::Cuda => "cudaMallocManaged",
+            Self::Hip => "hipMalloc",
+            Self::Cuda => "cudaMalloc",
         }
     }
 
@@ -93,6 +93,20 @@ impl GpuDialect {
         match self {
             Self::Hip => "hipDeviceSynchronize",
             Self::Cuda => "cudaDeviceSynchronize",
+        }
+    }
+
+    pub(crate) fn memcpy_fn(self) -> &'static str {
+        match self {
+            Self::Hip => "hipMemcpy",
+            Self::Cuda => "cudaMemcpy",
+        }
+    }
+
+    pub(crate) fn memcpy_device_to_host(self) -> &'static str {
+        match self {
+            Self::Hip => "hipMemcpyDeviceToHost",
+            Self::Cuda => "cudaMemcpyDeviceToHost",
         }
     }
 

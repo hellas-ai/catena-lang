@@ -1,3 +1,4 @@
+use super::device_mem::DeviceBuffer;
 use super::mem::Mem;
 use serde::{Deserialize, Serialize};
 
@@ -70,5 +71,11 @@ impl From<u32> for Value {
 impl From<f32> for Value {
     fn from(value: f32) -> Self {
         Value::f32(value)
+    }
+}
+
+impl From<DeviceBuffer> for Value {
+    fn from(value: DeviceBuffer) -> Self {
+        Value::Mem(value.into_mem())
     }
 }

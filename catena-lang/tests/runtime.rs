@@ -1,10 +1,24 @@
 use catena_lang::{
     codegen::GpuDialect,
-    runtime::{Runtime, Value, ValueKind},
+    runtime::{DeviceAllocator, IpcMemoryHandle, Runtime, Value, ValueKind},
     stdlib,
 };
+use std::process::Command;
 
 const GPU_DIALECT_ENV: &str = "CATENA_GPU_DIALECT";
+const IPC_CHILD_ENV: &str = "CATENA_DEVICE_IPC_TEST_CHILD";
+const IPC_DEVICE_ENV: &str = "CATENA_DEVICE_IPC_TEST_DEVICE";
+const IPC_LENGTH_ENV: &str = "CATENA_DEVICE_IPC_TEST_LENGTH";
+const ARRAY_HEAD_U64_SOURCE: &str = r#"
+    (def program array-head-u64 : ([n.] (cap.own mem)) -> ([n.] (u64 val)) = (
+      mem.cast.u64
+      {
+        (u64.assert-nz ix.zero)
+        [b]
+      }
+      ix
+    ))
+"#;
 
 /// Create a runtime with a provided user source file
 fn runtime_with(source: &'static str) -> anyhow::Result<Runtime> {
@@ -31,6 +45,44 @@ fn configured_gpu_dialect() -> anyhow::Result<GpuDialect> {
             value
         ),
     }
+}
+
+fn u64_bytes(values: &[u64]) -> Vec<u8> {
+    values
+        .iter()
+        .flat_map(|value| value.to_ne_bytes())
+        .collect()
+}
+
+fn encode_ipc_handle(bytes: &[u8; 64]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+fn decode_ipc_handle(encoded: &str) -> anyhow::Result<[u8; 64]> {
+    if encoded.len() != 128 {
+        anyhow::bail!(
+            "encoded IPC handle has length {}, expected 128",
+            encoded.len()
+        );
+    }
+    let mut bytes = [0; 64];
+    for (index, byte) in bytes.iter_mut().enumerate() {
+        let start = index * 2;
+        *byte = u8::from_str_radix(&encoded[start..start + 2], 16)?;
+    }
+    Ok(bytes)
+}
+
+fn ipc_handle_from_environment() -> anyhow::Result<IpcMemoryHandle> {
+    let bytes = decode_ipc_handle(&std::env::var(IPC_CHILD_ENV)?)?;
+    let device_ordinal = std::env::var(IPC_DEVICE_ENV)?.parse()?;
+    let byte_len = std::env::var(IPC_LENGTH_ENV)?.parse()?;
+    Ok(IpcMemoryHandle::from_bytes(
+        configured_gpu_dialect()?,
+        device_ordinal,
+        byte_len,
+        bytes,
+    ))
 }
 
 #[test]
@@ -736,6 +788,79 @@ fn array_head_u64() -> anyhow::Result<()> {
     };
 
     assert_eq!(head, values[0]);
+    Ok(())
+}
+
+#[test]
+fn explicit_device_buffer_upload_and_readback() -> anyhow::Result<()> {
+    let allocator = DeviceAllocator::new(configured_gpu_dialect()?)?;
+    let expected = b"device-resident weights";
+    let mut buffer = allocator.allocate_from_bytes(expected)?;
+
+    buffer.write(7, b"MEMORY")?;
+    let mut actual = vec![0; expected.len()];
+    buffer.read(0, &mut actual)?;
+
+    let mut patched = expected.to_vec();
+    patched[7..13].copy_from_slice(b"MEMORY");
+    assert_eq!(actual, patched);
+    Ok(())
+}
+
+#[test]
+fn array_head_u64_from_explicit_device_buffer() -> anyhow::Result<()> {
+    let runtime = runtime_with(ARRAY_HEAD_U64_SOURCE)?;
+    let values = [0x123456789abcdef0_u64, 7, 11];
+    let buffer = runtime
+        .device_allocator()
+        .allocate_from_bytes(&u64_bytes(&values))?;
+
+    let [head] = runtime.exec("array-head-u64", [buffer.into()])?;
+    let Value::U64(head) = head else {
+        anyhow::bail!("array-head-u64 returned non-u64 value: {head:?}");
+    };
+
+    assert_eq!(head, values[0]);
+    Ok(())
+}
+
+#[test]
+fn device_memory_ipc_is_usable_as_runtime_mem() -> anyhow::Result<()> {
+    let expected = [0x123456789abcdef0_u64, 7, 11];
+    if std::env::var_os(IPC_CHILD_ENV).is_some() {
+        let runtime = runtime_with(ARRAY_HEAD_U64_SOURCE)?;
+        let handle = ipc_handle_from_environment()?;
+        let imported = runtime.device_allocator().import_ipc(&handle)?;
+        let [head] = runtime.exec("array-head-u64", [imported.into()])?;
+        let Value::U64(head) = head else {
+            anyhow::bail!("array-head-u64 returned non-u64 value: {head:?}");
+        };
+        assert_eq!(head, expected[0]);
+        return Ok(());
+    }
+
+    let allocator = DeviceAllocator::new(configured_gpu_dialect()?)?;
+    let allocation = allocator.allocate_from_bytes(&u64_bytes(&expected))?;
+    let handle = allocation.export_ipc()?;
+    let output = Command::new(std::env::current_exe()?)
+        .args([
+            "--exact",
+            "device_memory_ipc_is_usable_as_runtime_mem",
+            "--nocapture",
+        ])
+        .env(IPC_CHILD_ENV, encode_ipc_handle(handle.as_bytes()))
+        .env(IPC_DEVICE_ENV, handle.device_ordinal().to_string())
+        .env(IPC_LENGTH_ENV, handle.byte_len().to_string())
+        .output()?;
+
+    if !output.status.success() {
+        anyhow::bail!(
+            "IPC child failed with {}\nstdout:\n{}\nstderr:\n{}",
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        );
+    }
     Ok(())
 }
 

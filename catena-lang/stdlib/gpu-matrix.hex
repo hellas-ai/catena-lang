@@ -106,6 +106,32 @@
     } f32.row-major.matrix-view)
   ))
 
+  # Locate one output coordinate within its tile:
+  #
+  #   output-coordinate % tile-size
+  (def gpu.tiled-matmul.output-tile-coordinate : {[n tile-size.]
+    ({[.tile-size] u64} :)
+    ([.n] ix val)
+  } -> ([n tile-size.] ([.tile-size] ix val))
+  = ([tile-size output-coordinate.]
+    ([.tile-size] u64.copies3 [
+      positive-tile-size remainder-tile-size index-tile-size.
+    ])
+    ([.positive-tile-size] u64.assert-nz [tile-size-positive.])
+    ([.output-coordinate] ix.to-u64 [output-coordinate-value.])
+    ([.output-coordinate-value] u64.name [named-output-coordinate.])
+    ({
+      [.named-output-coordinate]
+      [.remainder-tile-size]
+      [.tile-size-positive]
+    } u64.rem [named-output-tile-coordinate in-tile.])
+    ({
+      [.named-output-tile-coordinate]
+      [.index-tile-size]
+      [.in-tile]
+    } u64.to-ix)
+  ))
+
   # Compute one inner-tile contribution to a logical C cell.
   #
   #   row-inner-tile(thread-row, thread-col) =
@@ -171,7 +197,7 @@
     row-inner-view inner-col-view
     rows inner cols tile-size
     allocated-state row-inner-slot inner-col-slot
-    logical-index inner-tile-index.
+    output-coordinate inner-tile-index.
   ]
     ([.rows] :.param [a-rows-param.])
     ([.inner] u64.copies2 [a-inner-source b-inner-source.])
@@ -195,18 +221,18 @@
     ([.compute-tile-size] u64.copies6 [
       a-shared-rows a-shared-cols
       b-shared-rows b-shared-cols
-      local-coordinate-tile-size dot-tile-size.
+      output-coordinate-tile-size dot-tile-size.
     ])
-    ([.local-coordinate-tile-size] u64.copies2 [
-      local-row-tile-size local-col-tile-size.
+    ([.output-coordinate-tile-size] u64.copies2 [
+      output-tile-row-size output-tile-col-size.
     ])
     ([.dot-tile-size] u64.copy-params3 [
       dot-inner dot-row-param dot-col-param dot-inner-param.
     ])
 
-    ([.logical-index] *.elim [logical-row logical-col.])
-    ([.logical-row] ix.copy [reindex-logical-row local-logical-row.])
-    ([.logical-col] ix.copy [reindex-logical-col local-logical-col.])
+    ([.output-coordinate] *.elim [output-row output-col.])
+    ([.output-row] ix.copy [reindex-output-row output-tile-source-row.])
+    ([.output-col] ix.copy [reindex-output-col output-tile-source-col.])
     ([.inner-tile-index] ix.copy [
       idempotency-key tile-q.
     ])
@@ -223,7 +249,7 @@
         [.a-tile-size-param]
         [.a-inner]
         [.a-reindex-tile-size]
-        [.reindex-logical-row]
+        [.reindex-output-row]
         [.row-inner-tile-index-value]
       } partial.gpu.tiled-matmul.row-inner-tile-reindex.4)
       [.row-inner-view]
@@ -236,7 +262,7 @@
         [.b-tile-size-param]
         [.b-inner]
         [.b-reindex-tile-size]
-        [.reindex-logical-col]
+        [.reindex-output-col]
         [.inner-col-tile-index-value]
       } partial.gpu.tiled-matmul.inner-col-tile-reindex.4)
       [.inner-col-view]
@@ -319,14 +345,17 @@
     } gpu.f32.shared.row-major.view [inner-col-shared-view.])
 
     ({
-      [.local-row-tile-size]
-      [.local-logical-row]
-    } ix.local-tile-coordinate [local-row.])
+      [.output-tile-row-size]
+      [.output-tile-source-row]
+    } gpu.tiled-matmul.output-tile-coordinate [output-tile-row.])
     ({
-      [.local-col-tile-size]
-      [.local-logical-col]
-    } ix.local-tile-coordinate [local-col.])
-    ({[.local-row] [.local-col]} *.intro [local-index.])
+      [.output-tile-col-size]
+      [.output-tile-source-col]
+    } gpu.tiled-matmul.output-tile-coordinate [output-tile-col.])
+    ({
+      [.output-tile-row]
+      [.output-tile-col]
+    } *.intro [output-tile-coordinate.])
 
     ({
       [.dot-row-param]
@@ -334,14 +363,14 @@
       [.dot-inner]
       [.row-inner-shared-view]
       [.inner-col-shared-view]
-      [.local-index]
+      [.output-tile-coordinate]
     } f32.matmul.cell-dot [tile-value.])
 
     ([.materialized-state] gpu.sync [completed-state.])
-    ({
-      [.completed-state]
-      [.tile-value]
-    } gpu.state.discard-with-f32)
+    ([.completed-state] gpu.state.admit-discard)
+    (unit.intro [discarded.])
+    ({[.discarded] [.tile-value]} *.intro [discarded-and-tile-value.])
+    ([.discarded-and-tile-value] unit.left-elim)
   ))
 
   # Compute one logical output cell by accumulating every inner tile:
@@ -351,7 +380,7 @@
   #     accumulator += tile-dot(
   #       row-inner-view,
   #       inner-col-view,
-  #       logical-index,
+  #       output-coordinate,
   #       inner-tile-index)
   #   return accumulator
   (def gpu.f32.tiled-matmul.kernel : {[
@@ -373,7 +402,7 @@
   = ([
     row-inner-view inner-col-view
     rows inner cols tile-size inner-tile-count
-    state logical-index.
+    state output-coordinate.
   ]
     ([.rows] u64.copy-param [producer-rows rows-param.])
     ([.inner] u64.copy-param [producer-inner inner-param.])
@@ -427,7 +456,7 @@
         [.producer-state]
         [.row-inner-slot]
         [.inner-col-slot]
-        [.logical-index]
+        [.output-coordinate]
       } partial.gpu.f32.tiled-matmul.tile-dot.10)
       [.reduce-inner-tile-count]
     } reduce [value.])

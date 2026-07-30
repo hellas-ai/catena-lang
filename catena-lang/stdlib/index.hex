@@ -89,11 +89,4 @@
     ([.tile-size] ix val)
   } -> ([n tile-size.] ([.n] ix val)))
 
-  # Return the position of a coordinate within its tile:
-  #
-  #   coordinate % tile-size
-  (arr ix.local-tile-coordinate : {[n tile-size.]
-    ({[.tile-size] u64} :)
-    ([.n] ix val)
-  } -> ([n tile-size.] ([.tile-size] ix val)))
 })

@@ -383,6 +383,7 @@ fn render_primitive_assignment(
         "u64.mul" => render_binary(out, assignment, "*")?,
         "u64.product" => render_binary(out, assignment, "*")?,
         "u64.div" => render_u64_div(out, assignment)?,
+        "u64.rem" => render_u64_rem(out, assignment)?,
         "u64.name" => render_forget(out, assignment)?,
         "u32.one" => render_u64_one(out, assignment)?,
         "u32.add" => render_binary(out, assignment, "+")?,
@@ -749,6 +750,22 @@ fn render_u64_div(out: &mut String, assignment: &GpuAssign) -> Result<(), GpuRen
         quotient.name,
         value_expr(divisor),
         value_expr(dividend)
+    ));
+    Ok(())
+}
+
+fn render_u64_rem(out: &mut String, assignment: &GpuAssign) -> Result<(), GpuRenderError> {
+    let [dividend, divisor, _divisor_positive] = assignment.inputs.as_slice() else {
+        return Err(invalid_inputs(assignment, 3));
+    };
+    let [remainder, _in_range] = assignment.outputs.as_slice() else {
+        return Err(invalid_outputs(assignment, 2));
+    };
+    out.push_str(&format!(
+        "    {} = {} % {};\n",
+        remainder.name,
+        value_expr(dividend),
+        value_expr(divisor)
     ));
     Ok(())
 }

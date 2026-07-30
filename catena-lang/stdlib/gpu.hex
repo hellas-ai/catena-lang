@@ -153,13 +153,6 @@
     ({[.last-event] [.key]} gpu.state)
   } -> ([last-event key.] []))
 
-  # Sequencing adapter: apply admitted state weakening and forward the f32.
-  (arr gpu.state.discard-with-f32 : {[last-event key.]
-    ({[.last-event] [.key]} gpu.state)
-    (f32 val)
-  } -> ([last-event key.] (f32 val))
-  )
-
   # Temporarily admit a trace continued under a new idempotency key.
   (arr gpu.state.admit-keyed : {[
     last-event current-key next-key.

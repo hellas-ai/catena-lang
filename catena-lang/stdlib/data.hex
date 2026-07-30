@@ -121,6 +121,15 @@
     ({({[.x] [.y]} nat.div) u64} :)
     ({[.exact] bool} :)
   })
+  # Remainder together with the proof required to use it as Ix y.
+  (arr u64.rem : {[x y remainder.]
+    ({[.x] u64} :)
+    ({[.y] u64} :)
+    ({[.y] 0} > |-)
+  } -> ([x y remainder.] {
+    ({[.remainder] u64} :)
+    ({[.y] [.remainder]} > |-)
+  }))
   (arr u64.select : {(bool val) (u64 val) (u64 val)} -> (u64 val))
   (arr u64.name : {[x.] (u64 val)} -> ([x.] ({[.x] u64} :)))
 

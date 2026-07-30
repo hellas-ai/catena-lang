@@ -7,6 +7,9 @@
 (theory program type {
   (arr unit.intro : [] -> 1)
   (arr unit.elim : 1 -> [])
+  (arr unit.left-elim : {[a.]
+    ({1 [.a]} *)
+  } -> ([a . a]))
   (arr *.intro : [a b] -> *)
   (arr *.elim : * -> [a b])
 })

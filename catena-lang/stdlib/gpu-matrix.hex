@@ -243,7 +243,7 @@
       [.a-tile-rows]
       [.a-tile-cols]
       [.row-inner-tile-source]
-    } gpu.shared.cooperative-load.row-major [
+    } gpu.shared.row-major.cooperative-load [
       row-loaded-state row-loaded-slot.
     ])
 
@@ -260,7 +260,7 @@
       [.b-tile-rows]
       [.b-tile-cols]
       [.inner-col-tile-source]
-    } gpu.shared.cooperative-load.row-major [
+    } gpu.shared.row-major.cooperative-load [
       loaded-state col-loaded-slot.
     ])
 

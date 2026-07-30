@@ -100,7 +100,7 @@ fn function_directly_requires_device(function: &GpuFunction) -> bool {
         matches!(
             assignment.op.as_str(),
             "gpu.shared.alloc"
-                | "gpu.shared.cooperative-load.row-major"
+                | "gpu.shared.row-major.cooperative-loadc"
                 | "gpu.shared.materialize"
                 | "gpu.sync"
         )

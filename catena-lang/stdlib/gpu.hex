@@ -64,7 +64,7 @@
   }))
 
   # Cooperatively load a logical 2D view into an allocated row-major slot.
-  (arr gpu.shared.cooperative-load.row-major : {[
+  (arr gpu.shared.row-major.cooperative-load : {[
     rows cols t slot last-event key.
   ]
     ({[.last-event] [.key]} gpu.state)
@@ -74,6 +74,32 @@
     ({[.cols] u64} :)
     ({({([.rows] ix val) ([.cols] ix val)} *) ([.t] val)} =>)
   } -> ([rows cols t slot last-event key.] {
+    ({
+      ({[.slot] [.last-event]} gpu.shared.loaded)
+      [.key]
+    } gpu.state)
+    ({[.slot] ({[.rows] [.cols]} *) [.t]} gpu.shared.slot val)
+  }))
+
+  # Closure-converted cooperative load: explicit source environment and
+  # function reference.
+  (arr gpu.shared.row-major.cooperative-loadc : {[
+    x rows cols t slot last-event key.
+  ]
+    ({[.last-event] [.key]} gpu.state)
+    ({[.slot] [.last-event] [.key]} gpu.shared.allocated-at |-)
+    ({[.slot] ({[.rows] [.cols]} *) [.t]} gpu.shared.slot val)
+    ({[.rows] u64} :)
+    ({[.cols] u64} :)
+    ([.x])
+    ({
+      ({
+        [.x]
+        ({([.rows] ix val) ([.cols] ix val)} *)
+      } *)
+      ([.t] val)
+    } -> val)
+  } -> ([x rows cols t slot last-event key.] {
     ({
       ({[.slot] [.last-event]} gpu.shared.loaded)
       [.key]

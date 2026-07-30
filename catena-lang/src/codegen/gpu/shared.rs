@@ -3,8 +3,8 @@ use super::*;
 pub(super) fn render(out: &mut String, assignment: &GpuAssign) -> Result<bool, GpuRenderError> {
     match assignment.op.as_str() {
         "gpu.shared.alloc" => render_alloc(out, assignment)?,
-        "gpu.shared.cooperative-load.row-major" => {
-            render_cooperative_load_row_major(out, assignment)?
+        "gpu.shared.row-major.cooperative-loadc" => {
+            render_row_major_cooperative_load(out, assignment)?
         }
         "gpu.shared.materialize" => render_runtime_identity(out, assignment)?,
         "gpu.sync" => out.push_str("    __syncthreads();\n"),
@@ -42,7 +42,7 @@ fn render_alloc(out: &mut String, assignment: &GpuAssign) -> Result<(), GpuRende
     Ok(())
 }
 
-fn render_cooperative_load_row_major(
+fn render_row_major_cooperative_load(
     out: &mut String,
     assignment: &GpuAssign,
 ) -> Result<(), GpuRenderError> {
@@ -53,22 +53,23 @@ fn render_cooperative_load_row_major(
         slot_component,
         rows_component,
         cols_component,
-        source_component,
+        source_environment,
+        source_function,
     ] = components.as_slice()
     else {
         return Err(GpuRenderError::InvalidInputComponentCount {
             op: assignment.op.clone(),
-            expected: 6,
+            expected: 7,
             actual: components.len(),
         });
     };
     let slot = single_runtime_value(assignment, *slot_component, "slot")?;
     let _rows = single_runtime_value(assignment, *rows_component, "rows")?;
     let cols = single_runtime_value(assignment, *cols_component, "cols")?;
-    let source = single_function(*source_component).map_err(|error| {
+    let source = single_function(*source_function).map_err(|error| {
         GpuRenderError::InvalidInputComponentValueCount {
             op: assignment.op.clone(),
-            component: "source",
+            component: "source function",
             description: "source view function symbol",
             expected: 1,
             actual: error.actual,
@@ -99,7 +100,7 @@ fn render_cooperative_load_row_major(
     let row = synthetic_var(next_slot, &row_name, CType::U64);
     let col = synthetic_var(next_slot, &col_name, CType::U64);
     let value = synthetic_var(next_slot, &value_name, element.as_ref().clone());
-    let mut source_inputs = runtime_values(*source_component)
+    let mut source_inputs = runtime_values(*source_environment)
         .cloned()
         .collect::<Vec<_>>();
     source_inputs.push(GpuValue::Var(row));
@@ -260,8 +261,8 @@ mod tests {
         let capture = var(3, "capture", CType::Pointer(Box::new(CType::F32)));
         let next_slot = var(4, "next_slot", CType::Pointer(Box::new(CType::F32)));
         let assignment = GpuAssign {
-            op: op("gpu.shared.cooperative-load.row-major"),
-            input_sizes: vec![1, 1, 1, 1, 1, 2],
+            op: op("gpu.shared.row-major.cooperative-loadc"),
+            input_sizes: vec![1, 1, 1, 1, 1, 1, 1],
             output_sizes: vec![0, 1],
             call_symbol: None,
             inputs: vec![

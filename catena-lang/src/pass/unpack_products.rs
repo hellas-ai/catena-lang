@@ -94,7 +94,7 @@ pub fn map_objects(objects: &[Obj]) -> Vec<Obj> {
 fn is_forgotten_operation(operation: &str) -> bool {
     matches!(
         operation,
-        PRODUCT_INTRO | PRODUCT_ELIM | UNIT_INTRO | UNIT_ELIM
+        PRODUCT_INTRO | PRODUCT_ELIM | UNIT_INTRO | UNIT_ELIM | "unit.left-elim"
     )
 }
 

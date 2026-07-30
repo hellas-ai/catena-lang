@@ -3,7 +3,6 @@ use super::*;
 const TILED_MATMUL_SOURCE: &str = include_str!("gpu/tiled_matmul.hex");
 
 #[test]
-#[ignore = "cooperative shared materialization does not have codegen yet"]
 fn tiled_matmul_launch_allocates_output_before_launch() -> anyhow::Result<()> {
     let runtime = runtime_with(TILED_MATMUL_SOURCE)?;
 

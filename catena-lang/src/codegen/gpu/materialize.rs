@@ -116,13 +116,13 @@ struct MaterializeParts<'a> {
 }
 
 fn materialize_parts(assignment: &GpuAssign) -> Result<MaterializeParts<'_>, GpuRenderError> {
-    // Closure conversion preserves the three source components:
-    // launch parameters, element count, and the kernel closure.
+    // Closure conversion expands the kernel closure into its environment and
+    // function reference.
     let components = input_components(assignment)?;
-    let [launch, element_count, kernel] = components.as_slice() else {
+    let [launch, element_count, kernel_env, kernel] = components.as_slice() else {
         return Err(GpuRenderError::InvalidInputComponentCount {
             op: assignment.op.clone(),
-            expected: 3,
+            expected: 4,
             actual: components.len(),
         });
     };
@@ -140,7 +140,7 @@ fn materialize_parts(assignment: &GpuAssign) -> Result<MaterializeParts<'_>, Gpu
             "kernel",
             "value kernel function symbol",
         )?,
-        kernel_env: kernel,
+        kernel_env,
     })
 }
 

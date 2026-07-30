@@ -443,6 +443,13 @@ fn record_erased_passthrough_aliases(
     outputs: &[GpuVar],
     aliases: &mut BTreeMap<usize, GpuVar>,
 ) -> Result<(), CodegenError> {
+    if matches!(
+        op.as_str(),
+        "gpu.state.admit-discard" | "gpu.state.admit-keyed"
+    ) {
+        return Ok(());
+    }
+
     let runtime_inputs = inputs
         .iter()
         .filter_map(|input| match input {
@@ -538,7 +545,7 @@ mod tests {
 
         record_erased_passthrough_aliases(
             &"gpu.state.admit-keyed".parse().unwrap(),
-            &[GpuValue::Var(erased_var(0))],
+            &[GpuValue::Var(runtime_var(0))],
             &[erased_var(1)],
             &mut aliases,
         )

@@ -19,6 +19,9 @@ mod support;
 #[path = "compile/closures/mod.rs"]
 mod closures;
 
+#[path = "compile/gpu.rs"]
+mod gpu;
+
 /// Compile user sources through the same public entry point used by clients and
 /// return the complete phase report for structural assertions.
 fn compile_with_sources(

@@ -439,6 +439,8 @@ fn render_primitive_assignment(
         "f32.bitcast-u32" => render_f32_bitcast_u32(out, assignment)?,
         "ix.to-u64" => render_forget(out, assignment)?,
         "ix.zero" => render_ix_zero(out, assignment)?,
+        "ix.same-tile-coordinate" => render_same_tile_coordinate(out, assignment)?,
+        "ix.tile-offset-coordinate" => render_tile_offset_coordinate(out, assignment)?,
         "ix" => render_ix(out, assignment)?,
         "row-major-index" => row_major::render_index(out, assignment)?,
         "row-major-row" => row_major::render_row(out, assignment)?,
@@ -936,6 +938,46 @@ fn render_u64_to_ix(out: &mut String, assignment: &GpuAssign) -> Result<(), GpuR
     Ok(())
 }
 
+fn render_same_tile_coordinate(
+    out: &mut String,
+    assignment: &GpuAssign,
+) -> Result<(), GpuRenderError> {
+    let [tile_size, coordinate, local] = assignment.inputs.as_slice() else {
+        return Err(invalid_inputs(assignment, 3));
+    };
+    let [output] = assignment.outputs.as_slice() else {
+        return Err(invalid_outputs(assignment, 1));
+    };
+    out.push_str(&format!(
+        "    {output} = ({coordinate} / {tile_size}) * {tile_size} + {local};\n",
+        output = output.name,
+        coordinate = value_expr(coordinate),
+        tile_size = value_expr(tile_size),
+        local = value_expr(local),
+    ));
+    Ok(())
+}
+
+fn render_tile_offset_coordinate(
+    out: &mut String,
+    assignment: &GpuAssign,
+) -> Result<(), GpuRenderError> {
+    let [_extent, tile_size, tile_index, local] = assignment.inputs.as_slice() else {
+        return Err(invalid_inputs(assignment, 4));
+    };
+    let [output] = assignment.outputs.as_slice() else {
+        return Err(invalid_outputs(assignment, 1));
+    };
+    out.push_str(&format!(
+        "    {output} = {tile_index} * {tile_size} + {local};\n",
+        output = output.name,
+        tile_index = value_expr(tile_index),
+        tile_size = value_expr(tile_size),
+        local = value_expr(local),
+    ));
+    Ok(())
+}
+
 fn render_call(
     out: &mut String,
     symbol: &str,
@@ -1377,7 +1419,7 @@ mod tests {
                 targets: vec![out.clone()],
                 assignments: vec![GpuAssign {
                     op: op("gpu.materialize"),
-                    input_sizes: vec![1, 1, 2],
+                    input_sizes: vec![1, 1, 1, 1],
                     output_sizes: vec![1],
                     call_symbol: None,
                     inputs: vec![

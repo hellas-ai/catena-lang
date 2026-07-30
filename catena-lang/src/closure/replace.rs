@@ -35,6 +35,10 @@ const CONVERTED_PRIMITIVES: &[(&str, &str)] = &[
     ("bool.if", "bool.ifc"),
     ("reduce", "reducec"),
     ("materialize", "materializec"),
+    (
+        "gpu.shared.row-major.cooperative-load",
+        "gpu.shared.row-major.cooperative-loadc",
+    ),
 ];
 
 pub(super) struct PartialReplacement {

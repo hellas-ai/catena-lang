@@ -67,45 +67,6 @@
     ({[.tile-inner-row] [.tile-col]} *.intro)
   ))
 
-  # Read one element from linear shared storage.
-  (def gpu.f32.shared.row-major.flat-at : {[rows cols.]
-    ({
-      ({[.rows] [.cols]} *)
-      f32
-    } gpu.shared val)
-    (({[.rows] [.cols]} *) ix val)
-  } -> ([rows cols.] (f32 val))
-  = ([shared i.]
-    {[.i] [.shared]} gpu.shared.ix
-  ))
-
-  # Present linear shared storage as a row-major matrix.
-  (def gpu.f32.shared.row-major.view : {[rows cols.]
-    ({[.rows] u64} :)
-    ({[.cols] u64} :)
-    ({
-      ({[.rows] [.cols]} *)
-      f32
-    } gpu.shared val)
-  } -> ([rows cols.]
-    ({({([.rows] ix val) ([.cols] ix val)} *) (f32 val)} =>))
-  = ([rows cols shared.]
-    ([.rows] u64.copy-param [view-rows rows-param.])
-    ([.cols] u64.copy-param [view-cols cols-param.])
-
-    ({
-      [.rows-param]
-      [.cols-param]
-      [.shared]
-    } partial.gpu.f32.shared.row-major.flat-at.1 [flat-view.])
-
-    ({
-      [.view-rows]
-      [.view-cols]
-      [.flat-view]
-    } f32.row-major.matrix-view)
-  ))
-
   # Locate one output coordinate within its tile:
   #
   #   output-coordinate % tile-size
@@ -316,7 +277,7 @@
       [.row-inner-ready]
       [.row-inner-ready-slot]
     } gpu.shared.materialize [
-      row-materialized-state row-inner-shared.
+      row-materialized-state row-inner-buffer.
     ])
 
     ({
@@ -330,19 +291,19 @@
       [.inner-col-ready]
       [.inner-col-ready-slot]
     } gpu.shared.materialize [
-      materialized-state inner-col-shared.
+      materialized-state inner-col-buffer.
     ])
 
     ({
       [.a-shared-rows]
       [.a-shared-cols]
-      [.row-inner-shared]
-    } gpu.f32.shared.row-major.view [row-inner-shared-view.])
+      [.row-inner-buffer]
+    } f32.row-major.buffer-view [row-inner-shared-view.])
     ({
       [.b-shared-rows]
       [.b-shared-cols]
-      [.inner-col-shared]
-    } gpu.f32.shared.row-major.view [inner-col-shared-view.])
+      [.inner-col-buffer]
+    } f32.row-major.buffer-view [inner-col-shared-view.])
 
     ({
       [.output-tile-row-size]
@@ -520,7 +481,7 @@
   ({[.grid-cols] [.grid-rows]}
     gpu.dimensions.2d.intro [grid.])
   ({[.block-cols] [.block-rows]} gpu.dimensions.2d.intro [block.])
-  ({[.grid] [.block]} gpu.launch_params.intro [params.])
+  ({[.grid] [.block]} gpu.launch_params.2d-2d.intro [params.])
   {[.params] [.inner-tile-count]}
 ))
 

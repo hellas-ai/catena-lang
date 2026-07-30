@@ -5,16 +5,7 @@
 
 (theory type nat {
   # Ranked launch dimensions. These describe execution geometry, not memory.
-  (arr 1d : 1 -> 1)
   (arr 2d : 2 -> 1)
-  (arr 3d : 3 -> 1)
-
-  # Type-level multiplication used to relate execution extents.
-  (arr nat.mul : 2 -> 1)
-
-  # Linear shared memory: length × element type. It is block-local and has no
-  # host-visible ownership capability because it never escapes a launch.
-  (arr gpu.shared : 2 -> 1)
 
   # An allocated shared-memory slot: identity × length × element type.
   (arr gpu.shared.slot : 3 -> 1)
@@ -36,10 +27,6 @@
   # The physical execution grid: grid shape × block shape.
   (arr gpu.grid : 2 -> 1)
 
-  # Read-only information supplied implicitly to a running kernel. Indexing the
-  # environment by its grid contract ties kernel coordinates to the launch.
-  (arr gpu.env : 1 -> 1)
-
   # Erased linear proof of block state: last completed event × idempotency key.
   # Event names describe executed instructions with past participles.
   (arr gpu.state : 2 -> 1)
@@ -47,10 +34,8 @@
   # Fixed initialization tag used at a kernel boundary.
   (arr gpu.initial : 0 -> 1)
 
-  # Runtime dimension vectors and coordinates indexed by their rank/extent.
-  # CUDA/HIP lowers each supported rank to dim3, filling absent axes with one.
-  (arr gpu.dimensions : 1 -> 1)
-  (arr gpu.coordinate : 1 -> 1)
+  # Launch parameters are the backend boundary where structural dimensions
+  # become CUDA/HIP dim3 values.
   (arr gpu.launch_params : 1 -> 1)
 })
 
@@ -96,7 +81,7 @@
     ({[.slot] ({[.rows] [.cols]} *) [.t]} gpu.shared.slot val)
   }))
 
-  # Expose a ready slot as initialized shared storage.
+  # Expose a ready slot as an initialized borrowed buffer.
   (arr gpu.shared.materialize : {[
     n t slot last-event key.
   ]
@@ -108,7 +93,7 @@
       ({[.slot] [.last-event]} gpu.shared.materialized)
       [.key]
     } gpu.state)
-    ({[.n] [.t]} gpu.shared val)
+    ({cap.ref [.n t]} buf val)
   }))
 
   # Synchronize all threads in the block.
@@ -171,35 +156,33 @@
     } gpu.state)
   }))
 
-  # Index linear block-local shared storage.
-  (arr gpu.shared.ix : {[n t.]
-    ([.n] ix val)
-    ({[.n t]} gpu.shared val)
-  } -> ([n t . t] val))
-
-  # Construct ranked runtime dimensions.
-  (arr gpu.dimensions.1d.intro : {[x.]
-    ({[.x] u64} :)
-  } -> ([x.] (([.x] 1d) gpu.dimensions val)))
-
-  (arr gpu.dimensions.2d.intro : {[x y.]
+  # 2D dimensions are a structural pair of scalars.
+  (def gpu.dimensions.2d.intro : {[x y.]
     ({[.x] u64} :)
     ({[.y] u64} :)
-  } -> ([x y.] (({[.x] [.y]} 2d) gpu.dimensions val)))
-
-  (arr gpu.dimensions.3d.intro : {[x y z.]
+  } -> ([x y.] ({
     ({[.x] u64} :)
     ({[.y] u64} :)
-    ({[.z] u64} :)
-  } -> ([x y z.] (({[.x] [.y] [.z]} 3d) gpu.dimensions val)))
+  } *))
+  = ([x y.] ({[.x] [.y]} *.intro)))
 
-  # Grid and block dimensions are constructed independently, so their ranks do
-  # not need to match: for example, a 2D grid may launch 1D blocks.
-  (arr gpu.launch_params.intro : {[grid-shape block-shape.]
-    ([.grid-shape] gpu.dimensions val)
-    ([.block-shape] gpu.dimensions val)
-  } -> {[grid-shape block-shape.]
-    ({[.grid-shape] [.block-shape]} gpu.grid [grid.])
+  # Construct 2D grid and block launch parameters from structural dimensions.
+  (arr gpu.launch_params.2d-2d.intro : {[
+    grid-x grid-y block-x block-y.
+  ]
+    ({
+      ({[.grid-x] u64} :)
+      ({[.grid-y] u64} :)
+    } *)
+    ({
+      ({[.block-x] u64} :)
+      ({[.block-y] u64} :)
+    } *)
+  } -> {[grid-x grid-y block-x block-y.]
+    ({
+      ({[.grid-x] [.grid-y]} 2d)
+      ({[.block-x] [.block-y]} 2d)
+    } gpu.grid [grid.])
     ([.grid] gpu.launch_params val)
   })
 
@@ -222,76 +205,6 @@
     [.block-x]
     [.block-y]
   })
-
-  # Inspect the hardware coordinates of the current kernel invocation.
-  #
-  # The returned environment preserves this read-only resource for subsequent
-  # queries without requiring contraction.
-  (arr gpu.env.coordinates : {[grid-shape block-shape.]
-    ({[.grid-shape] [.block-shape]} gpu.grid [grid.])
-    ([.grid] gpu.env)
-  } -> {[grid-shape block-shape.]
-    ([.grid] gpu.env)
-    ([.grid-shape] gpu.coordinate val)  # block index
-    ([.block-shape] gpu.coordinate val) # thread index
-    ([.grid-shape] gpu.dimensions val)
-    ([.block-shape] gpu.dimensions val)
-  })
-
-  (arr gpu.coordinate.1d.elim :
-    (([x] 1d) gpu.coordinate val)
-    ->
-    ([x.] (u64 val)))
-
-  (arr gpu.coordinate.2d.elim :
-    (({[x] [y]} 2d) gpu.coordinate val)
-    ->
-    ([x y.] {(u64 val) (u64 val)}))
-
-  (arr gpu.coordinate.3d.elim :
-    (({[x] [y] [z]} 3d) gpu.coordinate val)
-    ->
-    ([x y z.] {(u64 val) (u64 val) (u64 val)}))
-
-  # General kernel launch.
-  #
-  #   S is the shared environment found in the kernel signature.
-  #   Codegen creates S independently for every block. S is present in the
-  #   kernel function but absent from gpu.launch's runtime inputs and outputs.
-  #
-  #   gpu.launch :
-  #     launch_params
-  #       × X
-  #       × val(env × state × (X × S)
-  #             -> state × (Y × S))
-  #       -> Y
-  (arr gpu.launch : {[
-    grid x y s
-    last-event key
-    next-last-event next-key.
-  ]
-    ({[.x] [.s]} * [resources.])
-    ({
-      ({[.last-event] [.key]} gpu.state)
-      [.resources]
-    } * [state-and-resources.])
-    ({([.grid] gpu.env) [.state-and-resources]} * [kernel-args.])
-
-    ({[.y] [.s]} * [next-resources.])
-    ({
-      ({[.next-last-event] [.next-key]} gpu.state)
-      [.next-resources]
-    } * [kernel-coargs.])
-
-    ([.grid] gpu.launch_params val)
-    ([.x])
-    ({[.kernel-args kernel-coargs]} -> val)
-  } -> ([
-    grid x y s
-    last-event key
-    next-last-event next-key
-    .y
-  ]))
 
   # Materialize one buffer element per logical thread index.
   #

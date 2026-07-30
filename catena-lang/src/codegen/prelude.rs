@@ -16,10 +16,6 @@ typedef struct {{
 }} catena_dim3_t;
 
 typedef struct {{
-    uint64_t thread_id;
-}} catena_gpu_env_t;
-
-typedef struct {{
     catena_dim3_t grid_dim;
     catena_dim3_t block_dim;
 }} catena_launch_params_t;
@@ -29,10 +25,7 @@ typedef struct {{
     uint64_t len;
 }} catena_mem_t;
 
-typedef struct {{
-    void *data;
-    uint64_t len;
-}} catena_gpu_buf_t;
+#define CATENA_GPU_MAX_SHARED_F32_SLOT_ELEMENTS 1024ULL
 
 __host__ __device__ static inline void catena_assert(uint8_t condition) {{
     if (!condition) {{
@@ -54,11 +47,6 @@ __host__ static inline void catena_host_gpu_check({error_type} err) {{
 }}
 
 #endif
-
-__host__ __device__ static inline uint64_t catena_launch_len(catena_launch_params_t params) {{
-    return (uint64_t)params.grid_dim.x * params.grid_dim.y * params.grid_dim.z
-        * params.block_dim.x * params.block_dim.y * params.block_dim.z;
-}}
 
 __host__ __device__ static inline float catena_u32_bitcast_f32(uint32_t bits) {{
     union {{

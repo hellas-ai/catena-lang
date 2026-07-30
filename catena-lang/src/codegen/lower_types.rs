@@ -54,14 +54,14 @@ pub fn lower_type(ty: &Tree<(), Operation>) -> Result<LoweredType, LowerTypeErro
         Tree::Node(op, 0, _children) if op.as_str() == FN_REF_TYPE => {
             Err(LowerTypeError::FunctionPointerRuntime)
         }
-        Tree::Node(op, 0, children) if op.as_str() == "gpu.buf" => {
-            let [element] = expect_unary(op.as_str(), children)?;
+        Tree::Node(op, 0, children) if op.as_str() == "buf" => {
+            let [_cap, _len, element] = expect_ternary(op.as_str(), children)?;
             Ok(LoweredType::Runtime(CType::Pointer(Box::new(
                 lower_runtime_type(element)?,
             ))))
         }
-        Tree::Node(op, 0, children) if op.as_str() == "buf" => {
-            let [_cap, _len, element] = expect_ternary(op.as_str(), children)?;
+        Tree::Node(op, 0, children) if op.as_str() == "gpu.shared.slot" => {
+            let element = shared_slot_element(op.as_str(), children)?;
             Ok(LoweredType::Runtime(CType::Pointer(Box::new(
                 lower_runtime_type(element)?,
             ))))
@@ -72,7 +72,10 @@ pub fn lower_type(ty: &Tree<(), Operation>) -> Result<LoweredType, LowerTypeErro
                 "catena_mem_t".to_string(),
             )))
         }
-        Tree::Node(op, 0, children) if is_gpu_control_type(op.as_str()) && children.is_empty() => {
+        Tree::Node(op, 0, children)
+            if is_gpu_control_type(op.as_str())
+                && children.len() == gpu_control_arity(op.as_str()) =>
+        {
             Ok(LoweredType::Runtime(CType::Named(c_name_for_gpu_control(
                 op.as_str(),
             ))))
@@ -113,13 +116,14 @@ pub fn lower_runtime_type(ty: &Tree<(), Operation>) -> Result<CType, LowerTypeEr
         Tree::Node(op, 0, _children) if op.as_str() == FN_REF_TYPE => {
             Err(LowerTypeError::FunctionPointerRuntime)
         }
-        Tree::Node(op, 0, children) if op.as_str() == "gpu.buf" => {
-            let [element] = expect_unary(op.as_str(), children)?;
-            Ok(CType::Pointer(Box::new(lower_runtime_type(element)?)))
-        }
         Tree::Node(op, 0, children) if op.as_str() == "buf" => {
             let [_cap, _len, element] = expect_ternary(op.as_str(), children)?;
             Ok(CType::Pointer(Box::new(lower_runtime_type(element)?)))
+        }
+        Tree::Node(op, 0, children) if op.as_str() == "gpu.shared.slot" => {
+            Ok(CType::Pointer(Box::new(lower_runtime_type(
+                shared_slot_element(op.as_str(), children)?,
+            )?)))
         }
         Tree::Node(op, 0, children) if op.as_str() == "mem" => {
             let [_cap] = expect_unary(op.as_str(), children)?;
@@ -129,7 +133,10 @@ pub fn lower_runtime_type(ty: &Tree<(), Operation>) -> Result<CType, LowerTypeEr
             let [_extent] = expect_unary(op.as_str(), children)?;
             Ok(CType::U64)
         }
-        Tree::Node(op, 0, children) if is_gpu_control_type(op.as_str()) && children.is_empty() => {
+        Tree::Node(op, 0, children)
+            if is_gpu_control_type(op.as_str())
+                && children.len() == gpu_control_arity(op.as_str()) =>
+        {
             Ok(CType::Named(c_name_for_gpu_control(op.as_str())))
         }
         _ => Err(LowerTypeError::NoRuntimeRepresentation(ty.clone())),
@@ -223,14 +230,27 @@ fn expect_ternary<'a>(
     }
 }
 
+fn shared_slot_element<'a>(
+    name: &str,
+    children: &'a [Tree<(), Operation>],
+) -> Result<&'a Tree<(), Operation>, LowerTypeError> {
+    let [_id, _len, element] = expect_ternary(name, children)?;
+    Ok(element)
+}
+
 fn is_gpu_control_type(name: &str) -> bool {
-    matches!(name, "gpu.3d" | "gpu.env" | "gpu.launch_params")
+    matches!(name, "gpu.launch_params")
+}
+
+fn gpu_control_arity(name: &str) -> usize {
+    match name {
+        "gpu.launch_params" => 1,
+        _ => unreachable!("checked by is_gpu_control_type"),
+    }
 }
 
 fn c_name_for_gpu_control(name: &str) -> String {
     match name {
-        "gpu.3d" => "catena_dim3_t",
-        "gpu.env" => "catena_gpu_env_t",
         "gpu.launch_params" => "catena_launch_params_t",
         _ => unreachable!("checked by is_gpu_control_type"),
     }
@@ -266,6 +286,19 @@ mod tests {
     }
 
     #[test]
+    fn gpu_shared_slot_lowers_to_an_element_pointer() {
+        let slot = node(
+            "val",
+            vec![node(
+                "gpu.shared.slot",
+                vec![leaf(0), leaf(1), node("f32", Vec::new())],
+            )],
+        );
+        let pointer = LoweredType::Runtime(CType::Pointer(Box::new(CType::F32)));
+        assert_eq!(lower_type(&slot).unwrap(), pointer);
+    }
+
+    #[test]
     fn value_wrapped_scalars_lower_to_runtime_types() {
         assert_eq!(
             lower_type(&node("val", vec![node("bool", vec![])])).unwrap(),
@@ -290,15 +323,12 @@ mod tests {
         let ty = node(
             "*",
             vec![
-                node("gpu.env", vec![]),
+                node("gpu.state", vec![leaf(0), leaf(1)]),
                 leaf(0),
                 node("val", vec![node("bool", vec![])]),
             ],
         );
-        assert_eq!(
-            lower_interface(&ty).unwrap(),
-            vec![CType::Named("catena_gpu_env_t".to_string()), CType::Bool]
-        );
+        assert_eq!(lower_interface(&ty).unwrap(), vec![CType::Bool]);
     }
 
     #[test]

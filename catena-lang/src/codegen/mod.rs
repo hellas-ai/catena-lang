@@ -229,6 +229,14 @@ pub enum CodegenError {
         containing: Operation,
         nested: Operation,
     },
+    #[error(
+        "erased passthrough `{op}` has {inputs} runtime inputs but {outputs} runtime outputs; runtime carriers must pass through one-to-one"
+    )]
+    InvalidErasedPassthroughBoundary {
+        op: Operation,
+        inputs: usize,
+        outputs: usize,
+    },
 }
 
 impl CodegenState<'_> {
@@ -255,15 +263,8 @@ impl CodegenState<'_> {
             }
         }
 
-        let mut targets = Vec::new();
-        for target in &term.targets {
-            let var = var(*target, &term, &instance.overrides)?;
-            if matches!(var.lowered, LoweredType::Runtime(_)) {
-                targets.push(var);
-            }
-        }
-
         let mut assignments = Vec::new();
+        let mut erased_aliases = BTreeMap::<usize, GpuVar>::new();
         for assignment in ssa(term.clone().to_strict())? {
             let op = assignment.op.operation.clone();
             if op.as_str().starts_with(NAME_PREFIX) {
@@ -277,7 +278,10 @@ impl CodegenState<'_> {
                     if let Some(symbol) = fn_symbols.get(node) {
                         Ok(GpuValue::FnSymbol(symbol.clone()))
                     } else {
-                        Ok(GpuValue::Var(var(*node, &term, &instance.overrides)?))
+                        let input = var(*node, &term, &instance.overrides)?;
+                        Ok(GpuValue::Var(
+                            erased_aliases.get(&node.0).cloned().unwrap_or(input),
+                        ))
                     }
                 })
                 .collect::<Result<Vec<_>, CodegenError>>()?;
@@ -287,7 +291,12 @@ impl CodegenState<'_> {
                 .map(|(node, _)| var(*node, &term, &instance.overrides))
                 .collect::<Result<Vec<_>, CodegenError>>()?;
 
-            if is_erased_only(&inputs, &outputs) {
+            if is_erased_passthrough(&op) {
+                record_erased_passthrough_aliases(&op, &inputs, &outputs, &mut erased_aliases)?;
+                continue;
+            }
+
+            if is_erased_only(&inputs, &outputs) && !has_runtime_effect(&op) {
                 continue;
             }
 
@@ -307,6 +316,15 @@ impl CodegenState<'_> {
                 inputs,
                 outputs,
             });
+        }
+
+        let mut targets = Vec::new();
+        for target in &term.targets {
+            let output = var(*target, &term, &instance.overrides)?;
+            let output = erased_aliases.get(&target.0).cloned().unwrap_or(output);
+            if matches!(output.lowered, LoweredType::Runtime(_)) {
+                targets.push(output);
+            }
         }
 
         Ok(GpuModule {
@@ -404,6 +422,51 @@ fn is_erased_only(inputs: &[GpuValue], outputs: &[GpuVar]) -> bool {
             .all(|var| matches!(var.lowered, LoweredType::Erased))
 }
 
+fn has_runtime_effect(op: &Operation) -> bool {
+    matches!(op.as_str(), "gpu.sync")
+}
+
+fn is_erased_passthrough(op: &Operation) -> bool {
+    matches!(
+        op.as_str(),
+        "gpu.shared.admit-allocated-at"
+            | "gpu.shared.admit-ready-at"
+            | "gpu.state.admit-discard"
+            | "gpu.state.admit-keyed"
+            | "gpu.launch_params.2d-2d.params"
+    )
+}
+
+fn record_erased_passthrough_aliases(
+    op: &Operation,
+    inputs: &[GpuValue],
+    outputs: &[GpuVar],
+    aliases: &mut BTreeMap<usize, GpuVar>,
+) -> Result<(), CodegenError> {
+    let runtime_inputs = inputs
+        .iter()
+        .filter_map(|input| match input {
+            GpuValue::Var(var) if runtime_type(var).is_some() => Some(var),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let runtime_outputs = outputs
+        .iter()
+        .filter(|output| runtime_type(output).is_some())
+        .collect::<Vec<_>>();
+    if runtime_inputs.len() != runtime_outputs.len() {
+        return Err(CodegenError::InvalidErasedPassthroughBoundary {
+            op: op.clone(),
+            inputs: runtime_inputs.len(),
+            outputs: runtime_outputs.len(),
+        });
+    }
+    for (input, output) in runtime_inputs.into_iter().zip(runtime_outputs) {
+        aliases.insert(output.node.0, input.clone());
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -439,5 +502,75 @@ mod tests {
             &[GpuValue::Var(erased_var(0))],
             &[runtime_var(1)]
         ));
+    }
+
+    #[test]
+    fn synchronization_is_retained_despite_its_erased_state_boundary() {
+        assert!(has_runtime_effect(&"gpu.sync".parse().unwrap()));
+        assert!(!has_runtime_effect(
+            &"gpu.state.admit-keyed".parse().unwrap()
+        ));
+    }
+
+    #[test]
+    fn erased_shared_theorems_alias_their_runtime_slot_carrier() {
+        let input_slot = runtime_var(0);
+        let output_slot = runtime_var(1);
+        let mut aliases = BTreeMap::new();
+
+        record_erased_passthrough_aliases(
+            &"gpu.shared.admit-ready-at".parse().unwrap(),
+            &[
+                GpuValue::Var(erased_var(2)),
+                GpuValue::Var(input_slot.clone()),
+            ],
+            &[erased_var(3), erased_var(4), output_slot.clone()],
+            &mut aliases,
+        )
+        .unwrap();
+
+        assert_eq!(aliases[&output_slot.node.0], input_slot);
+    }
+
+    #[test]
+    fn erased_state_theorems_have_no_runtime_aliases() {
+        let mut aliases = BTreeMap::new();
+
+        record_erased_passthrough_aliases(
+            &"gpu.state.admit-keyed".parse().unwrap(),
+            &[GpuValue::Var(erased_var(0))],
+            &[erased_var(1)],
+            &mut aliases,
+        )
+        .unwrap();
+
+        assert!(aliases.is_empty());
+    }
+
+    #[test]
+    fn launch_parameter_type_projection_aliases_its_runtime_carrier() {
+        let input_params = runtime_var(0);
+        let output_params = runtime_var(1);
+        let mut aliases = BTreeMap::new();
+
+        record_erased_passthrough_aliases(
+            &"gpu.launch_params.2d-2d.params".parse().unwrap(),
+            &[
+                GpuValue::Var(erased_var(2)),
+                GpuValue::Var(input_params.clone()),
+            ],
+            &[
+                erased_var(3),
+                output_params.clone(),
+                erased_var(4),
+                erased_var(5),
+                erased_var(6),
+                erased_var(7),
+            ],
+            &mut aliases,
+        )
+        .unwrap();
+
+        assert_eq!(aliases[&output_params.node.0], input_params);
     }
 }

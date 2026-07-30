@@ -153,7 +153,9 @@
     ({[.last-event] [.key]} gpu.state)
   } -> ([last-event key.] []))
 
-  # Temporarily admit a trace continued under a new idempotency key.
+  # TODO: replace this axiom with a stateful fold. The current pure reduction
+  # starts every iteration from the same captured state; the fold must carry
+  # state, accumulator, and shared slots through q, so q+1 receives q's state.
   (arr gpu.state.admit-keyed : {[
     last-event current-key next-key.
   ]

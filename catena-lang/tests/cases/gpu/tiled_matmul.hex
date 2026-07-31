@@ -108,3 +108,120 @@
   ({[.c-result-size] [.c]} buf.to-mem [result.])
   [.result]
 ))
+
+# Materialize a square tiled product from two logical views.
+# This closure-bearing helper is inlined before closure conversion.
+(def program tiled-square-matmul-via-views :
+  ([n tile-size.] {
+    ({({([.n] ix val) ([.n] ix val)} *) (f32 val)} =>)
+    ({({([.n] ix val) ([.n] ix val)} *) (f32 val)} =>)
+    ({[.n] u64} :)
+    ({[.tile-size] u64} :)
+  })
+  ->
+  ([n tile-size.] (cap.own mem))
+= ([a-view b-view n tile-size.]
+  ([.n] u64.copies2 [dimensions-a dimensions-b.])
+  ([.dimensions-a] u64.copies5 [
+    c-size-rows c-size-cols launch-rows launch-cols launch-inner.
+  ])
+  ([.dimensions-b] u64.copies3 [
+    materialize-rows materialize-inner materialize-cols.
+  ])
+  ([.tile-size] u64.copies2 [
+    launch-tile-size materialize-tile-size.
+  ])
+  ({[.c-size-rows] [.c-size-cols]} u64.product [c-size.])
+
+  ({
+    [.launch-rows]
+    [.launch-cols]
+    [.launch-inner]
+    [.launch-tile-size]
+  } gpu.tiled-matmul.perfect-launch-params [
+    params inner-tile-count.
+  ])
+
+  ({
+    [.params]
+    [.a-view]
+    [.b-view]
+    [.materialize-rows]
+    [.materialize-inner]
+    [.materialize-cols]
+    [.materialize-tile-size]
+    [.inner-tile-count]
+  } gpu.f32.tiled-matmul.row-major.materialize [c.])
+
+  ({[.c-size] [.c]} buf.to-mem)
+))
+
+# Multiply a row-major matrix by an identity-matrix closure.
+(def program tiled-matmul-right-identity-via-mem :
+  ([n tile-size.] {
+    (cap.ref mem)
+    ({[.n] u64} :)
+    ({[.tile-size] u64} :)
+  })
+  ->
+  ([n tile-size.] (cap.own mem))
+= ([a-mem n tile-size.]
+  ([.n] u64.copies6 [
+    a-size-rows a-size-cols
+    a-view-rows a-view-cols
+    identity-n materialize-n.
+  ])
+  ({[.a-size-rows] [.a-size-cols]} u64.product [a-size.])
+
+  ([.a-mem] mem.cast.f32 [actual-a-size a-buffer.])
+  ([.a-size actual-a-size]
+    u64.eq [a-compatible if-a-compatible _if-a-incompatible.])
+  ({[.a-compatible] [.if-a-compatible]} assert-then [a-size-proof.])
+  ({[.a-buffer] [.a-size-proof]} buf.f32.cast-same-length [a.])
+  ({[.a-view-rows] [.a-view-cols] [.a]}
+    f32.row-major.buffer-view [a-view.])
+
+  (([.identity-n] :.param) name.f32.matrix.identity-at lift [identity-view.])
+
+  ({
+    [.a-view]
+    [.identity-view]
+    [.materialize-n]
+    [.tile-size]
+  } tiled-square-matmul-via-views)
+))
+
+# Multiply an identity-matrix closure by a row-major matrix.
+(def program tiled-matmul-left-identity-via-mem :
+  ([n tile-size.] {
+    (cap.ref mem)
+    ({[.n] u64} :)
+    ({[.tile-size] u64} :)
+  })
+  ->
+  ([n tile-size.] (cap.own mem))
+= ([b-mem n tile-size.]
+  ([.n] u64.copies6 [
+    b-size-rows b-size-cols
+    b-view-rows b-view-cols
+    identity-n materialize-n.
+  ])
+  ({[.b-size-rows] [.b-size-cols]} u64.product [b-size.])
+
+  ([.b-mem] mem.cast.f32 [actual-b-size b-buffer.])
+  ([.b-size actual-b-size]
+    u64.eq [b-compatible if-b-compatible _if-b-incompatible.])
+  ({[.b-compatible] [.if-b-compatible]} assert-then [b-size-proof.])
+  ({[.b-buffer] [.b-size-proof]} buf.f32.cast-same-length [b.])
+  ({[.b-view-rows] [.b-view-cols] [.b]}
+    f32.row-major.buffer-view [b-view.])
+
+  (([.identity-n] :.param) name.f32.matrix.identity-at lift [identity-view.])
+
+  ({
+    [.identity-view]
+    [.b-view]
+    [.materialize-n]
+    [.tile-size]
+  } tiled-square-matmul-via-views)
+))

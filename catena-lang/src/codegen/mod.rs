@@ -13,7 +13,6 @@ mod ops;
 mod prelude;
 mod render_utils;
 mod specialize;
-mod validate;
 
 use std::collections::{BTreeMap, VecDeque};
 
@@ -221,15 +220,6 @@ pub enum CodegenError {
     #[error("definition `{0}` is used with non-monomorphic runtime interface")]
     NonMonomorphicUse(Operation),
     #[error(
-        "definition `{caller}` uses `{producer}` as a materializec producer, but device-callable producer dependency `{containing}` contains `{nested}`. materializec lowering is host-only: it allocates output memory and launches a GPU kernel. A materializec producer is called from GPU device code, so it and the program definitions it calls must be device-callable and allocation-free. Move the nested materialization out of the producer call chain, or pass a precomputed buffer as the producer environment."
-    )]
-    MaterializecProducerContainsMaterialize {
-        caller: Operation,
-        producer: Operation,
-        containing: Operation,
-        nested: Operation,
-    },
-    #[error(
         "erased passthrough `{op}` has {inputs} runtime inputs but {outputs} runtime outputs; runtime carriers must pass through one-to-one"
     )]
     InvalidErasedPassthroughBoundary {
@@ -299,8 +289,6 @@ impl CodegenState<'_> {
             if is_erased_only(&inputs, &outputs) && !has_runtime_effect(&op) {
                 continue;
             }
-
-            validate::assignment(&self.definitions, &instance.op, &op, &inputs)?;
 
             let call_symbol = if self.definitions.contains_key(&op) {
                 Some(self.ensure_specialization(&op, &inputs, &outputs)?)

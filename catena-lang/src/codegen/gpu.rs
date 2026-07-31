@@ -150,20 +150,13 @@ fn render_module_body(
     dialect: GpuDialect,
     placement: GpuFunctionPlacement,
 ) -> Result<(), GpuRenderError> {
-    // Materialization is represented in the dataflow body as one assignment, but GPU codegen needs an
-    // auxiliary `__global__` kernel in addition to the host wrapper function.
+    // Explicit GPU materialization is represented in the dataflow body as one
+    // assignment, but codegen also needs an auxiliary `__global__` kernel.
     for assignment in &module.entry.assignments {
         if assignment.op.as_str() == "gpu.materialize" {
             materialize::render_kernel(
                 out,
                 &materialize::kernel_name(&module.entry.name, assignment)?,
-                assignment,
-            )?;
-            out.push('\n');
-        } else if assignment.op.as_str() == "materializec" {
-            materializec::render_kernel(
-                out,
-                &materializec::kernel_name(&module.entry.name, assignment)?,
                 assignment,
             )?;
             out.push('\n');
@@ -309,7 +302,7 @@ fn render_assignment(
         "eval" => render_eval(out, assignment)?,
         "reducec" => reducec::render(out, assignment)?,
         "gpu.materialize" => materialize::render_call(out, function, assignment, dialect)?,
-        "materializec" => materializec::render_call(out, function, assignment, dialect)?,
+        "materializec" => materializec::render_call(out, assignment, dialect)?,
         op => {
             return Err(GpuRenderError::UnsupportedOp(
                 op.parse().unwrap_or_else(|_| assignment.op.clone()),
@@ -1339,7 +1332,7 @@ mod tests {
     }
 
     #[test]
-    fn materializing_host_wrappers_are_hidden_from_hip_device_parse() {
+    fn ordinary_materialize_is_a_host_loop_without_a_kernel_launch() {
         let len = var(0, "len", CType::U64);
         let out = var(1, "out", CType::Pointer(Box::new(CType::U64)));
         let value = var(2, "value", CType::U64);
@@ -1396,7 +1389,9 @@ mod tests {
             "#ifndef __HIP_DEVICE_COMPILE__\nextern \"C\" __host__ void program_materialize(uint64_t len, uint64_t * *out_out) {"
         ));
         assert!(source.contains("catena_host_gpu_check(hipMallocManaged"));
-        assert!(source.contains("catena_host_gpu_check(hipDeviceSynchronize"));
+        assert!(source.contains("for (uint64_t out_i = 0; out_i < out_len; ++out_i)"));
+        assert!(!source.contains("<<<"));
+        assert!(!source.contains("hipDeviceSynchronize"));
         assert!(!source.contains("catena_gpu_check"));
     }
 

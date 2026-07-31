@@ -62,6 +62,84 @@
   )
 ))
 
+# The same naive matrix multiplication, explicitly scheduled on the GPU with
+# one thread per output cell.
+(def program gpu-naive-matmul-via-mem :
+  ([n m k.] {
+    (cap.ref mem)
+    (cap.ref mem)
+    ({[.n] u64} :)
+    ({[.m] u64} :)
+    ({[.k] u64} :)
+    ({({[.n] [.k]} *) u64} :)
+    ({({[.k] [.m]} *) u64} :)
+    ({({[.n] [.m]} *) u64} :)
+  })
+  ->
+  ([n m k.] (cap.own mem))
+= ([a-mem b-mem n-len m-len k-len nk-len km-len nm-len.]
+  ([.a-mem] mem.cast.f32 [actual-nk-len a-raw.]
+    ([.b-mem] mem.cast.f32 [actual-km-len b-raw.]
+      ([.nk-len actual-nk-len] u64.eq [a-len-eq if-a-len-eq _if-a-len-ne.]
+        ([.km-len actual-km-len] u64.eq [b-len-eq if-b-len-eq _if-b-len-ne.]
+          ({
+            [.a-len-eq]
+            [.if-a-len-eq]
+          } assert-then [a-same-length.]
+            ({
+              [.b-len-eq]
+              [.if-b-len-eq]
+            } assert-then [b-same-length.]
+              ({[.a-raw] [.a-same-length]} buf.f32.cast-same-length [a.]
+                ({[.b-raw] [.b-same-length]} buf.f32.cast-same-length [b.]
+                  ([.n-len] u64.copies3 [
+                    a-rows materialize-n grid-rows.
+                  ])
+                  ([.m-len] u64.copies3 [
+                    b-cols materialize-m grid-cols.
+                  ])
+                  ([.k-len] u64.copies3 [
+                    a-cols b-rows materialize-k.
+                  ])
+                  ({([.nk-len] :.param) [.a]}
+                    partial.f32.row-major.flat-at.1 [a-flat-view.])
+                  ({[.a-rows] [.a-cols] [.a-flat-view]}
+                    f32.row-major.matrix-view [a-view.])
+                  ({([.km-len] :.param) [.b]}
+                    partial.f32.row-major.flat-at.1 [b-flat-view.])
+                  ({[.b-rows] [.b-cols] [.b-flat-view]}
+                    f32.row-major.matrix-view [b-view.])
+
+                  ({[.grid-cols] [.grid-rows]}
+                    gpu.dimensions.2d.intro [grid.])
+                  (u64.one [block-col-value.])
+                  ([.block-col-value] u64.name [block-col.])
+                  (u64.one [block-row-value.])
+                  ([.block-row-value] u64.name [block-row.])
+                  ({[.block-col] [.block-row]}
+                    gpu.dimensions.2d.intro [block.])
+                  ({[.grid] [.block]}
+                    gpu.launch_params.2d-2d.intro [params.])
+
+                  ({
+                    [.params]
+                    [.materialize-n]
+                    [.materialize-m]
+                    [.materialize-k]
+                    [.a-view]
+                    [.b-view]
+                  } gpu.f32.naive-matmul.row-major.materialize [result.]
+                  ({[.nm-len] [.result]} buf.to-mem)
+                )
+              )
+            )
+          )
+        )
+      )
+    )
+  )
+)))
+
 # mem -> typed buffer -> matrix view, multiplied by the shared identity view
 (def program matmul-right-identity-2x2-via-mem :
   ([n.] {

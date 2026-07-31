@@ -424,6 +424,35 @@
     [.value]
   ))
 
+  # Compute one naive output cell. The state is an erased kernel-boundary
+  # witness; this kernel performs no stateful block operations.
+  (def gpu.f32.naive-matmul.kernel : {[
+    rows cols inner.
+  ]
+    [.rows]
+    [.cols]
+    ({[.inner] u64} :)
+    ({({([.rows] ix val) ([.inner] ix val)} *) (f32 val)} =>)
+    ({({([.inner] ix val) ([.cols] ix val)} *) (f32 val)} =>)
+    ({gpu.initial gpu.initial} gpu.state)
+    ({([.rows] ix val) ([.cols] ix val)} *)
+  } -> ([rows cols inner.] (f32 val))
+  = ([
+    rows-param cols-param inner
+    row-inner-view inner-col-view
+    state output-coordinate.
+  ]
+    ([.state] gpu.state.admit-discard)
+    ({
+      [.rows-param]
+      [.cols-param]
+      [.inner]
+      [.row-inner-view]
+      [.inner-col-view]
+      [.output-coordinate]
+    } f32.matmul.cell-dot)
+  ))
+
 })
 
 # Exact dimension division.
@@ -483,6 +512,55 @@
   ({[.block-cols] [.block-rows]} gpu.dimensions.2d.intro [block.])
   ({[.grid] [.block]} gpu.launch_params.2d-2d.intro [params.])
   {[.params] [.inner-tile-count]}
+))
+
+# Materialize naive matrix multiplication with one result per GPU thread.
+# The launch must contain exactly rows * cols threads.
+(def program gpu.f32.naive-matmul.row-major.materialize :
+  ([grid rows cols inner.] {
+    ([.grid] gpu.launch_params val)
+    ({[.rows] u64} :)
+    ({[.cols] u64} :)
+    ({[.inner] u64} :)
+    ({({([.rows] ix val) ([.inner] ix val)} *) (f32 val)} =>)
+    ({({([.inner] ix val) ([.cols] ix val)} *) (f32 val)} =>)
+  })
+  ->
+  ([grid rows cols inner.]
+    ({cap.own ({[.rows] [.cols]} *) f32} buf val))
+= ([params rows cols inner a-view b-view.]
+  ([.rows] u64.copies2 [c-size-rows parameter-rows.])
+  ([.cols] u64.copies2 [c-size-cols parameter-cols.])
+  ({[.c-size-rows] [.c-size-cols]} u64.product [c-size.])
+
+  ([.parameter-rows] u64.params3 [indices-n dot-n cell-n.])
+  ([.parameter-cols] u64.copy-params3 [
+    indices-m-len indices-m dot-m cell-m.
+  ])
+  ([.inner] u64.copy-param [reduce-len inner-param.])
+
+  ({
+    ({
+      (partial.gpu.state.initial.forward.0)
+      ({
+        [.indices-n]
+        [.indices-m]
+        [.indices-m-len]
+      } partial.f32.row-major.indices.1)
+    } tensor)
+    ({
+      [.cell-n]
+      [.cell-m]
+      [.inner-param]
+      [.dot-n]
+      [.dot-m]
+      [.reduce-len]
+      [.a-view]
+      [.b-view]
+    } partial.gpu.f32.naive-matmul.kernel.5)
+  } compose [kernel.])
+
+  ({[.params] [.c-size] [.kernel]} gpu.materialize)
 ))
 
 # Row-major tiled-matmul materialization.

@@ -1,89 +1,30 @@
-//! `materializec` builds an owned buffer by evaluating a array-as-a-function producer at every index `0 <= i < len`.
-//! It is lowered as allocation plus a kernel launch, not as a
-//! device-callable expression. The host wrapper emits roughly:
+//! `materializec` builds an owned buffer by evaluating an array-as-a-function
+//! producer at every index `0 <= i < len`.
+//!
+//! It is an ordinary sequential materialization. The host function emits
+//! roughly:
 //!
 //! ```cpp
 //! T *buf_data = nullptr;
 //! catena_host_gpu_check(cudaMallocManaged((void **)&buf_data, len * sizeof(T)));
-//! materialize_kernel<<<dim3((len + 255) / 256), dim3(256)>>>(buf_data, len, env...);
-//! catena_host_gpu_check(cudaDeviceSynchronize());
-//! buf = buf_data;
+//! for (uint64_t i = 0; i < len; ++i) {
+//!     T value;
+//!     program_producer(env..., i, &value);
+//!     buf_data[i] = value;
+//! }
 //! ```
-//!
-//! The generated kernel is device code and assumes the producer is already device-callable and
-//! allocation-free:
-//!
-//! ```cpp
-//! uint64_t i = (uint64_t)blockIdx.x * blockDim.x + threadIdx.x;
-//! if (i >= len) { return; }
-//! T value;
-//! program_producer(env..., i, &value);
-//! out[i] = value;
-//! ```
-//!
 
 use crate::codegen::{
-    GpuAssign, GpuDialect, GpuFunction, GpuValue, GpuVar,
-    components::{
-        Component, input_components, runtime_values, single_function, single_value, value_expr,
-    },
+    GpuAssign, GpuDialect, GpuValue, GpuVar,
+    components::{Component, input_components, single_function, single_value, value_expr},
     gpu::{GpuRenderError, render_function_application},
     lower_types::{CType, LoweredType},
-    render_utils::{c_type, invalid_outputs, param_decl},
+    render_utils::{c_type, invalid_outputs},
     runtime_type,
 };
 
-pub(in crate::codegen) fn render_kernel(
-    out: &mut String,
-    kernel_name: &str,
-    assignment: &GpuAssign,
-) -> Result<(), GpuRenderError> {
-    let [output] = assignment.outputs.as_slice() else {
-        return Err(invalid_outputs(assignment, 1));
-    };
-    let CType::Pointer(element) =
-        runtime_type(output).ok_or_else(|| GpuRenderError::ErasedType(output.clone()))?
-    else {
-        return Err(GpuRenderError::UnsupportedType(
-            runtime_type(output).unwrap().clone(),
-        ));
-    };
-    let (func, _len, env) = parts(assignment)?;
-
-    out.push_str(&format!(
-        "__global__ void {kernel_name}({} *out, uint64_t len",
-        c_type(element)
-    ));
-    for arg in runtime_values(env) {
-        if let GpuValue::Var(var) = arg {
-            out.push_str(", ");
-            out.push_str(&param_decl(var, false)?);
-        }
-    }
-    out.push_str(") {\n");
-    out.push_str("    uint64_t i = (uint64_t)blockIdx.x * blockDim.x + threadIdx.x;\n");
-    out.push_str("    if (i >= len) { return; }\n");
-    out.push_str(&format!("    {} value;\n", c_type(element)));
-    let mut producer_inputs = env.to_vec();
-    producer_inputs.push(GpuValue::Var(GpuVar {
-        node: output.node,
-        name: "i".to_string(),
-        lowered: LoweredType::Runtime(CType::U64),
-    }));
-    let producer_output = GpuVar {
-        node: output.node,
-        name: "value".to_string(),
-        lowered: LoweredType::Runtime(element.as_ref().clone()),
-    };
-    render_function_application(out, "    ", func, &producer_inputs, &[producer_output])?;
-    out.push_str("    out[i] = value;\n");
-    out.push_str("}\n");
-    Ok(())
-}
-
 pub(in crate::codegen) fn render_call(
     out: &mut String,
-    function: &GpuFunction,
     assignment: &GpuAssign,
     dialect: GpuDialect,
 ) -> Result<(), GpuRenderError> {
@@ -97,9 +38,8 @@ pub(in crate::codegen) fn render_call(
             runtime_type(output).unwrap().clone(),
         ));
     };
-    let (_func, len, env) = parts(assignment)?;
+    let (func, len, env) = parts(assignment)?;
     let len = value_expr(len);
-    let kernel_name = kernel_name(&function.name, assignment)?;
 
     out.push_str(&format!(
         "    uint64_t {name}_len = {len};\n",
@@ -120,38 +60,39 @@ pub(in crate::codegen) fn render_call(
         element = c_type(element),
         managed_alloc_fn = dialect.managed_alloc_fn(),
     ));
+    let index_name = format!("{}_i", output.name);
+    let value_name = format!("{}_value", output.name);
     out.push_str(&format!(
-        "        {kernel_name}<<<dim3(({name}_len + 255) / 256), dim3(256)>>>\n",
-        name = output.name
+        "        for (uint64_t {index_name} = 0; {index_name} < {name}_len; ++{index_name}) {{\n",
+        name = output.name,
     ));
+    out.push_str(&format!("            {} {value_name};\n", c_type(element)));
+    let mut producer_inputs = env.to_vec();
+    producer_inputs.push(GpuValue::Var(GpuVar {
+        node: output.node,
+        name: index_name,
+        lowered: LoweredType::Runtime(CType::U64),
+    }));
+    let producer_output = GpuVar {
+        node: output.node,
+        name: value_name.clone(),
+        lowered: LoweredType::Runtime(element.as_ref().clone()),
+    };
+    render_function_application(
+        out,
+        "            ",
+        func,
+        &producer_inputs,
+        &[producer_output],
+    )?;
     out.push_str(&format!(
-        "            ({name}_data, {name}_len",
-        name = output.name
+        "            {name}_data[{name}_i] = {value_name};\n",
+        name = output.name,
     ));
-    for arg in runtime_values(env) {
-        if let GpuValue::Var(var) = arg {
-            out.push_str(", ");
-            out.push_str(&var.name);
-        }
-    }
-    out.push_str(");\n");
-    out.push_str(&format!(
-        "        catena_host_gpu_check({synchronize_fn}());\n",
-        synchronize_fn = dialect.synchronize_fn()
-    ));
+    out.push_str("        }\n");
     out.push_str("    }\n");
     out.push_str(&format!("    {} = {}_data;\n", output.name, output.name));
     Ok(())
-}
-
-pub(in crate::codegen) fn kernel_name(
-    function_name: &str,
-    assignment: &GpuAssign,
-) -> Result<String, GpuRenderError> {
-    let [output] = assignment.outputs.as_slice() else {
-        return Err(invalid_outputs(assignment, 1));
-    };
-    Ok(format!("materialize_{}_{}", function_name, output.name))
 }
 
 fn parts(assignment: &GpuAssign) -> Result<(&GpuValue, &GpuValue, Component<'_>), GpuRenderError> {
@@ -239,9 +180,12 @@ mod tests {
         };
 
         let mut out = String::new();
-        render_kernel(&mut out, "materialize_test", &assignment).unwrap();
+        render_call(&mut out, &assignment, GpuDialect::Hip).unwrap();
 
-        assert!(out.contains("value = i;"));
+        assert!(out.contains("for (uint64_t out_i = 0; out_i < out_len; ++out_i)"));
+        assert!(out.contains("out_value = out_i;"));
         assert!(!out.contains("program_ix_to_u64"));
+        assert!(!out.contains("<<<"));
+        assert!(!out.contains("DeviceSynchronize"));
     }
 }

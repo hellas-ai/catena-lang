@@ -3,7 +3,7 @@ use super::*;
 const MATMUL_SOURCE: &str = include_str!("matrix/matmul.hex");
 
 #[test]
-fn f32_matmul_row_major_bufs_from_mems() -> anyhow::Result<()> {
+fn f32_ordinary_naive_matmul_row_major_bufs_from_mems() -> anyhow::Result<()> {
     let runtime = runtime_with(MATMUL_SOURCE)?;
 
     let a = runtime.mem_f32(&[

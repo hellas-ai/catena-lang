@@ -6,6 +6,7 @@ pub fn render_gpu_prelude(dialect: GpuDialect) -> String {
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 typedef uint8_t catena_unit_t;
 

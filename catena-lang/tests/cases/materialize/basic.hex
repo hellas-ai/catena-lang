@@ -24,3 +24,103 @@
   }
   buf.to-mem
 ))
+
+# An ordinary materialize producer may itself materialize a temporary buffer.
+(def program nested-materialize-index :
+  ([n.] {
+    ({[.n] u64} :)
+    ([.n] ix val)
+  })
+  ->
+  ([n.] (u64 val))
+= ([len index.]
+  ([.len] u64.copy-param [
+    scratch-materialize-len scratch-param.
+  ])
+  ({
+    [.scratch-materialize-len]
+    ([.scratch-param] name.cast-index lift)
+  } materialize [scratch.])
+  ({[.index] [.scratch]} ix)
+))
+
+(def program nested-materialize-indexes-source :
+  ({[n] u64} :)
+  ->
+  ([n.] (cap.own mem))
+= ([len.]
+  ([.len] u64.copies3 [
+    producer-len output-len output-mem-len.
+  ])
+  ([.producer-len] u64.copy-param [
+    captured-producer-len producer-param.
+  ])
+  ({
+    [.output-len]
+    ({
+      [.producer-param]
+      [.captured-producer-len]
+    } partial.nested-materialize-index.1)
+  } materialize [output.])
+  ({[.output-mem-len] [.output]} buf.to-mem)
+))
+
+# A gpu.materialize kernel may use ordinary sequential materialize.
+(def program gpu-kernel-with-materialize :
+  ([n.] {
+    ({[.n] u64} :)
+    ({
+      ({gpu.initial gpu.initial} gpu.state)
+      ([.n] ix val)
+    } *)
+  })
+  ->
+  ([n.] (u64 val))
+= ([len state-and-index.]
+  ([.state-and-index] *.elim [state index.])
+  ([.state] gpu.state.admit-discard)
+
+  ([.len] u64.copy-param [
+    scratch-materialize-len scratch-param.
+  ])
+  ({
+    [.scratch-materialize-len]
+    ([.scratch-param] name.cast-index lift)
+  } materialize [scratch.])
+  ({[.index] [.scratch]} ix)
+))
+
+(def program gpu-materialize-with-ordinary-materialize :
+  ({[n] u64} :)
+  ->
+  ([n.] (cap.own mem))
+= ([len.]
+  ([.len] u64.copies2 [dimensions-len materialization-len.])
+  ([.dimensions-len] u64.copies2 [grid-x output-mem-len.])
+  ([.materialization-len] u64.copies2 [
+    output-len kernel-source-len.
+  ])
+  ([.kernel-source-len] u64.copy-param [
+    kernel-len n-param.
+  ])
+
+  (u64.one [grid-y-value.])
+  ([.grid-y-value] u64.name [grid-y.])
+  (u64.one [block-x-value.])
+  ([.block-x-value] u64.name [block-x.])
+  (u64.one [block-y-value.])
+  ([.block-y-value] u64.name [block-y.])
+  ({[.grid-x] [.grid-y]} gpu.dimensions.2d.intro [grid.])
+  ({[.block-x] [.block-y]} gpu.dimensions.2d.intro [block.])
+  ({[.grid] [.block]} gpu.launch_params.2d-2d.intro [params.])
+
+  ({
+    [.params]
+    [.output-len]
+    ({
+      [.n-param]
+      [.kernel-len]
+    } partial.gpu-kernel-with-materialize.1)
+  } gpu.materialize [output.])
+  ({[.output-mem-len] [.output]} buf.to-mem)
+))

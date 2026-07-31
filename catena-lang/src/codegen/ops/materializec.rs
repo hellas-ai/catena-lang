@@ -54,12 +54,20 @@ pub(in crate::codegen) fn render_call(
         "    if ({name}_len != 0) {{\n",
         name = output.name
     ));
+    out.push_str(&format!("#ifdef {}\n", dialect.device_compile_guard()));
+    out.push_str(&format!(
+        "        {name}_data = ({element} *)malloc({name}_len * sizeof({element}));\n",
+        name = output.name,
+        element = c_type(element),
+    ));
+    out.push_str("#else\n");
     out.push_str(&format!(
         "        catena_host_gpu_check({managed_alloc_fn}((void **)&{name}_data, {name}_len * sizeof({element})));\n",
         name = output.name,
         element = c_type(element),
         managed_alloc_fn = dialect.managed_alloc_fn(),
     ));
+    out.push_str("#endif\n");
     let index_name = format!("{}_i", output.name);
     let value_name = format!("{}_value", output.name);
     out.push_str(&format!(

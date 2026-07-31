@@ -92,7 +92,7 @@ fn function_directly_requires_host(function: &GpuFunction) -> bool {
     function
         .assignments
         .iter()
-        .any(|assignment| matches!(assignment.op.as_str(), "gpu.materialize" | "materializec"))
+        .any(|assignment| assignment.op.as_str() == "gpu.materialize")
 }
 
 fn function_directly_requires_device(function: &GpuFunction) -> bool {

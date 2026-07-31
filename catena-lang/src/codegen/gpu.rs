@@ -1332,7 +1332,7 @@ mod tests {
     }
 
     #[test]
-    fn ordinary_materialize_is_a_host_loop_without_a_kernel_launch() {
+    fn ordinary_materialize_is_a_sequential_loop_without_a_kernel_launch() {
         let len = var(0, "len", CType::U64);
         let out = var(1, "out", CType::Pointer(Box::new(CType::U64)));
         let value = var(2, "value", CType::U64);
@@ -1383,11 +1383,10 @@ mod tests {
         let source = render_modules(&modules, GpuDialect::Hip).unwrap();
 
         assert!(source.contains(
-            "#ifndef __HIP_DEVICE_COMPILE__\nextern \"C\" __host__ void program_materialize"
+            "extern \"C\" __host__ __device__ void program_materialize(uint64_t len, uint64_t * *out_out) {"
         ));
-        assert!(source.contains(
-            "#ifndef __HIP_DEVICE_COMPILE__\nextern \"C\" __host__ void program_materialize(uint64_t len, uint64_t * *out_out) {"
-        ));
+        assert!(source.contains("#ifdef __HIP_DEVICE_COMPILE__"));
+        assert!(source.contains("out_data = (uint64_t *)malloc"));
         assert!(source.contains("catena_host_gpu_check(hipMallocManaged"));
         assert!(source.contains("for (uint64_t out_i = 0; out_i < out_len; ++out_i)"));
         assert!(!source.contains("<<<"));

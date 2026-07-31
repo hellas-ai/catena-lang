@@ -13,6 +13,7 @@ mod ops;
 mod prelude;
 mod render_utils;
 mod specialize;
+mod validate;
 
 use std::collections::{BTreeMap, VecDeque};
 
@@ -220,6 +221,14 @@ pub enum CodegenError {
     #[error("definition `{0}` is used with non-monomorphic runtime interface")]
     NonMonomorphicUse(Operation),
     #[error(
+        "definition `{caller}` uses `{producer}` as a gpu.materialize kernel, but kernel dependency `{containing}` contains another gpu.materialize. Nested GPU kernel launches are not supported; launch the inner materialization before the outer gpu.materialize and capture its buffer instead."
+    )]
+    GpuMaterializeKernelContainsGpuMaterialize {
+        caller: Operation,
+        producer: Operation,
+        containing: Operation,
+    },
+    #[error(
         "erased passthrough `{op}` has {inputs} runtime inputs but {outputs} runtime outputs; runtime carriers must pass through one-to-one"
     )]
     InvalidErasedPassthroughBoundary {
@@ -289,6 +298,14 @@ impl CodegenState<'_> {
             if is_erased_only(&inputs, &outputs) && !has_runtime_effect(&op) {
                 continue;
             }
+
+            validate::assignment(
+                &self.definitions,
+                &instance.op,
+                &op,
+                &assignment.op.source_sizes,
+                &inputs,
+            )?;
 
             let call_symbol = if self.definitions.contains_key(&op) {
                 Some(self.ensure_specialization(&op, &inputs, &outputs)?)

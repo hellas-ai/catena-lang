@@ -3,14 +3,14 @@ HIP_FLAGS ?=
 BUILD_DIR ?= build
 TARGET ?= $(BUILD_DIR)/array_head
 SRC := src/array_head.cpp
-GENERATED := ../report/gpu/program.cpp
+GENERATED := ../report/gpu/hip.cpp
 
 .PHONY: all run clean generated
 
-all: $(TARGET)
+all: run
 
 generated:
-	cd .. && ./check.sh
+	cd .. && ./check.sh examples/example.hex
 
 $(TARGET): $(SRC) $(GENERATED)
 	mkdir -p $(BUILD_DIR)

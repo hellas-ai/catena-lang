@@ -5,7 +5,7 @@ use thiserror::Error;
 
 use crate::{
     codegen::GpuDialect,
-    runtime::{ExecError, Value, ValueKind},
+    runtime::{DeviceAllocator, DeviceBuffer, ExecError, IpcMemoryHandle, Mem, MemError, Value},
 };
 
 const MAX_FRAME_LEN: usize = 64 * 1024 * 1024;
@@ -18,22 +18,24 @@ pub(crate) enum Request {
     },
     Execute {
         name: String,
-        args: Vec<WireValue>,
+        args: Vec<WireArgument>,
         output_count: usize,
     },
+    ReleaseResultTransfers,
     Shutdown,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) enum Response {
     Initialized(Result<(), String>),
-    Executed(Result<Vec<WireValue>, RemoteExecError>),
+    Executed(Result<Vec<WireResult>, RemoteExecError>),
+    ResultTransfersReleased,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) enum RemoteExecError {
     Runtime(ExecError),
-    UnsupportedValueKind(ValueKind),
+    Memory(String),
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -61,36 +63,82 @@ impl From<WireGpuDialect> for GpuDialect {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub(crate) enum WireValue {
+pub(crate) struct WireMemory {
+    pub(crate) allocation_byte_len: u64,
+    pub(crate) view_offset: u64,
+    pub(crate) byte_len: u64,
+    pub(crate) handle: Vec<u8>,
+}
+
+impl WireMemory {
+    pub(crate) fn from_mem(value: &Mem) -> Result<Self, MemError> {
+        let (handle, view_offset) = value.export_ipc_view()?;
+        Ok(Self {
+            allocation_byte_len: handle.byte_len(),
+            view_offset,
+            byte_len: value.byte_len(),
+            handle: handle.as_bytes().to_vec(),
+        })
+    }
+
+    pub(crate) fn import(
+        self,
+        allocator: &DeviceAllocator,
+    ) -> Result<(DeviceBuffer, u64, u64), MemError> {
+        let handle_bytes =
+            self.handle
+                .try_into()
+                .map_err(|handle: Vec<u8>| MemError::InvalidIpcHandleLength {
+                    actual: handle.len(),
+                })?;
+        let handle = IpcMemoryHandle::from_bytes(
+            allocator.dialect(),
+            self.allocation_byte_len,
+            handle_bytes,
+        );
+        let buffer = allocator.import_ipc(&handle)?;
+        Ok((buffer, self.view_offset, self.byte_len))
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub(crate) enum WireArgument {
     Bool(u8),
     U32(u32),
     U64(u64),
     F32(f32),
+    Mem(WireMemory),
 }
 
-impl From<WireValue> for Value {
-    fn from(value: WireValue) -> Self {
+impl WireArgument {
+    pub(crate) fn from_value(value: &Value) -> Result<Self, MemError> {
         match value {
-            WireValue::Bool(value) => Value::Bool(value),
-            WireValue::U32(value) => Value::U32(value),
-            WireValue::U64(value) => Value::U64(value),
-            WireValue::F32(value) => Value::F32(value),
+            Value::Bool(value) => Ok(Self::Bool(*value)),
+            Value::U32(value) => Ok(Self::U32(*value)),
+            Value::U64(value) => Ok(Self::U64(*value)),
+            Value::F32(value) => Ok(Self::F32(*value)),
+            Value::Mem(value) => WireMemory::from_mem(value).map(Self::Mem),
         }
     }
 }
 
-impl TryFrom<Value> for WireValue {
-    type Error = ValueKind;
-
-    fn try_from(value: Value) -> Result<Self, Self::Error> {
-        match value {
-            Value::Bool(value) => Ok(Self::Bool(value)),
-            Value::U32(value) => Ok(Self::U32(value)),
-            Value::U64(value) => Ok(Self::U64(value)),
-            Value::F32(value) => Ok(Self::F32(value)),
-            Value::Mem(_) => Err(ValueKind::Mem),
-        }
-    }
+#[derive(Debug, Serialize, Deserialize)]
+pub(crate) enum WireResult {
+    Bool(u8),
+    U32(u32),
+    U64(u64),
+    F32(f32),
+    Mem(WireMemory),
+    ArgumentAlias {
+        argument_index: usize,
+        view_offset: u64,
+        byte_len: u64,
+    },
+    ResultAlias {
+        result_index: usize,
+        view_offset: u64,
+        byte_len: u64,
+    },
 }
 
 #[derive(Debug, Error)]
@@ -168,7 +216,7 @@ mod tests {
             &mut bytes,
             &Request::Execute {
                 name: "f".to_string(),
-                args: vec![WireValue::U64(7)],
+                args: vec![WireArgument::U64(7)],
                 output_count: 1,
             },
         )
@@ -181,7 +229,44 @@ mod tests {
                 name,
                 args,
                 output_count: 1,
-            } if name == "f" && matches!(args.as_slice(), [WireValue::U64(7)])
+            } if name == "f" && matches!(args.as_slice(), [WireArgument::U64(7)])
+        ));
+    }
+
+    #[test]
+    fn memory_and_release_descriptors_round_trip() {
+        let handle = std::array::from_fn::<_, 64, _>(|index| index as u8);
+        let mut bytes = Vec::new();
+        write_frame(
+            &mut bytes,
+            &Request::Execute {
+                name: "head".to_string(),
+                args: vec![WireArgument::Mem(WireMemory {
+                    allocation_byte_len: 4096,
+                    view_offset: 128,
+                    byte_len: 256,
+                    handle: handle.to_vec(),
+                })],
+                output_count: 1,
+            },
+        )
+        .unwrap();
+        write_frame(&mut bytes, &Request::ReleaseResultTransfers).unwrap();
+
+        let mut bytes = bytes.as_slice();
+        let Request::Execute { args, .. } = read_frame(&mut bytes).unwrap().unwrap() else {
+            panic!("decoded the wrong request kind");
+        };
+        let [WireArgument::Mem(memory)] = args.as_slice() else {
+            panic!("decoded the wrong argument kind");
+        };
+        assert_eq!(memory.allocation_byte_len, 4096);
+        assert_eq!(memory.view_offset, 128);
+        assert_eq!(memory.byte_len, 256);
+        assert_eq!(memory.handle, handle);
+        assert!(matches!(
+            read_frame(&mut bytes).unwrap(),
+            Some(Request::ReleaseResultTransfers)
         ));
     }
 

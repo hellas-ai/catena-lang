@@ -3,7 +3,7 @@ use super::mem::Mem;
 use serde::{Deserialize, Serialize};
 
 /// Public Catena runtime values accepted at program boundaries.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Value {
     Bool(u8),
     U32(u32),
@@ -77,5 +77,11 @@ impl From<f32> for Value {
 impl From<DeviceBuffer> for Value {
     fn from(value: DeviceBuffer) -> Self {
         Value::Mem(value.into_mem())
+    }
+}
+
+impl From<&DeviceBuffer> for Value {
+    fn from(value: &DeviceBuffer) -> Self {
+        value.clone().into()
     }
 }

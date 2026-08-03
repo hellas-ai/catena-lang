@@ -2,7 +2,7 @@ use std::{ffi::c_int, path::PathBuf};
 
 use thiserror::Error;
 
-use super::device_mem::{DeviceAllocator, DeviceBuffer};
+use super::device_mem::{DeviceBuffer, IpcMemoryHandle};
 use crate::{codegen::GpuDialect, runtime::executor::CatenaMem};
 
 #[derive(Debug, Error)]
@@ -47,30 +47,25 @@ pub enum MemError {
         allocator_dialect: GpuDialect,
         handle_dialect: GpuDialect,
     },
-    #[error(
-        "IPC handle belongs to device {handle_device}, but the current device is {allocator_device}"
-    )]
-    DeviceMismatch {
-        allocator_device: c_int,
-        handle_device: c_int,
-    },
     #[error("an imported IPC mapping cannot be exported again")]
     CannotExportImported,
+    #[error("device allocation is still shared")]
+    AllocationShared,
+    #[error("memory view does not belong to its backing device allocation")]
+    InvalidView,
     #[error("memory length {byte_len} is not a whole number of {element_size}-byte elements")]
     InvalidElementLength { byte_len: u64, element_size: usize },
+    #[error("SafeRuntime child returned invalid memory metadata: {0}")]
+    InvalidRemoteMemory(String),
+    #[error("IPC memory handle has {actual} bytes, expected 64")]
+    InvalidIpcHandleLength { actual: usize },
 }
 
 /// Mem values represent a device pointer and byte length which can be passed into a Catena program.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Mem {
     pub(crate) abi: CatenaMem,
-    owner: MemOwner,
-}
-
-#[derive(Debug)]
-enum MemOwner {
-    Generated(DeviceAllocator),
-    Device(DeviceBuffer),
+    buffer: DeviceBuffer,
 }
 
 impl Mem {
@@ -112,58 +107,58 @@ impl Mem {
         let mut values = vec![T::default(); len];
         let output =
             unsafe { std::slice::from_raw_parts_mut(values.as_mut_ptr().cast::<u8>(), byte_len) };
-        match &self.owner {
-            MemOwner::Generated(allocator) => {
-                allocator.copy_device_to_host_raw(
-                    output.as_mut_ptr().cast(),
-                    self.abi.data,
-                    byte_len,
-                )?;
-            }
-            MemOwner::Device(device) => device.read_all(output)?,
-        }
+        let offset = self.buffer.view_offset(self.abi.data, self.abi.len)?;
+        self.buffer.read(offset as usize, output)?;
         Ok(values)
     }
 
-    pub(crate) fn from_device_buffer(device: DeviceBuffer) -> Self {
+    pub(crate) fn from_device_buffer(buffer: DeviceBuffer) -> Self {
         let abi = CatenaMem {
-            data: device.data(),
-            len: device.byte_len() as u64,
+            data: buffer.data(),
+            len: buffer.byte_len() as u64,
         };
-        Self {
-            abi,
-            owner: MemOwner::Device(device),
-        }
+        Self { abi, buffer }
     }
 
-    pub(crate) fn device_identity(&self) -> Option<(GpuDialect, c_int)> {
-        match &self.owner {
-            MemOwner::Generated(allocator) => {
-                Some((allocator.dialect(), allocator.device_ordinal()))
-            }
-            MemOwner::Device(device) => Some((device.dialect(), device.device_ordinal())),
-        }
-    }
-
-    pub(crate) fn null(allocator: DeviceAllocator) -> Self {
-        Self {
+    pub(crate) fn from_device_buffer_view(
+        buffer: DeviceBuffer,
+        offset: u64,
+        byte_len: u64,
+    ) -> Result<Self, MemError> {
+        let data = buffer.data_for_view(offset, byte_len)?;
+        Ok(Self {
             abi: CatenaMem {
-                data: std::ptr::null_mut(),
-                len: 0,
+                data,
+                len: byte_len,
             },
-            owner: MemOwner::Generated(allocator),
-        }
+            buffer,
+        })
     }
-}
 
-impl Drop for Mem {
-    fn drop(&mut self) {
-        if self.abi.data.is_null() {
-            return;
-        }
-        if let MemOwner::Generated(allocator) = &self.owner {
-            let _ = allocator.free_raw(self.abi.data);
-        }
+    pub(crate) fn from_abi(buffer: DeviceBuffer, abi: CatenaMem) -> Result<Self, MemError> {
+        buffer.view_offset(abi.data, abi.len)?;
+        Ok(Self { abi, buffer })
+    }
+
+    pub fn byte_len(&self) -> u64 {
+        self.abi.len
+    }
+
+    pub(crate) fn device_dialect(&self) -> GpuDialect {
+        self.buffer.dialect()
+    }
+
+    pub(crate) fn device_buffer(&self) -> &DeviceBuffer {
+        &self.buffer
+    }
+
+    pub(crate) fn view(&self, offset: u64, byte_len: u64) -> Result<Self, MemError> {
+        Self::from_device_buffer_view(self.buffer.clone(), offset, byte_len)
+    }
+
+    pub(crate) fn export_ipc_view(&self) -> Result<(IpcMemoryHandle, u64), MemError> {
+        let offset = self.buffer.view_offset(self.abi.data, self.abi.len)?;
+        Ok((self.buffer.export_ipc()?, offset))
     }
 }
 

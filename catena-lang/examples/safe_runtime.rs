@@ -18,7 +18,10 @@ fn main() -> anyhow::Result<()> {
 
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let runtime = SafeRuntime::new(
-        stdlib::paths_from(&root).chain([root.join("examples/example.hex")]),
+        stdlib::paths_from(&root).chain([
+            root.join("examples/example.hex"),
+            root.join("examples/materializec.hex"),
+        ]),
         configured_gpu_dialect()?,
     )?;
 
@@ -31,6 +34,28 @@ fn main() -> anyhow::Result<()> {
 
     let [] = runtime.exec("require-true", [true.into()])?;
 
+    let values = [0x123456789abcdef0_u64, 7, 11];
+    let input = runtime.mem_u64(&values)?;
+    let retained_input = input.clone();
+    let [head] = runtime.exec("array-head-u64", [input])?;
+    let Value::U64(head) = head else {
+        anyhow::bail!("array-head-u64 returned non-u64 value: {head:?}");
+    };
+    println!("array-head-u64: 0x{head:x} (expected 0x{:x})", values[0]);
+    anyhow::ensure!(head == values[0], "array head mismatch");
+
+    let [materialized] = runtime.exec("materialize-indexes", [4_u64.into()])?;
+    let Value::Mem(memory) = &materialized else {
+        anyhow::bail!("materialize-indexes returned non-memory value: {materialized:?}");
+    };
+    anyhow::ensure!(memory.try_to_u64_vec()? == [1, 1, 1, 1]);
+
+    let [head] = runtime.exec("array-head-u64", [materialized.clone()])?;
+    let Value::U64(head) = head else {
+        anyhow::bail!("array-head-u64 returned non-u64 value: {head:?}");
+    };
+    anyhow::ensure!(head == 1, "reused child memory had the wrong first value");
+    println!("child memory result: read in parent and reused in child");
     match runtime.exec::<1, 0>("require-true", [false.into()]) {
         Err(SafeExecError::ChildTerminated { status, stderr }) => {
             anyhow::ensure!(!status.success(), "asserting child exited successfully");
@@ -43,6 +68,18 @@ fn main() -> anyhow::Result<()> {
         Ok([]) => anyhow::bail!("require-true(false) unexpectedly returned successfully"),
     }
     println!("require-true(false): child assertion isolated");
+
+    let Value::Mem(retained_input) = retained_input else {
+        unreachable!("mem_u64 must return a memory value");
+    };
+    anyhow::ensure!(retained_input.try_to_u64_vec()? == values);
+    println!("parent device buffer remained valid after child termination");
+
+    let Value::Mem(materialized) = materialized else {
+        unreachable!("materialize-indexes must return a memory value");
+    };
+    anyhow::ensure!(materialized.try_to_u64_vec()? == [1, 1, 1, 1]);
+    println!("copied child result remained valid after child termination");
 
     Ok(())
 }

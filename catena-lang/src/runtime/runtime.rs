@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use super::artifact::{Artifact, ArtifactError};
 use super::device_mem::DeviceAllocator;
-use super::executor::{Executor, ExecutorError};
+use super::executor::{Executor, ExecutorError, RawOutput};
 use super::mem::{Mem, MemError};
 use super::{
     signature::{FunctionSignature, SignatureTable, signatures},
@@ -100,8 +100,10 @@ pub enum ExecError {
         expected: usize,
         actual: usize,
     },
-    #[error("Argument {index} contains device memory from a different GPU dialect or device")]
+    #[error("Argument {index} contains device memory from a different GPU dialect")]
     IncompatibleDeviceMemory { index: usize },
+    #[error("generated memory length {byte_len} cannot be represented on this platform")]
+    InvalidOutputMemoryLength { byte_len: u64 },
 }
 
 impl Runtime {
@@ -231,13 +233,12 @@ impl Runtime {
             });
         }
 
-        let mut output_values: Vec<Value> = signature
+        let mut raw_outputs = signature
             .outputs
             .iter()
             .copied()
-            .map(|kind| self.zeroed_value(kind))
-            .collect();
-
+            .map(RawOutput::zeroed)
+            .collect::<Vec<_>>();
         for (index, (value, expected)) in args
             .iter()
             .zip(signature.inputs.iter().copied())
@@ -250,30 +251,54 @@ impl Runtime {
                     actual: value.kind(),
                 });
             }
-            if let Value::Mem(mem) = value
-                && let Some((dialect, device_ordinal)) = mem.device_identity()
-            {
-                if self.device_allocator.dialect() != dialect
-                    || self.device_allocator.device_ordinal() != device_ordinal
-                {
+            if let Value::Mem(mem) = value {
+                if self.device_allocator.dialect() != mem.device_dialect() {
                     return Err(ExecError::IncompatibleDeviceMemory { index });
                 }
             }
         }
 
         self.executor
-            .call(&signature.symbol, &args, &mut output_values);
+            .call(&signature.symbol, &args, &mut raw_outputs);
 
+        let mut output_values = Vec::with_capacity(raw_outputs.len());
+        for output in raw_outputs {
+            output_values.push(self.resolve_output(output, &args, &output_values)?);
+        }
         Ok(output_values)
     }
 
-    fn zeroed_value(&self, kind: ValueKind) -> Value {
-        match kind {
-            ValueKind::Bool => Value::Bool(0),
-            ValueKind::U32 => Value::U32(0),
-            ValueKind::U64 => Value::U64(0),
-            ValueKind::F32 => Value::F32(0.0),
-            ValueKind::Mem => Value::Mem(Mem::null(self.device_allocator.clone())),
+    fn resolve_output(
+        &self,
+        output: RawOutput,
+        inputs: &[Value],
+        previous_outputs: &[Value],
+    ) -> Result<Value, ExecError> {
+        match output {
+            RawOutput::Bool(value) => Ok(Value::Bool(value)),
+            RawOutput::U32(value) => Ok(Value::U32(value)),
+            RawOutput::U64(value) => Ok(Value::U64(value)),
+            RawOutput::F32(value) => Ok(Value::F32(value)),
+            RawOutput::Mem(abi) => {
+                let byte_len = usize::try_from(abi.len)
+                    .map_err(|_| ExecError::InvalidOutputMemoryLength { byte_len: abi.len })?;
+                let existing_buffer = inputs
+                    .iter()
+                    .chain(previous_outputs)
+                    .filter_map(|value| match value {
+                        Value::Mem(memory) => Some(memory.device_buffer()),
+                        _ => None,
+                    })
+                    .find(|buffer| buffer.view_offset(abi.data, abi.len).is_ok())
+                    .cloned();
+                let buffer = match existing_buffer {
+                    Some(buffer) => buffer,
+                    None => self.device_allocator.adopt_owned(abi.data, byte_len),
+                };
+                Ok(Value::Mem(Mem::from_abi(buffer, abi).expect(
+                    "resolved output must belong to its backing allocation",
+                )))
+            }
         }
     }
 }

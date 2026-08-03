@@ -19,6 +19,30 @@ pub(crate) struct CatenaMem {
 }
 
 #[derive(Debug)]
+pub(crate) enum RawOutput {
+    Bool(u8),
+    U32(u32),
+    U64(u64),
+    F32(f32),
+    Mem(CatenaMem),
+}
+
+impl RawOutput {
+    pub(crate) fn zeroed(kind: ValueKind) -> Self {
+        match kind {
+            ValueKind::Bool => Self::Bool(0),
+            ValueKind::U32 => Self::U32(0),
+            ValueKind::U64 => Self::U64(0),
+            ValueKind::F32 => Self::F32(0.0),
+            ValueKind::Mem => Self::Mem(CatenaMem {
+                data: std::ptr::null_mut(),
+                len: 0,
+            }),
+        }
+    }
+}
+
+#[derive(Debug)]
 struct PreparedFunction {
     code: CodePtr,
     cif: Cif,
@@ -85,7 +109,7 @@ impl Executor {
     }
 
     /// Invoke a prepared symbol. Runtime validation guarantees the value shapes and kinds.
-    pub(crate) fn call(&self, symbol: &str, inputs: &[Value], outputs: &mut [Value]) {
+    pub(crate) fn call(&self, symbol: &str, inputs: &[Value], outputs: &mut [RawOutput]) {
         let function = self
             .functions
             .get(symbol)
@@ -126,12 +150,12 @@ fn input_arg(value: &Value) -> Arg<'_> {
     }
 }
 
-fn output_pointer(value: &mut Value) -> *mut c_void {
+fn output_pointer(value: &mut RawOutput) -> *mut c_void {
     match value {
-        Value::Bool(value) => (value as *mut u8).cast(),
-        Value::U32(value) => (value as *mut u32).cast(),
-        Value::U64(value) => (value as *mut u64).cast(),
-        Value::F32(value) => (value as *mut f32).cast(),
-        Value::Mem(value) => (&mut value.abi as *mut CatenaMem).cast(),
+        RawOutput::Bool(value) => (value as *mut u8).cast(),
+        RawOutput::U32(value) => (value as *mut u32).cast(),
+        RawOutput::U64(value) => (value as *mut u64).cast(),
+        RawOutput::F32(value) => (value as *mut f32).cast(),
+        RawOutput::Mem(value) => (value as *mut CatenaMem).cast(),
     }
 }

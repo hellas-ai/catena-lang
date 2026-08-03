@@ -7,7 +7,6 @@ use std::process::Command;
 
 const GPU_DIALECT_ENV: &str = "CATENA_GPU_DIALECT";
 const IPC_CHILD_ENV: &str = "CATENA_DEVICE_IPC_TEST_CHILD";
-const IPC_DEVICE_ENV: &str = "CATENA_DEVICE_IPC_TEST_DEVICE";
 const IPC_LENGTH_ENV: &str = "CATENA_DEVICE_IPC_TEST_LENGTH";
 const ARRAY_HEAD_U64_SOURCE: &str = r#"
     (def program array-head-u64 : ([n.] (cap.own mem)) -> ([n.] (u64 val)) = (
@@ -75,11 +74,9 @@ fn decode_ipc_handle(encoded: &str) -> anyhow::Result<[u8; 64]> {
 
 fn ipc_handle_from_environment() -> anyhow::Result<IpcMemoryHandle> {
     let bytes = decode_ipc_handle(&std::env::var(IPC_CHILD_ENV)?)?;
-    let device_ordinal = std::env::var(IPC_DEVICE_ENV)?.parse()?;
     let byte_len = std::env::var(IPC_LENGTH_ENV)?.parse()?;
     Ok(IpcMemoryHandle::from_bytes(
         configured_gpu_dialect()?,
-        device_ordinal,
         byte_len,
         bytes,
     ))
@@ -795,7 +792,7 @@ fn array_head_u64() -> anyhow::Result<()> {
 fn explicit_device_buffer_upload_and_readback() -> anyhow::Result<()> {
     let allocator = DeviceAllocator::new(configured_gpu_dialect()?)?;
     let expected = b"device-resident weights";
-    let mut buffer = allocator.allocate_from_bytes(expected)?;
+    let buffer = allocator.allocate_from_bytes(expected)?;
 
     buffer.write(7, b"MEMORY")?;
     let mut actual = vec![0; expected.len()];
@@ -849,7 +846,6 @@ fn device_memory_ipc_is_usable_as_runtime_mem() -> anyhow::Result<()> {
             "--nocapture",
         ])
         .env(IPC_CHILD_ENV, encode_ipc_handle(handle.as_bytes()))
-        .env(IPC_DEVICE_ENV, handle.device_ordinal().to_string())
         .env(IPC_LENGTH_ENV, handle.byte_len().to_string())
         .output()?;
 

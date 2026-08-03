@@ -21,12 +21,12 @@ use thiserror::Error;
 mod protocol;
 
 use self::protocol::{
-    ProtocolError, RemoteExecError, Request, Response, WireGpuDialect, WireValue, read_frame,
-    write_frame,
+    ProtocolError, RemoteExecError, Request, Response, WireArgument, WireGpuDialect, WireResult,
+    read_frame, write_frame,
 };
 use crate::{
     codegen::GpuDialect,
-    runtime::{ExecError, Runtime, Value, ValueKind},
+    runtime::{DeviceAllocator, DeviceBuffer, ExecError, MemError, Runtime, Value},
 };
 
 const CHILD_MODE_ENV: &str = "CATENA_SAFE_RUNTIME_CHILD";
@@ -56,6 +56,8 @@ pub enum SafeInitError {
     UnexpectedResponse,
     #[error("SafeRuntime child terminated during initialization with {status}: {stderr}")]
     ChildTerminated { status: ExitStatus, stderr: String },
+    #[error(transparent)]
+    Memory(#[from] MemError),
 }
 
 /// Execution failures reported by [`SafeRuntime`].
@@ -63,8 +65,10 @@ pub enum SafeInitError {
 pub enum SafeExecError {
     #[error(transparent)]
     Runtime(#[from] ExecError),
-    #[error("SafeRuntime does not yet support {0:?} values")]
-    UnsupportedValueKind(ValueKind),
+    #[error(transparent)]
+    Memory(#[from] MemError),
+    #[error("SafeRuntime child memory operation failed: {0}")]
+    RemoteMemory(String),
     #[error("SafeRuntime transport failed: {0}")]
     Transport(String),
     #[error("SafeRuntime child returned an unexpected execution response")]
@@ -84,6 +88,8 @@ pub enum ChildMainError {
     ExpectedInitialization,
     #[error("SafeRuntime child received a second Initialize request")]
     AlreadyInitialized,
+    #[error("SafeRuntime child expected pending result transfers to be released")]
+    ExpectedResultTransferRelease,
 }
 
 /// A process-isolated Catena runtime.
@@ -94,6 +100,7 @@ pub enum ChildMainError {
 #[derive(Debug)]
 pub struct SafeRuntime {
     worker: Mutex<WorkerProcess>,
+    device_allocator: DeviceAllocator,
 }
 
 impl SafeRuntime {
@@ -129,6 +136,7 @@ impl SafeRuntime {
     ) -> Result<Self, SafeInitError> {
         let executable = env::current_exe().map_err(SafeInitError::CurrentExecutable)?;
         let mut worker = WorkerProcess::spawn(&executable)?;
+        let device_allocator = DeviceAllocator::new(dialect)?;
         worker
             .send(&Request::Initialize {
                 sources,
@@ -139,10 +147,32 @@ impl SafeRuntime {
         match worker.receive().map_err(map_init_worker_error)? {
             Response::Initialized(Ok(())) => Ok(Self {
                 worker: Mutex::new(worker),
+                device_allocator,
             }),
             Response::Initialized(Err(error)) => Err(SafeInitError::RemoteInitialization(error)),
-            Response::Executed(_) => Err(SafeInitError::UnexpectedResponse),
+            Response::Executed(_) | Response::ResultTransfersReleased => {
+                Err(SafeInitError::UnexpectedResponse)
+            }
         }
+    }
+
+    /// Upload `u64` values to parent-owned device memory.
+    pub fn mem_u64(&self, values: &[u64]) -> Result<Value, MemError> {
+        self.device_allocator
+            .allocate_from_bytes(slice_as_bytes(values))
+            .map(Value::from)
+    }
+
+    /// Upload `f32` values to parent-owned device memory.
+    pub fn mem_f32(&self, values: &[f32]) -> Result<Value, MemError> {
+        self.device_allocator
+            .allocate_from_bytes(slice_as_bytes(values))
+            .map(Value::from)
+    }
+
+    /// Return the parent-side allocator whose buffers can be passed to this runtime.
+    pub fn device_allocator(&self) -> &DeviceAllocator {
+        &self.device_allocator
     }
 
     /// Run a source-level program in the child process.
@@ -151,11 +181,11 @@ impl SafeRuntime {
         name: &str,
         args: [Value; M],
     ) -> Result<[Value; N], SafeExecError> {
-        let args = args
-            .into_iter()
-            .map(WireValue::try_from)
+        let wire_args = args
+            .iter()
+            .map(WireArgument::from_value)
             .collect::<Result<Vec<_>, _>>()
-            .map_err(SafeExecError::UnsupportedValueKind)?;
+            .map_err(SafeExecError::Memory)?;
         let mut worker = self
             .worker
             .lock()
@@ -170,28 +200,90 @@ impl SafeRuntime {
         worker
             .send(&Request::Execute {
                 name: name.to_string(),
-                args,
+                args: wire_args,
                 output_count: N,
             })
             .map_err(map_exec_worker_error)?;
 
         let response = worker.receive().map_err(map_exec_worker_error)?;
         let values = match response {
-            Response::Executed(Ok(values)) => {
-                values.into_iter().map(Value::from).collect::<Vec<_>>()
-            }
+            Response::Executed(Ok(values)) => self.decode_results(values, &args, &mut worker)?,
             Response::Executed(Err(RemoteExecError::Runtime(error))) => {
                 return Err(SafeExecError::Runtime(error));
             }
-            Response::Executed(Err(RemoteExecError::UnsupportedValueKind(kind))) => {
-                return Err(SafeExecError::UnsupportedValueKind(kind));
+            Response::Executed(Err(RemoteExecError::Memory(error))) => {
+                return Err(SafeExecError::RemoteMemory(error));
             }
-            Response::Initialized(_) => return Err(SafeExecError::UnexpectedResponse),
+            Response::Initialized(_) | Response::ResultTransfersReleased => {
+                return Err(SafeExecError::UnexpectedResponse);
+            }
         };
         values
             .try_into()
             .map_err(|_| SafeExecError::UnexpectedResponse)
     }
+
+    fn decode_results(
+        &self,
+        results: Vec<WireResult>,
+        args: &[Value],
+        worker: &mut WorkerProcess,
+    ) -> Result<Vec<Value>, SafeExecError> {
+        let has_result_transfers = results
+            .iter()
+            .any(|result| matches!(result, WireResult::Mem(_)));
+        let mut values = Vec::with_capacity(results.len());
+        let decoded = (|| {
+            for result in results {
+                let value = match result {
+                    WireResult::Bool(value) => Value::Bool(value),
+                    WireResult::U32(value) => Value::U32(value),
+                    WireResult::U64(value) => Value::U64(value),
+                    WireResult::F32(value) => Value::F32(value),
+                    WireResult::Mem(memory) => {
+                        let (source, view_offset, byte_len) =
+                            memory.import(&self.device_allocator)?;
+                        let destination = self.device_allocator.allocate(source.byte_len())?;
+                        destination.copy_from_device(0, &source, 0, source.byte_len())?;
+                        Value::Mem(destination.into_mem_view(view_offset, byte_len)?)
+                    }
+                    WireResult::ArgumentAlias {
+                        argument_index,
+                        view_offset,
+                        byte_len,
+                    } => alias_view(args.get(argument_index), view_offset, byte_len)?,
+                    WireResult::ResultAlias {
+                        result_index,
+                        view_offset,
+                        byte_len,
+                    } => alias_view(values.get(result_index), view_offset, byte_len)?,
+                };
+                values.push(value);
+            }
+            Ok::<_, MemError>(())
+        })();
+
+        if has_result_transfers {
+            worker
+                .send(&Request::ReleaseResultTransfers)
+                .map_err(map_exec_worker_error)?;
+            match worker.receive().map_err(map_exec_worker_error)? {
+                Response::ResultTransfersReleased => {}
+                _ => return Err(SafeExecError::UnexpectedResponse),
+            }
+        }
+
+        decoded.map(|()| values).map_err(SafeExecError::Memory)
+    }
+}
+
+fn alias_view(value: Option<&Value>, offset: u64, byte_len: u64) -> Result<Value, MemError> {
+    let Some(Value::Mem(memory)) = value else {
+        return Err(MemError::InvalidRemoteMemory(
+            "alias does not refer to an available memory value".to_string(),
+        ));
+    };
+    memory.view(offset, byte_len).map(Value::Mem)
 }
 
 /// Run the SafeRuntime child loop when this executable was spawned as a worker.
@@ -227,37 +319,140 @@ fn run_child_loop(mut reader: impl Read, mut writer: impl io::Write) -> Result<(
         }
     };
 
+    let mut pending_result_transfers = Vec::new();
     while let Some(request) = read_request(&mut reader)? {
         match request {
             Request::Initialize { .. } => return Err(ChildMainError::AlreadyInitialized),
             Request::Shutdown => return Ok(()),
+            Request::ReleaseResultTransfers => {
+                pending_result_transfers.clear();
+                write_response(&mut writer, &Response::ResultTransfersReleased)?;
+            }
             Request::Execute {
                 name,
                 args,
                 output_count,
             } => {
-                let args = args.into_iter().map(Value::from).collect::<Vec<_>>();
-                let response = match runtime.exec_values(&name, args, output_count) {
-                    Ok(values) => {
-                        match values
-                            .into_iter()
-                            .map(WireValue::try_from)
-                            .collect::<Result<Vec<_>, _>>()
-                        {
-                            Ok(values) => Response::Executed(Ok(values)),
-                            Err(kind) => {
-                                Response::Executed(Err(RemoteExecError::UnsupportedValueKind(kind)))
-                            }
-                        }
-                    }
-                    Err(error) => Response::Executed(Err(RemoteExecError::Runtime(error))),
-                };
+                if !pending_result_transfers.is_empty() {
+                    return Err(ChildMainError::ExpectedResultTransferRelease);
+                }
+                let response = execute_in_child(
+                    &runtime,
+                    &name,
+                    args,
+                    output_count,
+                    &mut pending_result_transfers,
+                );
                 write_response(&mut writer, &response)?;
             }
         }
     }
 
     Ok(())
+}
+
+fn execute_in_child(
+    runtime: &Runtime,
+    name: &str,
+    wire_args: Vec<WireArgument>,
+    output_count: usize,
+    pending_result_transfers: &mut Vec<DeviceBuffer>,
+) -> Response {
+    let args = match import_arguments(runtime.device_allocator(), wire_args) {
+        Ok(args) => args,
+        Err(error) => {
+            return Response::Executed(Err(RemoteExecError::Memory(error.to_string())));
+        }
+    };
+
+    let result_inputs = args.clone();
+    match runtime.exec_values(name, args, output_count) {
+        Ok(values) => {
+            if let Err(error) = runtime.device_allocator().synchronize() {
+                return Response::Executed(Err(RemoteExecError::Memory(error.to_string())));
+            }
+            match export_results(&result_inputs, &values, pending_result_transfers) {
+                Ok(values) => Response::Executed(Ok(values)),
+                Err(error) => Response::Executed(Err(RemoteExecError::Memory(error.to_string()))),
+            }
+        }
+        Err(error) => Response::Executed(Err(RemoteExecError::Runtime(error))),
+    }
+}
+
+fn import_arguments(
+    allocator: &DeviceAllocator,
+    arguments: Vec<WireArgument>,
+) -> Result<Vec<Value>, MemError> {
+    arguments
+        .into_iter()
+        .map(|argument| match argument {
+            WireArgument::Bool(value) => Ok(Value::Bool(value)),
+            WireArgument::U32(value) => Ok(Value::U32(value)),
+            WireArgument::U64(value) => Ok(Value::U64(value)),
+            WireArgument::F32(value) => Ok(Value::F32(value)),
+            WireArgument::Mem(memory) => {
+                let (buffer, offset, byte_len) = memory.import(allocator)?;
+                buffer.into_mem_view(offset, byte_len).map(Value::Mem)
+            }
+        })
+        .collect()
+}
+
+fn export_results(
+    arguments: &[Value],
+    values: &[Value],
+    pending_result_transfers: &mut Vec<DeviceBuffer>,
+) -> Result<Vec<WireResult>, MemError> {
+    let mut results = Vec::with_capacity(values.len());
+    let converted = (|| {
+        for (result_index, value) in values.iter().enumerate() {
+            let result = match value {
+                Value::Bool(value) => WireResult::Bool(*value),
+                Value::U32(value) => WireResult::U32(*value),
+                Value::U64(value) => WireResult::U64(*value),
+                Value::F32(value) => WireResult::F32(*value),
+                Value::Mem(memory) => {
+                    let buffer = memory.device_buffer();
+                    let view_offset = buffer.view_offset(memory.abi.data, memory.abi.len)?;
+                    if let Some(argument_index) = arguments
+                        .iter()
+                        .position(|argument| same_memory_allocation(argument, buffer))
+                    {
+                        WireResult::ArgumentAlias {
+                            argument_index,
+                            view_offset,
+                            byte_len: memory.byte_len(),
+                        }
+                    } else if let Some(previous) = values[..result_index]
+                        .iter()
+                        .position(|result| same_memory_allocation(result, buffer))
+                    {
+                        WireResult::ResultAlias {
+                            result_index: previous,
+                            view_offset,
+                            byte_len: memory.byte_len(),
+                        }
+                    } else {
+                        let wire_memory = self::protocol::WireMemory::from_mem(memory)?;
+                        pending_result_transfers.push(buffer.clone());
+                        WireResult::Mem(wire_memory)
+                    }
+                }
+            };
+            results.push(result);
+        }
+        Ok::<_, MemError>(())
+    })();
+    if let Err(error) = converted {
+        pending_result_transfers.clear();
+        return Err(error);
+    }
+    Ok(results)
+}
+
+fn same_memory_allocation(value: &Value, buffer: &DeviceBuffer) -> bool {
+    matches!(value, Value::Mem(memory) if memory.device_buffer().same_allocation(buffer))
 }
 
 fn read_request(reader: &mut impl Read) -> Result<Option<Request>, ChildMainError> {
@@ -413,4 +608,9 @@ fn map_exec_worker_error(error: WorkerError) -> SafeExecError {
         },
         other => SafeExecError::Transport(other.to_string()),
     }
+}
+
+fn slice_as_bytes<T>(values: &[T]) -> &[u8] {
+    let byte_len = std::mem::size_of_val(values);
+    unsafe { std::slice::from_raw_parts(values.as_ptr().cast::<u8>(), byte_len) }
 }

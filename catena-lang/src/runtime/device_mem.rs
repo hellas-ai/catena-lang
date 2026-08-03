@@ -1,6 +1,6 @@
-//! Application-owned device memory and legacy HIP/CUDA IPC handles.
+//! Device memory ownership and legacy HIP/CUDA IPC handles.
 //!
-//! These allocations are independent of memory allocated by generated Catena
+//! Buffers can be allocated by the application or adopted from generated Catena
 //! programs. An exported allocation remains owned by the exporting process;
 //! importing a handle creates a mapping of the same VRAM allocation without
 //! copying its contents.
@@ -9,6 +9,7 @@ use std::{
     env,
     ffi::{CString, c_int, c_uint, c_void},
     path::PathBuf,
+    rc::Rc,
     sync::Arc,
 };
 
@@ -20,6 +21,7 @@ use crate::codegen::GpuDialect;
 const IPC_HANDLE_BYTES: usize = 64;
 const MEMCPY_HOST_TO_DEVICE: c_int = 1;
 const MEMCPY_DEVICE_TO_HOST: c_int = 2;
+const MEMCPY_DEVICE_TO_DEVICE: c_int = 3;
 const IPC_LAZY_ENABLE_PEER_ACCESS: c_uint = 1;
 
 /// An opaque legacy HIP/CUDA IPC handle for one device allocation.
@@ -29,7 +31,6 @@ const IPC_LAZY_ENABLE_PEER_ACCESS: c_uint = 1;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IpcMemoryHandle {
     dialect: GpuDialect,
-    device_ordinal: c_int,
     byte_len: u64,
     bytes: [u8; IPC_HANDLE_BYTES],
 }
@@ -39,15 +40,9 @@ impl IpcMemoryHandle {
     ///
     /// The metadata must come from the same call to [`DeviceBuffer::export_ipc`]
     /// as the opaque bytes.
-    pub fn from_bytes(
-        dialect: GpuDialect,
-        device_ordinal: c_int,
-        byte_len: u64,
-        bytes: [u8; IPC_HANDLE_BYTES],
-    ) -> Self {
+    pub fn from_bytes(dialect: GpuDialect, byte_len: u64, bytes: [u8; IPC_HANDLE_BYTES]) -> Self {
         Self {
             dialect,
-            device_ordinal,
             byte_len,
             bytes,
         }
@@ -55,10 +50,6 @@ impl IpcMemoryHandle {
 
     pub fn dialect(&self) -> GpuDialect {
         self.dialect
-    }
-
-    pub fn device_ordinal(&self) -> c_int {
-        self.device_ordinal
     }
 
     pub fn byte_len(&self) -> u64 {
@@ -82,45 +73,21 @@ impl IpcMemoryHandle {
 #[derive(Debug, Clone)]
 pub struct DeviceAllocator {
     gpu: Arc<DeviceGpuRuntime>,
-    device_ordinal: c_int,
 }
 
 impl DeviceAllocator {
     /// Bind an allocator to the process's currently selected GPU device.
     pub fn new(dialect: GpuDialect) -> Result<Self, MemError> {
         let gpu = Arc::new(DeviceGpuRuntime::load(dialect)?);
-        let device_ordinal = gpu.current_device()?;
-        Ok(Self {
-            gpu,
-            device_ordinal,
-        })
+        Ok(Self { gpu })
     }
 
     pub fn dialect(&self) -> GpuDialect {
         self.gpu.dialect
     }
 
-    pub fn device_ordinal(&self) -> c_int {
-        self.device_ordinal
-    }
-
-    pub(crate) fn copy_device_to_host_raw(
-        &self,
-        destination: *mut c_void,
-        source: *const c_void,
-        byte_len: usize,
-    ) -> Result<(), MemError> {
-        self.gpu.copy(
-            destination,
-            source,
-            byte_len,
-            MEMCPY_DEVICE_TO_HOST,
-            "copy device to host",
-        )
-    }
-
-    pub(crate) fn free_raw(&self, data: *mut c_void) -> Result<(), MemError> {
-        self.gpu.free(data)
+    pub(crate) fn synchronize(&self) -> Result<(), MemError> {
+        self.gpu.synchronize()
     }
 
     /// Allocate uninitialized device-only memory.
@@ -129,40 +96,25 @@ impl DeviceAllocator {
         if byte_len != 0 {
             self.gpu.malloc(&mut data, byte_len)?;
         }
-        Ok(DeviceBuffer {
-            data,
-            byte_len,
-            gpu: self.gpu.clone(),
-            device_ordinal: self.device_ordinal,
-            release: Release::Free,
-        })
+        Ok(self.adopt_owned(data, byte_len))
     }
 
     /// Allocate device-only memory and synchronously upload all bytes.
     pub fn allocate_from_bytes(&self, bytes: &[u8]) -> Result<DeviceBuffer, MemError> {
-        let mut buffer = self.allocate(bytes.len())?;
-        if let Err(error) = buffer.write(0, bytes) {
-            let _ = buffer.release_now();
-            return Err(error);
-        }
+        let buffer = self.allocate(bytes.len())?;
+        buffer.write(0, bytes)?;
         Ok(buffer)
     }
 
     /// Map an allocation exported by another process without copying it.
     ///
     /// The exporting allocation must outlive the returned mapping. The handle's
-    /// dialect and device ordinal must match this allocator.
+    /// dialect must match this allocator.
     pub fn import_ipc(&self, handle: &IpcMemoryHandle) -> Result<DeviceBuffer, MemError> {
         if self.dialect() != handle.dialect {
             return Err(MemError::DialectMismatch {
                 allocator_dialect: self.dialect(),
                 handle_dialect: handle.dialect,
-            });
-        }
-        if self.device_ordinal != handle.device_ordinal {
-            return Err(MemError::DeviceMismatch {
-                allocator_device: self.device_ordinal,
-                handle_device: handle.device_ordinal,
             });
         }
         let byte_len = usize::try_from(handle.byte_len).map_err(|_| MemError::LengthTooLarge {
@@ -177,51 +129,65 @@ impl DeviceAllocator {
                 },
             )?;
         }
-        Ok(DeviceBuffer {
+        Ok(DeviceBuffer::new(DeviceAllocation {
             data,
             byte_len,
             gpu: self.gpu.clone(),
-            device_ordinal: self.device_ordinal,
             release: Release::IpcClose,
+        }))
+    }
+
+    pub(crate) fn adopt_owned(&self, data: *mut c_void, byte_len: usize) -> DeviceBuffer {
+        DeviceBuffer::new(DeviceAllocation {
+            data,
+            byte_len,
+            gpu: self.gpu.clone(),
+            release: Release::Free,
         })
     }
 }
 
 /// An opaque application-owned handle to a device allocation or IPC mapping.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct DeviceBuffer {
+    allocation: Rc<DeviceAllocation>,
+}
+
+#[derive(Debug)]
+struct DeviceAllocation {
     data: *mut c_void,
     byte_len: usize,
     gpu: Arc<DeviceGpuRuntime>,
-    device_ordinal: c_int,
     release: Release,
 }
 
 impl DeviceBuffer {
+    fn new(allocation: DeviceAllocation) -> Self {
+        Self {
+            allocation: Rc::new(allocation),
+        }
+    }
+
     pub fn byte_len(&self) -> usize {
-        self.byte_len
+        self.allocation.byte_len
     }
 
     pub fn is_empty(&self) -> bool {
-        self.byte_len == 0
+        self.allocation.byte_len == 0
     }
 
     pub fn dialect(&self) -> GpuDialect {
-        self.gpu.dialect
-    }
-
-    pub fn device_ordinal(&self) -> c_int {
-        self.device_ordinal
+        self.allocation.gpu.dialect
     }
 
     /// Synchronously upload bytes into a checked subrange of this allocation.
-    pub fn write(&mut self, offset: usize, bytes: &[u8]) -> Result<(), MemError> {
-        validate_range(self.byte_len, offset, bytes.len())?;
+    pub fn write(&self, offset: usize, bytes: &[u8]) -> Result<(), MemError> {
+        validate_range(self.byte_len(), offset, bytes.len())?;
         if bytes.is_empty() {
             return Ok(());
         }
-        let destination = unsafe { self.data.cast::<u8>().add(offset).cast::<c_void>() };
-        self.gpu.copy(
+        let destination = unsafe { self.data().cast::<u8>().add(offset).cast::<c_void>() };
+        self.allocation.gpu.copy(
             destination,
             bytes.as_ptr().cast(),
             bytes.len(),
@@ -232,12 +198,12 @@ impl DeviceBuffer {
 
     /// Synchronously read a checked subrange into host memory.
     pub fn read(&self, offset: usize, output: &mut [u8]) -> Result<(), MemError> {
-        validate_range(self.byte_len, offset, output.len())?;
+        validate_range(self.byte_len(), offset, output.len())?;
         if output.is_empty() {
             return Ok(());
         }
-        let source = unsafe { self.data.cast::<u8>().add(offset).cast::<c_void>() };
-        self.gpu.copy(
+        let source = unsafe { self.data().cast::<u8>().add(offset).cast::<c_void>() };
+        self.allocation.gpu.copy(
             output.as_mut_ptr().cast(),
             source,
             output.len(),
@@ -246,30 +212,67 @@ impl DeviceBuffer {
         )
     }
 
+    /// Synchronously copy between checked subranges of two device allocations.
+    pub(crate) fn copy_from_device(
+        &self,
+        destination_offset: usize,
+        source: &Self,
+        source_offset: usize,
+        byte_len: usize,
+    ) -> Result<(), MemError> {
+        validate_range(self.byte_len(), destination_offset, byte_len)?;
+        validate_range(source.byte_len(), source_offset, byte_len)?;
+        if byte_len == 0 {
+            return Ok(());
+        }
+        let destination = unsafe {
+            self.data()
+                .cast::<u8>()
+                .add(destination_offset)
+                .cast::<c_void>()
+        };
+        let source = unsafe {
+            source
+                .data()
+                .cast::<u8>()
+                .add(source_offset)
+                .cast::<c_void>()
+        };
+        self.allocation.gpu.copy(
+            destination,
+            source,
+            byte_len,
+            MEMCPY_DEVICE_TO_DEVICE,
+            "copy device to device",
+        )?;
+        self.allocation.gpu.synchronize()
+    }
+
     /// Export an opaque handle that another process can import.
     ///
     /// Imported mappings cannot be exported again.
     pub fn export_ipc(&self) -> Result<IpcMemoryHandle, MemError> {
-        if self.release == Release::IpcClose {
+        if self.allocation.release == Release::IpcClose {
             return Err(MemError::CannotExportImported);
         }
         let mut raw = RawIpcMemHandle {
             bytes: [0; IPC_HANDLE_BYTES],
         };
-        if !self.data.is_null() {
-            self.gpu.ipc_get(&mut raw, self.data)?;
+        if !self.data().is_null() {
+            self.allocation.gpu.ipc_get(&mut raw, self.data())?;
         }
         Ok(IpcMemoryHandle {
-            dialect: self.gpu.dialect,
-            device_ordinal: self.device_ordinal,
-            byte_len: self.byte_len as u64,
+            dialect: self.allocation.gpu.dialect,
+            byte_len: self.allocation.byte_len as u64,
             bytes: raw.bytes,
         })
     }
 
-    /// Release the allocation or imported mapping and report release failures.
-    pub fn free(mut self) -> Result<(), MemError> {
-        self.release_now()
+    /// Release a uniquely owned allocation or mapping and report failures.
+    /// Returns [`MemError::AllocationShared`] while clones still exist.
+    pub fn free(self) -> Result<(), MemError> {
+        let allocation = Rc::try_unwrap(self.allocation).map_err(|_| MemError::AllocationShared)?;
+        allocation.release_now()
     }
 
     /// Transfer this allocation or imported mapping into a runtime memory value.
@@ -278,14 +281,46 @@ impl DeviceBuffer {
     }
 
     pub(crate) fn data(&self) -> *mut c_void {
-        self.data
+        self.allocation.data
     }
 
-    pub(crate) fn read_all(&self, output: &mut [u8]) -> Result<(), MemError> {
-        self.read(0, output)
+    pub(crate) fn into_mem_view(self, offset: u64, byte_len: u64) -> Result<Mem, MemError> {
+        Mem::from_device_buffer_view(self, offset, byte_len)
     }
 
-    fn release_now(&mut self) -> Result<(), MemError> {
+    pub(crate) fn data_for_view(
+        &self,
+        offset: u64,
+        byte_len: u64,
+    ) -> Result<*mut c_void, MemError> {
+        let offset =
+            usize::try_from(offset).map_err(|_| MemError::LengthTooLarge { byte_len: offset })?;
+        let byte_len =
+            usize::try_from(byte_len).map_err(|_| MemError::LengthTooLarge { byte_len })?;
+        validate_range(self.byte_len(), offset, byte_len)?;
+        if offset == 0 {
+            return Ok(self.data());
+        }
+        Ok(unsafe { self.data().cast::<u8>().add(offset).cast() })
+    }
+
+    pub(crate) fn view_offset(&self, data: *mut c_void, byte_len: u64) -> Result<u64, MemError> {
+        let offset = (data as usize)
+            .checked_sub(self.data() as usize)
+            .ok_or(MemError::InvalidView)?;
+        let byte_len =
+            usize::try_from(byte_len).map_err(|_| MemError::LengthTooLarge { byte_len })?;
+        validate_range(self.byte_len(), offset, byte_len)?;
+        Ok(offset as u64)
+    }
+
+    pub(crate) fn same_allocation(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.allocation, &other.allocation)
+    }
+}
+
+impl DeviceAllocation {
+    fn release_now(mut self) -> Result<(), MemError> {
         if self.data.is_null() {
             return Ok(());
         }
@@ -294,9 +329,13 @@ impl DeviceBuffer {
     }
 }
 
-impl Drop for DeviceBuffer {
+impl Drop for DeviceAllocation {
     fn drop(&mut self) {
-        let _ = self.release_now();
+        if self.data.is_null() {
+            return;
+        }
+        let data = std::mem::replace(&mut self.data, std::ptr::null_mut());
+        let _ = self.gpu.release(data, self.release);
     }
 }
 
@@ -349,15 +388,6 @@ impl DeviceGpuRuntime {
         })
     }
 
-    fn current_device(&self) -> Result<c_int, MemError> {
-        let symbol = self.symbol("hipGetDevice", "cudaGetDevice");
-        let function: Symbol<'_, unsafe extern "C" fn(*mut c_int) -> c_int> =
-            unsafe { self.load_symbol(symbol)? };
-        let mut device = 0;
-        self.check("get current device", unsafe { function(&mut device) })?;
-        Ok(device)
-    }
-
     fn malloc(&self, data: &mut *mut c_void, byte_len: usize) -> Result<(), MemError> {
         let symbol = self.symbol("hipMalloc", "cudaMalloc");
         let function: Symbol<'_, unsafe extern "C" fn(*mut *mut c_void, usize) -> c_int> =
@@ -383,6 +413,13 @@ impl DeviceGpuRuntime {
         self.check(operation, unsafe {
             function(destination, source, byte_len, kind)
         })
+    }
+
+    fn synchronize(&self) -> Result<(), MemError> {
+        let symbol = self.symbol("hipDeviceSynchronize", "cudaDeviceSynchronize");
+        let function: Symbol<'_, unsafe extern "C" fn() -> c_int> =
+            unsafe { self.load_symbol(symbol)? };
+        self.check("synchronize device", unsafe { function() })
     }
 
     fn ipc_get(&self, handle: &mut RawIpcMemHandle, data: *mut c_void) -> Result<(), MemError> {
@@ -510,10 +547,9 @@ mod tests {
     #[test]
     fn ipc_handle_bytes_round_trip() {
         let bytes = std::array::from_fn(|index| index as u8);
-        let handle = IpcMemoryHandle::from_bytes(GpuDialect::Hip, 2, 4096, bytes);
+        let handle = IpcMemoryHandle::from_bytes(GpuDialect::Hip, 4096, bytes);
 
         assert_eq!(handle.dialect(), GpuDialect::Hip);
-        assert_eq!(handle.device_ordinal(), 2);
         assert_eq!(handle.byte_len(), 4096);
         assert_eq!(handle.as_bytes(), &bytes);
         assert_eq!(handle.into_bytes(), bytes);

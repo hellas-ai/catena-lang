@@ -166,7 +166,7 @@ mod tests {
             })
 
             (theory program type {
-              (arr __catena_partial.identity : (bool val) -> (bool val))
+              (arr catena.partial.identity : (bool val) -> (bool val))
             })
             "#,
         )
@@ -180,7 +180,7 @@ mod tests {
                 arrow,
                 prefix,
             } if theory == "program"
-                && arrow == "__catena_partial.identity"
+                && arrow == "catena.partial.identity"
                 && prefix == GENERATED_OPERATION_PREFIX
         ));
     }
@@ -188,8 +188,8 @@ mod tests {
     #[test]
     fn user_definitions_cannot_reference_catena_generated_operations() {
         for operation in [
-            "__catena_partial.identity.0.partial.f.1",
-            "name.__catena_partial.identity.0.partial.f.1",
+            "catena.partial.identity.0.partial.f.1",
+            "name.catena.partial.identity.0.partial.f.1",
         ] {
             let raw = RawTheorySet::from_text(&format!(
                 r#"

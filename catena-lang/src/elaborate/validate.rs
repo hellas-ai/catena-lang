@@ -84,7 +84,17 @@ fn check_reserved_operations_in_hexpr(
                 });
             }
         }
-        Hexpr::Frobenius { .. } => {}
+        Hexpr::Frobenius { sources, targets } => {
+            for variable in sources.iter().chain(targets) {
+                if let Some(label) = &variable.label {
+                    check_reserved_operations_in_hexpr(theory_name, arrow_name, label)?;
+                }
+            }
+        }
+        Hexpr::Wire(label) => {
+            check_reserved_operations_in_hexpr(theory_name, arrow_name, label)?;
+        }
+        Hexpr::Hole => {}
     }
     Ok(())
 }

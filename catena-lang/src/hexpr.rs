@@ -33,7 +33,7 @@ pub fn term_to_hexpr<O>(term: &OpenHypergraph<O, Operation>) -> Hexpr {
 /// Hexpr so their node variables cannot accidentally alias.
 pub fn term_to_hexpr_with<O, E>(
     term: &OpenHypergraph<O, Operation>,
-    fresh_variable: &mut impl FnMut() -> Result<Variable, E>,
+    fresh_variable: &mut impl FnMut() -> Result<LVar, E>,
 ) -> Result<Hexpr, E> {
     let node_vars = (0..term.hypergraph.nodes.len())
         .map(|_| fresh_variable())

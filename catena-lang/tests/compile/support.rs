@@ -99,7 +99,7 @@ pub fn assert_fully_lowered(definition: &str) {
     for edge in &final_term(definition).hypergraph.edges {
         let operation = edge.operation.as_str();
         assert!(
-            !operation.starts_with("__catena_context."),
+            !operation.starts_with("catena.context."),
             "`{definition}` retained context scaffolding"
         );
         assert!(

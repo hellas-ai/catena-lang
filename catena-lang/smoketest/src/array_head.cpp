@@ -3,7 +3,7 @@
 #include <iostream>
 #include <vector>
 
-#include "../../report/gpu/program.cpp"
+#include "../../report/gpu/hip.cpp"
 
 #ifndef __HIP_DEVICE_COMPILE__
 static inline void array_head_hip_check(hipError_t err) {

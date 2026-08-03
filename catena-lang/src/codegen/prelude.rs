@@ -1,6 +1,7 @@
 use crate::codegen::GpuDialect;
 
 pub fn render_gpu_prelude(dialect: GpuDialect) -> String {
+    let buffer_load = render_buffer_load(dialect);
     format!(
         r#"#include <{runtime_header}>
 #include <math.h>
@@ -79,12 +80,35 @@ __host__ __device__ static inline uint32_t catena_f32_bitcast_u32(float value) {
     return bits.u;
 }}
 
+{buffer_load}
+
 "#,
         runtime_header = dialect.runtime_header(),
         device_compile_guard = dialect.device_compile_guard(),
         error_type = dialect.error_type(),
         success_value = dialect.success_value(),
         error_string_fn = dialect.error_string_fn(),
+        buffer_load = buffer_load,
+    )
+}
+
+fn render_buffer_load(dialect: GpuDialect) -> String {
+    format!(
+        r#"template <typename T>
+__host__ __device__ static inline T catena_device_buffer_load(const T *buffer, uint64_t index) {{
+#ifdef {device_compile_guard}
+    return buffer[index];
+#else
+    // This is a synchronous scalar copy. Host loops such as reducec can issue
+    // one device-to-host transfer per element and should eventually be kernelized.
+    T value;
+    catena_host_gpu_check({memcpy_fn}(&value, buffer + index, sizeof(T), {memcpy_device_to_host}));
+    return value;
+#endif
+}}"#,
+        device_compile_guard = dialect.device_compile_guard(),
+        memcpy_fn = dialect.memcpy_fn(),
+        memcpy_device_to_host = dialect.memcpy_device_to_host(),
     )
 }
 
@@ -103,5 +127,25 @@ mod tests {
         );
         assert!(!prelude.contains("catena_gpu_check"));
         assert!(!prelude.contains("__device__ static inline void catena_host_gpu_check"));
+    }
+
+    #[test]
+    fn hip_buffer_load_test() {
+        let prelude = render_gpu_prelude(GpuDialect::Hip);
+
+        assert!(prelude.contains("#ifdef __HIP_DEVICE_COMPILE__\n    return buffer[index];"));
+        assert!(prelude.contains(
+            "catena_host_gpu_check(hipMemcpy(&value, buffer + index, sizeof(T), hipMemcpyDeviceToHost));"
+        ));
+    }
+
+    #[test]
+    fn cuda_buffer_load_test() {
+        let prelude = render_gpu_prelude(GpuDialect::Cuda);
+
+        assert!(prelude.contains("#ifdef __CUDA_ARCH__\n    return buffer[index];"));
+        assert!(prelude.contains(
+            "catena_host_gpu_check(cudaMemcpy(&value, buffer + index, sizeof(T), cudaMemcpyDeviceToHost));"
+        ));
     }
 }

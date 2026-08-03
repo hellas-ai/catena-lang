@@ -4,7 +4,7 @@
 //!
 //! ```cpp
 //! T *buf_data = nullptr;
-//! catena_host_gpu_check(cudaMallocManaged((void **)&buf_data, len * sizeof(T)));
+//! catena_host_gpu_check(cudaMalloc((void **)&buf_data, len * sizeof(T)));
 //! materialize_kernel<<<dim3((len + 255) / 256), dim3(256)>>>(buf_data, len, env...);
 //! catena_host_gpu_check(cudaDeviceSynchronize());
 //! buf = buf_data;
@@ -115,10 +115,10 @@ pub(in crate::codegen) fn render_call(
         name = output.name
     ));
     out.push_str(&format!(
-        "        catena_host_gpu_check({managed_alloc_fn}((void **)&{name}_data, {name}_len * sizeof({element})));\n",
+        "        catena_host_gpu_check({device_alloc_fn}((void **)&{name}_data, {name}_len * sizeof({element})));\n",
         name = output.name,
         element = c_type(element),
-        managed_alloc_fn = dialect.managed_alloc_fn(),
+        device_alloc_fn = dialect.device_alloc_fn(),
     ));
     out.push_str(&format!(
         "        {kernel_name}<<<dim3(({name}_len + 255) / 256), dim3(256)>>>\n",

@@ -1,13 +1,8 @@
-use std::{
-    env,
-    ffi::{CString, c_int, c_void},
-    path::PathBuf,
-    sync::Arc,
-};
+use std::{ffi::c_int, path::PathBuf};
 
-use libloading::Library;
 use thiserror::Error;
 
+use super::device_mem::{DeviceAllocator, DeviceBuffer};
 use crate::{codegen::GpuDialect, runtime::executor::CatenaMem};
 
 #[derive(Debug, Error)]
@@ -31,196 +26,145 @@ pub enum MemError {
     },
     #[error("{dialect:?} runtime call failed with status {status}")]
     GpuStatus { dialect: GpuDialect, status: c_int },
+    #[error("{dialect:?} runtime failed to {operation} with status {status}")]
+    GpuOperation {
+        dialect: GpuDialect,
+        operation: &'static str,
+        status: c_int,
+    },
+    #[error("device memory range {offset}..{end} exceeds allocation length {byte_len}")]
+    OutOfBounds {
+        offset: usize,
+        end: usize,
+        byte_len: usize,
+    },
+    #[error("device memory range overflows: offset {offset}, length {length}")]
+    RangeOverflow { offset: usize, length: usize },
+    #[error("device memory length {byte_len} cannot be represented on this platform")]
+    LengthTooLarge { byte_len: u64 },
+    #[error("IPC handle uses {handle_dialect:?}, but the allocator uses {allocator_dialect:?}")]
+    DialectMismatch {
+        allocator_dialect: GpuDialect,
+        handle_dialect: GpuDialect,
+    },
+    #[error(
+        "IPC handle belongs to device {handle_device}, but the current device is {allocator_device}"
+    )]
+    DeviceMismatch {
+        allocator_device: c_int,
+        handle_device: c_int,
+    },
+    #[error("an imported IPC mapping cannot be exported again")]
+    CannotExportImported,
+    #[error("memory length {byte_len} is not a whole number of {element_size}-byte elements")]
+    InvalidElementLength { byte_len: u64, element_size: usize },
 }
 
-/// Mem values represent a fat pointer (ptr + len) which can be passed into a catena program.
+/// Mem values represent a device pointer and byte length which can be passed into a Catena program.
 #[derive(Debug)]
 pub struct Mem {
     pub(crate) abi: CatenaMem,
-    gpu: Arc<GpuRuntime>,
+    owner: MemOwner,
+}
+
+#[derive(Debug)]
+enum MemOwner {
+    Generated(DeviceAllocator),
+    Device(DeviceBuffer),
 }
 
 impl Mem {
     pub fn to_f32_vec(&self) -> Vec<f32> {
-        let bytes = self.abi.len as usize;
-        assert_eq!(
-            bytes % std::mem::size_of::<f32>(),
-            0,
-            "mem length is not a whole number of f32 values"
-        );
-        if bytes == 0 {
-            return Vec::new();
-        }
-        let len = bytes / std::mem::size_of::<f32>();
-        unsafe { std::slice::from_raw_parts(self.abi.data.cast::<f32>(), len).to_vec() }
+        self.try_to_f32_vec()
+            .expect("failed to read memory as f32 values")
     }
 
     pub fn to_u64_vec(&self) -> Vec<u64> {
-        let bytes = self.abi.len as usize;
-        assert_eq!(
-            bytes % std::mem::size_of::<u64>(),
-            0,
-            "mem length is not a whole number of u64 values"
-        );
-        if bytes == 0 {
-            return Vec::new();
-        }
-        let len = bytes / std::mem::size_of::<u64>();
-        unsafe { std::slice::from_raw_parts(self.abi.data.cast::<u64>(), len).to_vec() }
+        self.try_to_u64_vec()
+            .expect("failed to read memory as u64 values")
     }
 
-    pub(crate) fn from_u64_slice(gpu: Arc<GpuRuntime>, values: &[u64]) -> Result<Self, MemError> {
-        let bytes = std::mem::size_of_val(values);
-        let mut ptr = std::ptr::null_mut();
-        if bytes != 0 {
-            gpu.malloc_managed(&mut ptr, bytes)?;
-            unsafe {
-                std::ptr::copy_nonoverlapping(values.as_ptr(), ptr.cast::<u64>(), values.len());
+    /// Read this buffer into host memory, reporting copy and element-size errors.
+    pub fn try_to_f32_vec(&self) -> Result<Vec<f32>, MemError> {
+        self.try_to_vec()
+    }
+
+    /// Read this buffer into host memory, reporting copy and element-size errors.
+    pub fn try_to_u64_vec(&self) -> Result<Vec<u64>, MemError> {
+        self.try_to_vec()
+    }
+
+    fn try_to_vec<T: Copy + Default>(&self) -> Result<Vec<T>, MemError> {
+        let element_size = std::mem::size_of::<T>();
+        if !self.abi.len.is_multiple_of(element_size as u64) {
+            return Err(MemError::InvalidElementLength {
+                byte_len: self.abi.len,
+                element_size,
+            });
+        }
+        let byte_len = usize::try_from(self.abi.len).map_err(|_| MemError::LengthTooLarge {
+            byte_len: self.abi.len,
+        })?;
+        if byte_len == 0 {
+            return Ok(Vec::new());
+        }
+        let len = byte_len / element_size;
+        let mut values = vec![T::default(); len];
+        let output =
+            unsafe { std::slice::from_raw_parts_mut(values.as_mut_ptr().cast::<u8>(), byte_len) };
+        match &self.owner {
+            MemOwner::Generated(allocator) => {
+                allocator.copy_device_to_host_raw(
+                    output.as_mut_ptr().cast(),
+                    self.abi.data,
+                    byte_len,
+                )?;
             }
+            MemOwner::Device(device) => device.read_all(output)?,
         }
-        Ok(Mem {
-            abi: CatenaMem {
-                data: ptr,
-                len: bytes as u64,
-            },
-            gpu,
-        })
+        Ok(values)
     }
 
-    pub(crate) fn from_f32_slice(gpu: Arc<GpuRuntime>, values: &[f32]) -> Result<Self, MemError> {
-        let bytes = std::mem::size_of_val(values);
-        let mut ptr = std::ptr::null_mut();
-        if bytes != 0 {
-            gpu.malloc_managed(&mut ptr, bytes)?;
-            unsafe {
-                std::ptr::copy_nonoverlapping(values.as_ptr(), ptr.cast::<f32>(), values.len());
+    pub(crate) fn from_device_buffer(device: DeviceBuffer) -> Self {
+        let abi = CatenaMem {
+            data: device.data(),
+            len: device.byte_len() as u64,
+        };
+        Self {
+            abi,
+            owner: MemOwner::Device(device),
+        }
+    }
+
+    pub(crate) fn device_identity(&self) -> Option<(GpuDialect, c_int)> {
+        match &self.owner {
+            MemOwner::Generated(allocator) => {
+                Some((allocator.dialect(), allocator.device_ordinal()))
             }
+            MemOwner::Device(device) => Some((device.dialect(), device.device_ordinal())),
         }
-        Ok(Mem {
-            abi: CatenaMem {
-                data: ptr,
-                len: bytes as u64,
-            },
-            gpu,
-        })
     }
 
-    pub(crate) fn null(gpu: Arc<GpuRuntime>) -> Self {
+    pub(crate) fn null(allocator: DeviceAllocator) -> Self {
         Self {
             abi: CatenaMem {
                 data: std::ptr::null_mut(),
                 len: 0,
             },
-            gpu,
+            owner: MemOwner::Generated(allocator),
         }
     }
 }
 
 impl Drop for Mem {
     fn drop(&mut self) {
-        if !self.abi.data.is_null() {
-            let _ = self.gpu.free(self.abi.data);
+        if self.abi.data.is_null() {
+            return;
+        }
+        if let MemOwner::Generated(allocator) = &self.owner {
+            let _ = allocator.free_raw(self.abi.data);
         }
     }
-}
-
-#[derive(Debug)]
-pub(crate) struct GpuRuntime {
-    dialect: GpuDialect,
-    library: Library,
-}
-
-impl GpuRuntime {
-    pub(crate) fn load(dialect: GpuDialect) -> Result<Self, MemError> {
-        let candidates = candidate_runtime_library_paths(dialect);
-        let mut last_error = None;
-
-        for path in &candidates {
-            match unsafe { Library::new(path) } {
-                Ok(library) => return Ok(Self { dialect, library }),
-                Err(error) => last_error = Some(error),
-            }
-        }
-
-        Err(MemError::LoadLibrary {
-            dialect,
-            tried: candidates,
-            source: last_error.expect("runtime library candidate list should not be empty"),
-        })
-    }
-
-    fn malloc_managed(&self, ptr: &mut *mut c_void, bytes: usize) -> Result<(), MemError> {
-        let symbol = match self.dialect {
-            GpuDialect::Hip => "hipMallocManaged",
-            GpuDialect::Cuda => "cudaMallocManaged",
-        };
-        let symbol_cstr =
-            CString::new(symbol).expect("runtime symbol names should not contain NUL");
-        let malloc = unsafe {
-            self.library
-                .get::<unsafe extern "C" fn(*mut *mut c_void, usize, u32) -> c_int>(
-                    symbol_cstr.as_bytes_with_nul(),
-                )
-                .map_err(|source| MemError::LoadSymbol {
-                    dialect: self.dialect,
-                    symbol,
-                    source,
-                })?
-        };
-        gpu_check(self.dialect, unsafe { malloc(ptr, bytes, 1) })
-    }
-
-    fn free(&self, ptr: *mut c_void) -> Result<(), MemError> {
-        let symbol = match self.dialect {
-            GpuDialect::Hip => "hipFree",
-            GpuDialect::Cuda => "cudaFree",
-        };
-        let symbol_cstr =
-            CString::new(symbol).expect("runtime symbol names should not contain NUL");
-        let free = unsafe {
-            self.library
-                .get::<unsafe extern "C" fn(*mut c_void) -> c_int>(symbol_cstr.as_bytes_with_nul())
-                .map_err(|source| MemError::LoadSymbol {
-                    dialect: self.dialect,
-                    symbol,
-                    source,
-                })?
-        };
-        gpu_check(self.dialect, unsafe { free(ptr) })
-    }
-}
-
-fn gpu_check(dialect: GpuDialect, status: c_int) -> Result<(), MemError> {
-    if status == 0 {
-        Ok(())
-    } else {
-        Err(MemError::GpuStatus { dialect, status })
-    }
-}
-
-fn candidate_runtime_library_paths(dialect: GpuDialect) -> Vec<PathBuf> {
-    let mut candidates = Vec::new();
-    match dialect {
-        GpuDialect::Hip => {
-            candidates.push(PathBuf::from("libamdhip64.so"));
-            for env_var in ["ROCM_PATH", "HIP_PATH"] {
-                if let Some(root) = env::var_os(env_var) {
-                    candidates.push(PathBuf::from(&root).join("lib/libamdhip64.so"));
-                }
-            }
-        }
-        GpuDialect::Cuda => {
-            candidates.push(PathBuf::from("libcudart.so"));
-            for env_var in ["CUDA_PATH", "CUDA_HOME"] {
-                if let Some(root) = env::var_os(env_var) {
-                    let root = PathBuf::from(root);
-                    candidates.push(root.join("lib64/libcudart.so"));
-                    candidates.push(root.join("lib/libcudart.so"));
-                }
-            }
-        }
-    }
-    candidates
 }
 
 fn display_paths(paths: &[PathBuf]) -> String {

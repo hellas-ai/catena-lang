@@ -3,7 +3,6 @@ use thiserror::Error;
 use std::{
     fs,
     path::{Path, PathBuf},
-    sync::Arc,
 };
 
 use libloading::Library;
@@ -11,8 +10,9 @@ use libloading::os::unix::{Library as UnixLibrary, RTLD_LAZY, RTLD_LOCAL};
 use serde::{Deserialize, Serialize};
 
 use super::artifact::{Artifact, ArtifactError};
+use super::device_mem::DeviceAllocator;
 use super::executor::{Executor, ExecutorError};
-use super::mem::{GpuRuntime, Mem, MemError};
+use super::mem::{Mem, MemError};
 use super::{
     signature::{FunctionSignature, SignatureTable, signatures},
     value::{Value, ValueKind},
@@ -28,8 +28,8 @@ pub struct Runtime {
     _artifact: Artifact,
     /// Prepared entry points in the loaded shared object.
     executor: Executor,
-    /// A handle to the loaded GPU runtime library, which we call for allocating memory.
-    gpu: Arc<GpuRuntime>,
+    /// Explicit allocator for application-owned device memory and Runtime inputs.
+    device_allocator: DeviceAllocator,
     /// Function signatures (runtime Rust ↔ C typechecking)
     signatures: SignatureTable,
 }
@@ -100,6 +100,8 @@ pub enum ExecError {
         expected: usize,
         actual: usize,
     },
+    #[error("Argument {index} contains device memory from a different GPU dialect or device")]
+    IncompatibleDeviceMemory { index: usize },
 }
 
 impl Runtime {
@@ -154,22 +156,33 @@ impl Runtime {
                 InitError::LoadSymbol { symbol, source }
             }
         })?;
-        let gpu = Arc::new(GpuRuntime::load(dialect)?);
+        let device_allocator = DeviceAllocator::new(dialect)?;
 
         Ok(Self {
             _artifact: artifact,
             executor,
-            gpu,
+            device_allocator,
             signatures: signature_table,
         })
     }
 
     pub fn mem_u64(&self, values: &[u64]) -> Result<Value, MemError> {
-        Mem::from_u64_slice(self.gpu.clone(), values).map(Value::Mem)
+        self.device_allocator
+            .allocate_from_bytes(slice_as_bytes(values))
+            .map(Value::from)
     }
 
     pub fn mem_f32(&self, values: &[f32]) -> Result<Value, MemError> {
-        Mem::from_f32_slice(self.gpu.clone(), values).map(Value::Mem)
+        self.device_allocator
+            .allocate_from_bytes(slice_as_bytes(values))
+            .map(Value::from)
+    }
+
+    /// Return the matching explicit allocator.
+    ///
+    /// Imported buffers from this allocator can be converted to [`Value::Mem`].
+    pub fn device_allocator(&self) -> &DeviceAllocator {
+        &self.device_allocator
     }
 
     /// Run a source-level `program` definition, which must have M arguments, and return its N arguments.
@@ -237,6 +250,15 @@ impl Runtime {
                     actual: value.kind(),
                 });
             }
+            if let Value::Mem(mem) = value
+                && let Some((dialect, device_ordinal)) = mem.device_identity()
+            {
+                if self.device_allocator.dialect() != dialect
+                    || self.device_allocator.device_ordinal() != device_ordinal
+                {
+                    return Err(ExecError::IncompatibleDeviceMemory { index });
+                }
+            }
         }
 
         self.executor
@@ -251,9 +273,14 @@ impl Runtime {
             ValueKind::U32 => Value::U32(0),
             ValueKind::U64 => Value::U64(0),
             ValueKind::F32 => Value::F32(0.0),
-            ValueKind::Mem => Value::Mem(Mem::null(self.gpu.clone())),
+            ValueKind::Mem => Value::Mem(Mem::null(self.device_allocator.clone())),
         }
     }
+}
+
+fn slice_as_bytes<T>(values: &[T]) -> &[u8] {
+    let byte_len = std::mem::size_of_val(values);
+    unsafe { std::slice::from_raw_parts(values.as_ptr().cast::<u8>(), byte_len) }
 }
 
 fn load_generated_library(path: &Path) -> Result<Library, InitError> {

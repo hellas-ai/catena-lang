@@ -130,7 +130,7 @@ fn collect_partials(hexpr: &Hexpr, partials: &mut Vec<Operation>) {
         Hexpr::Operation(operation) if operation.as_str().starts_with(PARTIAL_PREFIX) => {
             partials.push(operation.clone());
         }
-        Hexpr::Frobenius { .. } | Hexpr::Operation(_) => {}
+        Hexpr::Frobenius { .. } | Hexpr::Hole | Hexpr::Wire(_) | Hexpr::Operation(_) => {}
     }
 }
 
@@ -186,8 +186,8 @@ fn invalid_error(operation: &Operation, reason: &str) -> ElaborateError {
 /// lifted into closures:
 ///
 /// ```text
-/// __catena_partial.identity.i.partial.f.N       : D_i -> D_i
-/// __catena_partial.with-left-unit.i.partial.f.N : D_i -> 1 * D_i
+/// catena.partial.identity.i.partial.f.N       : D_i -> D_i
+/// catena.partial.with-left-unit.i.partial.f.N : D_i -> 1 * D_i
 /// ```
 ///
 fn partial_arrows(
@@ -685,10 +685,10 @@ mod tests {
         let arrow = &elaborated.theories[&program].arrows[&partial];
         assert!(arrow.definition.is_some());
         for helper in [
-            "__catena_partial.identity.0.partial.f.2",
-            "__catena_partial.with-left-unit.0.partial.f.2",
-            "__catena_partial.identity.1.partial.f.2",
-            "__catena_partial.with-left-unit.1.partial.f.2",
+            "catena.partial.identity.0.partial.f.2",
+            "catena.partial.with-left-unit.0.partial.f.2",
+            "catena.partial.identity.1.partial.f.2",
+            "catena.partial.with-left-unit.1.partial.f.2",
         ] {
             let helper: hexpr::Operation = helper.parse().unwrap();
             assert!(

@@ -73,7 +73,7 @@ fn collect_constants(hexpr: &Hexpr, kind: ConstantKind, constants: &mut Vec<Oper
                 collect_constants(expr, kind, constants);
             }
         }
-        Hexpr::Frobenius { .. } => {}
+        Hexpr::Frobenius { .. } | Hexpr::Hole | Hexpr::Wire(_) => {}
         Hexpr::Operation(op) if op.as_str().starts_with(kind.prefix) => {
             constants.push(op.clone());
         }

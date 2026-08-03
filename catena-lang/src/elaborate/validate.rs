@@ -84,7 +84,17 @@ fn check_reserved_operations_in_hexpr(
                 });
             }
         }
-        Hexpr::Frobenius { .. } => {}
+        Hexpr::Frobenius { sources, targets } => {
+            for variable in sources.iter().chain(targets) {
+                if let Some(label) = &variable.label {
+                    check_reserved_operations_in_hexpr(theory_name, arrow_name, label)?;
+                }
+            }
+        }
+        Hexpr::Wire(label) => {
+            check_reserved_operations_in_hexpr(theory_name, arrow_name, label)?;
+        }
+        Hexpr::Hole => {}
     }
     Ok(())
 }
@@ -135,22 +145,28 @@ fn check_reserved_variables_in_hexpr(
         }
         Hexpr::Frobenius { sources, targets } => {
             for variable in sources.iter().chain(targets) {
-                let variable = variable.to_string();
+                let variable_name = variable.name.to_string();
                 if let Some(prefix) = RESERVED_VARIABLE_PREFIXES
                     .iter()
                     .copied()
-                    .find(|prefix| variable.starts_with(prefix))
+                    .find(|prefix| variable_name.starts_with(prefix))
                 {
                     return Err(ElaborateError::ReservedVariablePrefix {
                         theory: theory_name.to_string(),
                         arrow: arrow_name.to_string(),
-                        variable,
+                        variable: variable_name,
                         prefix,
                     });
                 }
+                if let Some(label) = &variable.label {
+                    check_reserved_variables_in_hexpr(theory_name, arrow_name, label)?;
+                }
             }
         }
-        Hexpr::Operation(_) => {}
+        Hexpr::Wire(label) => {
+            check_reserved_variables_in_hexpr(theory_name, arrow_name, label)?;
+        }
+        Hexpr::Hole | Hexpr::Operation(_) => {}
     }
     Ok(())
 }
@@ -204,4 +220,43 @@ fn validate_type_map_domains_match(
         source_domain: source_domain.to_string(),
         target_domain: target_domain.to_string(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reserved_variables_are_rejected_inside_object_labels() {
+        let theory_name = "program".parse().unwrap();
+        let arrow_name = "bad".parse().unwrap();
+
+        for source in ["^[__catena_p0]", "[x^[__catena_p0]]"] {
+            let expr = source.parse().unwrap();
+            let error = check_reserved_variables_in_hexpr(&theory_name, &arrow_name, &expr)
+                .expect_err("reserved variable in a label should be rejected");
+
+            assert!(matches!(
+                error,
+                ElaborateError::ReservedVariablePrefix {
+                    theory,
+                    arrow,
+                    variable,
+                    prefix,
+                } if theory == "program"
+                    && arrow == "bad"
+                    && variable == "__catena_p0"
+                    && prefix == GENERATED_VARIABLE_PREFIX
+            ));
+        }
+    }
+
+    #[test]
+    fn holes_do_not_contain_reserved_variables() {
+        let theory_name = "program".parse().unwrap();
+        let arrow_name = "identity".parse().unwrap();
+        let expr = "_".parse().unwrap();
+
+        check_reserved_variables_in_hexpr(&theory_name, &arrow_name, &expr).unwrap();
+    }
 }

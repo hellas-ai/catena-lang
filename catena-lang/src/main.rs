@@ -5,7 +5,7 @@ use clap::Parser;
 use metacat::theory::RawTheorySet;
 
 #[derive(Parser)]
-#[command(name = "catena-dsl", version = env!("CARGO_PKG_VERSION"))]
+#[command(name = "catena", version = env!("CARGO_PKG_VERSION"))]
 struct Cli {
     #[arg(required = true)]
     paths: Vec<PathBuf>,
@@ -51,22 +51,16 @@ mod tests {
 
     #[test]
     fn svg_generation_is_enabled_by_default() {
-        let cli =
-            Cli::try_parse_from(["catena-dsl", "input.hex", "--output-dir", "report"]).unwrap();
+        let cli = Cli::try_parse_from(["catena", "input.hex", "--output-dir", "report"]).unwrap();
 
         assert!(!cli.no_svg);
     }
 
     #[test]
     fn no_svg_flag_disables_svg_generation() {
-        let cli = Cli::try_parse_from([
-            "catena-dsl",
-            "input.hex",
-            "--output-dir",
-            "report",
-            "--no-svg",
-        ])
-        .unwrap();
+        let cli =
+            Cli::try_parse_from(["catena", "input.hex", "--output-dir", "report", "--no-svg"])
+                .unwrap();
 
         assert!(cli.no_svg);
     }

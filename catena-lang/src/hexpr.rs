@@ -1,4 +1,4 @@
-use hexpr::{Hexpr, Operation, Variable};
+use hexpr::{Hexpr, LVar, Operation};
 use metacat::tree::Tree;
 use open_hypergraphs::lax::OpenHypergraph;
 
@@ -33,7 +33,7 @@ pub fn term_to_hexpr<O>(term: &OpenHypergraph<O, Operation>) -> Hexpr {
 /// Hexpr so their node variables cannot accidentally alias.
 pub fn term_to_hexpr_with<O, E>(
     term: &OpenHypergraph<O, Operation>,
-    fresh_variable: &mut impl FnMut() -> Result<Variable, E>,
+    fresh_variable: &mut impl FnMut() -> Result<LVar, E>,
 ) -> Result<Hexpr, E> {
     let node_vars = (0..term.hypergraph.nodes.len())
         .map(|_| fresh_variable())
@@ -87,7 +87,7 @@ fn object_to_hexpr(object: &Obj) -> Hexpr {
     }
 }
 
-fn vars_for(node_vars: &[Variable], nodes: &[open_hypergraphs::lax::NodeId]) -> Vec<Variable> {
+fn vars_for(node_vars: &[LVar], nodes: &[open_hypergraphs::lax::NodeId]) -> Vec<LVar> {
     nodes.iter().map(|node| node_vars[node.0].clone()).collect()
 }
 
@@ -95,7 +95,7 @@ fn op(name: &str) -> Operation {
     name.parse().expect("generated operation should parse")
 }
 
-fn var(name: &str) -> Variable {
+fn var(name: &str) -> LVar {
     name.parse().expect("generated variable should parse")
 }
 
@@ -115,6 +115,10 @@ mod tests {
 
         fn try_parse_op(&self, op: &Operation) -> Result<Self::Arr, Self::Error> {
             Ok(op.clone())
+        }
+
+        fn try_parse_object(&self, _object: &Hexpr) -> Result<Self::Obj, Self::Error> {
+            Ok(())
         }
 
         fn profile(&self, op: &Self::Arr) -> (Vec<Option<Self::Obj>>, Vec<Option<Self::Obj>>) {

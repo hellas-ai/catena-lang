@@ -413,6 +413,98 @@ worker 2 -> (2), (6)
 worker 3 -> (3), (7)
 ```
 
+## Locating workers in a topology
+
+### Perfectly tiled matrix multiplication
+
+Suppose `A` is an `n × k` matrix and `B` is a `k × m` matrix. Their product
+`C` is an `n × m` matrix. Use a `tile_size × tile_size` tile and assume that
+`n`, `k`, and `m` are all divisible by `tile_size`. The output schedule is:
+
+```text
+output work items: (n, m)
+physical blocks:  (n / tile_size, m / tile_size)
+threads/block:    (tile_size, tile_size)
+```
+
+The block and thread positions locate one output element:
+
+```text
+logical_tile = block_rank
+
+logical_row = logical_tile.row * tile_size + physical_thread_rank.row
+logical_col = logical_tile.col * tile_size + physical_thread_rank.col
+```
+
+A schematic implementation is:
+
+```text
+n, k, m, tile_size : u64
+require tile_size > 0
+require n % tile_size == 0 && k % tile_size == 0 && m % tile_size == 0
+
+A : Ix (n, k) => f32
+B : Ix (k, m) => f32
+
+plan = parallel-plan(
+    physical = blocks(n / tile_size, m / tile_size)
+             > threads(tile_size, tile_size)
+             > 1,
+    distribution = tiled(tile_size, tile_size),
+)
+
+C = schedule plan, \launch_ctx ->
+    # launch_ctx : context (workers (n, m))
+
+    pending_C = materialize(launch_ctx, (n, m),
+      \(ctx, index) ->
+        # ctx   : context (workers (n, m))
+        # index : Ix (n, m)
+        (row, col) = index
+        tile_row = row / tile_size
+        tile_col = col / tile_size
+        local_row = row % tile_size
+        local_col = col % tile_size
+        acc = 0
+
+        for k_tile in 0 ..< k / tile_size:
+            block_ctx = ctx.block
+            # block_ctx : context (workers (tile_size, tile_size))
+
+            pending_A = materialize(block_ctx, (tile_size, tile_size),
+              \a_tile_index ->
+                # a_tile_index : Ix (tile_size, tile_size)
+                (r, kk) = a_tile_index
+                a_index = (tile_row * tile_size + r,
+                           k_tile * tile_size + kk) : Ix (n, k)
+                A[a_index])
+
+            pending_B = materialize(block_ctx, (tile_size, tile_size),
+              \b_tile_index ->
+                # b_tile_index : Ix (tile_size, tile_size)
+                (kk, cc) = b_tile_index
+                b_index = (k_tile * tile_size + kk,
+                           tile_col * tile_size + cc) : Ix (k, m)
+                B[b_index])
+
+            [A_tile, B_tile] = sync(
+                block_ctx, [pending_A, pending_B])
+
+            acc += dot(A_tile[local_row, :], B_tile[:, local_col])
+            sync(block_ctx, [])
+
+        return acc)
+
+    return sync(launch_ctx, pending_C)
+
+C : buf (size (n, m)) f32
+```
+
+The types show the two compatibility checks: `workers (n, m)` matches the
+output task index `Ix (n, m)`, while `workers (tile_size, tile_size)` matches
+the tile-task indices. The derived `a_index : Ix (n, k)` and
+`b_index : Ix (k, m)` locate valid elements of the typed inputs.
+
 ## The three primitives
 
 The model begins with three primitives: `schedule`, `materialize`, and `sync`.
@@ -716,90 +808,6 @@ Every materialization supplies the logical space it distributes:
 ```text
 materialize(ctx, n, task)
 ```
-
-### Perfectly tiled matrix multiplication
-
-Suppose `A`, `B`, and `C` are `64 × 64` matrices and the tile size is
-`16 × 16`. The logical output contains `4 × 4` tiles. We launch `4 × 4`
-physical groups, each containing `16 × 16` CUDA thread positions:
-
-```text
-logical C:       (64, 64)
-logical tiles:   (4, 4)
-
-physical groups:  (4, 4)
-threads/group:   (16, 16)
-```
-
-The tiled distribution is:
-
-```text
-logical_tile = physical_group_rank
-
-logical_row = logical_tile.row * 16 + physical_thread_rank.row
-logical_col = logical_tile.col * 16 + physical_thread_rank.col
-```
-
-This is a perfect tiling: every worker at a CUDA thread position maps to one
-valid logical output index, and every logical output index has exactly one
-worker producing it. The equal coordinates are a property of this schedule,
-not an identification of logical tiles with physical groups.
-
-A schematic implementation using the primitives is:
-
-```text
-plan = parallel-plan(
-    physical = groups(4, 4) > threads(16, 16) > 1,
-    distribution = tiled(16, 16),
-)
-
-C = schedule plan, \launch_ctx ->
-    pending_C = materialize(launch_ctx, (64, 64),
-      \(ctx, index) ->
-        # index : Ix (64, 64)
-        (row, col) = index
-        tile_row = row / 16
-        tile_col = col / 16
-        local_row = row % 16
-        local_col = col % 16
-        acc = 0
-
-        for k_tile in 0 ..< 4:
-            group = ctx.group
-
-            pending_A = materialize(group, (16, 16), \(r, k) ->
-                A[tile_row * 16 + r, k_tile * 16 + k])
-
-            pending_B = materialize(group, (16, 16), \(k, c) ->
-                B[k_tile * 16 + k, tile_col * 16 + c])
-
-            [A_tile, B_tile] = sync(group, [pending_A, pending_B])
-
-            acc += dot(A_tile[local_row, :], B_tile[:, local_col])
-
-            # All workers must finish reading the current tiles before the
-            # next iteration overwrites their group-local storage.
-            sync(group, [])
-
-        return acc)
-
-    return sync(launch_ctx, pending_C)
-```
-
-This pseudocode omits representation details. Its important mappings are:
-
-- The outer `materialize` distributes logical `(row, col)` output indices over
-  the workers represented by `launch_ctx`.
-- Every group materializes the logical `16 × 16` spaces of its `A` and `B`
-  tiles using its workers.
-- `sync(group, ...)` is tied to the physical group, because those are the
-  workers that wrote and will read the tile buffers.
-- The second `sync(group, [])` in each K iteration protects the completed reads
-  before the next iteration reuses the same group-local storage.
-- Indices into `A`, `B`, and `C` remain logical data coordinates throughout.
-
-The final `sync(launch_ctx, pending_C)` runs in the caller and waits for the
-outer materialization to complete. It is not an in-kernel grid barrier.
 
 ### Imperfectly tiled matrix multiplication
 

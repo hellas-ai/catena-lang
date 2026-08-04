@@ -1267,3 +1267,65 @@ The rank-polymorphic source-level primitive is written consistently as:
 ```text
 materialize : (n : Shape k) × (Ix n => t) -> buf (size n) t
 ```
+
+## Correctness of GPU kernels
+
+This is out of scope for now, but the following "theorem" should prove that a
+GPU kernel created from `materialize + sync` is total and deterministic:
+
+```
+distribution is finite
+distribution covers every logical index
+distribution produces each logical index uniquely
+task is total
+task effects are deterministic and race-free
+task syncs are convergent
+--------------------------------------------------
+materialize + sync is total and deterministic
+```
+
+### Distributins
+
+Standard distributions provide allocation propositions automatically. Custom distributions must provide equivalent proofs.
+
+```text
+materialize : context (workers m)
+            × (n : Shape k)
+            × distribution m n
+            × task ...
+           -> pending (buf (size n) t)
+```
+
+Constructor guards
+
+```
+perfect : n -> distribution n n
+
+predicated :
+      n
+    × m
+    × |- n <= m
+    -> distribution m n
+
+grid_stride :
+      n
+    × m
+    × |- size(m) > 0
+    -> distribution m n
+```
+
+### `pending` and `sync` solve only one side
+
+`pending` and `sync` establish producer-to-consumer ordering:
+
+```text
+writes to shared data -> sync -> reads of shared data
+```
+
+They do not ensure that all reads finish before the storage is reused:
+
+```text
+reads of shared data -> synchronization -> next writes to shared data
+```
+
+An empty `sync(ctx, [])` can provide this barrier, but the current types do not require it. Either code generation must insert barriers when reusing storage, or shared storage must track a linear `writable -> pending -> readable -> writable` state.

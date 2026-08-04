@@ -144,12 +144,12 @@ grid containing a `(64, 64)` worker shape. Materializing through the grid
 configuration launches the task as a kernel across all 4096 GPU threads:
 
 ```text
-schedule blocks(4, 4) > threads(16, 16), \launch_ctx ->
+schedule blocks(4, 4) > threads(16, 16) > 1, \launch_ctx ->
     pending_output = materialize(launch_ctx, (64, 64),
-      \(active, work_item) ->
+      \(active, work_item: Ix (64, 64)) ->
         block_ctx = current_block(active)
         pending_tile = materialize(block_ctx, (16, 16),
-          \tile_item ->
+          \tile_item: Ix (16, 16) ->
             load_tile_element(tile_item))
 
         tile = sync(block_ctx, pending_tile)

@@ -63,10 +63,11 @@ The model uses the following vocabulary:
 - **Task**: the computation executed by the workers.
 - **Work item**: one logical unit of that task, such as one element of its
   result.
-- **Context configuration**: the topology, distributions, and capabilities
+- **Configuration**: the topology, distributions, and capabilities
   used to execute tasks on a worker population.
-- **Active context**: the worker-side information available while a task is
-  running, including the current worker and its assigned work.
+- **Context**: a handle to a worker population, passed to the `schedule`
+  callback and to running tasks. A task context also identifies the current
+  worker and its assigned work.
 
 Consider a CUDA grid containing `4 × 4` blocks, where every block contains
 `16 × 16` threads:
@@ -96,36 +97,33 @@ launch with more workers than result elements leaves some workers without an
 output item. Keeping the two distributions separate allows the same
 computation to use different launch sizes or backends.
 
-A _context configuration_ describes how a worker population will execute
-work. It combines the physical topology, the logical distribution, and the
-capabilities available to the workers, such as synchronization or shared
-memory. It is created outside the running task, so it has no current worker or
-assigned work.
+A _configuration_ describes how a worker population should be created. It
+combines the physical topology, the logical distribution, and the requested
+capabilities, such as synchronization or shared memory. `schedule` consumes
+the configuration and passes a _context_ to its callback. That context is the
+handle through which work is submitted and synchronized.
 
-When a task runs, each worker receives an _active context_ derived from the
-configuration. The active context describes that particular execution: which
-worker is running, which work has been assigned to it, and which capabilities
-it may use. For example, a GPU worker can obtain an active context for its
-current block when cooperating with the other workers in that block.
+When a task runs, it also receives a context. This task context additionally
+describes the current worker and its assigned work. For example, a GPU worker
+can obtain a context for its current block when cooperating with the other
+workers in that block.
 
 Three primitives connect the topology, workers, and logical work.
 
 `schedule` establishes the physical worker organization. Its body runs once
-in the caller and receives a context configuration for that worker population.
-The configuration does not perform the parallel work itself; it is the handle
-through which work is later submitted and synchronized.
+in the caller and receives a context for that worker population.
 
-`materialize` submits a _task_ through a context configuration. The task is
-the unit of work executed by workers. Each task invocation receives the active
-context and performs the logical work assigned to its worker. A worker may be
+`materialize` submits a _task_ through a context. The task is the unit
+of work executed by workers. Each task invocation receives a context and
+performs the logical work assigned to its worker. A worker may be
 assigned one work item, several work items, or no output item. `materialize`
 collects the results into a buffer but returns it as pending, because the work
-may still be executing. A task may also obtain an active block context and
+may still be executing. A task may also obtain a block context and
 start cooperative work, such as filling shared memory.
 
 `sync` completes pending work associated with a context and makes its results
-safe to observe. For a grid configuration it may wait for a kernel. For an
-active block context it is a collective operation reached by all workers in
+safe to observe. For a grid context it may wait for a kernel. For a block
+context it is a collective operation reached by all workers in
 the block, for example after they have cooperatively filled shared memory.
 Together, `schedule` chooses the worker organization, `materialize` states the
 task and its logical result, and `sync` states when that result may be used.
@@ -141,13 +139,13 @@ For CUDA, the abstract concepts above can be interpreted as follows:
 
 With `4 × 4` blocks and `16 × 16` threads per block, scheduling establishes a
 grid containing a `(64, 64)` worker shape. Materializing through the grid
-configuration launches the task as a kernel across all 4096 GPU threads:
+context launches the task as a kernel across all 4096 GPU threads:
 
 ```text
 schedule blocks(4, 4) > threads(16, 16) > 1, \launch_ctx ->
     pending_output = materialize(launch_ctx, (64, 64),
-      \(active, work_item: Ix (64, 64)) ->
-        block_ctx = current_block(active)
+      \(ctx, work_item: Ix (64, 64)) ->
+        block_ctx = current_block(ctx)
         pending_tile = materialize(block_ctx, (16, 16),
           \tile_item: Ix (16, 16) ->
             load_tile_element(tile_item))
@@ -158,7 +156,7 @@ schedule blocks(4, 4) > threads(16, 16) > 1, \launch_ctx ->
     output = sync(launch_ctx, pending_output)
 ```
 
-Inside the kernel task, obtaining the active block context selects the 256 GPU
+Inside the kernel task, obtaining the block context selects the 256 GPU
 threads in the current block. The nested materialization uses those workers to
 fill the `(16, 16)` shared-memory tile cooperatively before the task computes
 its output.
@@ -167,12 +165,152 @@ Thus the same abstract operation can use different CUDA levels: grid-level
 `materialize` becomes kernel-wide work, while block-level `materialize`
 becomes cooperative work by the GPU threads of one block.
 
+## Context
+
+A configuration describes an execution before it is scheduled. `schedule`
+consumes it and passes a _context_ to its callback. `materialize` also passes
+a context to every running task. It is the same context type in both places;
+worker-specific information is available while the context is used in a
+task:
+
+```text
+context c p l = {
+    config  : configuration p,
+    workers : worker-population (worker-shape p l),
+}
+```
+
+The type parameters have the following roles:
+
+- `c` identifies the execution whose work can be materialized or synchronized;
+- `p` is the complete physical topology;
+- `l` is the level currently selected within that topology.
+
+The context does not copy or create workers. It provides a typed view
+of the workers contained below `l`. Their shape follows from `p` and `l`, so
+worker information can be queried without passing dimensions separately:
+
+```text
+worker-population n = {
+    shape : Shape k = n,
+    count : u64 = size n,
+}
+
+current-worker n = {
+    position : Ix n,
+}
+
+(ctx : context c p l).worker
+    : current-worker (worker-shape p l)
+```
+
+`shape` and `count` describe the worker population selected by the context.
+Within a task, `worker.position` describes where the current worker lies
+within that population. For example, the position reported by a block context
+is the current GPU thread's position within its block. The `schedule` callback
+uses its context to submit work and does not query a current worker.
+
+When the selected level is clear from the surrounding type, later signatures
+may omit `l` and use the shorter spelling `context c p`.
+
+### Scoping a context
+
+Scoping narrows a context from one topology level to a level below it:
+
+```text
+scope : (ctx : context c p parent)
+     -> (child : descendant-level p parent)
+     -> context c p child
+```
+
+The `descendant-level p parent` constraint means that the requested level must
+exist below the current level in `p`. Dot notation is shorthand for this
+operation:
+
+```text
+ctx.block  = scope(ctx, block)
+ctx.warp   = scope(ctx, warp)
+ctx.thread = scope(ctx, thread)
+```
+
+Scoping does not move execution to another worker. It changes the worker
+population relative to which `workers`, `materialize`, and `sync` are
+interpreted. A block context therefore describes all workers in the current
+block, while a warp context describes only the workers in the current warp.
+
+### CUDA topology: `grid > block > thread`
+
+Consider a `4 × 4` grid of blocks, each containing `16 × 16` CUDA threads:
+
+```text
+p = blocks(4, 4) > threads(16, 16) > 1
+
+ctx : context kernel p grid
+
+ctx.workers.shape    : Shape 2  = (64, 64)
+ctx.workers.count    : u64      = 4096
+ctx.worker.position  : Ix (64, 64)
+
+block_ctx = ctx.block
+# block_ctx : context kernel p block
+
+block_ctx.workers.shape    : Shape 2  = (16, 16)
+block_ctx.workers.count    : u64      = 256
+block_ctx.worker.position  : Ix (16, 16)
+
+thread_ctx = ctx.thread
+# thread_ctx : context kernel p thread
+
+thread_ctx.workers.shape    : Shape 1 = (1)
+thread_ctx.workers.count    : u64     = 1
+thread_ctx.worker.position  : Ix (1)  = (0)
+```
+
+At grid level, worker positions combine `blockIdx` and `threadIdx`. After
+scoping to `block`, the worker position corresponds to `threadIdx` within the
+current block. In the topology type, `blocks(4, 4)` describes the grid,
+`threads(16, 16)` describes each block, and `1` describes the singleton thread
+scope. This topology has no `warp` level, so `ctx.warp` is not well-typed.
+
+### CUDA topology: `grid > block > warp > thread`
+
+A backend may expose CUDA warps explicitly. The same 256 workers per block can
+then be organized as eight warps of 32 threads:
+
+```text
+p = blocks(4, 4) > warps(8) > threads(32) > 1
+
+ctx : context kernel p grid
+
+block_ctx = ctx.block
+# block_ctx : context kernel p block
+
+block_ctx.workers.shape    : Shape 2 = (8, 32)
+block_ctx.workers.count    : u64     = 256
+block_ctx.worker.position  : Ix (8, 32)
+
+warp_ctx = ctx.warp
+# warp_ctx : context kernel p warp
+
+warp_ctx.workers.shape    : Shape 1 = (32)
+warp_ctx.workers.count    : u64     = 32
+warp_ctx.worker.position  : Ix (32)
+```
+
+Here a block worker position is expressed as `(warp, lane)`. Scoping to the
+current warp removes the warp coordinate and leaves only the lane position.
+In this topology type, `blocks(4, 4)` describes the grid, `warps(8)` describes
+each block, `threads(32)` describes each warp, and `1` describes the thread
+scope. The explicit-warp topology changes the physical coordinate types, but
+not the number of GPU workers in a block. A logical distribution may still
+map these workers to a differently shaped work-item space.
+
 ## Work Item Distribution
 
 `materialize(ctx, n, task)` distributes the logical work items `Ix n` over
-the physical workers represented by `ctx`. In this section, assume a perfect
-tiling: every worker executes exactly one work item, and every work item is
-executed by exactly one worker.
+the physical workers represented by `ctx`. Its source is always a context. In
+this section, assume a perfect tiling: every worker executes exactly one work
+item, and every work item is executed by exactly one worker.
 
 Under this assumption, the worker shape carried by the context must match the
 work-item shape passed to `materialize`. We can express that directly in a
@@ -196,12 +334,12 @@ a `(64, 64)` distribution of workers. A matrix-multiplication kernel over a
 `64 × 64` result has one work item for every cell `C[i, j]`:
 
 ```text
-schedule blocks(4, 4) > threads(16, 16), \launch_ctx ->
-    # launch_ctx : context-configuration (workers (64, 64))
+schedule blocks(4, 4) > threads(16, 16) > 1, \launch_ctx ->
+    # launch_ctx : context (workers (64, 64))
 
     pending_C = materialize(launch_ctx, (64, 64),
-      \(active, cell) ->
-        # active : active-context (workers (64, 64))
+      \(ctx, cell) ->
+        # ctx    : context (workers (64, 64))
         # cell   : Ix (64, 64)
         compute_C(cell))
 ```
@@ -213,13 +351,13 @@ under perfect tiling because the worker and work-item shapes differ.
 
 ### CUDA cooperative loading
 
-Inside the kernel, the active block context represents only the
+Inside the kernel, the block context represents only the
 `16 × 16` workers in the current CUDA block. A cooperative load of a
 `16 × 16` tile therefore has compatible worker and work-item shapes:
 
 ```text
-block = active.block
-# block : active-context (workers (16, 16))
+block = ctx.block
+# block : context (workers (16, 16))
 
 pending_tile = materialize(block, (16, 16),
   \tile_index ->
@@ -275,83 +413,6 @@ worker 2 -> (2), (6)
 worker 3 -> (3), (7)
 ```
 
-## Contexts
-
-The schematic type signatures use two context parameters:
-
-```text
-p : physical topology
-c : execution-context identity
-```
-
-For example, `p` may be `groups(4, 4) > threads(16, 16)`. The parameter `c`
-identifies the context whose work is being submitted or synchronized; this is
-why `context-configuration c p`, `active-context c p`, and `pending c` agree
-on the same `c`. Neither parameter describes the logical index shape.
-
-The context configuration has no current thread, group, or lane position
-because it exists outside task execution.
-
-`materialize` submits an indexed task through the context configuration. That
-task runs on the workers and receives an _active context_. In addition to the
-shared topology and capabilities, the active context gives each worker access
-to:
-
-1. **Position**: its coordinates in the physical hierarchy.
-2. **Index assignment**: the indices in the distribution's state space that
-   are assigned to it by the materialization.
-
-Active contexts form a hierarchy. A kernel may narrow its context to one of
-its physical scopes:
-
-```text
-active.group
-active.warp
-active.thread
-```
-
-## Index-space notation
-
-An index-space shape may have any rank:
-
-> **Notation note:** Catena does not currently have a `Shape` type. `Shape k`
-> is introduced only as shorthand for expressing the rank and dimensions of
-> the index types in this document. It is not a proposal or requirement for
-> how shapes, index spaces, or `materialize` must be represented in a future
-> implementation.
-
-```text
-Shape k = Vec k u64
-n       : Shape k
-
-Ix n = {coord : Vec k u64 |
-        for every axis a, coord[a] < n[a]}
-
-size n = product(a in 0 ..< k, n[a]) : u64
-```
-
-`Ix (10)` and `Ix (64, 64)` are index types. Example values are:
-
-```text
-(1)     : Ix (10)
-(3, 49) : Ix (64, 64)
-```
-
-Likewise, `Ix (4, 8, 16)` is a three-dimensional index type. In the signatures
-below, `n` is a shape of the appropriate rank rather than a single size. `Ix n`
-is the Catena type of coordinates proven to be within that shape; it is not
-wrapped in a second `index` type. `size n` is the number of elements:
-
-```text
-size (n, m) = n * m
-size (n0, ..., nk-1) = n0 * ... * nk-1
-
-size (10) = 10
-size (64, 64) = 64 * 64 = 4096
-```
-
-This size determines the length of the flat buffer produced by `materialize`.
-
 ## The three primitives
 
 The model begins with three primitives: `schedule`, `materialize`, and `sync`.
@@ -359,48 +420,40 @@ The model begins with three primitives: `schedule`, `materialize`, and `sync`.
 ### `schedule`
 
 ```text
-schedule : dimensions p × (context-configuration c p => r) -> r
+schedule : configuration p
+         × (context c p grid => r)
+        -> r
 
-schedule dims, \ctx ->
+schedule config, \ctx ->
     ... submit work through ctx ...
 ```
 
-`schedule(dims, body)` creates a scoped, logical population of workers and
-executes `body` once in the caller. The body receives the
-context-configuration handle `ctx`; it is not replicated over the parallel
-workers. Work reaches those workers through `materialize`.
+`schedule(config, body)` creates a population of workers and executes `body`
+once in the caller. The body receives a grid context; it is not replicated
+over the workers. Work reaches those workers through `materialize`.
 
 ### `materialize`
 
-At schedule scope:
-
 ```text
-materialize : context-configuration c p
+materialize : context c p l
             × (n : Shape k)
-            × (active-context c p × Ix n => t)
+            × (context c p l × Ix n => t)
            -> pending c (buf (size n) t)
 ```
 
 `materialize(ctx, n, task)` distributes the logical shape `n` over the workers
-represented by `ctx` and runs `task` on them. The task receives an active
-context and an assigned index in the
-distribution's state space. The signature above is the common case in which
-the state shape is the logical shape `n`; the generalized semantics are
+represented by `ctx` and runs `task` on them. The task receives a context and
+an assigned index in the distribution's state space. The signature above is
+the common case in which the state shape is the logical shape `n`; the
+generalized semantics are
 described below. Each task index has type `Ix n`.
 
-Inside a running task, `materialize` can target an active subcontext:
-
-```text
-materialize : active-context c p
-            × (n : Shape k)
-            × (Ix n => t)
-           -> pending c (buf (size n) t)
-```
-
-This form distributes nested work over workers already executing in that
-scope. It does not spawn another population. For example, materializing
-through `active.group` cooperatively fills a group-local buffer using the
-workers in the current group.
+The source may be the context received from `schedule` or a nested context
+obtained inside a running task. In both cases, the submitted task receives a
+context for the worker that executes it. Targeting a nested context does not
+spawn another population; for example, materializing through `ctx.group`
+cooperatively fills a group-local buffer using the workers in the current
+group.
 
 A pending buffer may be moved and grouped with other pending values, but it
 cannot be indexed or otherwise observed until it is passed to `sync`.
@@ -408,7 +461,7 @@ cannot be indexed or otherwise observed until it is passed to `sync`.
 ### `sync`
 
 ```text
-sync : context c p × list (pending c t) -> list t
+sync : context c p l × list (pending c t) -> list t
 ```
 
 `sync(ctx, values)` waits until the work represented by `values` is complete
@@ -428,17 +481,17 @@ reused:
 sync(ctx, [])
 ```
 
-On a context configuration, `sync` waits for submitted work such as a
-GPU kernel. On an active group context, it is collective: every worker in the
-scope must reach compatible sync points, and the operation provides the
-required memory visibility. `sync` is legal only when the context has the
-corresponding synchronization capability.
+On the grid context received from `schedule`, `sync` waits for submitted work
+such as a GPU kernel. On a group context inside a task, it is collective:
+every worker in the group must reach compatible sync points, and the operation
+provides the required memory visibility. `sync` is legal only when the context
+has the corresponding synchronization capability.
 
 ## Materialize distribution strategies
 
-The context's distribution strategy defines how `materialize` relates the
-physical workers in the context to the logical indices `Ix n`. Each
-strategy defines a state shape `m`, whose indices `Ix m` drive task execution.
+The context's distribution strategy defines how `materialize` relates its
+physical workers to the logical indices `Ix n`. Each strategy defines a state
+shape `m`, whose indices `Ix m` drive task execution.
 The state shape `m : Shape j` and logical shape `n : Shape k` may have
 different ranks. Conceptually:
 
@@ -447,7 +500,7 @@ for n : Shape k, m : Shape j:
 
 materialize : context c p
             × (n : Shape k)
-            × (active-context c p
+            × (context c p
                × Ix m
                × Option (Ix n)
                => produced n t)
@@ -460,9 +513,9 @@ produced n t = produce(Ix n, t) | produce-nothing
 ```
 
 `materialize` allocates a `buf (size n) t`, runs the task according to the
-selected strategy, and passes the task a product containing the active
-context, an `Ix m`, and the result of the strategy's `logical-index`
-projection. The `Ix m` type says which state shape the index ranges over; it is
+selected strategy, and passes the task a product containing a context, an
+`Ix m`, and the result of the strategy's `logical-index` projection. The
+`Ix m` type says which state shape the index ranges over; it is
 never an untyped candidate coordinate. The optional `Ix n` says whether that
 state is also a logical output index. The task returns either
 `produce(logical, value)` for that logical index or `produce-nothing`.
@@ -470,7 +523,7 @@ Across the whole context, every logical index `Ix n` must be produced
 exactly once. `materialize` linearizes that index according to the layout of
 `n` when storing the value in the flat `buf (size n) t`. When `m = n`, the
 projection is the identity and the shorter
-`(active-context c p × Ix n => t)` task form may be used.
+`(context c p × Ix n => t)` task form may be used.
 
 ### Perfect tiling
 
@@ -480,7 +533,7 @@ tiles, so every worker corresponds to exactly one logical index. For
 example:
 
 ```text
-physical     : groups(4, 4) > threads(16, 16)
+physical     : groups(4, 4) > threads(16, 16) > 1
 output_space : Shape 2 = (64, 64)
 
 group (gy, gx), thread (ty, tx)
@@ -493,7 +546,7 @@ logical bounds. The semantics of `materialize` are:
 ```text
 for each worker:
     logical = tiled-index(group.rank, thread.rank)
-    result[linearize(n, logical)] = task(active, logical)
+    result[linearize(n, logical)] = task(ctx, logical)
 ```
 
 The state shape and logical shape are both `(64, 64)`, so `m = n`. The task
@@ -521,7 +574,7 @@ for each worker with global rank r:
     linear = r
     while linear < size output_space:
         logical = unlinearize(output_space, linear)  # Ix n
-        result[linear] = task(active, logical)
+        result[linear] = task(ctx, logical)
         linear += P
 ```
 
@@ -555,13 +608,13 @@ The semantics of `materialize` are:
 
 ```text
 for each worker:
-    state_index = physical-index(active)  # Ix m
+    state_index = physical-index(ctx)  # Ix m
     within = for every axis a in 0 ..< k:
                  state_index[a] < n[a]
     logical = if within
               then Some(refine(output_space, state_index))
               else None
-    produced = task(active, state_index, logical)
+    produced = task(ctx, state_index, logical)
     commit produced
 ```
 
@@ -579,7 +632,7 @@ is `Some(index)`, `produce` must use that same index.
 ### Sharing one barrier
 
 ```text
-group = active.group
+group = ctx.group
 pending_keys = materialize(group, key_space, load_key)
 pending_vals = materialize(group, value_space, load_value)
 [keys, vals] = sync(group, [pending_keys, pending_vals])
@@ -609,10 +662,10 @@ A physical index instead describes where code is currently executing. A CUDA
 interpretation might expose:
 
 ```text
-active.group.rank       # blockIdx
-active.thread.rank      # threadIdx
-active.warp.rank
-active.lane.rank
+ctx.group.rank       # blockIdx
+ctx.thread.rank      # threadIdx
+ctx.warp.rank
+ctx.lane.rank
 ```
 
 The context's distribution maps the two spaces:
@@ -696,13 +749,13 @@ A schematic implementation using the primitives is:
 
 ```text
 plan = parallel-plan(
-    physical = groups(4, 4) > threads(16, 16),
+    physical = groups(4, 4) > threads(16, 16) > 1,
     distribution = tiled(16, 16),
 )
 
 C = schedule plan, \launch_ctx ->
     pending_C = materialize(launch_ctx, (64, 64),
-      \(active, index) ->
+      \(ctx, index) ->
         # index : Ix (64, 64)
         (row, col) = index
         tile_row = row / 16
@@ -712,7 +765,7 @@ C = schedule plan, \launch_ctx ->
         acc = 0
 
         for k_tile in 0 ..< 4:
-            group = active.group
+            group = ctx.group
 
             pending_A = materialize(group, (16, 16), \(r, k) ->
                 A[tile_row * 16 + r, k_tile * 16 + k])
@@ -801,19 +854,19 @@ The imperfectly tiled computation can then be written schematically as:
 
 ```text
 plan = parallel-plan(
-    physical = groups(5, 4) > threads(16, 16),
+    physical = groups(5, 4) > threads(16, 16) > 1,
     distribution = tiled-and-predicated(16, 16),
 )
 
 C = schedule plan, \launch_ctx ->
-    # launch_ctx : context-configuration (
-    #     physical = groups(5, 4) > threads(16, 16))
+    # launch_ctx : context (
+    #     physical = groups(5, 4) > threads(16, 16) > 1)
     #
     # The physical topology covers Ix (80, 64), while the logical result is
     # only Ix (70, 50). materialize constructs the relation between them.
     pending_C = materialize(launch_ctx, (70, 50),
-      \(active, index, logical) ->
-        # active  : active-context launch_ctx
+      \(ctx, index, logical) ->
+        # ctx     : context launch_ctx
         # index   : Ix (80, 64)
         # logical : Option (Ix (70, 50))
         #
@@ -832,7 +885,7 @@ C = schedule plan, \launch_ctx ->
         acc = 0
 
         for k_tile in 0 ..< ceil(37 / 16):
-            group = active.group
+            group = ctx.group
 
             pending_A = materialize(group, (16, 16), \(r, k) ->
                 # (r, k) : Ix (16, 16)
@@ -905,9 +958,9 @@ the task's input product, so imperfect coverage does not remove physical
 workers from collective control flow:
 
 ```text
-materialize : context-configuration c p
+materialize : context c p l
             × (n : Shape k)
-            × (active-context c p
+            × (context c p l
                × Ix m
                × Option (Ix n)
                => produced n t)
@@ -933,7 +986,7 @@ One CUDA lowering could use the following correspondence:
 
 | Abstract concept            | CUDA interpretation                                    |
 | --------------------------- | ------------------------------------------------------ |
-| context configuration       | grid and block execution configuration                 |
+| configuration               | grid and block execution configuration                 |
 | schedule body               | caller-side orchestration                              |
 | schedule-scope materialize  | kernel dispatch plus global-memory stores              |
 | group                       | thread block                                           |

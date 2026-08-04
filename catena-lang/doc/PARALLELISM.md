@@ -784,6 +784,14 @@ spawn another population; for example, materializing through `ctx.group`
 cooperatively fills a group-local buffer using the workers in the current
 group.
 
+> **Context-dependent execution:** The code generator or runtime interprets
+> `materialize` according to its first parameter. When that parameter is the
+> launch context, `materialize(launch_ctx, ...)` dispatches the task using the
+> launch parameters so that the workers execute it. When it is a block context,
+> `materialize(block, ...)` is performed locally by workers that are already
+> running the surrounding task: each worker performs its assigned part **without**
+> dispatching new code to its peers.
+
 A pending buffer may be moved and grouped with other pending values, but it
 cannot be indexed or otherwise observed until it is passed to `sync`.
 

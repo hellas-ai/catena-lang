@@ -2,7 +2,8 @@ use std::{env, path::PathBuf};
 
 use catena_lang::{
     codegen::GpuDialect,
-    runtime::{SafeExecError, SafeRuntime, Value, run_safe_runtime_child_if_requested},
+    runtime::Value,
+    safe_runtime::{SafeExecError, SafeRuntime, run_safe_runtime_child_if_requested},
     stdlib,
 };
 

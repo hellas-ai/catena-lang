@@ -18,13 +18,8 @@ pub(crate) mod executor;
 /// manage and run compiled catena programs
 pub mod runtime;
 
-/// Runtime-call signature metadata
+/// Runtime-call signature metadata.
 pub mod signature;
-
-mod protocol;
-
-/// Run compiled Catena programs in an isolated child process.
-pub mod safe_runtime;
 
 //#[cfg(test)]
 //mod tests;
@@ -32,8 +27,5 @@ pub mod safe_runtime;
 pub use device_mem::{DeviceAllocator, DeviceBuffer, IpcMemoryHandle};
 pub use mem::{Mem, MemError};
 pub use runtime::{ExecError, InitError, Runtime};
-pub use safe_runtime::{
-    ChildMainError, SafeExecError, SafeInitError, SafeRuntime, run_safe_runtime_child_if_requested,
-};
 pub use value::Value;
 pub use value::ValueKind;

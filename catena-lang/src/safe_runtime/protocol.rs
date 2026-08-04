@@ -3,11 +3,10 @@ use std::io::{self, Read, Write};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use thiserror::Error;
 
-use super::{
-    runtime::ExecError,
-    value::{Value, ValueKind},
+use crate::{
+    codegen::GpuDialect,
+    runtime::{ExecError, Value, ValueKind},
 };
-use crate::codegen::GpuDialect;
 
 const MAX_FRAME_LEN: usize = 64 * 1024 * 1024;
 

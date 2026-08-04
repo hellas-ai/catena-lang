@@ -1,3 +1,12 @@
+//! Process-isolated execution for Catena programs.
+//!
+//! Generated GPU code runs through native libraries, so a failed Catena assertion,
+//! GPU runtime failure, or native crash can terminate the process rather than return
+//! a Rust error. [`SafeRuntime`] solves this by executing [`Runtime`] in a child
+//! process and communicating over a framed protocol. If execution terminates the
+//! child, the host process survives and receives a structured error with its exit
+//! status and stderr.
+
 use std::{
     env, fs,
     io::{self, BufReader, Read},
@@ -9,15 +18,16 @@ use std::{
 
 use thiserror::Error;
 
-use super::{
-    protocol::{
-        ProtocolError, RemoteExecError, Request, Response, WireGpuDialect, WireValue, read_frame,
-        write_frame,
-    },
-    runtime::{ExecError, Runtime},
-    value::{Value, ValueKind},
+mod protocol;
+
+use self::protocol::{
+    ProtocolError, RemoteExecError, Request, Response, WireGpuDialect, WireValue, read_frame,
+    write_frame,
 };
-use crate::codegen::GpuDialect;
+use crate::{
+    codegen::GpuDialect,
+    runtime::{ExecError, Runtime, Value, ValueKind},
+};
 
 const CHILD_MODE_ENV: &str = "CATENA_SAFE_RUNTIME_CHILD";
 

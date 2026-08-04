@@ -167,6 +167,114 @@ Thus the same abstract operation can use different CUDA levels: grid-level
 `materialize` becomes kernel-wide work, while block-level `materialize`
 becomes cooperative work by the GPU threads of one block.
 
+## Work Item Distribution
+
+`materialize(ctx, n, task)` distributes the logical work items `Ix n` over
+the physical workers represented by `ctx`. In this section, assume a perfect
+tiling: every worker executes exactly one work item, and every work item is
+executed by exactly one worker.
+
+Under this assumption, the worker shape carried by the context must match the
+work-item shape passed to `materialize`. We can express that directly in a
+schematic dependent type:
+
+```text
+materialize : context (workers n)
+            × (n : Shape k)
+            × task (Ix n) t
+           -> pending (buf (size n) t)
+```
+
+The repeated `n` is the compatibility check. A context containing
+`workers (16, 16)` can materialize `Ix (16, 16)` work items. It cannot
+materialize `Ix (32, 16)` work items under perfect tiling.
+
+### CUDA launch
+
+A CUDA grid with `4 × 4` blocks and `16 × 16` GPU threads per block contains
+a `(64, 64)` distribution of workers. A matrix-multiplication kernel over a
+`64 × 64` result has one work item for every cell `C[i, j]`:
+
+```text
+schedule blocks(4, 4) > threads(16, 16), \launch_ctx ->
+    # launch_ctx : context-configuration (workers (64, 64))
+
+    pending_C = materialize(launch_ctx, (64, 64),
+      \(active, cell) ->
+        # active : active-context (workers (64, 64))
+        # cell   : Ix (64, 64)
+        compute_C(cell))
+```
+
+The context supplies `workers (64, 64)`, and `materialize` requires work
+shaped `(64, 64)`. The dimensions unify, so the distribution is valid. With
+the same context, `materialize(launch_ctx, (70, 50), ...)` would be rejected
+under perfect tiling because the worker and work-item shapes differ.
+
+### CUDA cooperative loading
+
+Inside the kernel, the active block context represents only the
+`16 × 16` workers in the current CUDA block. A cooperative load of a
+`16 × 16` tile therefore has compatible worker and work-item shapes:
+
+```text
+block = active.block
+# block : active-context (workers (16, 16))
+
+pending_tile = materialize(block, (16, 16),
+  \tile_index ->
+    # tile_index : Ix (16, 16)
+    load_tile(tile_index))
+```
+
+The relevant context is `block`, not the context for the complete grid. Its
+type says that `materialize` has `workers (16, 16)` available, while the
+second argument requires `Ix (16, 16)` tile work items. Those dimensions
+unify, so each block worker loads one tile element. A `(32, 16)` tile would
+not be compatible with this block context under perfect tiling.
+
+### Note: non-perfect tiling
+
+For non-perfect tiling, the worker shape and work-item shape must be kept
+separate. Let `m` be the shape of the workers represented by the context and
+`n` the shape of the logical work:
+
+```text
+materialize : context (workers m)
+            × (n : Shape k)
+            × distribution m n
+            × task ...
+           -> pending (buf (size n) t)
+```
+
+The `distribution m n` term describes why workers shaped `m` can cover work
+items shaped `n`. It is usually determined by the context and omitted at the
+call site.
+
+For a predicated distribution, the shapes have the same rank and the logical
+shape fits component-wise within the worker shape:
+
+```text
+predicated : (n <= m) -> distribution m n
+
+context (workers (8))       -> Ix (6)       # 6 <= 8
+context (workers (16, 16))  -> Ix (13, 15)  # 13 <= 16 and 15 <= 16
+```
+
+For a grid-stride distribution, `n` may instead be larger than `m`. Each
+worker executes several work items until the complete logical shape is
+covered:
+
+```text
+grid-stride : (size m > 0) -> distribution m n
+
+context (workers (4)) -> Ix (10)
+worker 0 -> (0), (4), (8)
+worker 1 -> (1), (5), (9)
+worker 2 -> (2), (6)
+worker 3 -> (3), (7)
+```
+
 ## Contexts
 
 The schematic type signatures use two context parameters:
@@ -466,112 +574,7 @@ before a group barrier merely because its state index is outside `Ix n`; it
 produces nothing only after the collective work is complete. When `logical`
 is `Some(index)`, `produce` must use that same index.
 
-## Basic examples
-
-### CUDA-like launch
-
-```text
-schedule dims, \launch_ctx ->
-    pending_buf = materialize(
-        launch_ctx,
-        output_space,
-        \(active, index) -> kernel(active, index))
-
-    buf = sync(launch_ctx, pending_buf)
-    return buf
-```
-
-The schedule body runs once in the caller. `launch_ctx` represents the worker
-at every CUDA thread position in every group created by the launch.
-`materialize` dispatches `kernel` to that complete worker population and
-supplies each worker with its active context, assigned state-space indices,
-and their optional logical indices.
-
-The physical size of `launch_ctx` and the logical size of `output_space` must
-be compatible with the context's distribution policy. For example, an exact
-two-dimensional distribution may have these schematic types:
-
-```text
-p           = groups(4, 4) > threads(16, 16)
-launch_ctx  : context-configuration c p
-output_space: Shape 2 = (64, 64)
-active      : active-context c p
-index       : Ix output_space
-```
-
-There are `4 × 4 × 16 × 16 = 4096` CUDA thread positions, hence 4096 workers,
-and `64 × 64 = 4096` output elements. The distribution relates their shapes,
-and `materialize` gives the task an `Ix (64, 64)`, matching the shape used
-to allocate the result.
-
-The distribution strategies above describe other compatible relationships
-between the physical launch and `output_space`. With a predicated CUDA
-distribution, the task receives the full product because some physical
-workers have no logical index. The CUDA lowering must explicitly test the
-state-space index against the logical bounds before constructing the optional
-task index:
-
-```text
-state_shape = (
-    gridDim.y * blockDim.y,
-    gridDim.x * blockDim.x)
-
-state_index = (
-    blockIdx.y * blockDim.y + threadIdx.y,
-    blockIdx.x * blockDim.x + threadIdx.x) : Ix state_shape
-
-logical = if state_index.y < output_space.rows
-          && state_index.x < output_space.cols
-          then Some(refine(output_space, state_index))
-          else None
-
-task(active, state_index, logical)
-```
-
-Only the `Some` branch carries an index compatible with `output_space` and may
-commit an output element. Workers in the `None` branch still execute any group
-collectives in the kernel.
-
-`sync(launch_ctx, pending_buf)` waits in the caller until the materialization
-is complete.
-
-### Cooperative loading within a group
-
-```text
-kernel = \active, index ->
-    group = active.group
-    pending_tile = materialize(group, tile_space, \tile_index ->
-        f(tile_index))
-    tile = sync(group, pending_tile)
-    return use(tile, index)
-```
-
-The kernel is already running on the scheduled workers. The nested
-`materialize` distributes `tile_space` over `group`, which represents all the
-workers in the current group and no workers from any other group; it does not
-spawn another population. The number of workers in `group` and the size of
-`tile_space` must likewise be compatible with the distribution policy. For
-the launch above, one exact cooperative mapping has these types:
-
-```text
-group       : active-context g (threads(16, 16))
-tile_space  : Shape 2 = (16, 16)
-tile_index  : Ix tile_space
-pending_tile: pending g (buf (size tile_space) t)
-```
-
-The group contains 256 CUDA thread positions (`16 × 16`), hence 256 workers,
-and the tile contains 256 elements (`16 × 16`). The `tile_index` type matches
-`tile_space`, so it can index the resulting tile. An index from the outer
-`Ix (64, 64)` output space is not a tile index and cannot be substituted
-without an explicit conversion or refinement.
-
-A one-to-one cooperative load requires one worker per tile element; other
-policies may make each worker load several elements or make excess workers
-inactive for the load, while retaining them for collective synchronization.
-No worker can observe `tile` until the group synchronization discharges
-`pending_tile`. The backend may place this buffer in CUDA shared memory when
-its size and lifetime permit it.
+## Synchronization examples
 
 ### Sharing one barrier
 

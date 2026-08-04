@@ -393,6 +393,55 @@ not be compatible with this block context under perfect tiling.
 > express or safely lower this reuse, including the synchronization required
 > before overwriting values that other workers may still be reading.
 
+Possibile solution: primitive `allocate` for `block` context.
+
+```
+tile = allocate(block, tile_shape) # shape implicit for block?
+
+for k_tile:
+    pending = materialize(tile, load_tile)
+    ready = sync(block, pending)
+```
+
+To make it uniform, materialize takes **always** a `storage-context` that could be a temporary buffer, a shared memory or anything else.
+
+```
+allocate
+    : execution-context c p l
+    × (n : Shape k)
+    × Type
+   -> storage-context c p l n t
+
+materialize
+    : storage-context c p l n t
+    × (execution-context c p l × Ix n => t)
+   -> pending c (buf-view n t)
+```
+
+```
+load_A = \(ctx, (row, col): Ix tile_shape) ->
+    A[source_index(ctx, row, col)]
+```
+
+has meaning
+
+```
+for each index i assigned to a worker:
+    value = load_A(worker_context, i)
+    A_tile[i] = value <=== assign value to shared memory
+```
+
+```
+materialize(launch_ctx, shape, task)
+```
+
+becomes r is syntactic sugar for:
+
+```
+storage = allocate(launch_ctx, shape, result_type)
+materialize(storage, task)
+```
+
 ### Note: non-perfect tiling
 
 For non-perfect tiling, the worker shape and work-item shape must be kept

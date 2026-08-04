@@ -54,7 +54,11 @@ The model uses the following vocabulary:
 - **Topology**: the complete hierarchy, such as `grid > block > thread`.
 - **Level**: one layer of that hierarchy, such as grid, block, or thread.
 - **Workers**: the leaf executions in the topology.
-- **Worker shape**: the physical arrangement of those workers.
+- **Worker path**: the canonical hierarchical location of a worker, with one
+  index for each level of the topology.
+- **Scope**: the topology level used as the coordinate origin for a worker.
+- **Worker shape**: the worker coordinate space visible from a scope.
+- **Worker index**: the same worker's coordinate within that shape.
 - **Logical shape**: the shape of the problem or result being computed.
 - **Physical distribution**: how the available workers are organized in the
   execution topology.
@@ -175,8 +179,10 @@ task:
 
 ```text
 context c p l = {
-    config  : configuration p,
-    workers : worker-population (worker-shape p l),
+    config : configuration p,
+    path   : worker-path p,
+    shape  : worker-shape p l,
+    index  : Ix (worker-shape p l),
 }
 ```
 
@@ -186,29 +192,11 @@ The type parameters have the following roles:
 - `p` is the complete physical topology;
 - `l` is the level currently selected within that topology.
 
-The context does not copy or create workers. It provides a typed view
-of the workers contained below `l`. Their shape follows from `p` and `l`, so
-worker information can be queried without passing dimensions separately:
-
-```text
-worker-population n = {
-    shape : Shape k = n,
-    count : u64 = size n,
-}
-
-current-worker n = {
-    position : Ix n,
-}
-
-(ctx : context c p l).worker
-    : current-worker (worker-shape p l)
-```
-
-`shape` and `count` describe the worker population selected by the context.
-Within a task, `worker.position` describes where the current worker lies
-within that population. For example, the position reported by a block context
-is the current GPU thread's position within its block. The `schedule` callback
-uses its context to submit work and does not query a current worker.
+The context does not copy or create workers. `path` is the current worker's
+canonical location in the complete topology, with one component per level.
+Scoping changes `l`, then derives a new `shape` and `index` for the same path.
+The `schedule` callback uses its context to submit work; `path` and `index` are
+queried while a task is running.
 
 When the selected level is clear from the surrounding type, later signatures
 may omit `l` and use the shorter spelling `context c p`.
@@ -234,9 +222,18 @@ ctx.thread = scope(ctx, thread)
 ```
 
 Scoping does not move execution to another worker. It changes the worker
-population relative to which `workers`, `materialize`, and `sync` are
-interpreted. A block context therefore describes all workers in the current
-block, while a warp context describes only the workers in the current warp.
+space relative to which `shape`, `index`, `materialize`, and `sync` are
+interpreted:
+
+```text
+scope(ctx, child).path  = ctx.path
+scope(ctx, child).shape = worker-shape p child
+scope(ctx, child).index = flatten-from(child, p, ctx.path)
+```
+
+A block context therefore expresses the current worker in block-local
+coordinates, while a warp context expresses that same worker in warp-local
+coordinates.
 
 ### CUDA topology: `grid > block > thread`
 
@@ -247,28 +244,29 @@ p = blocks(4, 4) > threads(16, 16) > 1
 
 ctx : context kernel p grid
 
-ctx.workers.shape    : Shape 2  = (64, 64)
-ctx.workers.count    : u64      = 4096
-ctx.worker.position  : Ix (64, 64)
+ctx.path.block  : Ix (4, 4)
+ctx.path.thread : Ix (16, 16)
+ctx.shape       : Shape 2 = (64, 64)
+ctx.index       : Ix (64, 64)
 
 block_ctx = ctx.block
 # block_ctx : context kernel p block
 
-block_ctx.workers.shape    : Shape 2  = (16, 16)
-block_ctx.workers.count    : u64      = 256
-block_ctx.worker.position  : Ix (16, 16)
+block_ctx.path  = ctx.path
+block_ctx.shape : Shape 2 = (16, 16)
+block_ctx.index : Ix (16, 16) = ctx.path.thread
 
 thread_ctx = ctx.thread
 # thread_ctx : context kernel p thread
 
-thread_ctx.workers.shape    : Shape 1 = (1)
-thread_ctx.workers.count    : u64     = 1
-thread_ctx.worker.position  : Ix (1)  = (0)
+thread_ctx.path  = ctx.path
+thread_ctx.shape : Shape 1 = (1)
+thread_ctx.index : Ix (1) = (0)
 ```
 
-At grid level, worker positions combine `blockIdx` and `threadIdx`. After
-scoping to `block`, the worker position corresponds to `threadIdx` within the
-current block. In the topology type, `blocks(4, 4)` describes the grid,
+At grid level, `index` combines `path.block` (`blockIdx`) and `path.thread`
+(`threadIdx`). After scoping to `block`, `index` is just `path.thread`. In the
+topology type, `blocks(4, 4)` describes the grid,
 `threads(16, 16)` describes each block, and `1` describes the singleton thread
 scope. This topology has no `warp` level, so `ctx.warp` is not well-typed.
 
@@ -282,23 +280,27 @@ p = blocks(4, 4) > warps(8) > threads(32) > 1
 
 ctx : context kernel p grid
 
+ctx.path.block  : Ix (4, 4)
+ctx.path.warp   : Ix (8)
+ctx.path.thread : Ix (32)
+
 block_ctx = ctx.block
 # block_ctx : context kernel p block
 
-block_ctx.workers.shape    : Shape 2 = (8, 32)
-block_ctx.workers.count    : u64     = 256
-block_ctx.worker.position  : Ix (8, 32)
+block_ctx.path  = ctx.path
+block_ctx.shape : Shape 2 = (8, 32)
+block_ctx.index : Ix (8, 32)
 
 warp_ctx = ctx.warp
 # warp_ctx : context kernel p warp
 
-warp_ctx.workers.shape    : Shape 1 = (32)
-warp_ctx.workers.count    : u64     = 32
-warp_ctx.worker.position  : Ix (32)
+warp_ctx.path  = ctx.path
+warp_ctx.shape : Shape 1 = (32)
+warp_ctx.index : Ix (32) = ctx.path.thread
 ```
 
-Here a block worker position is expressed as `(warp, lane)`. Scoping to the
-current warp removes the warp coordinate and leaves only the lane position.
+Here `block_ctx.index` is `(path.warp, path.thread)`. Scoping to the current
+warp removes the warp component and leaves the thread coordinate.
 In this topology type, `blocks(4, 4)` describes the grid, `warps(8)` describes
 each block, `threads(32)` describes each warp, and `1` describes the thread
 scope. The explicit-warp topology changes the physical coordinate types, but
@@ -317,14 +319,14 @@ work-item shape passed to `materialize`. We can express that directly in a
 schematic dependent type:
 
 ```text
-materialize : context (workers n)
+materialize : context (shape n)
             × (n : Shape k)
             × task (Ix n) t
            -> pending (buf (size n) t)
 ```
 
-The repeated `n` is the compatibility check. A context containing
-`workers (16, 16)` can materialize `Ix (16, 16)` work items. It cannot
+The repeated `n` is the compatibility check. A context with shape `(16, 16)`
+can materialize `Ix (16, 16)` work items. It cannot
 materialize `Ix (32, 16)` work items under perfect tiling.
 
 ### CUDA launch
@@ -335,17 +337,17 @@ a `(64, 64)` distribution of workers. A matrix-multiplication kernel over a
 
 ```text
 schedule blocks(4, 4) > threads(16, 16) > 1, \launch_ctx ->
-    # launch_ctx : context (workers (64, 64))
+    # launch_ctx : context (shape (64, 64))
 
     pending_C = materialize(launch_ctx, (64, 64),
       \(ctx, cell) ->
-        # ctx    : context (workers (64, 64))
+        # ctx    : context (shape (64, 64))
         # cell   : Ix (64, 64)
         compute_C(cell))
 ```
 
-The context supplies `workers (64, 64)`, and `materialize` requires work
-shaped `(64, 64)`. The dimensions unify, so the distribution is valid. With
+The context has shape `(64, 64)`, and `materialize` requires work shaped
+`(64, 64)`. The dimensions unify, so the distribution is valid. With
 the same context, `materialize(launch_ctx, (70, 50), ...)` would be rejected
 under perfect tiling because the worker and work-item shapes differ.
 
@@ -357,7 +359,7 @@ Inside the kernel, the block context represents only the
 
 ```text
 block = ctx.block
-# block : context (workers (16, 16))
+# block : context (shape (16, 16))
 
 pending_tile = materialize(block, (16, 16),
   \tile_index ->
@@ -366,7 +368,7 @@ pending_tile = materialize(block, (16, 16),
 ```
 
 The relevant context is `block`, not the context for the complete grid. Its
-type says that `materialize` has `workers (16, 16)` available, while the
+type says that `materialize` has a `(16, 16)` worker space, while the
 second argument requires `Ix (16, 16)` tile work items. Those dimensions
 unify, so each block worker loads one tile element. A `(32, 16)` tile would
 not be compatible with this block context under perfect tiling.
@@ -395,8 +397,8 @@ shape fits component-wise within the worker shape:
 ```text
 predicated : (n <= m) -> distribution m n
 
-context (workers (8))       -> Ix (6)       # 6 <= 8
-context (workers (16, 16))  -> Ix (13, 15)  # 13 <= 16 and 15 <= 16
+context (shape (8))       -> Ix (6)       # 6 <= 8
+context (shape (16, 16))  -> Ix (13, 15)  # 13 <= 16 and 15 <= 16
 ```
 
 For a grid-stride distribution, `n` may instead be larger than `m`. Each
@@ -406,7 +408,7 @@ covered:
 ```text
 grid-stride : (size m > 0) -> distribution m n
 
-context (workers (4)) -> Ix (10)
+context (shape (4)) -> Ix (10)
 worker 0 -> (0), (4), (8)
 worker 1 -> (1), (5), (9)
 worker 2 -> (2), (6)
@@ -414,6 +416,48 @@ worker 3 -> (3), (7)
 ```
 
 ## Locating workers in a topology
+
+Consider the topology used by a perfectly tiled output:
+
+```text
+blocks(n / tile_size, m / tile_size)
+> threads(tile_size, tile_size)
+> 1
+```
+
+Inside a task, the worker has one canonical path:
+
+```text
+ctx.path.block  : Ix (n / tile_size, m / tile_size)
+ctx.path.thread : Ix (tile_size, tile_size)
+```
+
+Let `ctx.path.block = (block_row, block_col)` and
+`ctx.path.thread = (thread_row, thread_col)`. At grid scope, the worker shape
+and index are:
+
+```text
+ctx.shape : Shape 2 = (n, m)
+ctx.index : Ix (n, m)
+
+ctx.index = (block_row * tile_size + thread_row,
+             block_col * tile_size + thread_col)
+```
+
+Scoping to the current block keeps the path but changes the coordinate system:
+
+```text
+block_ctx = ctx.block
+
+block_ctx.path  = ctx.path
+block_ctx.shape : Shape 2 = (tile_size, tile_size)
+block_ctx.index : Ix (tile_size, tile_size) = ctx.path.thread
+```
+
+Thus `ctx.path.block` locates the block in the grid, while `block_ctx.index`
+locates the same worker within that block. The topology implementation owns
+the multiplication used to form `ctx.index`; task code uses the typed path and
+scoped indices directly.
 
 ### Perfectly tiled matrix multiplication
 
@@ -427,15 +471,6 @@ physical blocks:  (n / tile_size, m / tile_size)
 threads/block:    (tile_size, tile_size)
 ```
 
-The block and thread positions locate one output element:
-
-```text
-logical_tile = block_rank
-
-logical_row = logical_tile.row * tile_size + physical_thread_rank.row
-logical_col = logical_tile.col * tile_size + physical_thread_rank.col
-```
-
 A schematic implementation is:
 
 ```text
@@ -446,6 +481,29 @@ require n % tile_size == 0 && k % tile_size == 0 && m % tile_size == 0
 A : Ix (n, k) => f32
 B : Ix (k, m) => f32
 
+a_reindex : (Ix (n / tile_size, k / tile_size)
+             × Ix (tile_size, tile_size))
+         => Ix (n, k)
+a_reindex = \((tile_row, k_tile), (r, kk)) ->
+    (tile_row * tile_size + r,
+     k_tile * tile_size + kk)
+
+b_reindex : (Ix (k / tile_size, m / tile_size)
+             × Ix (tile_size, tile_size))
+         => Ix (k, m)
+b_reindex = \((k_tile, tile_col), (kk, cc)) ->
+    (k_tile * tile_size + kk,
+     tile_col * tile_size + cc)
+
+# f >> g = \index -> g(f(index))
+A_by_tile = a_reindex >> A
+B_by_tile = b_reindex >> B
+
+A_by_tile : (Ix (n / tile_size, k / tile_size)
+             × Ix (tile_size, tile_size)) => f32
+B_by_tile : (Ix (k / tile_size, m / tile_size)
+             × Ix (tile_size, tile_size)) => f32
+
 plan = parallel-plan(
     physical = blocks(n / tile_size, m / tile_size)
              > threads(tile_size, tile_size)
@@ -454,38 +512,46 @@ plan = parallel-plan(
 )
 
 C = schedule plan, \launch_ctx ->
-    # launch_ctx : context (workers (n, m))
+    # launch_ctx : context (shape (n, m))
 
     pending_C = materialize(launch_ctx, (n, m),
       \(ctx, index) ->
-        # ctx   : context (workers (n, m))
+        # ctx   : context (shape (n, m))
         # index : Ix (n, m)
-        (row, col) = index
-        tile_row = row / tile_size
-        tile_col = col / tile_size
-        local_row = row % tile_size
-        local_col = col % tile_size
+        # Under perfect tiling, index and ctx.index have equal coordinates,
+        # but index is logical while ctx.index is physical.
+
+        block_ctx = ctx.block
+        # block_ctx.path.block : Ix (n / tile_size, m / tile_size)
+        # block_ctx            : context (shape (tile_size, tile_size))
+        # block_ctx.index      : Ix (tile_size, tile_size)
+
+        # The path selects the A/B tiles in the grid.
+        (tile_row, tile_col) = block_ctx.path.block
+
+        # The block-scoped index selects this worker's output within a tile.
+        (local_row, local_col) = block_ctx.index
         acc = 0
 
-        for k_tile in 0 ..< k / tile_size:
-            block_ctx = ctx.block
-            # block_ctx : context (workers (tile_size, tile_size))
+        for k_tile_index : Ix (k / tile_size):
+            (k_tile) = k_tile_index
 
-            pending_A = materialize(block_ctx, (tile_size, tile_size),
-              \a_tile_index ->
-                # a_tile_index : Ix (tile_size, tile_size)
-                (r, kk) = a_tile_index
-                a_index = (tile_row * tile_size + r,
-                           k_tile * tile_size + kk) : Ix (n, k)
-                A[a_index])
+            A_tile_view : Ix (tile_size, tile_size) => f32
+            A_tile_view = \a_tile_index ->
+                # Input to a_reindex >> A:
+                #   output block row, K tile, and local tile index.
+                A_by_tile[((tile_row, k_tile), a_tile_index)]
 
-            pending_B = materialize(block_ctx, (tile_size, tile_size),
-              \b_tile_index ->
-                # b_tile_index : Ix (tile_size, tile_size)
-                (kk, cc) = b_tile_index
-                b_index = (k_tile * tile_size + kk,
-                           tile_col * tile_size + cc) : Ix (k, m)
-                B[b_index])
+            B_tile_view : Ix (tile_size, tile_size) => f32
+            B_tile_view = \b_tile_index ->
+                # Input to b_reindex >> B:
+                #   K tile, output block column, and local tile index.
+                B_by_tile[((k_tile, tile_col), b_tile_index)]
+
+            pending_A = materialize(
+                block_ctx, (tile_size, tile_size), A_tile_view)
+            pending_B = materialize(
+                block_ctx, (tile_size, tile_size), B_tile_view)
 
             [A_tile, B_tile] = sync(
                 block_ctx, [pending_A, pending_B])
@@ -500,10 +566,12 @@ C = schedule plan, \launch_ctx ->
 C : buf (size (n, m)) f32
 ```
 
-The types show the two compatibility checks: `workers (n, m)` matches the
-output task index `Ix (n, m)`, while `workers (tile_size, tile_size)` matches
-the tile-task indices. The derived `a_index : Ix (n, k)` and
-`b_index : Ix (k, m)` locate valid elements of the typed inputs.
+The types show the two compatibility checks: context shape `(n, m)` matches
+the output task index `Ix (n, m)`, while context shape
+`(tile_size, tile_size)` matches the tile-task indices. `a_reindex` and
+`b_reindex` contain the only data-coordinate arithmetic. Composing them with
+`A` and `B` produces views that the kernel indexes with the block component of
+the worker path and a local tile index.
 
 ## The three primitives
 
@@ -637,7 +705,7 @@ logical bounds. The semantics of `materialize` are:
 
 ```text
 for each worker:
-    logical = tiled-index(group.rank, thread.rank)
+    logical = tiled-index(ctx.path.group, ctx.path.thread)
     result[linearize(n, logical)] = task(ctx, logical)
 ```
 
@@ -754,10 +822,9 @@ A physical index instead describes where code is currently executing. A CUDA
 interpretation might expose:
 
 ```text
-ctx.group.rank       # blockIdx
-ctx.thread.rank      # threadIdx
-ctx.warp.rank
-ctx.lane.rank
+ctx.path.block       # blockIdx
+ctx.path.warp        # warp within the block, when exposed
+ctx.path.thread      # threadIdx or lane within the immediate parent
 ```
 
 The context's distribution maps the two spaces:
@@ -778,7 +845,7 @@ does not change the logical result.
 In a simple CUDA kernel these concepts are easily confused:
 
 ```text
-physical = block_rank * group_size + thread_rank
+physical = join(block_coordinate, thread_coordinate)
 logical_index = physical
 ```
 
@@ -984,9 +1051,10 @@ commit a value to the result. The governing semantic rule is:
 
 This distinction is also needed when there are more logical tiles than
 physical groups. A group may process several logical tiles in successive
-rounds; its physical group rank stays constant while the logical tile index
-changes. As long as the distribution covers every logical index exactly once
-and keeps group collectives convergent, the result is unchanged.
+rounds; the group component of its physical path stays constant while the
+logical tile index changes. As long as the distribution covers every logical
+index exactly once and keeps group collectives convergent, the result is
+unchanged.
 
 ## CUDA interpretation
 
@@ -1000,7 +1068,8 @@ One CUDA lowering could use the following correspondence:
 | group                       | thread block                                           |
 | warp/subgroup               | warp                                                   |
 | worker / leaf topology node | GPU thread                                             |
-| context position            | `blockIdx`, `threadIdx`, and derived lane indices      |
+| context path                | `blockIdx`, `threadIdx`, and derived warp/lane indices |
+| scoped context index        | grid-, block-, warp-, or thread-relative coordinate    |
 | group synchronization       | `__syncthreads()`                                      |
 | warp synchronization        | `__syncwarp()` or warp-synchronous operations          |
 | group-local materialization | shared-memory allocation plus cooperative stores       |

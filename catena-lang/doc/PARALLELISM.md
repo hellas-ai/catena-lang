@@ -22,7 +22,7 @@ than declarations in the current Catena syntax.
 - Keep the logical index space separate from the physical execution topology.
 - Make values produced by cooperative work unavailable until the required
   synchronization has occurred.
-- Permit nested scopes such as group > warp > thread.
+- Permit nested scopes such as grid > block > warp > thread.
 - Leave scheduling, memory placement, and synchronization details available to
   backend-specific lowering.
 
@@ -38,7 +38,7 @@ The schedule body runs once in the caller and receives a _schedule context_.
 This is a handle used to submit work to the population. It contains:
 
 1. **Topology**: the hierarchy and size of the execution, for example
-   `grid > group > warp > thread`.
+   `grid > block > warp > thread`.
 2. **Distribution policy**: how logical index spaces are assigned to the
    population.
 3. **Capabilities**: operations supported by the topology, e.g. shared memory.
@@ -81,6 +81,57 @@ active.group
 active.warp
 active.thread
 ```
+
+### Selecting a context level
+
+`materialize` distributes work over the threads represented by the selected
+context level. Selecting a level therefore determines both the participating
+threads and the physical index space against which the logical index space is
+checked for compatibility.
+
+The CUDA hierarchy has at least grid and block levels. Consider a grid with
+`4 × 4` blocks and `16 × 16` threads in each block:
+
+```text
+grid:          blocks(4, 4) > threads(16, 16)
+grid threads:  (4 * 16, 4 * 16) = (64, 64)
+block threads: (16, 16)
+```
+
+At grid level, `launch_ctx` represents every thread in every block. A kernel
+materialized through `launch_ctx` is therefore distributed over all `64 × 64`
+threads in the grid:
+
+```text
+materialize(launch_ctx, (64, 64), kernel)
+
+grid_index = (
+    block_rank.y * 16 + thread_rank.y,
+    block_rank.x * 16 + thread_rank.x) : Ix (64, 64)
+```
+
+For a one-to-one distribution, the kernel's logical index space must be
+compatible with these `64 × 64` grid threads. Other distribution strategies
+may establish compatibility differently, but they still use the population
+selected by `launch_ctx`.
+
+Shared-memory materialization instead selects the block level. In the
+abstract terminology used elsewhere in this document, a CUDA block is a
+`group`, so a running kernel narrows its active context to `active.group`:
+
+```text
+materialize(active.block, (16, 16), load_tile)
+
+block_index = thread_rank : Ix (16, 16)
+```
+
+This materialization is performed cooperatively by the `16 × 16` threads in
+the current block, independently of every other block. Consequently, the
+logical index space for the shared-memory tile must be compatible with the
+number of threads in one block, not with the number of threads in the entire
+grid. The selected level is thus part of the meaning of `materialize`: grid
+level distributes a kernel over the whole launch, while block level
+distributes block-local work such as filling a shared-memory tile.
 
 ### Index-space notation
 

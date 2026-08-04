@@ -314,6 +314,15 @@ the physical workers represented by `ctx`. Its source is always a context. In
 this section, assume a perfect tiling: every worker executes exactly one work
 item, and every work item is executed by exactly one worker.
 
+The context path and the task index have different meanings. `ctx.path`
+identifies the worker on which the task runs, whereas the index passed to the
+task identifies the work item assigned by `materialize`. Under perfect
+one-to-one distribution, the work-item index can be derived from the scoped
+worker index, so a callback may omit it when it is not otherwise useful. It is
+not redundant in general: with a grid-stride distribution the same worker path
+executes several work-item indices, and with a predicated distribution a
+physical state index may have no corresponding logical work item.
+
 Under this assumption, the worker shape carried by the context must match the
 work-item shape passed to `materialize`. We can express that directly in a
 schematic dependent type:

@@ -386,6 +386,13 @@ second argument requires `Ix (16, 16)` tile work items. Those dimensions
 unify, so each block worker loads one tile element. A `(32, 16)` tile would
 not be compatible with this block context under perfect tiling.
 
+> **Open problem:** The current semantics make every `materialize` allocate a
+> fresh buffer. Repeated cooperative loads would therefore appear to allocate
+> new shared memory on every iteration. CUDA implementations instead allocate
+> block-local storage once and refill it. The model still needs a way to
+> express or safely lower this reuse, including the synchronization required
+> before overwriting values that other workers may still be reading.
+
 ### Note: non-perfect tiling
 
 For non-perfect tiling, the worker shape and work-item shape must be kept
@@ -1284,7 +1291,7 @@ task syncs are convergent
 materialize + sync is total and deterministic
 ```
 
-### Distributins
+### Distributions
 
 Standard distributions provide allocation propositions automatically. Custom distributions must provide equivalent proofs.
 
@@ -1312,6 +1319,28 @@ grid_stride :
     × m
     × |- size(m) > 0
     -> distribution m n
+```
+
+### Race free
+
+#### Shared memory
+
+A conservative sufficient condition is to divide shared-memory execution into synchronization phases. For every shared-memory location within one phase:
+
+- Either all threads only read it.
+- Or exactly one thread owns it (only writer), and no other thread reads or writes it.
+- Or all conflicting accesses use a correctly scoped atomic operation.
+
+Some useful properties
+
+- If a distribution is valid, every work item is assigned to exactly one worker. `materialize` "constructs" the proof from the distribution. Roughly, a task can have this signature:
+
+```
+task :
+    (worker   : context c p l)
+    × (work-item-index   : Ix n)
+    × (|- owns(worker.path, work-item-index))
+    -> t
 ```
 
 ### `pending` and `sync` solve only one side

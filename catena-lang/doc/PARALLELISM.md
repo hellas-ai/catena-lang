@@ -53,9 +53,11 @@ The model uses the following vocabulary:
 
 - **Topology**: the complete hierarchy, such as `grid > block > thread`.
 - **Level**: one layer of that hierarchy, such as grid, block, or thread.
-- **Workers**: the leaf executions in the topology.
+- **Workers**: the physical leaf executions in the topology. A sequential
+  terminal describes work assigned to a worker rather than more workers.
 - **Worker path**: the canonical hierarchical location of a worker, with one
-  index for each level of the topology.
+  index for each physical worker level of the topology. Sequential terminals
+  do not add a path component.
 - **Scope**: the topology level used as the coordinate origin for a worker.
 - **Worker shape**: the worker coordinate space visible from a scope.
 - **Worker index**: the same worker's coordinate within that shape.
@@ -189,14 +191,16 @@ context c p l = {
 The type parameters have the following roles:
 
 - `c` identifies the execution whose work can be materialized or synchronized;
-- `p` is the complete physical topology;
-- `l` is the level currently selected within that topology.
+- `p` is the complete execution topology, including any sequential terminal;
+- `l` is the physical worker level currently selected within that topology.
 
 The context does not copy or create workers. `path` is the current worker's
-canonical location in the complete topology, with one component per level.
-Scoping changes `l`, then derives a new `shape` and `index` for the same path.
-The `schedule` callback uses its context to submit work; `path` and `index` are
-queried while a task is running.
+canonical location in the physical part of the topology, with one component
+per physical worker level. Scoping changes `l`, then derives a new `shape` and
+`index` for the same path. A sequential terminal describes work assigned to
+that worker and therefore does not extend its path. The `schedule` callback
+uses its context to submit work; `path` and `index` are queried while a task is
+running.
 
 When the selected level is clear from the surrounding type, later signatures
 may omit `l` and use the shorter spelling `context c p`.
@@ -424,6 +428,53 @@ worker 2 -> (2), (6)
 worker 3 -> (3), (7)
 ```
 
+### Sequential work below a worker
+
+A topology may end in `sequential(q)` instead of `1`:
+
+```text
+blocks(bx, by) > threads(tx, ty) > sequential(q)
+```
+
+`q` is the number of iterations, so their indices have type `Ix (q)` and
+range from `(0)` through `(q - 1)`. The terminal does not create `q` more
+physical workers. It says that each GPU thread can execute `q` work items
+sequentially. Consequently, it does not contribute to physical worker shapes
+or paths:
+
+```text
+grid_ctx.shape   = (bx * tx, by * ty)
+block_ctx.shape  = (tx, ty)
+thread_ctx.shape = (1)
+
+thread_ctx.path = (block, thread)
+```
+
+Instead, `sequential(q)` supplies a distribution from the singleton thread
+worker space to the iteration space:
+
+```text
+sequential : (q : u64) -> distribution (1) (q)
+```
+
+This makes the following materialization compatible even though its work-item
+shape is not the physical shape of `thread_ctx`:
+
+```text
+thread_ctx : context c p thread
+where p = ... > thread > sequential(q)
+
+materialize(thread_ctx, (q),
+  \(iteration_ctx, iteration : Ix (q)) -> task(iteration))
+```
+
+Every invocation has the same physical worker path as `thread_ctx`; the task
+index distinguishes the `q` work items assigned to that worker. A CUDA backend
+lowers the materialization to a loop. The iteration count is exact rather than
+an upper bound. This is particularly important when the task contains
+block-wide synchronization: every thread must traverse the same iteration
+indices in the same order.
+
 ## Locating workers in a topology
 
 Consider the topology used by a perfectly tiled output:
@@ -591,24 +642,24 @@ each CUDA thread:
 ```text
 blocks(n / tile_size, m / tile_size)
 > threads(tile_size, tile_size)
-> tiles(k / tile_size)
-> 1
+> sequential(k / tile_size)
 ```
 
 The levels have different lowering strategies:
 
-| Level  | Population                              | CUDA lowering              |
-| ------ | --------------------------------------- | -------------------------- |
-| grid   | `blocks(n / tile_size, m / tile_size)`  | kernel grid                |
-| block  | `threads(tile_size, tile_size)`          | CUDA thread block          |
-| thread | `tiles(k / tile_size)`                   | sequential loop per thread |
-| tile   | `1`                                      | one loop iteration         |
+| Level  | Population or work                     | CUDA lowering              |
+| ------ | -------------------------------------- | -------------------------- |
+| grid   | `blocks(n / tile_size, m / tile_size)` | kernel grid                |
+| block  | `threads(tile_size, tile_size)`        | CUDA thread block          |
+| thread | one GPU thread                         | GPU thread                 |
+| tile   | `Ix (k / tile_size)` work items        | sequential loop per thread |
 
-The first three levels describe the CUDA launch hierarchy. The tile level is
-an abstract execution level: it does not add GPU threads or change the kernel
-launch shape. Materialization through the grid context still targets the CUDA
-threads. Materialization through a thread context targets its tile children,
-which the CUDA code generator lowers sequentially.
+The first three levels describe the CUDA launch hierarchy. The
+`sequential(k / tile_size)` terminal represents the tile level, but does not
+add GPU threads or change the kernel launch shape. Materialization through the
+grid context still targets the CUDA threads. Materialization through a thread
+context uses the sequential distribution, which the CUDA code generator
+lowers to the K-tile loop.
 
 Using the same `A_by_tile` and `B_by_tile` reindexings defined above, the
 kernel can replace the K-tile loop with another `materialize`:
@@ -617,16 +668,13 @@ kernel can replace the K-tile loop with another `materialize`:
 tile_plan = parallel-plan(
     physical = blocks(n / tile_size, m / tile_size)
              > threads(tile_size, tile_size)
-             > tiles(k / tile_size)
-             > 1,
+             > sequential(k / tile_size),
     distribution = tiled(tile_size, tile_size),
 )
 
 C = schedule tile_plan, \launch_ctx ->
     pending_C = materialize(launch_ctx, (n, m),
-      \(ctx, output_index) ->
-        # output_index : Ix (n, m)
-
+      \ctx ->
         block_ctx = ctx.block
         thread_ctx = ctx.thread
 
@@ -638,17 +686,16 @@ C = schedule tile_plan, \launch_ctx ->
         # block_ctx.index : Ix (tile_size, tile_size)
         (local_row, local_col) = block_ctx.index
 
-        # The thread context exposes the sequential tile population.
+        # The thread context contains one physical GPU worker.
         # thread_ctx       : context c p thread
-        # thread_ctx.shape : Shape 1 = (k / tile_size)
+        # thread_ctx.shape : Shape 1 = (1)
+        # p ends in thread > sequential(k / tile_size)
         pending_partials = materialize(thread_ctx, (k / tile_size),
           \(tile_ctx, k_tile_index) ->
-            # tile_ctx             : context c p tile
-            # tile_ctx.path.tile   : Ix (k / tile_size)
-            # tile_ctx.shape       : Shape 1 = (1)
-            # tile_ctx.index       : Ix (1) = (0)
-            # k_tile_index         : Ix (k / tile_size)
-            # tile_ctx.path.tile = k_tile_index
+            # tile_ctx.path  = thread_ctx.path
+            # tile_ctx.shape : Shape 1 = (1)
+            # tile_ctx.index : Ix (1) = (0)
+            # k_tile_index   : Ix (k / tile_size)
             (k_tile) = k_tile_index
 
             A_tile_view : Ix (tile_size, tile_size) => f32
@@ -680,9 +727,10 @@ C = schedule tile_plan, \launch_ctx ->
     return sync(launch_ctx, pending_C)
 ```
 
-Semantically, the inner `materialize` produces one partial result for every
-`Ix (k / tile_size)`. On CUDA, `tiles` is below `thread`, so code generation
-implements it as the original per-thread loop. It may fuse the temporary
+Semantically, the inner `materialize` assigns every
+`Ix (k / tile_size)` work item to the same GPU worker and produces one partial
+result for each. On CUDA, `sequential(k / tile_size)` tells code generation to
+implement it as the original per-thread loop. It may fuse the temporary
 `partials` buffer and reduction into a scalar accumulator. All threads in a
 block traverse the tile indices in the same order, so the block-level
 materializations and synchronizations remain collective.

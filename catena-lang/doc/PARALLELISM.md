@@ -573,6 +573,111 @@ the output task index `Ix (n, m)`, while context shape
 `A` and `B` produces views that the kernel indexes with the block component of
 the worker path and a local tile index.
 
+### Matrix multiplication with a tile level
+
+The reduction tiles can also be represented in the execution topology instead
+of by an explicit `for` loop. Extend the hierarchy with a tile level below
+each CUDA thread:
+
+```text
+blocks(n / tile_size, m / tile_size)
+> threads(tile_size, tile_size)
+> tiles(k / tile_size)
+> 1
+```
+
+The levels have different lowering strategies:
+
+| Level  | Population                              | CUDA lowering              |
+| ------ | --------------------------------------- | -------------------------- |
+| grid   | `blocks(n / tile_size, m / tile_size)`  | kernel grid                |
+| block  | `threads(tile_size, tile_size)`          | CUDA thread block          |
+| thread | `tiles(k / tile_size)`                   | sequential loop per thread |
+| tile   | `1`                                      | one loop iteration         |
+
+The first three levels describe the CUDA launch hierarchy. The tile level is
+an abstract execution level: it does not add GPU threads or change the kernel
+launch shape. Materialization through the grid context still targets the CUDA
+threads. Materialization through a thread context targets its tile children,
+which the CUDA code generator lowers sequentially.
+
+Using the same `A_by_tile` and `B_by_tile` reindexings defined above, the
+kernel can replace the K-tile loop with another `materialize`:
+
+```text
+tile_plan = parallel-plan(
+    physical = blocks(n / tile_size, m / tile_size)
+             > threads(tile_size, tile_size)
+             > tiles(k / tile_size)
+             > 1,
+    distribution = tiled(tile_size, tile_size),
+)
+
+C = schedule tile_plan, \launch_ctx ->
+    pending_C = materialize(launch_ctx, (n, m),
+      \(ctx, output_index) ->
+        # output_index : Ix (n, m)
+
+        block_ctx = ctx.block
+        thread_ctx = ctx.thread
+
+        # The worker path selects the output tile.
+        # block_ctx.path.block : Ix (n / tile_size, m / tile_size)
+        (tile_row, tile_col) = block_ctx.path.block
+
+        # The block-scoped index selects this thread's element in the tile.
+        # block_ctx.index : Ix (tile_size, tile_size)
+        (local_row, local_col) = block_ctx.index
+
+        # The thread context exposes the sequential tile population.
+        # thread_ctx       : context c p thread
+        # thread_ctx.shape : Shape 1 = (k / tile_size)
+        pending_partials = materialize(thread_ctx, (k / tile_size),
+          \(tile_ctx, k_tile_index) ->
+            # tile_ctx             : context c p tile
+            # tile_ctx.path.tile   : Ix (k / tile_size)
+            # tile_ctx.shape       : Shape 1 = (1)
+            # tile_ctx.index       : Ix (1) = (0)
+            # k_tile_index         : Ix (k / tile_size)
+            # tile_ctx.path.tile = k_tile_index
+            (k_tile) = k_tile_index
+
+            A_tile_view : Ix (tile_size, tile_size) => f32
+            A_tile_view = \a_tile_index ->
+                # a_reindex >> A uses the block row, tile, and local index.
+                A_by_tile[((tile_row, k_tile), a_tile_index)]
+
+            B_tile_view : Ix (tile_size, tile_size) => f32
+            B_tile_view = \b_tile_index ->
+                # b_reindex >> B uses the tile, block column, and local index.
+                B_by_tile[((k_tile, tile_col), b_tile_index)]
+
+            pending_A = materialize(
+                block_ctx, (tile_size, tile_size), A_tile_view)
+            pending_B = materialize(
+                block_ctx, (tile_size, tile_size), B_tile_view)
+
+            [A_tile, B_tile] = sync(
+                block_ctx, [pending_A, pending_B])
+
+            partial = dot(
+                A_tile[local_row, :], B_tile[:, local_col])
+            sync(block_ctx, [])
+            return partial)
+
+        partials = sync(thread_ctx, pending_partials)
+        return reduce(add, 0, partials))
+
+    return sync(launch_ctx, pending_C)
+```
+
+Semantically, the inner `materialize` produces one partial result for every
+`Ix (k / tile_size)`. On CUDA, `tiles` is below `thread`, so code generation
+implements it as the original per-thread loop. It may fuse the temporary
+`partials` buffer and reduction into a scalar accumulator. All threads in a
+block traverse the tile indices in the same order, so the block-level
+materializations and synchronizations remain collective.
+
 ## The three primitives
 
 The model begins with three primitives: `schedule`, `materialize`, and `sync`.

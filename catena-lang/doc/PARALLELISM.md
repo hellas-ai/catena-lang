@@ -10,9 +10,7 @@ The central idea is:
 > A context describes a hierarchical execution topology and determines how a
 > logical index space is distributed over the participants in that topology.
 
-Programs express parallel work in terms of contexts, indexed producers, and
-synchronization. A backend decides how those concepts map to GPU launches,
-SIMD lanes, CPU workers, or another execution model.
+Programs express parallel work in terms of scheduling discipline, work allocation, and synchronization. A backend decides how those concepts map to GPU launches, SIMD lanes, CPU workers, or another execution model.
 
 This is an initial design. The notation and types below are schematic rather
 than declarations in the current Catena syntax.
@@ -29,8 +27,7 @@ than declarations in the current Catena syntax.
   backend-specific lowering.
 
 Non-goals for the first version include dynamic task graphs, arbitrary
-cross-device communication, and a single cost model that works for every
-backend.
+cross-device communication, and scheduling optimization techniques.
 
 ## Contexts
 
@@ -40,12 +37,23 @@ processes. A process here is an abstract execution agent: it may lower to a GPU 
 The schedule body runs once in the caller and receives a _schedule context_.
 This is a handle used to submit work to the population. It contains:
 
-1. **Topology**: the hierarchy and extent of the execution, for example
+1. **Topology**: the hierarchy and size of the execution, for example
    `grid > group > warp > thread`.
 2. **Distribution policy**: how logical index spaces are assigned to the
    population.
-3. **Capabilities**: operations supported by the topology, such as group
-   barriers, shared storage, subgroup operations, or asynchronous copies.
+3. **Capabilities**: operations supported by the topology, e.g. shared memory.
+
+The schematic type signatures use two context parameters:
+
+```text
+p : physical topology
+c : execution-context identity
+```
+
+For example, `p` may be `groups(4, 4) > threads(16, 16)`. The parameter `c`
+identifies the context whose work is being submitted or synchronized; this is
+why `schedule-context c p`, `active-context c p`, and `pending c` agree on the
+same `c`. Neither parameter describes the logical index shape.
 
 The schedule context has no current thread, group, or lane position because
 the caller is not one of the parallel processes.
@@ -56,8 +64,8 @@ addition to the shared topology and capabilities, the active context gives
 each process access to:
 
 1. **Position**: its coordinates in the physical hierarchy.
-2. **Index assignment**: the logical indices or slots assigned to it by the
-   materialization.
+2. **Index assignment**: the indices in the distribution's state space that
+   are assigned to it by the materialization.
 
 The topology is not the logical shape of the data. A context with 256 physical
 threads may cover a logical space of 10,000 elements by assigning several
@@ -74,9 +82,47 @@ active.warp
 active.thread
 ```
 
-The schedule context and all active contexts produced from it share a
-generative identity. Pending work, group-local storage, and synchronization
-are tagged with that identity so an unrelated context cannot complete them.
+### Index-space notation
+
+An index-space shape may have any rank:
+
+> **Notation note:** Catena does not currently have a `Shape` type. `Shape k`
+> is introduced only as shorthand for expressing the rank and dimensions of
+> the index types in this document. It is not a proposal or requirement for
+> how shapes, index spaces, or `materialize` must be represented in a future
+> implementation.
+
+```text
+Shape k = Vec k u64
+n       : Shape k
+
+Ix n = {coord : Vec k u64 |
+        for every axis a, coord[a] < n[a]}
+
+size n = product(a in 0 ..< k, n[a]) : u64
+```
+
+`Ix (10)` and `Ix (64, 64)` are index types. Example values are:
+
+```text
+(1)     : Ix (10)
+(3, 49) : Ix (64, 64)
+```
+
+Likewise, `Ix (4, 8, 16)` is a three-dimensional index type. In the signatures
+below, `n` is a shape of the appropriate rank rather than a single size. `Ix n`
+is the Catena type of coordinates proven to be within that shape; it is not
+wrapped in a second `index` type. `size n` is the number of elements:
+
+```text
+size (n, m) = n * m
+size (n0, ..., nk-1) = n0 * ... * nk-1
+
+size (10) = 10
+size (64, 64) = 64 * 64 = 4096
+```
+
+This size determines the length of the flat buffer produced by `materialize`.
 
 ## The three primitives
 
@@ -96,36 +142,31 @@ processes and executes `body` once in the caller. The body receives the
 schedule-context handle `ctx`; it is not replicated over the parallel
 processes. Work reaches those processes through `materialize`.
 
-The context cannot escape the schedule body. Every pending operation submitted
-through it must be synchronized before the schedule ends. A backend realizes
-the population using its execution model, such as GPU threads, a worker pool,
-vector lanes, or a sequential loop.
-
 ### `materialize`
 
 At schedule scope:
 
 ```text
 materialize : schedule-context c p
-            × space s
-            × (active-context c p × slot s => t)
-           -> pending c (buf s t)
+            × (n : Shape k)
+            × (active-context c p × Ix n => t)
+           -> pending c (buf (size n) t)
 ```
 
-`materialize(ctx, space, producer)` distributes the logical space over the
+`materialize(ctx, n, producer)` distributes the logical shape `n` over the
 parallel processes represented by `ctx` and runs `producer` on them. The
-producer receives an active context and an assigned logical slot. Every logical index is produced exactly once.
-
-When every physical slot is active, the producer may bind the slot's logical
-index directly as a shorthand.
+producer receives an active context and an assigned index in the
+distribution's state space. The signature above is the common case in which
+the state shape is the logical shape `n`; the generalized semantics are
+described below. Each producer index has type `Ix n`.
 
 Inside a running producer, `materialize` can target an active subcontext:
 
 ```text
 materialize : active-context c p
-            × space s
-            × (slot s => t)
-           -> pending c (buf s t)
+            × (n : Shape k)
+            × (Ix n => t)
+           -> pending c (buf (size n) t)
 ```
 
 This form distributes nested work over processes already executing in that
@@ -163,6 +204,146 @@ scope must reach compatible sync points, and the operation provides the
 required memory visibility. `sync` is legal only when the context has the
 corresponding synchronization capability.
 
+## Materialize distribution strategies
+
+The context's distribution strategy defines how `materialize` relates the
+physical participants in the context to the logical indices `Ix n`. Each
+strategy defines a state shape `m`, whose indices `Ix m` drive producer
+execution. The state shape `m : Shape j` and logical shape `n : Shape k` may
+have different ranks. Conceptually:
+
+```text
+for n : Shape k, m : Shape j:
+
+materialize : context c p
+            × (n : Shape k)
+            × (active-context c p
+               × Ix m
+               × Option (Ix n)
+               => produced n t)
+           -> pending c (buf (size n) t)
+
+where m = state-shape(distribution(c), n)
+      logical-index : Ix m -> Option (Ix n)
+
+produced n t = produce(Ix n, t) | produce-nothing
+```
+
+`materialize` allocates a `buf (size n) t`, runs the producer according to
+the selected strategy, and passes the producer a product containing the active
+context, an `Ix m`, and the result of the strategy's `logical-index`
+projection. The `Ix m` type says which state shape the index ranges over; it is
+never an untyped candidate coordinate. The optional `Ix n` says whether that
+state is also a logical output index. The producer returns either
+`produce(logical, value)` for that logical index or `produce-nothing`.
+Across the whole context, every logical index `Ix n` must be produced
+exactly once. `materialize` linearizes that index according to the layout of
+`n` when storing the value in the flat `buf (size n) t`. When `m = n`, the
+projection is the identity and the shorter
+`(active-context c p × Ix n => t)` producer form may be used.
+
+### Perfect tiling
+
+A perfect tiling divides the logical space into tiles whose shape matches the
+physical group shape. The number of groups matches the number of logical
+tiles, so every physical thread corresponds to exactly one logical index. For
+example:
+
+```text
+physical     : groups(4, 4) > threads(16, 16)
+output_space : Shape 2 = (64, 64)
+
+group (gy, gx), thread (ty, tx)
+    -> (gy * 16 + ty, gx * 16 + tx) : Ix output_space
+```
+
+Here `4 × 4 × 16 × 16 = 64 × 64`, and all computed coordinates are within the
+logical bounds. The semantics of `materialize` are:
+
+```text
+for each physical thread:
+    logical = tiled-index(group.rank, thread.rank)
+    result[linearize(n, logical)] = producer(active, logical)
+```
+
+The state shape and logical shape are both `(64, 64)`, so `m = n`. The producer
+runs once per thread, its argument already has type `Ix (64, 64)`, and no
+bounds predicate is required.
+
+### Grid-stride distribution
+
+A grid-stride distribution linearizes the logical space. Physical thread `r`
+starts at logical offset `r` and repeatedly advances by `P`, the total number
+of physical threads, while the offset remains within the logical space. With
+four threads and `output_space : Shape 1 = (10)`:
+
+```text
+thread 0 -> [0, 4, 8] : sequence (Ix (10))
+thread 1 -> [1, 5, 9] : sequence (Ix (10))
+thread 2 -> [2, 6]    : sequence (Ix (10))
+thread 3 -> [3, 7]    : sequence (Ix (10))
+```
+
+The semantics of `materialize` are:
+
+```text
+for each physical thread with global rank r:
+    linear = r
+    while linear < size output_space:
+        logical = unlinearize(output_space, linear)  # Ix n
+        result[linear] = producer(active, logical)
+        linear += P
+```
+
+A thread may therefore run the producer several times. The loop condition is
+the proof required to convert the flat offset into `Ix n`; together, the
+threads cover every logical index exactly once. `unlinearize` works for any
+rank using the shape `n`, so the same loop can produce `Ix (rows, cols)` or a
+higher-dimensional index. As in perfect tiling, the state shape exposed to the
+producer is the logical shape; in the one-dimensional example,
+`m = n = (10)`.
+
+### Predicated distribution
+
+A predicated distribution rounds the physical coverage up to a convenient
+tile or group size. It dispatches every physical participant once, then tests
+whether that participant's state-space index also lies within the logical
+space. For predication, `m` and `n` have the same rank `k`, although their
+axis sizes may differ. For eight threads, `m = (8)` while
+`output_space : Shape 1 = (6)`:
+
+```text
+thread 0 -> 0 : Ix (8) -> Some(0 : Ix (6))
+thread 1 -> 1 : Ix (8) -> Some(1 : Ix (6))
+...
+thread 5 -> 5 : Ix (8) -> Some(5 : Ix (6))
+thread 6 -> 6 : Ix (8) -> None
+thread 7 -> 7 : Ix (8) -> None
+```
+
+The semantics of `materialize` are:
+
+```text
+for each physical thread:
+    state_index = physical-index(active)  # Ix m
+    within = for every axis a in 0 ..< k:
+                 state_index[a] < n[a]
+    logical = if within
+              then Some(refine(output_space, state_index))
+              else None
+    produced = producer(active, state_index, logical)
+    commit produced
+```
+
+The `within` condition is required. An `Ix m` from the padded state shape is
+not an `Ix n` until this check proves that all `k` coordinates are within
+their corresponding logical bounds.
+Indices that do not refine still run the producer so that all physical threads
+can participate in collective control flow. The producer must not return
+before a group barrier merely because its state index is outside `Ix n`; it
+produces nothing only after the collective work is complete. When `logical`
+is `Some(index)`, `produce` must use that same index.
+
 ## Basic examples
 
 ### CUDA-like launch
@@ -178,7 +359,58 @@ schedule dims, \launch_ctx ->
     return buf
 ```
 
-The schedule body runs once in the caller. `materialize` dispatches `kernel` to the parallel population and supplies each process with its active context and assigned logical indices. `sync(launch_ctx, pending_buf)` waits in the caller until the materialization is complete.
+The schedule body runs once in the caller. `launch_ctx` represents every
+thread in every group created by the launch. `materialize` dispatches `kernel`
+to that complete parallel population and supplies each process with its active
+context, assigned state-space indices, and their optional logical indices.
+
+The physical size of `launch_ctx` and the logical size of `output_space` must
+be compatible with the context's distribution policy. For example, an exact
+two-dimensional distribution may have these schematic types:
+
+```text
+p           = groups(4, 4) > threads(16, 16)
+launch_ctx  : schedule-context c p
+output_space: Shape 2 = (64, 64)
+active      : active-context c p
+index       : Ix output_space
+```
+
+There are `4 × 4 × 16 × 16 = 4096` threads and `64 × 64 = 4096`
+output elements. The distribution relates their two-dimensional shapes, and
+`materialize` gives the producer an `Ix (64, 64)`, matching the shape
+used to allocate the result.
+
+The distribution strategies above describe other compatible relationships
+between the physical launch and `output_space`. With a predicated CUDA
+distribution, the producer receives the full product because some physical
+threads have no logical index. The CUDA lowering must explicitly test the
+state-space index against the logical bounds before constructing the optional
+producer index:
+
+```text
+state_shape = (
+    gridDim.y * blockDim.y,
+    gridDim.x * blockDim.x)
+
+state_index = (
+    blockIdx.y * blockDim.y + threadIdx.y,
+    blockIdx.x * blockDim.x + threadIdx.x) : Ix state_shape
+
+logical = if state_index.y < output_space.rows
+          && state_index.x < output_space.cols
+          then Some(refine(output_space, state_index))
+          else None
+
+producer(active, state_index, logical)
+```
+
+Only the `Some` branch carries an index compatible with `output_space` and may
+commit an output element. Threads in the `None` branch still execute any group
+collectives in the kernel.
+
+`sync(launch_ctx, pending_buf)` waits in the caller until the materialization
+is complete.
 
 ### Cooperative loading within a group
 
@@ -192,9 +424,31 @@ kernel = \active, index ->
 ```
 
 The kernel is already running on the scheduled processes. The nested
-`materialize` distributes `tile_space` over the threads in the current group;
-it does not spawn more processes. No thread can observe `tile` until the group
-synchronization discharges `pending_tile`. The backend may place this buffer in CUDA shared memory when its size and lifetime permit it.
+`materialize` distributes `tile_space` over `group`, which represents all the
+threads in the current group and no threads from any other group; it does not
+spawn more processes. The number of threads in `group` and the size of
+`tile_space` must likewise be compatible with the distribution policy. For
+the launch above, one exact cooperative mapping has these types:
+
+```text
+group       : active-context g (threads(16, 16))
+tile_space  : Shape 2 = (16, 16)
+tile_index  : Ix tile_space
+pending_tile: pending g (buf (size tile_space) t)
+```
+
+The group contains 256 threads (`16 × 16`), and the tile contains 256 elements
+(`16 × 16`). The `tile_index` type matches `tile_space`, so it can index the
+resulting tile. An index from the outer `Ix (64, 64)` output space is not a
+tile index and cannot be substituted without an explicit conversion or
+refinement.
+
+A one-to-one cooperative load requires one thread per tile element; other
+policies may make each thread load several elements or make excess threads
+inactive for the load, while retaining them for collective synchronization.
+No thread can observe `tile` until the group synchronization discharges
+`pending_tile`. The backend may place this buffer in CUDA shared memory when
+its size and lifetime permit it.
 
 ### Sharing one barrier
 
@@ -238,36 +492,17 @@ active.lane.rank
 The context's distribution maps the two spaces:
 
 ```text
-distribution : physical participant -> sequence of logical indices
+distribution : physical participant
+            -> sequence (Ix m × Option (Ix n))
 ```
 
-For ten logical elements and four physical threads, a grid-stride
-distribution could be:
-
-```text
-thread 0 -> [0, 4, 8]
-thread 1 -> [1, 5, 9]
-thread 2 -> [2, 6]
-thread 3 -> [3, 7]
-```
-
-Conceptually, a caller-level `materialize` executes:
-
-```text
-materialize(launch_ctx, logical_space, f):
-    allocate result for logical_space
-    dispatch f to launch_ctx's parallel processes
-
-    on each process with active context:
-        for logical_slot in active.assigned_slots:
-            result[logical_slot.index] = f(active, logical_slot)
-
-    return pending(launch_ctx, result)
-```
-
-The physical thread rank selects the sequence, while `logical_slot.index`
-selects a result element. Changing the number of physical threads changes the
-distribution, but not the logical result.
+Depending on the strategy, a physical participant may receive exactly one
+logical index, a sequence of logical indices, or a state-space index whose
+optional logical index is `None`. The
+[materialize distribution strategies](#materialize-distribution-strategies)
+section defines how `materialize` invokes the producer and commits results in
+each case. Changing the physical topology may change that assignment, but it
+does not change the logical result.
 
 In a simple CUDA kernel these concepts are easily confused:
 
@@ -276,7 +511,10 @@ physical = block_rank * group_size + thread_rank
 logical_index = physical
 ```
 
-Their numeric values happen to be equal because this schedule uses a one-to-one mapping. The grid-stride example makes the difference apparent: one physical index is responsible for several logical indices.
+Their numeric values happen to be equal because this schedule uses a
+one-to-one mapping. They remain different types: another strategy may assign
+several logical indices to one physical thread or predicate a physical
+state-space index out of the logical space.
 
 The architecture keeps the logical and physical configuration distinct:
 
@@ -297,7 +535,7 @@ plan = parallel-plan(
 Every materialization supplies the logical space it distributes:
 
 ```text
-materialize(ctx, logical_space, producer)
+materialize(ctx, n, producer)
 ```
 
 ### Perfectly tiled matrix multiplication
@@ -336,9 +574,10 @@ plan = parallel-plan(
 )
 
 C = schedule plan, \launch_ctx ->
-    pending_C = materialize(launch_ctx, Ix (64, 64),
-      \(active, slot) ->
-        (row, col) = slot.logical
+    pending_C = materialize(launch_ctx, (64, 64),
+      \(active, index) ->
+        # index : Ix (64, 64)
+        (row, col) = index
         tile_row = row / 16
         tile_col = col / 16
         local_row = row % 16
@@ -348,10 +587,10 @@ C = schedule plan, \launch_ctx ->
         for k_tile in 0 ..< 4:
             group = active.group
 
-            pending_A = materialize(group, Ix (16, 16), \(r, k) ->
+            pending_A = materialize(group, (16, 16), \(r, k) ->
                 A[tile_row * 16 + r, k_tile * 16 + k])
 
-            pending_B = materialize(group, Ix (16, 16), \(k, c) ->
+            pending_B = materialize(group, (16, 16), \(k, c) ->
                 B[k_tile * 16 + k, tile_col * 16 + c])
 
             [A_tile, B_tile] = sync(group, [pending_A, pending_B])
@@ -405,29 +644,32 @@ The physical coverage is therefore `80 × 64`, but the logical result is only
 `70 × 50`. For example:
 
 ```text
-group (4, 3), thread (0, 0)   -> candidate logical index (64, 48), valid
-group (4, 3), thread (5, 1)   -> candidate logical index (69, 49), valid
-group (4, 3), thread (6, 1)   -> candidate logical index (70, 49), invalid
-group (4, 3), thread (0, 2)   -> candidate logical index (64, 50), invalid
-group (4, 3), thread (15, 15) -> candidate logical index (79, 63), invalid
+group (4, 3), thread (0, 0)   -> (64, 48) : Ix (80, 64), valid for C
+group (4, 3), thread (5, 1)   -> (69, 49) : Ix (80, 64), valid for C
+group (4, 3), thread (6, 1)   -> (70, 49) : Ix (80, 64), invalid for C
+group (4, 3), thread (0, 2)   -> (64, 50) : Ix (80, 64), invalid for C
+group (4, 3), thread (15, 15) -> (79, 63) : Ix (80, 64), invalid for C
 ```
 
-An invalid candidate is not a logical index of `C`; it is only a coordinate
-obtained from the physical tiling. It must never be used to index `C`.
+Each value is a valid index in the padded `Ix (80, 64)` state space. An index
+that does not refine to `Ix (70, 50)` is not a logical index of `C` and must
+never be used to index `C`.
 
-This case reveals an important synchronization requirement. Threads mapped to
-invalid output candidates cannot simply skip the kernel body: the other
-threads in their group execute `sync(group, ...)`, so all physical threads in
-the group must still participate. A tiled distribution therefore needs a
-_slot_ for every physical participant:
+This case reveals an important synchronization requirement. Threads whose
+state indices are outside the logical output cannot simply skip the kernel
+body: the other threads in their group execute `sync(group, ...)`, so all
+physical threads in the group must still participate. A
+tiled-and-predicated distribution
+therefore gives every physical participant a state-space index and includes
+the corresponding optional logical index directly in the producer product:
 
 ```text
-slot.candidate : integer coordinates
-slot.logical   : optional (Ix result_shape)
-slot.active    : whether slot.logical exists
+index   : Ix physical_coverage
+logical : Option (Ix result_shape)
 ```
 
-All slots execute collective operations. Only active slots produce output.
+All state-space indices execute collective operations. Only indices with
+`Some(logical)` produce output.
 The imperfectly tiled computation can then be written schematically as:
 
 ```text
@@ -442,31 +684,30 @@ C = schedule plan, \launch_ctx ->
     #
     # The physical topology covers Ix (80, 64), while the logical result is
     # only Ix (70, 50). materialize constructs the relation between them.
-    pending_C = materialize(launch_ctx, Ix (70, 50),
-      \(active, slot) ->
-        # active : active-context launch_ctx
-        # slot   : slot (logical = Ix (70, 50), physical = Ix (80, 64))
+    pending_C = materialize(launch_ctx, (70, 50),
+      \(active, index, logical) ->
+        # active  : active-context launch_ctx
+        # index   : Ix (80, 64)
+        # logical : Option (Ix (70, 50))
         #
-        # slot.candidate : Ix (80, 64)
-        # slot.logical   : Option (Ix (70, 50))
-        #
-        # slot.candidate cannot index C. To write C, we must obtain the
-        # Ix (70, 50) proof carried by Some(slot.logical).
-        (row, col) = slot.candidate
+        # index cannot index C. To write C, we must obtain the Ix (70, 50)
+        # proof carried by Some(logical).
+        (row, col) = index
         tile_row = row / 16
         tile_col = col / 16
         local_row = row % 16
         local_col = col % 16
 
         # local_row and local_col are each < 16 by the definition of `% 16`.
-        # This proves (local_row, local_col) : Ix (16, 16), so they can index
-        # the group-local tiles after synchronization.
+        # This proves:
+        #     (local_row, local_col) : Ix (16, 16)
+        # so the coordinate can index the group-local tiles after sync.
         acc = 0
 
         for k_tile in 0 ..< ceil(37 / 16):
             group = active.group
 
-            pending_A = materialize(group, Ix (16, 16), \(r, k) ->
+            pending_A = materialize(group, (16, 16), \(r, k) ->
                 # (r, k) : Ix (16, 16)
                 a_row = tile_row * 16 + r
                 a_col = k_tile * 16 + k
@@ -475,14 +716,14 @@ C = schedule plan, \launch_ctx ->
                 #     (a_row, a_col) : Ix (80, 48)
                 # This is a physical/padded index, not an Ix (70, 37), so it
                 # cannot index A directly.
-                match refine(Ix (70, 37), (a_row, a_col)):
+                match refine((70, 37), (a_row, a_col)):
                     # a_index : Ix (70, 37)
                     # The Some branch carries proofs a_row < 70 and
                     # a_col < 37.
                     Some(a_index) -> A[a_index]
                     None          -> 0)
 
-            pending_B = materialize(group, Ix (16, 16), \(k, c) ->
+            pending_B = materialize(group, (16, 16), \(k, c) ->
                 # (k, c) : Ix (16, 16)
                 b_row = k_tile * 16 + k
                 b_col = tile_col * 16 + c
@@ -491,7 +732,7 @@ C = schedule plan, \launch_ctx ->
                 #     (b_row, b_col) : Ix (48, 64)
                 # B requires Ix (37, 50), so the padded index must be refined
                 # before it can index B.
-                match refine(Ix (37, 50), (b_row, b_col)):
+                match refine((37, 50), (b_row, b_col)):
                     # b_index : Ix (37, 50)
                     # The Some branch carries proofs b_row < 37 and
                     # b_col < 50.
@@ -507,18 +748,18 @@ C = schedule plan, \launch_ctx ->
             # The sync proves that cooperative writes are complete and
             # visible to every physical thread in `group`.
 
-            # Every physical thread reaches the sync above. Inactive output
-            # slots may compute a value, but it will not be committed to C.
+            # Every physical thread reaches the sync above. State-space
+            # indices outside C may compute a value, but it is not committed.
             acc += dot(A_tile[local_row, :], B_tile[:, local_col])
 
             # Protect reads before reusing A_tile and B_tile.
             sync(group, [])
 
-        # Producing C requires a logical Ix (70, 50), not the physical
-        # slot.candidate. Exhaustive matching forces the inactive case.
+        # Producing C requires an Ix (70, 50), not the padded state-space
+        # index. Exhaustive matching forces the inactive case.
         # This could be part of materialize implementation
         # on the contrary of the other guards that must be in user program
-        return match slot.logical:
+        return match logical:
             # c_index : Ix (70, 50)
             Some(c_index) -> produce(c_index, acc)
             None          -> produce-nothing)
@@ -529,24 +770,26 @@ C = schedule plan, \launch_ctx ->
 
 The zero values on out-of-bounds tile loads are padding in the physical
 execution. They do not add elements to the logical matrices. The exhaustive
-match on `slot.logical` makes `materialize` commit exactly one value for each
-valid logical index and nothing for inactive physical slots.
+match on `logical` makes `materialize` commit exactly one value for each valid
+logical index and nothing for state-space indices outside the result.
 
-Materialization uses a slot so imperfect coverage does not remove physical
+Materialization passes the state and logical indices as separate components of
+the producer's input product, so imperfect coverage does not remove physical
 participants from collective control flow:
 
 ```text
-slot s = candidate-coordinate × optional (ix s)
-
 materialize : schedule-context c p
-           × space s
-           × (active-context c p × slot s => produced t)
-          -> pending c (buf s t)
+            × (n : Shape k)
+            × (active-context c p
+               × Ix m
+               × Option (Ix n)
+               => produced n t)
+           -> pending c (buf (size n) t)
 ```
 
-For perfect coverage, every slot contains a logical index. For imperfect
-coverage, inactive slots execute the producer but do not commit a value to the
-result. The governing semantic rule is:
+For perfect coverage, every state index has a logical index. For imperfect
+coverage, state indices without a logical index execute the producer but do
+not commit a value to the result. The governing semantic rule is:
 
 > Physical participants may be inactive with respect to logical output, but
 > they must remain active with respect to collective control flow.
@@ -600,8 +843,8 @@ checking when the selected context cannot provide it.
 Catena already represents a logical tensor or multidimensional view as an
 indexed closure and materializes it into a flat, dependently sized buffer. This proposal retains that model. It adds an explicit execution context to describe _who_ evaluates the indexed closure and a `pending` phase to describe _when_ the result is safe to observe.
 
-The existing source-level primitive:
+The rank-polymorphic source-level primitive is written consistently as:
 
 ```text
-materialize : (n : u64) × (ix n => t) -> buf n t
+materialize : (n : Shape k) × (Ix n => t) -> buf (size n) t
 ```

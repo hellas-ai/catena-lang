@@ -172,6 +172,12 @@ schedule plan, \launch_ctx ->
         block = ctx.block
         A_tile = allocate(block, tile_size * tile_size, f32)
         B_tile = allocate(block, tile_size * tile_size, f32)
+
+        # block.shape = (tile_size, tile_size)
+        # size(block) = tile_size * tile_size
+        #             = size(A_tile) = size(B_tile)
+        # The block is two-dimensional; both tile buffers are linear.
+
         acc = 0
 
         for k_tile: Ix (k / tile_size)

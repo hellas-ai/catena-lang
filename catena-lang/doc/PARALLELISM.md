@@ -119,18 +119,19 @@ Three primitives connect the topology, workers, and logical work.
 `schedule` establishes the physical worker organization. Its body runs once
 in the caller and receives a context for that worker population.
 
-`materialize` submits a _task_ through a context. The task is the unit
-of work executed by workers. Each task invocation receives a context and
-performs the logical work assigned to its worker. A worker may be
+`materialize` runs a _task_ in a context. The task is the unit
+of work executed by the workers in context. Each task invocation receives a context and performs the logical work assigned to its worker. A worker may be
 assigned one work item, several work items, or no output item. `materialize`
 collects the results into a buffer but returns it as pending, because the work
-may still be executing. A task may also obtain a block context and
-start cooperative work, such as filling shared memory.
+may still be executing.
 
 `sync` completes pending work associated with a context and makes its results
 safe to observe. For a grid context it may wait for a kernel. For a block
 context it is a collective operation reached by all workers in
 the block, for example after they have cooperatively filled shared memory.
+
+`allocate` TBD
+
 Together, `schedule` chooses the worker organization, `materialize` states the
 task and its logical result, and `sync` states when that result may be used.
 
@@ -441,6 +442,49 @@ becomes r is syntactic sugar for:
 storage = allocate(launch_ctx, shape, result_type)
 materialize(storage, task)
 ```
+
+#### Shared-buffer state and loop-carried synchronization
+
+We want the type system to require collective synchronization before shared storage is overwritten while peer workers may still be reading it. For example, in the tiled matmul example, the second sync prevents faster workers to overwrite shared memory while others are still reading, in the native implementation the type system doesn't force the second sync that can be omitted introducing a race condition.
+
+The allocation remains alive across the iterations that use it, while its
+handle changes state as each generation of its contents is produced and
+consumed:
+
+```text
+             materialize              sync
+writable ─────────────────→ pending ─────────→ readable
+    ↑                                             │
+    └──────────── collective release ─────────────┘
+```
+
+The handles are affine: they cannot be duplicated, but a readable handle may
+be discarded when its storage will not be reused. The second synchronization
+is therefore required on a loop backedge, but not after the final use of the
+buffer.
+
+The current `reduce` takes an independent producer `Ix n => A`, so it cannot
+pass a buffer handle from one iteration to the next. A state-carrying fold
+could instead have a type schematically like:
+
+```text
+fold : S
+     ● (S * Ix n => S)
+     ● (n : u64)
+    -> S
+
+S = accumulator
+  * writable A_tile
+  * writable B_tile
+```
+
+The fold body consumes `S` at the start of an iteration. Taking the backedge
+requires it to return another `S`. Because `S` contains writable tile handles,
+the body can construct that result only by collectively releasing the readable
+handles produced during the iteration. A final form of the combinator should
+distinguish the backedge result from the final result, allowing the last
+iteration to discard its readable handles instead of performing an unnecessary
+release barrier.
 
 ### Note: non-perfect tiling
 

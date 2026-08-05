@@ -170,8 +170,13 @@ schedule plan, \launch_ctx ->
     # The materialize context must match the buffer's allocation context.
     # C_storage is owned by the launch/grid context, so it is global memory.
     pending_C = materialize(launch_ctx, C_storage,
-      \(ctx, output_index: Ix (n * m)) ->
-        block = ctx.block
+      \(grid_ctx, grid_worker, output_index: Ix (n * m)) ->
+        # grid_ctx = launch_ctx
+        # grid_worker : live grid_ctx
+        (block, block_worker) = current_block(grid_ctx, grid_worker)
+        # block        : context for the current block
+        # block_worker : live block
+
         A_tile = allocate(block, tile_size * tile_size, f32)
         B_tile = allocate(block, tile_size * tile_size, f32)
 
@@ -191,21 +196,24 @@ schedule plan, \launch_ctx ->
             B_tile : writable block (
                 buf cap.own (tile_size * tile_size) f32)
         do
-            # Each tile task receives a context for its current worker. It
-            # identifies the same worker as the surrounding block context:
-            #     worker_ctx.path  = block.path
-            #     worker_ctx.index = block.index
-            #     tile_index = linearize(worker_ctx.shape, worker_ctx.index)
+            # Each tile task receives the materialize context and separate
+            # evidence identifying the live worker in that context.
             pending_A = materialize(block, A_tile,
-              \(worker_ctx, tile_index: Ix (tile_size * tile_size)) ->
-                (tile_row, tile_col) = worker_ctx.index
-                (block_row, _) = worker_ctx.path.block
+              \(block_ctx, worker, tile_index: Ix (tile_size * tile_size)) ->
+                # block_ctx = block
+                # worker : live block_ctx
+                # tile_index = linearize(block_ctx.shape, worker.index)
+                (tile_row, tile_col) = worker.index
+                (block_row, _) = worker.path.block
                 A[(block_row * tile_size + tile_row,
                    k_tile * tile_size + tile_col)])
             pending_B = materialize(block, B_tile,
-              \(worker_ctx, tile_index: Ix (tile_size * tile_size)) ->
-                (tile_row, tile_col) = worker_ctx.index
-                (_, block_col) = worker_ctx.path.block
+              \(block_ctx, worker, tile_index: Ix (tile_size * tile_size)) ->
+                # block_ctx = block
+                # worker : live block_ctx
+                # tile_index = linearize(block_ctx.shape, worker.index)
+                (tile_row, tile_col) = worker.index
+                (_, block_col) = worker.path.block
                 B[(k_tile * tile_size + tile_row,
                    block_col * tile_size + tile_col)])
 
@@ -219,7 +227,7 @@ schedule plan, \launch_ctx ->
             #     buf cap.own (tile_size * tile_size) f32)
 
             acc = accumulate(
-                acc, A_ready, B_ready, block.index)
+                acc, A_ready, B_ready, block_worker.index)
 
             [A_tile, B_tile] = sync(
                 block, [A_ready, B_ready])
@@ -235,11 +243,13 @@ schedule plan, \launch_ctx ->
 Passing `launch_ctx` to `materialize` dispatches the task that fills
 `C_storage` across the grid. Passing `block` performs the materializations of
 `A_tile` and `B_tile` collectively and locally among the already-running block
-workers. All three buffers and their callback indices are linear; a callback
-may construct a shaped view when it needs multidimensional coordinates. The
-tiles remain allocated across the loop: `sync` makes their cells readable,
-while the second `sync` proves that all workers have finished reading and
-returns the same buffers as writable for the next iteration.
+workers. Each callback receives the input execution context and separate
+`live` evidence containing the current worker's path and scoped index. All
+three buffers and their callback indices are linear; a callback may construct
+a shaped view when it needs multidimensional coordinates. The tiles remain
+allocated across the loop: `sync` makes their cells readable, while the second
+`sync` proves that all workers have finished reading and returns the same
+buffers as writable for the next iteration.
 
 ## Context
 

@@ -1,0 +1,68 @@
+# Multiply two row-major f32 memories using perfectly tiled GPU execution.
+#
+# Inputs, in order:
+#   - A: an n x k matrix stored in a flat mem;
+#   - B: a k x m matrix stored in a flat mem;
+#   - n: the number of rows of A and C;
+#   - k: the number of columns of A and rows of B;
+#   - m: the number of columns of B and C;
+#   - tile-size: the tile width and height;
+#   - n*k, k*m, and n*m: the flat matrix lengths;
+#   - tile-size*tile-size: the block-local tile capacity.
+#
+# As in the naive matmul fixture, product lengths are explicit typed arguments.
+# This records their relationships to the dimensions without requiring the
+# language to prove facts about runtime multiplication. For now, tile-size must
+# divide n, k, and m. The wrapper checks the input lengths, builds row-major
+# views, then delegates launch and materialization. The kernel derives only the
+# number of k-tile iterations from k and tile-size.
+(def program tiled-matmul-via-mem :
+  ([n k m tile-size.] {
+    (cap.ref mem)
+    (cap.ref mem)
+    ({[.n] u64} :)
+    ({[.k] u64} :)
+    ({[.m] u64} :)
+    ({[.tile-size] u64} :)
+    ({({[.n k]} *) u64} :)
+    ({({[.k m]} *) u64} :)
+    ({({[.n m]} *) u64} :)
+    ({({[.tile-size tile-size]} *) u64} :)
+  })
+  ->
+  ([n k m tile-size.] (cap.own mem))
+= {[a-mem b-mem n-len k-len m-len tile-size
+    nk-len km-len nm-len tile-element-count.]
+  ([.n-len] u64.copies2 [a-rows materialize-n.])
+  ([.k-len] u64.copies3 [a-cols b-rows materialize-k.])
+  ([.m-len] u64.copies2 [b-cols materialize-m.])
+
+  ([.a-mem] mem.cast.f32 [actual-nk-len a-raw.])
+  ([.b-mem] mem.cast.f32 [actual-km-len b-raw.])
+  ({[.nk-len] [.actual-nk-len]} u64.eq
+    [a-len-eq if-a-len-eq _if-a-len-ne.])
+  ({[.km-len] [.actual-km-len]} u64.eq
+    [b-len-eq if-b-len-eq _if-b-len-ne.])
+  ({[.a-len-eq] [.if-a-len-eq]} assert-then [a-same-length.])
+  ({[.b-len-eq] [.if-b-len-eq]} assert-then [b-same-length.])
+  ({[.a-raw] [.a-same-length]} buf.f32.cast-same-length [a.])
+  ({[.b-raw] [.b-same-length]} buf.f32.cast-same-length [b.])
+
+  ({([.nk-len] :.param) [.a]} partial.f32.row-major.flat-at.1 [a-flat.])
+  ({[.a-rows] [.a-cols] [.a-flat]} f32.row-major.matrix-view [a-view.])
+  ({([.km-len] :.param) [.b]} partial.f32.row-major.flat-at.1 [b-flat.])
+  ({[.b-rows] [.b-cols] [.b-flat]} f32.row-major.matrix-view [b-view.])
+
+  ([.nm-len] u64.copies2 [output-len mem-len.])
+  ({
+    [.materialize-n]
+    [.materialize-m]
+    [.materialize-k]
+    [.output-len]
+    [.tile-size]
+    [.tile-element-count]
+    [.a-view]
+    [.b-view]
+  } gpu.f32.tiled-matmul.row-major.materialize [result.])
+  ({[.mem-len] [.result]} buf.to-mem)
+})

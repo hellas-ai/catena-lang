@@ -29,49 +29,47 @@
 })
 
 (theory program type {
-  # Construct a GPU execution plan. The three runtime values configure the
-  # grid, block, and thread levels respectively. `gpu.3d` is not yet indexed,
-  # so their runtime values are not statically related to the topology dims.
-  (arr gpu.plan : {[
-    c
-    grid-shape grid-size
-    block-shape block-size
-    thread-shape thread-size.
+  (arr gpu.grid.type : [] -> gpu.grid)
+  (arr gpu.block.type : [] -> gpu.block)
+
+  # Build a physical 2D grid -> 2D block GPU plan entirely from the generic
+  # parallel shape and topology constructors.
+  (def gpu.launch-config.2d : {[
+    grid-x grid-y block-x block-y.
   ]
-    (gpu.3d val)
-    (gpu.3d val)
-    (gpu.3d val)
+    ({[.grid-x] u64} :)
+    ({[.grid-y] u64} :)
+    ({[.block-x] u64} :)
+    ({[.block-y] u64} :)
   }
   ->
-  ([
-    c
-    grid-shape grid-size
-    block-shape block-size
-    thread-shape thread-size.
-  ]
-    ({
-      [.c]
-      ({
+  ([grid-x grid-y block-x block-y.]
+    (({
         gpu.grid
-        ({[.grid-shape grid-size]} dims)
+        ({({[.grid-x grid-y]} shape.2d) ({[.grid-x grid-y]} *)} dims)
         ({
           gpu.block
-          ({[.block-shape block-size]} dims)
-          ({
-            gpu.thread
-            ({[.thread-shape thread-size]} dims)
-            topo.end
-          } topo.level)
+          ({({[.block-x block-y]} shape.2d) ({[.block-x block-y]} *)} dims)
+          topo.end
         } topo.level)
       } topo.level)
-    } parallel.plan)))
+    parallel.plan))
+  = ([grid-x grid-y block-x block-y.]
+    ({[.grid-x] [.grid-y]} shape.2d [grid-shape.])
+    ({[.block-x] [.block-y]} shape.2d [block-shape.])
+    (topo.end [end-plan.])
+    ({gpu.block.type [.block-shape] [.end-plan]}
+      topo.level [block-plan.])
+    ({gpu.grid.type [.grid-shape] [.block-plan]}
+      topo.level)
+  ))
 
   # Scope a grid worker to its containing block.
   (def gpu.current-block : {[
-    c p grid-shape grid-size block-shape block-size rest.
+    p grid-shape grid-size block-shape block-size rest.
   ]
     ({
-      [.c p]
+      [.p]
       ({
         gpu.grid
         ({[.grid-shape grid-size]} dims)
@@ -83,7 +81,7 @@
       } topo.level)
     } context)
     ({
-      [.c p]
+      [.p]
       ({
         gpu.grid
         ({[.grid-shape grid-size]} dims)
@@ -96,9 +94,9 @@
     } worker)
   }
   ->
-  ([c p grid-shape grid-size block-shape block-size rest.] {
+  ([p grid-shape grid-size block-shape block-size rest.] {
     ({
-      [.c p]
+      [.p]
       ({
         gpu.block
         ({[.block-shape block-size]} dims)
@@ -106,7 +104,7 @@
       } topo.level)
     } context)
     ({
-      [.c p]
+      [.p]
       ({
         gpu.block
         ({[.block-shape block-size]} dims)

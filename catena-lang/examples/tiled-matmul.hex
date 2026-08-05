@@ -15,41 +15,41 @@
 (theory program type {
   # Map one cooperative A-tile load to its source matrix coordinate.
   (arr gpu.tiled-matmul.a-tile-to-matrix-index :
-    {[c p s z q n k r.]
-      ({[.c p] ({gpu.block ({[.s z]} dims) [.q]} topo.level)} context)
-      ({[.c p] ({gpu.block ({[.s z]} dims) [.q]} topo.level)} worker)
+    {[p s z q n k tile-size.]
+      ({[.p] ({gpu.block ({[.s z]} dims) [.q]} topo.level)} context)
+      ({[.p] ({gpu.block ({[.s z]} dims) [.q]} topo.level)} worker)
       (u64 val) # k tile
-      ({[.r] u64} :) # tile size
+      ({[.tile-size] u64} :)
       ([.z] ix val) # cooperative tile index
     }
     ->
-    ([c p s z q n k r.] {([.n] ix val) ([.k] ix val)} *))
+    ([p s z q n k tile-size.] {([.n] ix val) ([.k] ix val)} *))
 
   # Map one cooperative B-tile load to its source matrix coordinate.
   (arr gpu.tiled-matmul.b-tile-to-matrix-index :
-    {[c p s z q k m r.]
-      ({[.c p] ({gpu.block ({[.s z]} dims) [.q]} topo.level)} context)
-      ({[.c p] ({gpu.block ({[.s z]} dims) [.q]} topo.level)} worker)
+    {[p s z q k m tile-size.]
+      ({[.p] ({gpu.block ({[.s z]} dims) [.q]} topo.level)} context)
+      ({[.p] ({gpu.block ({[.s z]} dims) [.q]} topo.level)} worker)
       (u64 val) # k tile
-      ({[.r] u64} :) # tile size
+      ({[.tile-size] u64} :)
       ([.z] ix val) # cooperative tile index
     }
     ->
-    ([c p s z q k m r.] {([.k] ix val) ([.m] ix val)} *))
+    ([p s z q k m tile-size.] {([.k] ix val) ([.m] ix val)} *))
 })
 
 # Load one element of A into the current block's shared tile.
 (def program gpu.tiled-matmul.load-a :
-  ([c p s z q n k r.] {
+  ([p s z q n k tile-size.] {
     ({({([.n] ix val) ([.k] ix val)} *) (f32 val)} =>)
     (u64 val) # k tile
-    ({[.r] u64} :) # tile size
-    ({[.c p] ({gpu.block ({[.s z]} dims) [.q]} topo.level)} context)
-    ({[.c p] ({gpu.block ({[.s z]} dims) [.q]} topo.level)} worker)
+    ({[.tile-size] u64} :)
+    ({[.p] ({gpu.block ({[.s z]} dims) [.q]} topo.level)} context)
+    ({[.p] ({gpu.block ({[.s z]} dims) [.q]} topo.level)} worker)
     ([.z] ix val)
   })
   ->
-  ([c p s z q n k r.] (f32 val))
+  ([p s z q n k tile-size.] (f32 val))
 = ([a k-tile tile-size block-context worker tile-index.]
   ({
     ({
@@ -68,16 +68,16 @@
 
 # Load one element of B into the current block's shared tile.
 (def program gpu.tiled-matmul.load-b :
-  ([c p s z q k m r.] {
+  ([p s z q k m tile-size.] {
     ({({([.k] ix val) ([.m] ix val)} *) (f32 val)} =>)
     (u64 val) # k tile
-    ({[.r] u64} :) # tile size
-    ({[.c p] ({gpu.block ({[.s z]} dims) [.q]} topo.level)} context)
-    ({[.c p] ({gpu.block ({[.s z]} dims) [.q]} topo.level)} worker)
+    ({[.tile-size] u64} :)
+    ({[.p] ({gpu.block ({[.s z]} dims) [.q]} topo.level)} context)
+    ({[.p] ({gpu.block ({[.s z]} dims) [.q]} topo.level)} worker)
     ([.z] ix val)
   })
   ->
-  ([c p s z q k m r.] (f32 val))
+  ([p s z q k m tile-size.] (f32 val))
 = ([b k-tile tile-size block-context worker tile-index.]
   ({
     ({
@@ -96,15 +96,15 @@
 
 # Produce one product in the dot product for the current output worker.
 (def program gpu.tiled-matmul.tile-product-at :
-  ([c p s z q r.] {
+  ([p s z q tile-size.] {
     ({cap.own [.z] f32} buf val)
     ({cap.own [.z] f32} buf val)
-    ({[.c p] ({gpu.block ({[.s z]} dims) [.q]} topo.level)} worker)
-    ({[.r] u64} :) # tile size
-    ([.r] ix val)
+    ({[.p] ({gpu.block ({[.s z]} dims) [.q]} topo.level)} worker)
+    ({[.tile-size] u64} :)
+    ([.tile-size] ix val)
   })
   ->
-  ([c p s z q r.] (f32 val))
+  ([p s z q tile-size.] (f32 val))
 = ([a-tile b-tile block-worker tile-size j.]
   ({[.block-worker] [.j] [.tile-size]}
     gpu.tiled-matmul.tile-indices
@@ -118,22 +118,22 @@
 # cooperatively, become bare buffers after await, and become writable again
 # after release.
 (def program gpu.tiled-matmul.tile-step :
-  ([c p s z q n k m k-tiles r.] {
+  ([p s z q n k m k-tiles tile-size.] {
     ({({([.n] ix val) ([.k] ix val)} *) (f32 val)} =>)
     ({({([.k] ix val) ([.m] ix val)} *) (f32 val)} =>)
-    ({[.r] u64} :) # tile size
-    ({[.c p] ({gpu.block ({[.s z]} dims) [.q]} topo.level)} context)
-    ({[.c p] ({gpu.block ({[.s z]} dims) [.q]} topo.level)} worker)
+    ({[.tile-size] u64} :)
+    ({[.p] ({gpu.block ({[.s z]} dims) [.q]} topo.level)} context)
+    ({[.p] ({gpu.block ({[.s z]} dims) [.q]} topo.level)} worker)
     ({
       ({
         (f32 val)
         ({
           ({
-            ({[.c p] ({gpu.block ({[.s z]} dims) [.q]} topo.level)} context)
+            ({[.p] ({gpu.block ({[.s z]} dims) [.q]} topo.level)} context)
             ({cap.own [.z] f32} buf)
           } writable val)
           ({
-            ({[.c p] ({gpu.block ({[.s z]} dims) [.q]} topo.level)} context)
+            ({[.p] ({gpu.block ({[.s z]} dims) [.q]} topo.level)} context)
             ({cap.own [.z] f32} buf)
           } writable val)
         } *)
@@ -142,16 +142,16 @@
     } *)
   })
   ->
-  ([c p s z q n k m k-tiles r.]
+  ([p s z q n k m k-tiles tile-size.]
     ({
       (f32 val)
       ({
         ({
-          ({[.c p] ({gpu.block ({[.s z]} dims) [.q]} topo.level)} context)
+          ({[.p] ({gpu.block ({[.s z]} dims) [.q]} topo.level)} context)
           ({cap.own [.z] f32} buf)
         } writable val)
         ({
-          ({[.c p] ({gpu.block ({[.s z]} dims) [.q]} topo.level)} context)
+          ({[.p] ({gpu.block ({[.s z]} dims) [.q]} topo.level)} context)
           ({cap.own [.z] f32} buf)
         } writable val)
       } *)
@@ -225,38 +225,36 @@
 
 # Compute one output cell on one grid worker.
 (def program gpu.tiled-matmul.cell.kernel :
-  ([c q n k m k-tiles r.] {
+  ([q n k m k-tiles tile-size.] {
     ({({([.n] ix val) ([.k] ix val)} *) (f32 val)} =>)
     ({({([.k] ix val) ([.m] ix val)} *) (f32 val)} =>)
-    ({({[.r r]} *) u64} :) # tile element count
+    ({({[.tile-size tile-size]} *) u64} :) # tile element count
     ({[.k-tiles] u64} :)
-    ({[.r] u64} :) # tile size
+    ({[.tile-size] u64} :)
     ({
       ({
-        [.c]
         ({
           gpu.grid
           ({({[.n m]} shape.2d) ({[.n m]} *)} dims)
-          ({gpu.block ({({[.r r]} shape.2d) ({[.r r]} *)} dims) [.q]} topo.level)
+          ({gpu.block ({({[.tile-size tile-size]} shape.2d) ({[.tile-size tile-size]} *)} dims) [.q]} topo.level)
         } topo.level)
         ({
           gpu.grid
           ({({[.n m]} shape.2d) ({[.n m]} *)} dims)
-          ({gpu.block ({({[.r r]} shape.2d) ({[.r r]} *)} dims) [.q]} topo.level)
+          ({gpu.block ({({[.tile-size tile-size]} shape.2d) ({[.tile-size tile-size]} *)} dims) [.q]} topo.level)
         } topo.level)
       } context)
       ({
         ({
-          [.c]
           ({
             gpu.grid
             ({({[.n m]} shape.2d) ({[.n m]} *)} dims)
-            ({gpu.block ({({[.r r]} shape.2d) ({[.r r]} *)} dims) [.q]} topo.level)
+            ({gpu.block ({({[.tile-size tile-size]} shape.2d) ({[.tile-size tile-size]} *)} dims) [.q]} topo.level)
           } topo.level)
           ({
             gpu.grid
             ({({[.n m]} shape.2d) ({[.n m]} *)} dims)
-            ({gpu.block ({({[.r r]} shape.2d) ({[.r r]} *)} dims) [.q]} topo.level)
+            ({gpu.block ({({[.tile-size tile-size]} shape.2d) ({[.tile-size tile-size]} *)} dims) [.q]} topo.level)
           } topo.level)
         } worker)
         (({[.n m]} *) ix val)
@@ -264,7 +262,7 @@
     } *)
   })
   ->
-  ([c q n k m k-tiles r.] (f32 val))
+  ([q n k m k-tiles tile-size.] (f32 val))
 = {[a b tile-count k-tiles tile-size task.]
   ([.task] *.elim [grid-context worker-and-index.])
   ([.worker-and-index] *.elim [grid-worker output-index.])
@@ -272,11 +270,11 @@
     gpu.current-block
     [block-context block-worker.])
 
-  ({[.block-context] [.tile-count] f32.type}
+  ({[.block-context] [.tile-count]}
     parallel.allocate
     [block-context a-tile.])
 
-  ({[.block-context] [.tile-count] f32.type}
+  ({[.block-context] [.tile-count]}
     parallel.allocate
     [block-context b-tile.])
 
@@ -306,29 +304,24 @@
 
 # Schedule the grid, allocate C, materialize its cells, then wait for the grid.
 (def program gpu.tiled-matmul :
-  ([n k m k-tiles r.] {
+  ([n k m k-tiles tile-size.] {
     ({({([.n] ix val) ([.k] ix val)} *) (f32 val)} =>)
     ({({([.k] ix val) ([.m] ix val)} *) (f32 val)} =>)
     ({({[.n m]} *) u64} :)
-    ({({[.r r]} *) u64} :) # tile element count
+    ({({[.tile-size tile-size]} *) u64} :) # tile element count
     ({[.k-tiles] u64} :)
-    ({[.r] u64} :) # tile size
-    (gpu.3d val) # grid dimensions
-    (gpu.3d val) # block dimensions
-    (gpu.3d val) # thread dimensions
+    ({[.tile-size] u64} :)
+    ({[.n] u64} :) # physical grid x
+    ({[.m] u64} :) # physical grid y
   })
   ->
-  ([n k m k-tiles r.]
+  ([n k m k-tiles tile-size.]
     ({cap.own ({[.n m]} *) f32} buf val))
 = {[a b output-len tile-count k-tiles tile-size
-    grid-dims block-dims thread-dims.]
-  ({
-    [.grid-dims]
-    [.block-dims]
-    [.thread-dims]
-  }
-  gpu.plan
-  [plan.])
+    grid-x grid-y.]
+  ([.tile-size] u64.copies3 [kernel-tile-size block-x block-y.])
+  ({[.grid-x] [.grid-y] [.block-x] [.block-y]}
+    gpu.launch-config.2d [plan.])
 
   ([.plan] parallel.schedule [launch-context.])
 
@@ -337,12 +330,12 @@
     [.b]
     [.tile-count]
     [.k-tiles]
-    [.tile-size]
+    [.kernel-tile-size]
   }
   partial.gpu.tiled-matmul.cell.kernel.5
   [cell-kernel.])
 
-  ({[.launch-context] [.output-len] f32.type}
+  ({[.launch-context] [.output-len]}
     parallel.allocate
     [launch-context c-buffer.])
 

@@ -1,0 +1,245 @@
+# Perfectly tiled f32 matrix multiplication.
+#
+# The physical grid shape is independent of the logical n x m output shape.
+# Each block has shape tile-size x tile-size and therefore
+# tile-size*tile-size workers.
+
+(theory program type {
+  # Construct one iteration of the k-tile fold. Keeping the captured values
+  # in this interface makes every topology metavariable inferable before the
+  # resulting closure is passed to fold.
+  (arr gpu.f32.tiled-matmul.tile-step-closure :
+    {[p s z n k m k-tiles tile-size.]
+      ({({([.n] ix val) ([.k] ix val)} *) (f32 val)} =>)
+      ({({([.k] ix val) ([.m] ix val)} *) (f32 val)} =>)
+      ({([.n] ix val) ([.m] ix val)} *)
+      ({[.tile-size] u64} :)
+      ({[.k-tiles] u64} :)
+      ({[.p] ({gpu.block ({[.s z]} dims) topo.end} topo.level)} context)
+      ({[.p] ({gpu.block ({[.s z]} dims) topo.end} topo.level)} worker)
+    }
+    ->
+    ([p s z n k m k-tiles tile-size.]
+      ({
+        ({
+          ({
+            (f32 val)
+            ({
+              ({
+                ({[.p] ({gpu.block ({[.s z]} dims) topo.end} topo.level)} context)
+                ({cap.own [.z] f32} buf)
+              } writable val)
+              ({
+                ({[.p] ({gpu.block ({[.s z]} dims) topo.end} topo.level)} context)
+                ({cap.own [.z] f32} buf)
+              } writable val)
+            } *)
+          } *)
+          ([.k-tiles] ix val)
+        } *)
+        ({
+          (f32 val)
+          ({
+            ({
+              ({[.p] ({gpu.block ({[.s z]} dims) topo.end} topo.level)} context)
+              ({cap.own [.z] f32} buf)
+            } writable val)
+            ({
+              ({[.p] ({gpu.block ({[.s z]} dims) topo.end} topo.level)} context)
+              ({cap.own [.z] f32} buf)
+            } writable val)
+          } *)
+        } *)
+      } =>)))
+
+  # Closure-converted form of the cell kernel. The grid witnesses determine
+  # the physical input topology; the closure still receives a logical C index.
+  (arr gpu.f32.tiled-matmul.cell.kernel-closure : {[
+    grid-x grid-y n k m tile-size.
+  ]
+    ({({([.n] ix val) ([.k] ix val)} *) (f32 val)} =>)
+    ({({([.k] ix val) ([.m] ix val)} *) (f32 val)} =>)
+    ({[.k] u64} :)
+    ({[.tile-size] u64} :)
+    ({({[.tile-size tile-size]} *) u64} :)
+    ({[.grid-x] u64} :)
+    ({[.grid-y] u64} :)
+  }
+  ->
+  ([grid-x grid-y n k m tile-size.]
+    ({
+      ({
+        ({
+          ({
+            gpu.grid
+            ({({[.grid-x grid-y]} shape.2d) ({[.grid-x grid-y]} *)} dims)
+            ({gpu.block ({({[.tile-size tile-size]} shape.2d) ({[.tile-size tile-size]} *)} dims) topo.end} topo.level)
+          } topo.level)
+          ({
+            gpu.grid
+            ({({[.grid-x grid-y]} shape.2d) ({[.grid-x grid-y]} *)} dims)
+            ({gpu.block ({({[.tile-size tile-size]} shape.2d) ({[.tile-size tile-size]} *)} dims) topo.end} topo.level)
+          } topo.level)
+        } context)
+        ({
+          ({
+            ({
+              gpu.grid
+              ({({[.grid-x grid-y]} shape.2d) ({[.grid-x grid-y]} *)} dims)
+              ({gpu.block ({({[.tile-size tile-size]} shape.2d) ({[.tile-size tile-size]} *)} dims) topo.end} topo.level)
+            } topo.level)
+            ({
+              gpu.grid
+              ({({[.grid-x grid-y]} shape.2d) ({[.grid-x grid-y]} *)} dims)
+              ({gpu.block ({({[.tile-size tile-size]} shape.2d) ({[.tile-size tile-size]} *)} dims) topo.end} topo.level)
+            } topo.level)
+          } worker)
+          ({([.n] ix val) ([.m] ix val)} *)
+        } *)
+      } *)
+      (f32 val)
+    } =>)))
+})
+
+# Compute one logical C cell selected independently of the physical worker.
+(def program gpu.f32.tiled-matmul.cell.kernel :
+  ([grid-x grid-y n k m tile-size.] {
+    ({({([.n] ix val) ([.k] ix val)} *) (f32 val)} =>)
+    ({({([.k] ix val) ([.m] ix val)} *) (f32 val)} =>)
+    ({[.k] u64} :)
+    ({[.tile-size] u64} :)
+    ({({[.tile-size tile-size]} *) u64} :)
+    ({
+      ({
+        ({
+          gpu.grid
+          ({({[.grid-x grid-y]} shape.2d) ({[.grid-x grid-y]} *)} dims)
+          ({gpu.block ({({[.tile-size tile-size]} shape.2d) ({[.tile-size tile-size]} *)} dims) topo.end} topo.level)
+        } topo.level)
+        ({
+          gpu.grid
+          ({({[.grid-x grid-y]} shape.2d) ({[.grid-x grid-y]} *)} dims)
+          ({gpu.block ({({[.tile-size tile-size]} shape.2d) ({[.tile-size tile-size]} *)} dims) topo.end} topo.level)
+        } topo.level)
+      } context)
+      ({
+        ({
+          ({
+            gpu.grid
+            ({({[.grid-x grid-y]} shape.2d) ({[.grid-x grid-y]} *)} dims)
+            ({gpu.block ({({[.tile-size tile-size]} shape.2d) ({[.tile-size tile-size]} *)} dims) topo.end} topo.level)
+          } topo.level)
+          ({
+            gpu.grid
+            ({({[.grid-x grid-y]} shape.2d) ({[.grid-x grid-y]} *)} dims)
+            ({gpu.block ({({[.tile-size tile-size]} shape.2d) ({[.tile-size tile-size]} *)} dims) topo.end} topo.level)
+          } topo.level)
+        } worker)
+        ({([.n] ix val) ([.m] ix val)} *)
+      } *)
+    } *)
+  })
+  ->
+  ([grid-x grid-y n k m tile-size.] (f32 val))
+= {[a b k tile-size tile-element-count task.]
+  ([.task] *.elim [grid-context assignment.])
+  # c-index is the logical 2D index of C. The physical worker index is
+  # represented independently by grid-worker.
+  ([.assignment] *.elim [grid-worker c-index.])
+  ({[.grid-context] [.grid-worker]}
+    gpu.current-block [block-context-0 block-worker.])
+
+  ([.tile-size] u64.copies2 [k-tile-size step-tile-size.])
+  ({([.k] :.forget) ([.k-tile-size] :.forget)}
+    u64.div u64.name [k-tile-count.])
+
+  ({[.block-context-0] [.tile-element-count]}
+    parallel.allocate [block-context-1 a-tile.])
+  ({[.block-context-1] [.tile-element-count]}
+    parallel.allocate [block-context-2 b-tile.])
+
+  ({[.a-tile] [.b-tile]} *.intro [tiles.])
+  (const.u32.0x00000000 u32.bitcast-f32 [zero.])
+  ({[.zero] [.tiles]} *.intro [initial-state.])
+
+  ([.k-tile-count] u64.copies2 [step-count fold-count.])
+  ({
+    [.a]
+    [.b]
+    [.c-index]
+    [.step-tile-size]
+    [.step-count]
+    [.block-context-2]
+    [.block-worker]
+  } gpu.f32.tiled-matmul.tile-step-closure [tile-step.])
+  ({[.initial-state] [.tile-step] [.fold-count]} fold [final-state.])
+
+  ([.final-state] *.elim [result final-tiles.])
+  ([.final-tiles] *.elim [_a-tile _b-tile.])
+  [.result]
+})
+
+# Materialize C in row-major order. Row-major layout is handled only by the
+# first producer in the composition; the tiled kernel receives a logical 2D
+# C index and is independent of the output layout.
+(def program gpu.f32.tiled-matmul.row-major.materialize :
+  ([n m k tile-size.] {
+    ({[.n] u64} :)
+    ({[.m] u64} :)
+    ({[.k] u64} :)
+    ({({[.n m]} *) u64} :)
+    ({[.tile-size] u64} :)
+    ({({[.tile-size tile-size]} *) u64} :)
+    ({({([.n] ix val) ([.k] ix val)} *) (f32 val)} =>)
+    ({({([.k] ix val) ([.m] ix val)} *) (f32 val)} =>)
+  })
+  ->
+  ([n m k tile-size.] ({cap.own ({[.n m]} *) f32} buf val))
+= {[n m k output-len tile-size tile-element-count a b.]
+  ([.n] u64.copy-param [grid-n indices-n.])
+  ([.m] u64.copies2-param [grid-m indices-m-len indices-m.])
+  ([.tile-size] u64.copies6
+    [grid-x-tile grid-y-tile block-x block-y kernel-tile-size _tile-unused.])
+
+  ({([.grid-n] :.forget) ([.grid-x-tile] :.forget)}
+    u64.div u64.name [grid-x.])
+  ({([.grid-m] :.forget) ([.grid-y-tile] :.forget)}
+    u64.div u64.name [grid-y.])
+
+  ([.grid-x] u64.copies2 [launch-grid-x kernel-grid-x.])
+  ([.grid-y] u64.copies2 [launch-grid-y kernel-grid-y.])
+
+  ({[.launch-grid-x] [.launch-grid-y] [.block-x] [.block-y]}
+    gpu.launch-config.2d [plan.])
+  ([.plan] parallel.plan.root-types [typed-plan context-type worker-type.])
+  ([.typed-plan] parallel.schedule [grid-context.])
+  ({[.grid-context] [.output-len]}
+    parallel.allocate [allocated-context output.])
+
+  ({
+    [.allocated-context]
+    [.output]
+    ({
+      ({
+        ([.context-type] name.identity lift)
+        ({
+          ([.worker-type] name.identity lift)
+          ({[.indices-n] [.indices-m] [.indices-m-len]}
+            partial.f32.row-major.indices.1)
+        } tensor)
+      } tensor)
+      ({
+        [.a]
+        [.b]
+        [.k]
+        [.kernel-tile-size]
+        [.tile-element-count]
+        [.kernel-grid-x]
+        [.kernel-grid-y]
+      } gpu.f32.tiled-matmul.cell.kernel-closure)
+    } compose)
+  } parallel.materialize [materialized-context pending-output.])
+  ({[.materialized-context] [.pending-output]}
+    parallel.await [_grid-context result.])
+  [.result]
+})

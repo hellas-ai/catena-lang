@@ -1,6 +1,50 @@
 use super::*;
 
 const MATMUL_SOURCE: &str = include_str!("matrix/matmul.hex");
+const TILED_MATMUL_SOURCE: &str = include_str!("matrix/tiled_matmul.hex");
+
+#[test]
+#[ignore = "parallel producer closure conversion and GPU lowering are not implemented"]
+fn f32_tiled_matmul_row_major_bufs_from_mems() -> anyhow::Result<()> {
+    let runtime = runtime_with(TILED_MATMUL_SOURCE)?;
+
+    let a_values = [
+        1.0_f32, 2.0, 3.0, 4.0, //
+        5.0, 6.0, 7.0, 8.0, //
+        9.0, 10.0, 11.0, 12.0, //
+        13.0, 14.0, 15.0, 16.0,
+    ];
+    let identity = [
+        1.0_f32, 0.0, 0.0, 0.0, //
+        0.0, 1.0, 0.0, 0.0, //
+        0.0, 0.0, 1.0, 0.0, //
+        0.0, 0.0, 0.0, 1.0,
+    ];
+    let a = runtime.mem_f32(&a_values)?;
+    let b = runtime.mem_f32(&identity)?;
+
+    let [result] = runtime.exec(
+        "tiled-matmul-via-mem",
+        [
+            a,
+            b,
+            4_u64.into(),
+            4_u64.into(),
+            4_u64.into(),
+            2_u64.into(),
+            16_u64.into(),
+            16_u64.into(),
+            16_u64.into(),
+            4_u64.into(),
+        ],
+    )?;
+    let Value::Mem(result) = result else {
+        anyhow::bail!("tiled-matmul-via-mem returned non-mem value: {result:?}");
+    };
+
+    assert_eq!(result.to_f32_vec(), a_values);
+    Ok(())
+}
 
 #[test]
 fn f32_matmul_row_major_bufs_from_mems() -> anyhow::Result<()> {

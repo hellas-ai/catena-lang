@@ -9,76 +9,108 @@
   (arr topo.end : 0 -> 1)
   (arr topo.level : 3 -> 1)
 
-  # `context c p s` identifies execution `c`, complete topology `p`, and the
-  # selected topology node `s`.
-  (arr context : 3 -> 1)
+  # `context p s` identifies complete topology `p` and selected node `s`.
+  (arr context : 2 -> 1)
 
-  # `worker c p s` identifies the current worker in that context.
-  (arr worker : 3 -> 1)
+  # `worker p s` identifies the current worker at that topology node.
+  (arr worker : 2 -> 1)
 
-  # `parallel.plan c p` describes execution `c` over complete topology `p`.
-  (arr parallel.plan : 2 -> 1)
+  # `parallel.plan p` carries the runtime configuration for topology `p`.
+  (arr parallel.plan : 1 -> 1)
 })
 
 (theory program type {
-  # Schedule a plan and select the root of its complete topology.
-  (arr parallel.schedule :
-    ([c p.] ({[.c p]} parallel.plan))
-    ->
-    ([c p.] ({[.c p p]} context)))
-
-  # Allocate an owned block-local buffer in an execution context.
-  (arr parallel.allocate : {[c p s n t.]
-    ({[.c p s]} context)
-    ({[.n] u64} :)
-    ([.t])
+  # Reify two named extents as a runtime 2D shape. Its cardinality is fixed
+  # by the same type-level extents and cannot be supplied independently.
+  (arr shape.2d : {[x y.]
+    ({[.x] u64} :)
+    ({[.y] u64} :)
   }
   ->
-  ([c p s n t.] {
-    ({[.c p s]} context)
-    ({({[.c p s]} context) ({cap.own [.n t]} buf)} writable val)
+  ([x y.] ({[.x y]} shape.2d val)))
+
+  # Build a runtime plan from the same generic level structure used at the
+  # type level. The level value is erased; the 2D shape carries its extents.
+  (arr topo.end : [] -> (topo.end parallel.plan))
+
+  (arr topo.level : {[l x y rest.]
+    ([.l])
+    ({[.x y]} shape.2d val)
+    ([.rest] parallel.plan)
+  }
+  ->
+  ([l x y rest.]
+    (({[.l] ({({[.x y]} shape.2d) ({[.x y]} *)} dims) [.rest]} topo.level)
+      parallel.plan)))
+
+  # Preserve a plan while exposing the root context and worker objects used
+  # as erased type arguments to polymorphic structural constructors.
+  (arr parallel.plan.root-types :
+    ([p.] ([.p] parallel.plan))
+    ->
+    ([p.] {
+      ([.p] parallel.plan)
+      ({[.p p]} context)
+      ({[.p p]} worker)
+    }))
+
+  # Schedule a plan and select the root of its complete topology.
+  (arr parallel.schedule :
+    ([p.] ([.p] parallel.plan))
+    ->
+    ([p.] ({[.p p]} context)))
+
+  # Allocate an owned f32 buffer in an execution context.
+  (arr parallel.allocate : {[p s n.]
+    ({[.p s]} context)
+    ({[.n] u64} :)
+  }
+  ->
+  ([p s n.] {
+    ({[.p s]} context)
+    ({({[.p s]} context) ({cap.own [.n] f32} buf)} writable val)
   }))
 
   # Wait until writes into a buffer are visible to the context's workers.
   # The bare buffer no longer records which context made it available.
-  (arr parallel.await : {[c p s m n t.]
-    ({[.c p s]} context)
-    ({({[.c p s]} context) ({[.m n t]} buf)} pending val)
+  (arr parallel.await : {[p s m n.]
+    ({[.p s]} context)
+    ({({[.p s]} context) ({[.m n] f32} buf)} pending val)
   }
   ->
-  ([c p s m n t.] {
-    ({[.c p s]} context)
-    ({[.m n t]} buf val)
+  ([p s m n.] {
+    ({[.p s]} context)
+    ({[.m n] f32} buf val)
   }))
 
   # Wait until the context's workers have finished reading a buffer and make
   # it writable again. TODO: because await returns a bare buffer, this type
   # cannot prove that the buffer came from this same context.
-  (arr parallel.release : {[c p s m n t.]
-    ({[.c p s]} context)
-    ({[.m n t]} buf val)
+  (arr parallel.release : {[p s m n.]
+    ({[.p s]} context)
+    ({[.m n] f32} buf val)
   }
   ->
-  ([c p s m n t.] {
-    ({[.c p s]} context)
-    ({({[.c p s]} context) ({[.m n t]} buf)} writable val)
+  ([p s m n.] {
+    ({[.p s]} context)
+    ({({[.p s]} context) ({[.m n] f32} buf)} writable val)
   }))
 
   # Synchronize the workers without changing any buffer state.
   (arr parallel.barrier :
-    ({[c p s.] [.c p s]} context)
+    ({[p s.] [.p s]} context)
     ->
-    ({[c p s.] [.c p s]} context))
+    ({[p s.] [.p s]} context))
 
   # Select the immediate child topology containing the current worker.
   (arr parallel.scope : {[
-    c p
+    p
     parent parent-shape parent-size
     child child-shape child-size
     rest.
   ]
     ({
-      [.c p]
+      [.p]
       ({
         [.parent]
         ({[.parent-shape parent-size]} dims)
@@ -90,7 +122,7 @@
       } topo.level)
     } context)
     ({
-      [.c p]
+      [.p]
       ({
         [.parent]
         ({[.parent-shape parent-size]} dims)
@@ -104,13 +136,13 @@
   }
   ->
   ([
-    c p
+    p
     parent parent-shape parent-size
     child child-shape child-size
     rest.
   ] {
     ({
-      [.c p]
+      [.p]
       ({
         [.child]
         ({[.child-shape child-size]} dims)
@@ -118,7 +150,7 @@
       } topo.level)
     } context)
     ({
-      [.c p]
+      [.p]
       ({
         [.child]
         ({[.child-shape child-size]} dims)
@@ -128,35 +160,40 @@
   }))
 
   # parallel.materialize :
-  #   context c p (topo.level l (dims s n) q)
-  #   * val(writable (context c p (topo.level l (dims s n) q))
-  #                  (buf cap.own n t))
-  #   * (context ... * worker ... * val(ix n) => val(t))
-  #  -> val(pending (context c p (topo.level l (dims s n) q))
-  #                 (buf cap.own n t))
-  (arr parallel.materialize : {[c p l s n q t.]
-    ({[.c p] ({[.l] ({[.s n]} dims) [.q]} topo.level)} context)
+  #   context p (topo.level l (dims worker-shape worker-count) q)
+  #   * val(writable (context p ...)
+  #                  (buf cap.own output-count f32))
+  #   * (context ... * worker ... * val(ix output-count) => val(f32))
+  #  -> val(pending (context p ...)
+  #                 (buf cap.own output-count f32))
+  #
+  # `worker-count` is physical; `output-count` is the logical materialized
+  # index space. A scheduling policy assigns the latter to the former.
+  (arr parallel.materialize : {[
+    p l worker-shape worker-count q output-count.
+  ]
+    ({[.p] ({[.l] ({[.worker-shape worker-count]} dims) [.q]} topo.level)} context)
     ({
-      ({[.c p] ({[.l] ({[.s n]} dims) [.q]} topo.level)} context)
-      ({cap.own [.n t]} buf)
+      ({[.p] ({[.l] ({[.worker-shape worker-count]} dims) [.q]} topo.level)} context)
+      ({cap.own [.output-count] f32} buf)
     } writable val)
     ({
       ({
-        ({[.c p] ({[.l] ({[.s n]} dims) [.q]} topo.level)} context)
+        ({[.p] ({[.l] ({[.worker-shape worker-count]} dims) [.q]} topo.level)} context)
         ({
-          ({[.c p] ({[.l] ({[.s n]} dims) [.q]} topo.level)} worker)
-          ([.n] ix val)
+          ({[.p] ({[.l] ({[.worker-shape worker-count]} dims) [.q]} topo.level)} worker)
+          ([.output-count] ix val)
         } *)
       } *)
-      ([.t] val)
+      (f32 val)
     } =>)
   }
   ->
-  ([c p l s n q t.] {
-    ({[.c p] ({[.l] ({[.s n]} dims) [.q]} topo.level)} context)
+  ([p l worker-shape worker-count q output-count.] {
+    ({[.p] ({[.l] ({[.worker-shape worker-count]} dims) [.q]} topo.level)} context)
     ({
-      ({[.c p] ({[.l] ({[.s n]} dims) [.q]} topo.level)} context)
-      ({cap.own [.n t]} buf)
+      ({[.p] ({[.l] ({[.worker-shape worker-count]} dims) [.q]} topo.level)} context)
+      ({cap.own [.output-count] f32} buf)
     } pending val)
   }))
 })

@@ -52,3 +52,11 @@
     } compose run)
   ))
 })
+
+# Polymorphic identity. Its generated name is a general identity-function
+# constructor; lifting that function pointer produces `a => a`.
+(def program identity :
+  ([a.] [.a])
+  ->
+  ([a.] [.a])
+= (defer run))

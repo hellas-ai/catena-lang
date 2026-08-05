@@ -4,6 +4,10 @@
   (arr cap.own : 0 -> 1)
   (arr cap.ref : 0 -> 1)
 
+  # Buffer access states. These modify a buffer type.
+  (arr writable : 2 -> 1)
+  (arr pending : 2 -> 1)
+
   # Memory: untyped, sized bytes, with ownership mode
   (arr mem : 1 -> 1)
 

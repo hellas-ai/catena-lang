@@ -22,4 +22,27 @@
     {({([.y]) ([.n] ix val)} * [yi.]) ([.yi a] -> val)}
     ({[.n] u64} :)
   } -> ([x y a n . a]))
+
+  # Fold an index space while carrying state between iterations.
+  #
+  #   fold : S ● (S * ix n => S) ● (n : u64) -> S
+  (arr fold : {[s n.]
+    ([.s])
+    ({({[.s] ([.n] ix val)} *) [.s]} =>)
+    ({[.n] u64} :)
+  } -> ([s n . s]))
+
+  # Closure-converted fold.
+  #
+  #   foldc : S ● X ● (X * (S * ix n) -> S) ● (n : u64) -> S
+  (arr foldc : {[x s n.]
+    ([.s])
+    ([.x])
+    {
+      ({[.s] ([.n] ix val)} * [si.])
+      ({[.x si]} * [xsi.])
+      ([.xsi s] -> val)
+    }
+    ({[.n] u64} :)
+  } -> ([x s n . s]))
 })

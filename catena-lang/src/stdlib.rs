@@ -53,6 +53,7 @@ pub const FILES: &[StdlibFile] = stdlib_files![
     "fn.hex",
     "product.hex",
     "combinators.hex",
+    "parallel.hex",
     "gpu.hex",
     "identity-matrix.hex",
     "matrix.hex",

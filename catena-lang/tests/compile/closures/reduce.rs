@@ -55,3 +55,14 @@ fn product_accumulator_has_matching_expanded_boundaries() {
     assert_eq!(reduce.target_sizes, vec![2]);
     assert_fully_lowered("pair-reduce");
 }
+
+/// Fold's state-carrying step closure becomes an explicit environment and
+/// function pointer consumed by foldc.
+#[test]
+fn fold_step_is_closure_converted() {
+    assert_eq!(regions("scalar-fold").len(), 1);
+    let term = final_term("scalar-fold");
+    assert_eq!(operation_count(term, "fold"), 0);
+    assert_eq!(operation_count(term, "foldc"), 1);
+    assert_fully_lowered("scalar-fold");
+}

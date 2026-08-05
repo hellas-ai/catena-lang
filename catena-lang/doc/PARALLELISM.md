@@ -251,6 +251,25 @@ allocated across the loop: `sync` makes their cells readable, while the second
 `sync` proves that all workers have finished reading and returns the same
 buffers as writable for the next iteration.
 
+## Why schedule
+
+`schedule` establishes a scoped execution context and its launch parameters;
+it does not itself execute a worker task, which happens when storage is
+materialized through that context.
+
+For CUDA, one possible lowering is:
+
+```text
+schedule(grid configuration)
+    → establish launch parameters and execution scope
+
+materialize(grid_ctx, ...)
+    → launch kernel
+
+materialize(block_ctx, ...)
+    → cooperative local execution
+```
+
 ## Task execution
 
 The code generator or interpreter uses the input context's level to decide how

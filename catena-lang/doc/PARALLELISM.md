@@ -251,6 +251,20 @@ allocated across the loop: `sync` makes their cells readable, while the second
 `sync` proves that all workers have finished reading and returns the same
 buffers as writable for the next iteration.
 
+## Task execution
+
+The code generator or interpreter uses the input context's level to decide how
+to execute a `materialize` task, and the worker passed to the callback must be
+a live member of that context.
+
+For CUDA:
+
+| Context level | Task execution                        | Storage scope | `sync` meaning           |
+| ------------- | ------------------------------------- | ------------- | ------------------------ |
+| grid          | dispatch to grid workers              | global        | wait for dispatched task |
+| block         | execute locally and collectively      | shared        | block barrier            |
+| thread        | execute locally in the current worker | thread-local  | local sequencing         |
+
 ## Context
 
 A configuration describes an execution before it is scheduled. `schedule`

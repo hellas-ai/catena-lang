@@ -55,6 +55,12 @@ __host__ static inline void catena_host_gpu_check({error_type} err) {{
     }}
 }}
 
+__host__ static inline void catena_host_buffer_free(void *data) {{
+    if (data != nullptr) {{
+        catena_host_gpu_check({device_free_fn}(data));
+    }}
+}}
+
 #endif
 
 __host__ __device__ static inline uint64_t catena_launch_len(catena_launch_params_t params) {{
@@ -88,6 +94,7 @@ __host__ __device__ static inline uint32_t catena_f32_bitcast_u32(float value) {
         error_type = dialect.error_type(),
         success_value = dialect.success_value(),
         error_string_fn = dialect.error_string_fn(),
+        device_free_fn = dialect.device_free_fn(),
         buffer_load = buffer_load,
     )
 }
@@ -127,6 +134,15 @@ mod tests {
         );
         assert!(!prelude.contains("catena_gpu_check"));
         assert!(!prelude.contains("__device__ static inline void catena_host_gpu_check"));
+    }
+
+    #[test]
+    fn buffer_free_uses_the_selected_host_runtime() {
+        let hip = render_gpu_prelude(GpuDialect::Hip);
+        assert!(hip.contains("catena_host_gpu_check(hipFree(data));"));
+
+        let cuda = render_gpu_prelude(GpuDialect::Cuda);
+        assert!(cuda.contains("catena_host_gpu_check(cudaFree(data));"));
     }
 
     #[test]

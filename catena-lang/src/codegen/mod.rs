@@ -89,6 +89,13 @@ impl GpuDialect {
         }
     }
 
+    pub(crate) fn device_free_fn(self) -> &'static str {
+        match self {
+            Self::Hip => "hipFree",
+            Self::Cuda => "cudaFree",
+        }
+    }
+
     pub fn synchronize_fn(self) -> &'static str {
         match self {
             Self::Hip => "hipDeviceSynchronize",

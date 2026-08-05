@@ -67,10 +67,12 @@ pub(super) fn function_placement(
 }
 
 fn function_directly_requires_host(function: &GpuFunction) -> bool {
-    function
-        .assignments
-        .iter()
-        .any(|assignment| matches!(assignment.op.as_str(), "gpu.materialize" | "materializec"))
+    function.assignments.iter().any(|assignment| {
+        matches!(
+            assignment.op.as_str(),
+            "gpu.materialize" | "materializec" | "buf.free"
+        )
+    })
 }
 
 fn callers_by_callee(modules: &GpuModuleMap) -> BTreeMap<&str, Vec<String>> {

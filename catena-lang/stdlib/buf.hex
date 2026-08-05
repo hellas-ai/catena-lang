@@ -19,8 +19,9 @@
 
 (theory program type {
   ################################################################################
-  # owned memory can be deallocated
-  (arr free : (cap.own mem) -> [])
+  # Only owned typed buffers can be deallocated. Borrowed buffers and untyped
+  # memory handles deliberately have no free operation.
+  (arr buf.free : ([n t.] ({cap.own [.n t]} buf val)) -> ([n t.] []))
 
   ################################################################################
   # Casting mem to buf and back

@@ -383,6 +383,8 @@ fn render_primitive_assignment(
         "u64.lte" => render_binary_bool(out, assignment, "<=")?,
         "u64.gte" => render_binary_bool(out, assignment, ">=")?,
         "u64.mul" => render_binary(out, assignment, "*")?,
+        "u64.div" => render_binary(out, assignment, "/")?,
+        "u64.rem" => render_binary(out, assignment, "%")?,
         "u64.name" => render_forget(out, assignment)?,
         "u32.one" => render_u64_one(out, assignment)?,
         "u32.add" => render_binary(out, assignment, "+")?,
@@ -410,6 +412,7 @@ fn render_primitive_assignment(
         "buf.u64.cast-same-length" => render_buf_u64_cast_same_length(out, assignment)?,
         "buf.f32.cast-same-length" => render_buf_f32_cast_same_length(out, assignment)?,
         "buf.to-mem" => render_buf_to_mem(out, assignment)?,
+        "buf.free" => render_buf_free(out, assignment)?,
         "f32.one" => render_f32_one(out, assignment)?,
         "f32.add" => render_binary(out, assignment, "+")?,
         "f32.sub" => render_binary(out, assignment, "-")?,
@@ -454,6 +457,20 @@ fn render_assert(out: &mut String, assignment: &GpuAssign) -> Result<(), GpuRend
         return Err(invalid_outputs(assignment, 1));
     };
     out.push_str(&format!("    catena_assert({});\n", value_expr(input)));
+    Ok(())
+}
+
+fn render_buf_free(out: &mut String, assignment: &GpuAssign) -> Result<(), GpuRenderError> {
+    let [input] = assignment.inputs.as_slice() else {
+        return Err(invalid_inputs(assignment, 1));
+    };
+    let [] = assignment.outputs.as_slice() else {
+        return Err(invalid_outputs(assignment, 0));
+    };
+    out.push_str(&format!(
+        "    catena_host_buffer_free((void *){});\n",
+        value_expr(input)
+    ));
     Ok(())
 }
 
@@ -1258,6 +1275,55 @@ mod tests {
         let error = render_module(&module, GpuDialect::Hip).unwrap_err();
 
         assert!(matches!(error, GpuRenderError::UnsupportedOp(op) if op.as_str() == "type-helper"));
+    }
+
+    #[test]
+    fn owned_buffer_free_renders_in_a_host_only_function() {
+        let buffer = var(0, "buffer", CType::Pointer(Box::new(CType::F32)));
+        let module = GpuModule {
+            name: "program_free_buffer".to_string(),
+            source_name: Some(op("free-buffer")),
+            entry: GpuFunction {
+                name: "program_free_buffer".to_string(),
+                sources: vec![buffer.clone()],
+                targets: Vec::new(),
+                assignments: vec![GpuAssign {
+                    op: op("buf.free"),
+                    input_sizes: vec![1],
+                    output_sizes: Vec::new(),
+                    call_symbol: None,
+                    inputs: vec![GpuValue::Var(buffer)],
+                    outputs: Vec::new(),
+                }],
+            },
+        };
+
+        let source = render_module(&module, GpuDialect::Hip).unwrap();
+        assert!(source.contains(
+            "#ifndef __HIP_DEVICE_COMPILE__\nextern \"C\" __host__ void program_free_buffer"
+        ));
+        assert!(source.contains("    catena_host_buffer_free((void *)buffer);\n"));
+    }
+
+    #[test]
+    fn u64_division_and_remainder_render_as_integer_arithmetic() {
+        for (name, operator) in [("u64.div", "/"), ("u64.rem", "%")] {
+            let lhs = var(0, "lhs", CType::U64);
+            let rhs = var(1, "rhs", CType::U64);
+            let output = var(2, "output", CType::U64);
+            let assignment = GpuAssign {
+                op: op(name),
+                input_sizes: vec![2],
+                output_sizes: vec![1],
+                call_symbol: None,
+                inputs: vec![GpuValue::Var(lhs), GpuValue::Var(rhs)],
+                outputs: vec![output],
+            };
+
+            let mut rendered = String::new();
+            assert!(render_primitive_assignment(&mut rendered, &assignment).unwrap());
+            assert_eq!(rendered, format!("    output = lhs {operator} rhs;\n"));
+        }
     }
 
     #[test]

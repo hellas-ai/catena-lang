@@ -36,13 +36,22 @@ fn main() -> anyhow::Result<()> {
 
     let values = [0x123456789abcdef0_u64, 7, 11];
     let input = runtime.mem_u64(&values)?;
-    let retained_input = input.clone();
-    let [head] = runtime.exec("array-head-u64", [input])?;
-    let Value::U64(head) = head else {
-        anyhow::bail!("array-head-u64 returned non-u64 value: {head:?}");
+    // `exec` consumes its argument handles. Cloning a memory value keeps the
+    // parent-owned allocation alive and does not copy its contents in VRAM.
+    let [first_head] = runtime.exec("array-head-u64", [input.clone()])?;
+    let Value::U64(first_head) = first_head else {
+        anyhow::bail!("first array-head-u64 returned non-u64 value: {first_head:?}");
     };
-    println!("array-head-u64: 0x{head:x} (expected 0x{:x})", values[0]);
-    anyhow::ensure!(head == values[0], "array head mismatch");
+    let [second_head] = runtime.exec("array-head-u64", [input.clone()])?;
+    let Value::U64(second_head) = second_head else {
+        anyhow::bail!("second array-head-u64 returned non-u64 value: {second_head:?}");
+    };
+    println!(
+        "array-head-u64 twice: 0x{first_head:x}, 0x{second_head:x} (expected 0x{:x})",
+        values[0]
+    );
+    anyhow::ensure!(first_head == values[0], "first array head mismatch");
+    anyhow::ensure!(second_head == values[0], "second array head mismatch");
 
     let [materialized] = runtime.exec("materialize-indexes", [4_u64.into()])?;
     let Value::Mem(memory) = &materialized else {
@@ -69,10 +78,10 @@ fn main() -> anyhow::Result<()> {
     }
     println!("require-true(false): child assertion isolated");
 
-    let Value::Mem(retained_input) = retained_input else {
+    let Value::Mem(input) = input else {
         unreachable!("mem_u64 must return a memory value");
     };
-    anyhow::ensure!(retained_input.try_to_u64_vec()? == values);
+    anyhow::ensure!(input.try_to_u64_vec()? == values);
     println!("parent device buffer remained valid after child termination");
 
     let Value::Mem(materialized) = materialized else {

@@ -35,19 +35,32 @@ fn main() -> anyhow::Result<()> {
             .join(", ")
     );
 
-    // Execute array-head-u64 with values above
-    let input = runtime.mem_u64(&values)?;
-    let [head] = runtime.exec("array-head-u64", [input])?;
-    let Value::U64(head) = head else {
-        anyhow::bail!("array-head-u64 returned non-u64 value: {head:?}");
-    };
+    // Keep ownership of the device buffer and pass a cloned handle to each
+    // invocation. This allows long-lived inputs, such as model weights, to be
+    // reused without reallocating or uploading them again.
+    let input_bytes = values
+        .iter()
+        .flat_map(|value| value.to_ne_bytes())
+        .collect::<Vec<_>>();
+    let input = runtime
+        .device_allocator()
+        .allocate_from_bytes(&input_bytes)?;
+    for invocation in 1..=2 {
+        let [head] = runtime.exec("array-head-u64", [Value::from(&input)])?;
+        let Value::U64(head) = head else {
+            anyhow::bail!("array-head-u64 returned non-u64 value: {head:?}");
+        };
 
-    println!("array-head-u64: 0x{head:x} (expected 0x{:x})", values[0]);
-    anyhow::ensure!(
-        head == values[0],
-        "array head mismatch: got 0x{head:x}, expected 0x{:x}",
-        values[0]
-    );
+        println!(
+            "array-head-u64 invocation {invocation}: 0x{head:x} (expected 0x{:x})",
+            values[0]
+        );
+        anyhow::ensure!(
+            head == values[0],
+            "array head mismatch on invocation {invocation}: got 0x{head:x}, expected 0x{:x}",
+            values[0]
+        );
+    }
 
     Ok(())
 }

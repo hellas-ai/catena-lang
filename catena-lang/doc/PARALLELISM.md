@@ -75,18 +75,20 @@ The model uses the following vocabulary:
   callback and to running tasks. A task context also identifies the current
   worker and its assigned work.
 
-Consider a CUDA grid containing `4 × 4` blocks, where every block contains
-`16 × 16` threads:
+Consider an `n × m` logical result, with `n` and `m` divisible by
+`tile_size`. A CUDA grid can contain `(n / tile_size, m / tile_size)` blocks,
+where every block contains `(tile_size, tile_size)` threads:
 
-| Worker population |    Direct children | Worker shape | Worker count |
-| ----------------- | -----------------: | -----------: | -----------: |
-| grid              |    `(4, 4)` blocks |   `(64, 64)` |       `4096` |
-| current block     | `(16, 16)` threads |   `(16, 16)` |        `256` |
-| current thread    |               none |    singleton |          `1` |
+| Worker population |                         Direct children |             Worker shape |            Worker count |
+| ----------------- | --------------------------------------: | -----------------------: | ----------------------: |
+| grid              | `(n / tile_size, m / tile_size)` blocks |                 `(n, m)` |                 `n * m` |
+| current block     |        `(tile_size, tile_size)` threads | `(tile_size, tile_size)` | `tile_size * tile_size` |
+| current thread    |                                    none |                singleton |                     `1` |
 
 `size` gives the cardinality of a worker shape. For a two-dimensional shape,
-`size((n, m)) = n * m`; therefore, the block worker shape `(16, 16)` has size
-256, while the grid worker shape `(64, 64)` has size 4096.
+`size((n, m)) = n * m`; therefore, the block worker shape
+`(tile_size, tile_size)` has size `tile_size * tile_size`, while the grid
+worker shape `(n, m)` has size `n * m`.
 
 Parallel execution therefore has a physical distribution and a logical
 distribution. The physical distribution describes the workers available to
@@ -97,11 +99,11 @@ those work items are assigned to the available workers.
 
 The topology is not the logical shape of the data. The simplest and most
 common assignment gives one work item to each worker, so the physical worker
-shape and logical shape coincide. They need not coincide: 256 workers may
-compute 10,000 result elements by handling several work items each, while a
-launch with more workers than result elements leaves some workers without an
-output item. Keeping the two distributions separate allows the same
-computation to use different launch sizes or backends.
+shape and logical shape coincide. They need not coincide: `p` workers may
+compute `q` result elements by handling several work items each when `q > p`,
+while `p > q` leaves some workers without an output item. Keeping the two
+distributions separate allows the same computation to use different launch
+sizes or backends.
 
 A _configuration_ describes how a worker population should be created. It
 combines the physical topology, the logical distribution, and the requested
@@ -114,23 +116,27 @@ describes the current worker and its assigned work. For example, a GPU worker
 can obtain a context for its current block when cooperating with the other
 workers in that block.
 
-Three primitives connect the topology, workers, and logical work.
+The following operations connect the topology, storage, workers, and logical
+work.
 
 `schedule` establishes the physical worker organization. Its body runs once
 in the caller and receives a context for that worker population.
 
-`materialize` runs a _task_ in a context. The task is the unit
-of work executed by the workers in context. Each task invocation receives a context and performs the logical work assigned to its worker. A worker may be
-assigned one work item, several work items, or no output item. `materialize`
-collects the results into a buffer but returns it as pending, because the work
-may still be executing.
+`allocate` creates a linear buffer owned by an execution context and returns a
+storage context. The owner determines the storage scope, its participating
+workers, and its synchronization domain.
+
+`materialize` runs a _task_ to fill a storage context. The task is the unit of
+work executed by the workers of its owning execution context. Each invocation
+receives a worker context and performs the logical work assigned to that
+worker. A worker may be assigned one work item, several work items, or no
+output item. `materialize` returns the storage as pending because the work may
+still be executing or may not yet be visible to all participating workers.
 
 `sync` completes pending work associated with a context and makes its results
 safe to observe. For a grid context it may wait for a kernel. For a block
 context it is a collective operation reached by all workers in
 the block, for example after they have cooperatively filled shared memory.
-
-`allocate` TBD
 
 Together, `schedule` chooses the worker organization, `materialize` states the
 task and its logical result, and `sync` states when that result may be used.
@@ -144,33 +150,83 @@ For CUDA, the abstract concepts above can be interpreted as follows:
 - task = the kernel
 - work item = one output cell, such as `C[i, j]` in matrix multiplication
 
-With `4 × 4` blocks and `16 × 16` threads per block, scheduling establishes a
-grid containing a `(64, 64)` worker shape. Materializing through the grid
-context launches the task as a kernel across all 4096 GPU threads:
+For a perfectly tiled multiplication of `A : n × k` and `B : k × m`, assume
+that `n`, `k`, and `m` are divisible by `tile_size`. Scheduling establishes
+`(n / tile_size, m / tile_size)` blocks of `(tile_size, tile_size)` workers.
+The output and the two block-local tiles are allocated explicitly as linear
+buffers, then `materialize` fills them using their owning execution contexts:
 
 ```text
-schedule blocks(4, 4) > threads(16, 16) > 1, \launch_ctx ->
-    pending_output = materialize(launch_ctx, (64, 64),
-      \(ctx, work_item: Ix (64, 64)) ->
-        block_ctx = current_block(ctx)
-        pending_tile = materialize(block_ctx, (16, 16),
-          \tile_item: Ix (16, 16) ->
-            load_tile_element(tile_item))
+A : Ix (n, k) => f32
+B : Ix (k, m) => f32
 
-        tile = sync(block_ctx, pending_tile)
-        compute_output(tile, work_item))
+plan = blocks(n / tile_size, m / tile_size)
+     > threads(tile_size, tile_size)
+     > sequential(1)
 
-    output = sync(launch_ctx, pending_output)
+schedule plan, \launch_ctx ->
+    C_storage = allocate(launch_ctx, n * m, f32)
+
+    pending_C = materialize(launch_ctx, C_storage,
+      \(ctx, output_index: Ix (n * m)) ->
+        block = ctx.block
+        A_tile = allocate(block, tile_size * tile_size, f32)
+        B_tile = allocate(block, tile_size * tile_size, f32)
+        acc = 0
+
+        for k_tile: Ix (k / tile_size)
+        invariant
+            A_tile : writable block (
+                buf cap.own (tile_size * tile_size) f32)
+            B_tile : writable block (
+                buf cap.own (tile_size * tile_size) f32)
+        do
+            pending_A = materialize(block, A_tile,
+              \tile_index: Ix (tile_size * tile_size) ->
+                tile_row = tile_index / tile_size
+                tile_col = tile_index % tile_size
+                (block_row, _) = block.path.block
+                A[(block_row * tile_size + tile_row,
+                   k_tile * tile_size + tile_col)])
+            pending_B = materialize(block, B_tile,
+              \tile_index: Ix (tile_size * tile_size) ->
+                tile_row = tile_index / tile_size
+                tile_col = tile_index % tile_size
+                (_, block_col) = block.path.block
+                B[(k_tile * tile_size + tile_row,
+                   block_col * tile_size + tile_col)])
+
+            # pending_A, pending_B : pending block (
+            #     buf cap.own (tile_size * tile_size) f32)
+
+            [A_ready, B_ready] = sync(
+                block, [pending_A, pending_B])
+
+            # A_ready, B_ready : readable block (
+            #     buf cap.own (tile_size * tile_size) f32)
+
+            acc = accumulate(
+                acc, A_ready, B_ready, block.index)
+
+            [A_tile, B_tile] = sync(
+                block, [A_ready, B_ready])
+
+            # A_tile, B_tile : writable block (
+            #     buf cap.own (tile_size * tile_size) f32)
+
+        return acc)
+
+    C = sync(launch_ctx, pending_C)
 ```
 
-Inside the kernel task, obtaining the block context selects the 256 GPU
-threads in the current block. The nested materialization uses those workers to
-fill the `(16, 16)` shared-memory tile cooperatively before the task computes
-its output.
-
-Thus the same abstract operation can use different CUDA levels: grid-level
-`materialize` becomes kernel-wide work, while block-level `materialize`
-becomes cooperative work by the GPU threads of one block.
+Passing `launch_ctx` to `materialize` dispatches the task that fills
+`C_storage` across the grid. Passing `block` performs the materializations of
+`A_tile` and `B_tile` collectively and locally among the already-running block
+workers. All three buffers and their callback indices are linear; a callback
+may construct a shaped view when it needs multidimensional coordinates. The
+tiles remain allocated across the loop: `sync` makes their cells readable,
+while the second `sync` proves that all workers have finished reading and
+returns the same buffers as writable for the next iteration.
 
 ## Context
 
@@ -397,10 +453,10 @@ not be compatible with this block context under perfect tiling.
 Possibile solution: primitive `allocate` for `block` context.
 
 ```
-tile = allocate(block, tile_shape) # shape implicit for block?
+tile = allocate(block, tile_size * tile_size, element_type)
 
 for k_tile:
-    pending = materialize(tile, load_tile)
+    pending = materialize(tile, (tile_size, tile_size), load_tile)
     ready = sync(block, pending)
 ```
 
@@ -409,14 +465,17 @@ To make it uniform, materialize takes **always** a `storage-context` that could 
 ```
 allocate
     : execution-context c p l
-    × (n : Shape k)
+    × (length : u64)
     × Type
-   -> storage-context c p l n t
+   -> storage-context c p l length t
 
 materialize
-    : storage-context c p l n t
+    : storage-context c p l length t
+    × (n : Shape k)
     × (execution-context c p l × Ix n => t)
    -> pending c (buf-view n t)
+
+require length = size n
 ```
 
 ```
@@ -436,11 +495,11 @@ for each index i assigned to a worker:
 materialize(launch_ctx, shape, task)
 ```
 
-becomes r is syntactic sugar for:
+is syntactic sugar for:
 
 ```
-storage = allocate(launch_ctx, shape, result_type)
-materialize(storage, task)
+storage = allocate(launch_ctx, size shape, result_type)
+materialize(storage, shape, task)
 ```
 
 #### Shared-buffer state and loop-carried synchronization

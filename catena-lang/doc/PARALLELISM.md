@@ -191,18 +191,21 @@ schedule plan, \launch_ctx ->
             B_tile : writable block (
                 buf cap.own (tile_size * tile_size) f32)
         do
+            # Each tile task receives a context for its current worker. It
+            # identifies the same worker as the surrounding block context:
+            #     worker_ctx.path  = block.path
+            #     worker_ctx.index = block.index
+            #     tile_index = linearize(worker_ctx.shape, worker_ctx.index)
             pending_A = materialize(block, A_tile,
-              \tile_index: Ix (tile_size * tile_size) ->
-                tile_row = tile_index / tile_size
-                tile_col = tile_index % tile_size
-                (block_row, _) = block.path.block
+              \(worker_ctx, tile_index: Ix (tile_size * tile_size)) ->
+                (tile_row, tile_col) = worker_ctx.index
+                (block_row, _) = worker_ctx.path.block
                 A[(block_row * tile_size + tile_row,
                    k_tile * tile_size + tile_col)])
             pending_B = materialize(block, B_tile,
-              \tile_index: Ix (tile_size * tile_size) ->
-                tile_row = tile_index / tile_size
-                tile_col = tile_index % tile_size
-                (_, block_col) = block.path.block
+              \(worker_ctx, tile_index: Ix (tile_size * tile_size)) ->
+                (tile_row, tile_col) = worker_ctx.index
+                (_, block_col) = worker_ctx.path.block
                 B[(k_tile * tile_size + tile_row,
                    block_col * tile_size + tile_col)])
 

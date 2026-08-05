@@ -167,12 +167,16 @@ plan = blocks(n / tile_size, m / tile_size)
 schedule plan, \launch_ctx ->
     C_storage = allocate(launch_ctx, n * m, f32)
 
+    # The materialize context must match the buffer's allocation context.
+    # C_storage is owned by the launch/grid context, so it is global memory.
     pending_C = materialize(launch_ctx, C_storage,
       \(ctx, output_index: Ix (n * m)) ->
         block = ctx.block
         A_tile = allocate(block, tile_size * tile_size, f32)
         B_tile = allocate(block, tile_size * tile_size, f32)
 
+        # A_tile and B_tile are owned by block, so they are shared memory and
+        # must be filled by materialize(block, ...).
         # block.shape = (tile_size, tile_size)
         # size(block) = tile_size * tile_size
         #             = size(A_tile) = size(B_tile)

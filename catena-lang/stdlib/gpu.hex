@@ -1,14 +1,10 @@
 # Cooperative thread execution primitives
 
 (theory type nat {
-  # CUDA topology levels. A complete GPU topology is:
-  #
-  #   topo.level gpu.grid (dims grid-shape grid-size)
-  #     (topo.level gpu.block (dims block-shape block-size)
-  #       (topo.level gpu.thread (dims thread-shape thread-size) topo.end))
-  (arr gpu.grid : 0 -> 1)
-  (arr gpu.block : 0 -> 1)
-  (arr gpu.thread : 0 -> 1)
+  # Nominal GPU levels. Their dimensions let lowering distinguish kernel
+  # launch from block-local cooperative execution.
+  (arr gpu.grid.2d : 4 -> 1)
+  (arr gpu.block.2d : 2 -> 1)
 
   # the read-only *environment* available to a GPU kernel.
   # Consists of:
@@ -29,11 +25,23 @@
 })
 
 (theory program type {
-  (arr gpu.grid.type : [] -> gpu.grid)
-  (arr gpu.block.type : [] -> gpu.block)
+  # Reify the GPU-specific root level. This is the only domain-specific value
+  # needed by generic plan construction.
+  (arr gpu.grid.2d : {[
+    grid-x grid-y block-x block-y.
+  ]
+    ({[.grid-x] u64} :)
+    ({[.grid-y] u64} :)
+    ({[.block-x] u64} :)
+    ({[.block-y] u64} :)
+  }
+  ->
+  ([grid-x grid-y block-x block-y.]
+    ({[.grid-x grid-y block-x block-y]} gpu.grid.2d val)))
 
-  # Build a physical 2D grid -> 2D block GPU plan entirely from the generic
-  # parallel shape and topology constructors.
+  # Build a physical 2D GPU plan. The grid context contains every thread and
+  # groups them by block. Runtime plan construction uses only generic parallel
+  # shape and plan primitives.
   (def gpu.launch-config.2d : {[
     grid-x grid-y block-x block-y.
   ]
@@ -44,75 +52,62 @@
   }
   ->
   ([grid-x grid-y block-x block-y.]
-    (({
-        gpu.grid
-        ({({[.grid-x grid-y]} shape.2d) ({[.grid-x grid-y]} *)} dims)
-        ({
-          gpu.block
-          ({({[.block-x block-y]} shape.2d) ({[.block-x block-y]} *)} dims)
-          topo.end
-        } topo.level)
-      } topo.level)
-    parallel.plan))
+    ({
+      ({[.grid-x grid-y block-x block-y]} gpu.grid.2d)
+      ({({[.grid-x grid-y]} *) ({[.block-x block-y]} *)} *)
+      ({[.grid-x grid-y]} *)
+    } parallel.plan))
   = ([grid-x grid-y block-x block-y.]
-    ({[.grid-x] [.grid-y]} shape.2d [grid-shape.])
-    ({[.block-x] [.block-y]} shape.2d [block-shape.])
-    (topo.end [end-plan.])
-    ({gpu.block.type [.block-shape] [.end-plan]}
-      topo.level [block-plan.])
-    ({gpu.grid.type [.grid-shape] [.block-plan]}
-      topo.level)
+    ([.grid-x] u64.copies2 [level-grid-x shape-grid-x.]
+      ([.grid-y] u64.copies2 [level-grid-y shape-grid-y.]
+        ([.block-x] u64.copies2 [level-block-x shape-block-x.]
+          ([.block-y] u64.copies2 [level-block-y shape-block-y.]
+            ({
+              [.level-grid-x]
+              [.level-grid-y]
+              [.level-block-x]
+              [.level-block-y]
+            } gpu.grid.2d [level.]
+              ({[.shape-grid-x] [.shape-grid-y]} shape.2d [grid-shape.]
+                ({[.shape-block-x] [.shape-block-y]} shape.2d [block-shape.]
+                  ({[.level] [.grid-shape] [.block-shape]} parallel.plan)
+                )
+              )
+            )
+          )
+        )
+      )
+    )
   ))
 
   # Scope a grid worker to its containing block.
-  (def gpu.current-block : {[
-    p grid-shape grid-size block-shape block-size rest.
+  (arr gpu.current-block : {[
+    grid-x grid-y block-x block-y.
   ]
     ({
-      [.p]
-      ({
-        gpu.grid
-        ({[.grid-shape grid-size]} dims)
-        ({
-          gpu.block
-          ({[.block-shape block-size]} dims)
-          [.rest]
-        } topo.level)
-      } topo.level)
+      ({[.grid-x grid-y block-x block-y]} gpu.grid.2d)
+      ({({[.grid-x grid-y]} *) ({[.block-x block-y]} *)} *)
+      ({[.grid-x grid-y]} *)
     } context)
     ({
-      [.p]
-      ({
-        gpu.grid
-        ({[.grid-shape grid-size]} dims)
-        ({
-          gpu.block
-          ({[.block-shape block-size]} dims)
-          [.rest]
-        } topo.level)
-      } topo.level)
+      ({[.grid-x grid-y block-x block-y]} gpu.grid.2d)
+      ({({[.grid-x grid-y]} *) ({[.block-x block-y]} *)} *)
+      ({[.grid-x grid-y]} *)
     } worker)
   }
   ->
-  ([p grid-shape grid-size block-shape block-size rest.] {
+  ([grid-x grid-y block-x block-y.] {
     ({
-      [.p]
-      ({
-        gpu.block
-        ({[.block-shape block-size]} dims)
-        [.rest]
-      } topo.level)
+      ({[.block-x block-y]} gpu.block.2d)
+      ({[.block-x block-y]} *)
+      1
     } context)
     ({
-      [.p]
-      ({
-        gpu.block
-        ({[.block-shape block-size]} dims)
-        [.rest]
-      } topo.level)
+      ({[.block-x block-y]} gpu.block.2d)
+      ({[.block-x block-y]} *)
+      1
     } worker)
-  })
-  = parallel.scope)
+  }))
 
   # Launch parameter construction
   (arr gpu.3d.intro : (u64 val [x . x x x]) -> gpu.3d)

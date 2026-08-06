@@ -4,26 +4,6 @@
 # Each block has shape tile-size x tile-size and therefore
 # tile-size*tile-size workers.
 
-(theory program type {
-  # Expose the erased topology parameters needed by a partially applied tile
-  # producer. The context itself continues independently into allocation.
-  (arr gpu.f32.tiled-matmul.block-param :
-    ({[p tile-size.]
-      [.p]
-      ({
-        gpu.block
-        ({
-          ({[.tile-size tile-size]} shape.2d)
-          ({[.tile-size tile-size]} *)
-        } dims)
-        topo.end
-      } topo.level)
-    } context)
-    ->
-    ([p tile-size.] [.p]))
-
-})
-
 # Convert the logical C index to its position inside a tile. c-index is
 # already 2D, so both coordinates need their independent remainder:
 # (c-row % tile-size, c-col % tile-size).
@@ -132,7 +112,7 @@
 # Produce one k-tile contribution. The writable tiles are captured by the
 # surrounding reduction and reused for every k-tile.
 (def program gpu.f32.tiled-matmul.tile-step :
-  ([p n k m k-tiles tile-size.] {
+  ([n k m k-tiles tile-size.] {
     [.n]
     [.m]
     ({({([.n] ix val) ([.k] ix val)} *) (f32 val)} =>)
@@ -141,20 +121,20 @@
     ({[.tile-size] u64} :)
     ({[.k] u64} :)
     ({[.k-tiles] u64} :)
-    ({[.p] ({gpu.block ({({[.tile-size tile-size]} shape.2d) ({[.tile-size tile-size]} *)} dims) topo.end} topo.level)} context)
-    ({[.p] ({gpu.block ({({[.tile-size tile-size]} shape.2d) ({[.tile-size tile-size]} *)} dims) topo.end} topo.level)} worker)
+    ({({[.tile-size tile-size]} gpu.block.2d) ({[.tile-size tile-size]} *) 1} context)
+    ({({[.tile-size tile-size]} gpu.block.2d) ({[.tile-size tile-size]} *) 1} worker)
     ({
-      ({[.p] ({gpu.block ({({[.tile-size tile-size]} shape.2d) ({[.tile-size tile-size]} *)} dims) topo.end} topo.level)} context)
+      ({({[.tile-size tile-size]} gpu.block.2d) ({[.tile-size tile-size]} *) 1} context)
       ({cap.own ({[.tile-size tile-size]} *) f32} buf)
     } writable val)
     ({
-      ({[.p] ({gpu.block ({({[.tile-size tile-size]} shape.2d) ({[.tile-size tile-size]} *)} dims) topo.end} topo.level)} context)
+      ({({[.tile-size tile-size]} gpu.block.2d) ({[.tile-size tile-size]} *) 1} context)
       ({cap.own ({[.tile-size tile-size]} *) f32} buf)
     } writable val)
     ([.k-tiles] ix val)
   })
   ->
-  ([p n k m k-tiles tile-size.] (f32 val))
+  ([n k m k-tiles tile-size.] (f32 val))
 = {[n-param m-param a b c-index tile-size inner _k-tiles block-context block-worker a-tile b-tile k-tile.]
   ([.c-index] *.elim [output-row-0 output-col-0.])
   ([.output-row-0] ix.copy [output-row-for-tile output-row.])
@@ -246,29 +226,15 @@
     ({[.grid-y] u64} :)
     ({
       ({
-        ({
-          gpu.grid
-          ({({[.grid-x grid-y]} shape.2d) ({[.grid-x grid-y]} *)} dims)
-          ({gpu.block ({({[.tile-size tile-size]} shape.2d) ({[.tile-size tile-size]} *)} dims) topo.end} topo.level)
-        } topo.level)
-        ({
-          gpu.grid
-          ({({[.grid-x grid-y]} shape.2d) ({[.grid-x grid-y]} *)} dims)
-          ({gpu.block ({({[.tile-size tile-size]} shape.2d) ({[.tile-size tile-size]} *)} dims) topo.end} topo.level)
-        } topo.level)
+        ({[.grid-x grid-y tile-size tile-size]} gpu.grid.2d)
+        ({({[.grid-x grid-y]} *) ({[.tile-size tile-size]} *)} *)
+        ({[.grid-x grid-y]} *)
       } context)
       ({
         ({
-          ({
-            gpu.grid
-            ({({[.grid-x grid-y]} shape.2d) ({[.grid-x grid-y]} *)} dims)
-            ({gpu.block ({({[.tile-size tile-size]} shape.2d) ({[.tile-size tile-size]} *)} dims) topo.end} topo.level)
-          } topo.level)
-          ({
-            gpu.grid
-            ({({[.grid-x grid-y]} shape.2d) ({[.grid-x grid-y]} *)} dims)
-            ({gpu.block ({({[.tile-size tile-size]} shape.2d) ({[.tile-size tile-size]} *)} dims) topo.end} topo.level)
-          } topo.level)
+          ({[.grid-x grid-y tile-size tile-size]} gpu.grid.2d)
+          ({({[.grid-x grid-y]} *) ({[.tile-size tile-size]} *)} *)
+          ({[.grid-x grid-y]} *)
         } worker)
         ({([.n] ix val) ([.m] ix val)} *)
       } *)
@@ -283,7 +249,6 @@
   ([.assignment] *.elim [grid-worker c-index.])
   ({[.grid-context] [.grid-worker]}
     gpu.current-block [block-context-0 block-worker.])
-  ([.block-context-0] gpu.f32.tiled-matmul.block-param [p-param.])
 
   ([.k] u64.copies2-param [k-value step-inner k-param.])
   ([.tile-size] u64.copies2-param
@@ -302,7 +267,6 @@
     (const.u32.0x00000000 u32.bitcast-f32)
     (name.f32.add lift)
     ({
-      [.p-param]
       [.n-param]
       [.k-param]
       [.m-param]

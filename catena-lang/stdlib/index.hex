@@ -67,4 +67,22 @@
     })
     ->
     ([n m.] ([.m] ix val)))
+
+  # Replace the position within the tile containing `coordinate`:
+  # (coordinate / tile-size) * tile-size + local.
+  (arr ix.same-tile-coordinate : {[n tile-size.]
+    ({[.tile-size] u64} :)
+    ([.n] ix val)
+    ([.tile-size] ix val)
+  } -> ([n tile-size.] ([.n] ix val)))
+
+  # Select a position within a numbered tile:
+  # tile-index * tile-size + local. Perfect tiling guarantees the result is
+  # within n.
+  (arr ix.tile-offset-coordinate : {[n tile-size.]
+    ({[.n] u64} :)
+    ({[.tile-size] u64} :)
+    (u64 val)
+    ([.tile-size] ix val)
+  } -> ([n tile-size.] ([.n] ix val)))
 })

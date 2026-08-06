@@ -114,9 +114,7 @@
   ({[.a-value b-value]} f32.mul)
 ))
 
-# One k-tile iteration. The two shared buffers enter writable, are filled
-# cooperatively, become bare buffers after await, and become writable again
-# after release.
+# Produce one k-tile contribution with captured shared buffers.
 (def program gpu.tiled-matmul.tile-step :
   ([p s z q n k m k-tiles tile-size.] {
     ({({([.n] ix val) ([.k] ix val)} *) (f32 val)} =>)
@@ -125,41 +123,18 @@
     ({[.p] ({gpu.block ({[.s z]} dims) [.q]} topo.level)} context)
     ({[.p] ({gpu.block ({[.s z]} dims) [.q]} topo.level)} worker)
     ({
-      ({
-        (f32 val)
-        ({
-          ({
-            ({[.p] ({gpu.block ({[.s z]} dims) [.q]} topo.level)} context)
-            ({cap.own [.z] f32} buf)
-          } writable val)
-          ({
-            ({[.p] ({gpu.block ({[.s z]} dims) [.q]} topo.level)} context)
-            ({cap.own [.z] f32} buf)
-          } writable val)
-        } *)
-      } *)
-      ([.k-tiles] ix val)
-    } *)
+      ({[.p] ({gpu.block ({[.s z]} dims) [.q]} topo.level)} context)
+      ({cap.own [.z] f32} buf)
+    } writable val)
+    ({
+      ({[.p] ({gpu.block ({[.s z]} dims) [.q]} topo.level)} context)
+      ({cap.own [.z] f32} buf)
+    } writable val)
+    ([.k-tiles] ix val)
   })
   ->
-  ([p s z q n k m k-tiles tile-size.]
-    ({
-      (f32 val)
-      ({
-        ({
-          ({[.p] ({gpu.block ({[.s z]} dims) [.q]} topo.level)} context)
-          ({cap.own [.z] f32} buf)
-        } writable val)
-        ({
-          ({[.p] ({gpu.block ({[.s z]} dims) [.q]} topo.level)} context)
-          ({cap.own [.z] f32} buf)
-        } writable val)
-      } *)
-    } *))
-= {[a b tile-size block-context block-worker arg.]
-  ([.arg] *.elim [state k-tile.])
-  ([.state] *.elim [acc tiles.])
-  ([.tiles] *.elim [a-tile b-tile.])
+  ([p s z q n k m k-tiles tile-size.] (f32 val))
+= {[a b tile-size block-context block-worker a-tile b-tile k-tile.]
   ([.k-tile] ix.to-u64 [k-tile-u64.])
 
   {
@@ -196,7 +171,7 @@
     [block-context b-ready.])
 
   ({
-    [.acc]
+    (const.u32.0x00000000 u32.bitcast-f32)
     (name.f32.add lift)
     ({
       [.a-ready]
@@ -208,19 +183,17 @@
     [.tile-size]
   }
   reduce
-  [next-acc.])
+  [tile-result.])
 
-  # No worker may overwrite either tile until all workers have finished
-  # reading the current generation.
+  # This second synchronization restores both captured tiles to writable, but
+  # standard reduce does not currently enforce that invariant in its types.
   ({[.block-context] [.a-ready]}
     parallel.release
-    [block-context next-a-tile.])
+    [block-context _next-a-tile.])
   ({[.block-context] [.b-ready]}
     parallel.release
-    [_block-context next-b-tile.])
-  ({[.next-a-tile] [.next-b-tile]} *.intro [next-tiles.])
-  ({[.next-acc] [.next-tiles]} *.intro [next-state.])
-  [.next-state]
+    [_block-context _next-b-tile.])
+  [.tile-result]
 })
 
 # Compute one output cell on one grid worker.
@@ -278,27 +251,23 @@
     parallel.allocate
     [block-context b-tile.])
 
-  ({[.a-tile] [.b-tile]} *.intro [tiles.])
-  (const.u32.0x00000000 u32.bitcast-f32 [zero.])
-  ({[.zero] [.tiles]} *.intro [initial-state.])
-
   ({
-    [.initial-state]
+    (const.u32.0x00000000 u32.bitcast-f32)
+    (name.f32.add lift)
     ({
       [.a]
       [.b]
       [.tile-size]
       [.block-context]
       [.block-worker]
+      [.a-tile]
+      [.b-tile]
     }
-    partial.gpu.tiled-matmul.tile-step.5)
+    partial.gpu.tiled-matmul.tile-step.7)
     [.k-tiles]
   }
-  fold
-  [final-state.])
-
-  ([.final-state] *.elim [result final-tiles.])
-  ([.final-tiles] *.elim [_a-tile _b-tile.])
+  reduce
+  [result.])
   [.result]
 })
 

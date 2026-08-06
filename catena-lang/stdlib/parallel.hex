@@ -60,6 +60,53 @@
     ->
     ([p.] ({[.p p]} context)))
 
+  # Return the current worker's flat index within the selected topology level.
+  (arr parallel.worker-index : {[p l s n rest.]
+    ({[.p] ({[.l] ({[.s n]} dims) [.rest]} topo.level)} context)
+    ({[.p] ({[.l] ({[.s n]} dims) [.rest]} topo.level)} worker)
+  }
+  ->
+  ([p l s n rest.] ([.n] ix val)))
+
+  # Project the flat logical index from a one-work-item-per-worker
+  # materialization callback. The context and worker inputs fix the complete
+  # callback type; the resulting closure only exposes its index.
+  (arr parallel.work-item-index : {[p l s n rest.]
+    ({[.p] ({[.l] ({[.s n]} dims) [.rest]} topo.level)} context)
+    ({[.p] ({[.l] ({[.s n]} dims) [.rest]} topo.level)} worker)
+  }
+  ->
+  ([p l s n rest.]
+    ({
+      ({
+        ({[.p] ({[.l] ({[.s n]} dims) [.rest]} topo.level)} context)
+        ({
+          ({[.p] ({[.l] ({[.s n]} dims) [.rest]} topo.level)} worker)
+          ([.n] ix val)
+        } *)
+      } *)
+      ([.n] ix val)
+    } =>)))
+
+  # Convert a flat index of a 2D shape into its row and column coordinates.
+  (def shape.2d.indices : {[x y.]
+    ({[.y] u64} :)
+    (({[.x y]} *) ix val)
+  }
+  ->
+  ([x y.] {([.x] ix val) ([.y] ix val)} *)
+  = ([y-len flat.]
+    ([.y-len] u64.copies2 [row-cols col-cols.]
+      ([.flat] ix.copy [flat-for-row flat-for-col.]
+        ({[.row-cols] [.flat-for-row]} row-major-row [row.]
+          ({[.col-cols] [.flat-for-col]} row-major-col [column.]
+            ({[.row] [.column]} *.intro)
+          )
+        )
+      )
+    )
+  ))
+
   # Allocate an owned f32 buffer in an execution context.
   (arr parallel.allocate : {[p s n.]
     ({[.p s]} context)
@@ -71,7 +118,9 @@
     ({({[.p s]} context) ({cap.own [.n] f32} buf)} writable val)
   }))
 
-  # Wait until writes into a buffer are visible to the context's workers.
+  # Synchronize after writes, making a pending buffer visible to the context's
+  # workers. This and `parallel.release` are both sync operations, but use
+  # different names because their buffer-state signatures are different.
   # The bare buffer no longer records which context made it available.
   (arr parallel.await : {[p s m n.]
     ({[.p s]} context)
@@ -83,9 +132,11 @@
     ({[.m n] f32} buf val)
   }))
 
-  # Wait until the context's workers have finished reading a buffer and make
-  # it writable again. TODO: because await returns a bare buffer, this type
-  # cannot prove that the buffer came from this same context.
+  # Synchronize after reads, making the buffer writable again. This and
+  # `parallel.await` are both sync operations, but use different names because
+  # their buffer-state signatures are different. TODO: because await returns a
+  # bare buffer, this type cannot prove that the buffer came from this same
+  # context.
   (arr parallel.release : {[p s m n.]
     ({[.p s]} context)
     ({[.m n] f32} buf val)

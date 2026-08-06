@@ -5,147 +5,174 @@
 # tile-size*tile-size workers.
 
 (theory program type {
-  # Expose the erased topology parameters needed by a partially applied fold
-  # step. The context itself continues independently into allocation.
-  (arr gpu.f32.tiled-matmul.block-params :
-    ({[p s z.] [.p] ({gpu.block ({[.s z]} dims) topo.end} topo.level)} context)
-    ->
-    ([p s z.] { [.p] [.s] [.z] }))
-
-  # Build the producer for one cooperative load of the current A tile.
-  (arr gpu.f32.tiled-matmul.load-a :
-    {[p s z n k m tile-size.]
-      ({({([.n] ix val) ([.k] ix val)} *) (f32 val)} =>)
-      ({([.n] ix val) ([.m] ix val)} *)
-      (u64 val)
-      ({[.tile-size] u64} :)
-      ({[.p] ({gpu.block ({[.s z]} dims) topo.end} topo.level)} context)
-      ({[.p] ({gpu.block ({[.s z]} dims) topo.end} topo.level)} worker)
-    }
-    ->
-    ([p s z n k m tile-size.]
+  # Expose the erased topology parameters needed by a partially applied tile
+  # producer. The context itself continues independently into allocation.
+  (arr gpu.f32.tiled-matmul.block-param :
+    ({[p tile-size.]
+      [.p]
       ({
+        gpu.block
         ({
-          ({[.p] ({gpu.block ({[.s z]} dims) topo.end} topo.level)} context)
-          ({
-            ({[.p] ({gpu.block ({[.s z]} dims) topo.end} topo.level)} worker)
-            ([.z] ix val)
-          } *)
-        } *)
-        (f32 val)
-      } =>)))
-
-  # Build the producer for one cooperative load of the current B tile.
-  (arr gpu.f32.tiled-matmul.load-b :
-    {[p s z n k m tile-size.]
-      ({({([.k] ix val) ([.m] ix val)} *) (f32 val)} =>)
-      ({([.n] ix val) ([.m] ix val)} *)
-      (u64 val)
-      ({[.tile-size] u64} :)
-      ({[.p] ({gpu.block ({[.s z]} dims) topo.end} topo.level)} context)
-      ({[.p] ({gpu.block ({[.s z]} dims) topo.end} topo.level)} worker)
-    }
+          ({[.tile-size tile-size]} shape.2d)
+          ({[.tile-size tile-size]} *)
+        } dims)
+        topo.end
+      } topo.level)
+    } context)
     ->
-    ([p s z n k m tile-size.]
-      ({
-        ({
-          ({[.p] ({gpu.block ({[.s z]} dims) topo.end} topo.level)} context)
-          ({
-            ({[.p] ({gpu.block ({[.s z]} dims) topo.end} topo.level)} worker)
-            ([.z] ix val)
-          } *)
-        } *)
-        (f32 val)
-      } =>)))
+    ([p tile-size.] [.p]))
 
-  # Build the producer for the terms of the logical C cell's dot product.
-  (arr gpu.f32.tiled-matmul.tile-product :
-    {[p s z n m tile-size.]
-      ({cap.own [.z] f32} buf val)
-      ({cap.own [.z] f32} buf val)
-      ({([.n] ix val) ([.m] ix val)} *)
-      ({[.tile-size] u64} :)
-      ({[.p] ({gpu.block ({[.s z]} dims) topo.end} topo.level)} worker)
-    }
-    ->
-    ([p s z n m tile-size.]
-      ({([.tile-size] ix val) (f32 val)} =>)))
 })
 
-# One k-tile fold iteration. Shared tiles transition from writable to pending,
-# then to readable bare buffers, and finally back to writable for reuse.
+# Map a local row-inner tile coordinate to its source matrix coordinate.
+(def program tiled-matmul.row-inner-tile-reindex :
+  ([rows inner tile-size.] {
+    ({[.inner] u64} :)
+    ({[.tile-size] u64} :)
+    ([.rows] ix val)
+    (u64 val)
+    ({([.tile-size] ix val) ([.tile-size] ix val)} *)
+  })
+  ->
+  ([rows inner tile-size.] {([.rows] ix val) ([.inner] ix val)} *)
+= {[inner tile-size output-row inner-tile-index local-index.]
+  ([.tile-size] u64.copies2 [row-tile-size inner-tile-size.])
+  ([.local-index] *.elim [local-row local-col.])
+  ({[.row-tile-size] [.output-row] [.local-row]}
+    ix.same-tile-coordinate [matrix-row.])
+  ({[.inner] [.inner-tile-size] [.inner-tile-index] [.local-col]}
+    ix.tile-offset-coordinate [matrix-inner.])
+  ({[.matrix-row] [.matrix-inner]} *.intro)
+})
+
+# Map a local inner-column tile coordinate to its source matrix coordinate.
+(def program tiled-matmul.inner-col-tile-reindex :
+  ([inner cols tile-size.] {
+    ({[.inner] u64} :)
+    ({[.tile-size] u64} :)
+    ([.cols] ix val)
+    (u64 val)
+    ({([.tile-size] ix val) ([.tile-size] ix val)} *)
+  })
+  ->
+  ([inner cols tile-size.] {([.inner] ix val) ([.cols] ix val)} *)
+= {[inner tile-size output-col inner-tile-index local-index.]
+  ([.tile-size] u64.copies2 [inner-tile-size col-tile-size.])
+  ([.local-index] *.elim [local-row local-col.])
+  ({[.inner] [.inner-tile-size] [.inner-tile-index] [.local-row]}
+    ix.tile-offset-coordinate [matrix-inner.])
+  ({[.col-tile-size] [.output-col] [.local-col]}
+    ix.same-tile-coordinate [matrix-col.])
+  ({[.matrix-inner] [.matrix-col]} *.intro)
+})
+
+# Evaluate the row-inner source view at one flat local tile index.
+(def program f32.tiled-matmul.row-inner-tile-load :
+  ([rows inner tile-size.] {
+    ({({([.rows] ix val) ([.inner] ix val)} *) (f32 val)} =>)
+    ({[.inner] u64} :)
+    ({[.tile-size] u64} :)
+    ([.rows] ix val)
+    (u64 val)
+    (({[.tile-size tile-size]} *) ix val)
+  })
+  ->
+  ([rows inner tile-size.] (f32 val))
+= {[view inner tile-size output-row inner-tile-index flat-index.]
+  ({[.tile-size] [.flat-index]} shape.2d.indices [local-index.])
+  ({[.inner] [.tile-size] [.output-row] [.inner-tile-index] [.local-index]}
+    tiled-matmul.row-inner-tile-reindex [matrix-index.])
+  ({[.matrix-index] [.view]} evaluate)
+})
+
+# Evaluate the inner-column source view at one flat local tile index.
+(def program f32.tiled-matmul.inner-col-tile-load :
+  ([inner cols tile-size.] {
+    ({({([.inner] ix val) ([.cols] ix val)} *) (f32 val)} =>)
+    ({[.inner] u64} :)
+    ({[.tile-size] u64} :)
+    ([.cols] ix val)
+    (u64 val)
+    (({[.tile-size tile-size]} *) ix val)
+  })
+  ->
+  ([inner cols tile-size.] (f32 val))
+= {[view inner tile-size output-col inner-tile-index flat-index.]
+  ({[.tile-size] [.flat-index]} shape.2d.indices [local-index.])
+  ({[.inner] [.tile-size] [.output-col] [.inner-tile-index] [.local-index]}
+    tiled-matmul.inner-col-tile-reindex [matrix-index.])
+  ({[.matrix-index] [.view]} evaluate)
+})
+
+# Produce one k-tile contribution. The writable tiles are captured by the
+# surrounding reduction and reused for every k-tile.
 (def program gpu.f32.tiled-matmul.tile-step :
-  ([p s z n k m k-tiles tile-size.] {
+  ([p n k m k-tiles tile-size.] {
+    [.n]
+    [.m]
     ({({([.n] ix val) ([.k] ix val)} *) (f32 val)} =>)
     ({({([.k] ix val) ([.m] ix val)} *) (f32 val)} =>)
     ({([.n] ix val) ([.m] ix val)} *)
     ({[.tile-size] u64} :)
+    ({[.k] u64} :)
     ({[.k-tiles] u64} :)
-    ({[.p] ({gpu.block ({[.s z]} dims) topo.end} topo.level)} context)
-    ({[.p] ({gpu.block ({[.s z]} dims) topo.end} topo.level)} worker)
+    ({[.p] ({gpu.block ({({[.tile-size tile-size]} shape.2d) ({[.tile-size tile-size]} *)} dims) topo.end} topo.level)} context)
+    ({[.p] ({gpu.block ({({[.tile-size tile-size]} shape.2d) ({[.tile-size tile-size]} *)} dims) topo.end} topo.level)} worker)
     ({
-      ({
-        (f32 val)
-        ({
-          ({
-            ({[.p] ({gpu.block ({[.s z]} dims) topo.end} topo.level)} context)
-            ({cap.own [.z] f32} buf)
-          } writable val)
-          ({
-            ({[.p] ({gpu.block ({[.s z]} dims) topo.end} topo.level)} context)
-            ({cap.own [.z] f32} buf)
-          } writable val)
-        } *)
-      } *)
-      ([.k-tiles] ix val)
-    } *)
+      ({[.p] ({gpu.block ({({[.tile-size tile-size]} shape.2d) ({[.tile-size tile-size]} *)} dims) topo.end} topo.level)} context)
+      ({cap.own ({[.tile-size tile-size]} *) f32} buf)
+    } writable val)
+    ({
+      ({[.p] ({gpu.block ({({[.tile-size tile-size]} shape.2d) ({[.tile-size tile-size]} *)} dims) topo.end} topo.level)} context)
+      ({cap.own ({[.tile-size tile-size]} *) f32} buf)
+    } writable val)
+    ([.k-tiles] ix val)
   })
   ->
-  ([p s z n k m k-tiles tile-size.]
-    ({
-      (f32 val)
-      ({
-        ({
-          ({[.p] ({gpu.block ({[.s z]} dims) topo.end} topo.level)} context)
-          ({cap.own [.z] f32} buf)
-        } writable val)
-        ({
-          ({[.p] ({gpu.block ({[.s z]} dims) topo.end} topo.level)} context)
-          ({cap.own [.z] f32} buf)
-        } writable val)
-      } *)
-    } *))
-= {[a b c-index tile-size _k-tiles block-context block-worker arg.]
-  ([.arg] *.elim [state k-tile.])
-  ([.state] *.elim [acc tiles.])
-  ([.tiles] *.elim [a-tile b-tile.])
+  ([p n k m k-tiles tile-size.] (f32 val))
+= {[n-param m-param a b c-index tile-size inner _k-tiles block-context block-worker a-tile b-tile k-tile.]
+  ([.c-index] *.elim [output-row output-col.])
   ([.k-tile] ix.to-u64 [k-tile-u64.])
+  ([.inner] u64.copy-param [inner-value inner-param.])
+  ([.tile-size] u64.copy-param [tile-size-value tile-size-param.])
+  ({[.block-context] [.block-worker]}
+    parallel.worker-index [local-flat-index.])
+  ({[.tile-size] [.local-flat-index]}
+    shape.2d.indices [local-c-index.])
 
   ({
     [.block-context]
     [.a-tile]
     ({
-      [.a]
-      [.c-index]
-      [.k-tile-u64]
-      [.tile-size]
-      [.block-context]
-      [.block-worker]
-    }
-      gpu.f32.tiled-matmul.load-a)
+      ({[.block-context] [.block-worker]} parallel.work-item-index)
+      ({
+        [.n-param]
+        [.inner-param]
+        [.tile-size-param]
+        [.a]
+        [.inner-value]
+        [.tile-size-value]
+        [.output-row]
+        [.k-tile-u64]
+      } partial.f32.tiled-matmul.row-inner-tile-load.5)
+    } compose)
   } parallel.materialize [block-context-1 pending-a.])
   ({
     [.block-context-1]
     [.b-tile]
     ({
-      [.b]
-      [.c-index]
-      [.k-tile-u64]
-      [.tile-size]
-      [.block-context-1]
-      [.block-worker]
-    }
-      gpu.f32.tiled-matmul.load-b)
+      ({[.block-context-1] [.block-worker]} parallel.work-item-index)
+      ({
+        [.inner-param]
+        [.m-param]
+        [.tile-size-param]
+        [.b]
+        [.inner-value]
+        [.tile-size-value]
+        [.output-col]
+        [.k-tile-u64]
+      } partial.f32.tiled-matmul.inner-col-tile-load.5)
+    } compose)
   } parallel.materialize [block-context-2 pending-b.])
 
   ({[.block-context-2] [.pending-a]}
@@ -153,21 +180,29 @@
   ({[.block-context-3] [.pending-b]}
     parallel.await [block-context-4 b-ready.])
 
+  ([.a-ready] buf.f32.view [a-flat-view.])
+  ([.b-ready] buf.f32.view [b-flat-view.])
+  ({[.tile-size] [.tile-size] [.a-flat-view]}
+    f32.row-major.matrix-view [a-tile-view.])
+  ({[.tile-size] [.tile-size] [.b-flat-view]}
+    f32.row-major.matrix-view [b-tile-view.])
+  ([.tile-size] u64.params3 [tile-n tile-m _tile-unused.])
   ({
-    [.acc]
-    (name.f32.add lift)
-    ({[.a-ready] [.b-ready] [.c-index] [.tile-size] [.block-worker]}
-      gpu.f32.tiled-matmul.tile-product)
+    [.tile-n]
+    [.tile-m]
     [.tile-size]
-  } reduce [next-acc.])
+    [.a-tile-view]
+    [.b-tile-view]
+    [.local-c-index]
+  } f32.matmul.cell-dot [tile-result.])
 
+  # This second synchronization restores both captured tiles to writable, but
+  # standard reduce does not currently enforce that invariant in its types.
   ({[.block-context-4] [.a-ready]}
-    parallel.release [block-context-5 next-a-tile.])
+    parallel.release [block-context-5 _next-a-tile.])
   ({[.block-context-5] [.b-ready]}
-    parallel.release [_block-context next-b-tile.])
-  ({[.next-a-tile] [.next-b-tile]} *.intro [next-tiles.])
-  ({[.next-acc] [.next-tiles]} *.intro [next-state.])
-  [.next-state]
+    parallel.release [_block-context _next-b-tile.])
+  [.tile-result]
 })
 
 # Evaluate one logical C cell selected independently of the physical worker.
@@ -221,10 +256,9 @@
   ([.assignment] *.elim [grid-worker c-index.])
   ({[.grid-context] [.grid-worker]}
     gpu.current-block [block-context-0 block-worker.])
-  ([.block-context-0] gpu.f32.tiled-matmul.block-params
-    [p-param block-shape-param block-size-param.])
+  ([.block-context-0] gpu.f32.tiled-matmul.block-param [p-param.])
 
-  ([.k] u64.copy-param [k-value k-param.])
+  ([.k] u64.copies2-param [k-value step-inner k-param.])
   ([.tile-size] u64.copies2-param
     [k-tile-size step-tile-size tile-size-param.])
   ({([.k-value] :.forget) ([.k-tile-size] :.forget)}
@@ -235,36 +269,33 @@
   ({[.block-context-1] [.tile-element-count]}
     parallel.allocate [block-context-2 b-tile.])
 
-  ({[.a-tile] [.b-tile]} *.intro [tiles.])
-  (const.u32.0x00000000 u32.bitcast-f32 [zero.])
-  ({[.zero] [.tiles]} *.intro [initial-state.])
-
   ([.k-tile-count] u64.copies2-param
-    [step-count fold-count k-tiles-param.])
+    [step-count reduce-count k-tiles-param.])
   ({
-    [.initial-state]
+    (const.u32.0x00000000 u32.bitcast-f32)
+    (name.f32.add lift)
     ({
       [.p-param]
-      [.block-shape-param]
-      [.block-size-param]
       [.n-param]
       [.k-param]
       [.m-param]
       [.k-tiles-param]
       [.tile-size-param]
+      [.n-param]
+      [.m-param]
       [.a]
       [.b]
       [.c-index]
       [.step-tile-size]
+      [.step-inner]
       [.step-count]
       [.block-context-2]
       [.block-worker]
-    } partial.gpu.f32.tiled-matmul.tile-step.7)
-    [.fold-count]
-  } fold [final-state.])
-
-  ([.final-state] *.elim [result final-tiles.])
-  ([.final-tiles] *.elim [_a-tile _b-tile.])
+      [.a-tile]
+      [.b-tile]
+    } partial.gpu.f32.tiled-matmul.tile-step.12)
+    [.reduce-count]
+  } reduce [result.])
   [.result]
 })
 

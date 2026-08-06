@@ -90,29 +90,3 @@
   }
   reduce
 ))
-
-# Fold carries the accumulator directly into the indexed step closure. Closure
-# conversion replaces that closure with an explicit environment and rewrites
-# fold to foldc.
-(def program u64-fold-step :
-  ([n.] ({(u64 val) ([.n] ix val)} *))
-  ->
-  ([n.] (u64 val))
-= ([arg.]
-  ([.arg] *.elim [acc i.])
-  ([.i] ix.to-u64 [i-u64.])
-  ({[.acc] [.i-u64]} u64.add)
-))
-
-(def program scalar-fold :
-  ([n.] ({[.n] u64} :))
-  ->
-  ([n.] (u64 val))
-= ([len.]
-  {
-    const.u64.0x0000000000000000
-    (([.len] :.param) name.u64-fold-step lift)
-    [.len]
-  }
-  fold
-))

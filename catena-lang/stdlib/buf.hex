@@ -61,6 +61,14 @@
     ([.n p] = |-)           # n = p
   } -> ([m n p.] ({[.m n] f32} buf val)))
 
+  # Construct an indexed read view over any bare f32 buffer. Capability is
+  # intentionally generic; writable and pending buffers remain inaccessible
+  # because those states wrap the buffer type.
+  (arr buf.f32.view :
+    ([m n.] ({[.m n] f32} buf val))
+    ->
+    ([m n.] ({([.n] ix val) (f32 val)} =>)))
+
   # Materialize an owned buffer from an indexed producer.
   #
   #   materialize : (n : u64) ● (val(ix n) => val(t)) -> val(buf cap.own n t)

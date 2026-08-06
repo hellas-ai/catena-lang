@@ -100,7 +100,7 @@ pub enum ExecError {
         expected: usize,
         actual: usize,
     },
-    #[error("Argument {index} contains device memory from a different GPU dialect or device")]
+    #[error("Argument {index} contains device memory from a different GPU dialect")]
     IncompatibleDeviceMemory { index: usize },
 }
 
@@ -251,11 +251,9 @@ impl Runtime {
                 });
             }
             if let Value::Mem(mem) = value
-                && let Some((dialect, device_ordinal)) = mem.device_identity()
+                && let Some(dialect) = Some(mem.dialect())
             {
-                if self.device_allocator.dialect() != dialect
-                    || self.device_allocator.device_ordinal() != device_ordinal
-                {
+                if self.device_allocator.dialect() != dialect {
                     return Err(ExecError::IncompatibleDeviceMemory { index });
                 }
             }

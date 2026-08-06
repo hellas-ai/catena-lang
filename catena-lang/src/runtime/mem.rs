@@ -47,13 +47,6 @@ pub enum MemError {
         allocator_dialect: GpuDialect,
         handle_dialect: GpuDialect,
     },
-    #[error(
-        "IPC handle belongs to device {handle_device}, but the current device is {allocator_device}"
-    )]
-    DeviceMismatch {
-        allocator_device: c_int,
-        handle_device: c_int,
-    },
     #[error("an imported IPC mapping cannot be exported again")]
     CannotExportImported,
     #[error("memory length {byte_len} is not a whole number of {element_size}-byte elements")]
@@ -136,12 +129,10 @@ impl Mem {
         }
     }
 
-    pub(crate) fn device_identity(&self) -> Option<(GpuDialect, c_int)> {
+    pub(crate) fn dialect(&self) -> GpuDialect {
         match &self.owner {
-            MemOwner::Generated(allocator) => {
-                Some((allocator.dialect(), allocator.device_ordinal()))
-            }
-            MemOwner::Device(device) => Some((device.dialect(), device.device_ordinal())),
+            MemOwner::Generated(allocator) => allocator.dialect(),
+            MemOwner::Device(device) => device.dialect(),
         }
     }
 

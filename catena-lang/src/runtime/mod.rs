@@ -6,8 +6,8 @@ pub mod value;
 /// Helpers for creating and freeing Catena memory values on program boundaries
 pub mod mem;
 
-/// Explicit GPU allocations.
-pub mod device_mem;
+/// Low-level GPU operations needed to manage Runtime-owned allocations.
+mod gpu_api;
 
 /// Compile generated GPU C++ to a shared object.
 pub mod artifact;
@@ -24,7 +24,6 @@ pub mod signature;
 //#[cfg(test)]
 //mod tests;
 
-pub use device_mem::{DeviceAllocator, DeviceBuffer};
 pub use mem::{MemError, MemOwn, MemRef};
 pub use runtime::{ExecError, InitError, Runtime};
 pub use value::Value;

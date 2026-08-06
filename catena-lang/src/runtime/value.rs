@@ -1,4 +1,3 @@
-use super::device_mem::DeviceBuffer;
 use super::mem::{MemOwn, MemRef};
 use serde::{Deserialize, Serialize};
 
@@ -74,18 +73,6 @@ impl<'a> From<u32> for Value<'a> {
 impl<'a> From<f32> for Value<'a> {
     fn from(value: f32) -> Self {
         Value::f32(value)
-    }
-}
-
-impl From<DeviceBuffer> for Value<'static> {
-    fn from(value: DeviceBuffer) -> Self {
-        Value::MemOwn(value.into_mem_own())
-    }
-}
-
-impl<'a> From<&'a DeviceBuffer> for Value<'a> {
-    fn from(value: &'a DeviceBuffer) -> Self {
-        Value::MemRef(MemRef::from_device_buffer(value))
     }
 }
 

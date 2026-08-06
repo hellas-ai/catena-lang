@@ -3,6 +3,7 @@ use thiserror::Error;
 use std::{
     fs,
     path::{Path, PathBuf},
+    sync::Arc,
 };
 
 use libloading::Library;
@@ -10,8 +11,8 @@ use libloading::os::unix::{Library as UnixLibrary, RTLD_LAZY, RTLD_LOCAL};
 use serde::{Deserialize, Serialize};
 
 use super::artifact::{Artifact, ArtifactError};
-use super::device_mem::DeviceAllocator;
 use super::executor::{AbiValue, Executor, ExecutorError};
+use super::gpu_api::GpuApi;
 use super::mem::{MemError, MemOwn};
 use super::{
     signature::{FunctionSignature, SignatureTable, signatures},
@@ -28,8 +29,8 @@ pub struct Runtime {
     _artifact: Artifact,
     /// Prepared entry points in the loaded shared object.
     executor: Executor,
-    /// Explicit allocator for application-owned device memory and Runtime inputs.
-    device_allocator: DeviceAllocator,
+    /// GPU operations used to validate and release memory crossing the ABI.
+    gpu: Arc<GpuApi>,
     /// Function signatures (runtime Rust ↔ C typechecking)
     signatures: SignatureTable,
 }
@@ -104,8 +105,6 @@ pub enum ExecError {
     },
     #[error("Argument {index} contains device memory from a different GPU dialect")]
     IncompatibleDeviceMemory { index: usize },
-    #[error("generated memory length {byte_len} cannot be represented on this platform")]
-    InvalidOutputMemoryLength { byte_len: u64 },
 }
 
 impl Runtime {
@@ -163,34 +162,32 @@ impl Runtime {
                 InitError::LoadSymbol { symbol, source }
             }
         })?;
-        let device_allocator = DeviceAllocator::new(dialect)?;
+        let gpu = Arc::new(GpuApi::load(dialect)?);
 
         Ok(Self {
             _artifact: artifact,
             executor,
-            device_allocator,
+            gpu,
             signatures: signature_table,
         })
     }
 
     pub fn mem_u64(&self, values: &[u64]) -> Result<MemOwn, MemError> {
-        self.device_allocator
-            .allocate_from_bytes(slice_as_bytes(values))
-            .map(|buffer| buffer.into_mem_own())
+        self.mem_from_bytes(slice_as_bytes(values))
     }
 
     pub fn mem_f32(&self, values: &[f32]) -> Result<MemOwn, MemError> {
-        self.device_allocator
-            .allocate_from_bytes(slice_as_bytes(values))
-            .map(|buffer| buffer.into_mem_own())
+        self.mem_from_bytes(slice_as_bytes(values))
     }
 
-    /// Return the matching explicit allocator.
-    ///
-    /// Buffers from this allocator can be borrowed as [`Value::MemRef`] or
-    /// transferred as [`Value::MemOwn`].
-    pub fn device_allocator(&self) -> &DeviceAllocator {
-        &self.device_allocator
+    fn mem_from_bytes(&self, bytes: &[u8]) -> Result<MemOwn, MemError> {
+        let data = self.gpu.allocate(bytes.len())?;
+        // SAFETY: `data` is the unique allocation returned immediately above
+        // by this same GPU API, and ownership is transferred into `MemOwn`.
+        let mut memory =
+            unsafe { MemOwn::from_raw_parts_with_gpu(data, bytes.len() as u64, self.gpu.clone()) };
+        memory.write_from_host(bytes)?;
+        Ok(memory)
     }
 
     /// Run a source-level `program` definition, which must have M arguments, and return its N arguments.
@@ -203,7 +200,13 @@ impl Runtime {
             .map(|values| values.try_into().expect("output arity already validated"))
     }
 
-    pub(crate) fn exec_values<'a>(
+    /// Run a source-level `program` with dynamically sized input and output
+    /// collections.
+    ///
+    /// This is the public execution boundary for adapters such as SafeRuntime,
+    /// whose arities are known from a runtime protocol rather than const
+    /// generics.
+    pub fn exec_values<'a>(
         &self,
         name: &str,
         args: Vec<Value<'a>>,
@@ -264,7 +267,7 @@ impl Runtime {
                 _ => None,
             };
             if let Some(dialect) = memory_dialect {
-                if self.device_allocator.dialect() != dialect {
+                if self.gpu.dialect() != dialect {
                     return Err(ExecError::IncompatibleDeviceMemory { index });
                 }
             }
@@ -298,11 +301,12 @@ impl Runtime {
             AbiValue::U64(value) => Ok(Value::U64(value)),
             AbiValue::F32(value) => Ok(Value::F32(value)),
             AbiValue::Mem(abi) => {
-                let byte_len = usize::try_from(abi.len)
-                    .map_err(|_| ExecError::InvalidOutputMemoryLength { byte_len: abi.len })?;
-                Ok(Value::from(
-                    self.device_allocator.adopt_owned(abi.data, byte_len),
-                ))
+                // SAFETY: cap.ref outputs are rejected at initialization, so
+                // every memory output transfers a GPU allocation owned by the
+                // generated program to its caller.
+                let memory =
+                    unsafe { MemOwn::from_raw_parts_with_gpu(abi.data, abi.len, self.gpu.clone()) };
+                Ok(Value::from(memory))
             }
         }
     }

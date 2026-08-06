@@ -1,15 +1,12 @@
 use catena_lang::{
     codegen::GpuDialect,
-    runtime::{DeviceAllocator, IpcMemoryHandle, Runtime, Value, ValueKind},
+    runtime::{DeviceAllocator, InitError, Runtime, Value, ValueKind},
     stdlib,
 };
-use std::process::Command;
 
 const GPU_DIALECT_ENV: &str = "CATENA_GPU_DIALECT";
-const IPC_CHILD_ENV: &str = "CATENA_DEVICE_IPC_TEST_CHILD";
-const IPC_LENGTH_ENV: &str = "CATENA_DEVICE_IPC_TEST_LENGTH";
 const ARRAY_HEAD_U64_SOURCE: &str = r#"
-    (def program array-head-u64 : ([n.] (cap.own mem)) -> ([n.] (u64 val)) = (
+    (def program array-head-u64 : ([n.] (cap.ref mem)) -> ([n.] (u64 val)) = (
       mem.cast.u64
       {
         (u64.assert-nz ix.zero)
@@ -51,35 +48,6 @@ fn u64_bytes(values: &[u64]) -> Vec<u8> {
         .iter()
         .flat_map(|value| value.to_ne_bytes())
         .collect()
-}
-
-fn encode_ipc_handle(bytes: &[u8; 64]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
-}
-
-fn decode_ipc_handle(encoded: &str) -> anyhow::Result<[u8; 64]> {
-    if encoded.len() != 128 {
-        anyhow::bail!(
-            "encoded IPC handle has length {}, expected 128",
-            encoded.len()
-        );
-    }
-    let mut bytes = [0; 64];
-    for (index, byte) in bytes.iter_mut().enumerate() {
-        let start = index * 2;
-        *byte = u8::from_str_radix(&encoded[start..start + 2], 16)?;
-    }
-    Ok(bytes)
-}
-
-fn ipc_handle_from_environment() -> anyhow::Result<IpcMemoryHandle> {
-    let bytes = decode_ipc_handle(&std::env::var(IPC_CHILD_ENV)?)?;
-    let byte_len = std::env::var(IPC_LENGTH_ENV)?.parse()?;
-    Ok(IpcMemoryHandle::from_bytes(
-        configured_gpu_dialect()?,
-        byte_len,
-        bytes,
-    ))
 }
 
 #[test]
@@ -766,7 +734,7 @@ fn deadbeef_u32() -> anyhow::Result<()> {
 fn array_head_u64() -> anyhow::Result<()> {
     let runtime = runtime_with(
         r#"
-        (def program array-head-u64 : ([n.] (cap.own mem)) -> ([n.] (u64 val)) = (
+        (def program array-head-u64 : ([n.] (cap.ref mem)) -> ([n.] (u64 val)) = (
           mem.cast.u64
           {
             (u64.assert-nz ix.zero)
@@ -779,12 +747,84 @@ fn array_head_u64() -> anyhow::Result<()> {
 
     let values = [0x123456789abcdef0_u64, 7, 11];
     let input = runtime.mem_u64(&values)?;
-    let [head] = runtime.exec("array-head-u64", [input])?;
+    let [head] = runtime.exec("array-head-u64", [input.as_ref().into()])?;
     let Value::U64(head) = head else {
         anyhow::bail!("array-head-u64 returned non-u64 value: {head:?}");
     };
 
     assert_eq!(head, values[0]);
+    Ok(())
+}
+
+#[test]
+fn cap_ref_input_is_borrowed_and_reusable() -> anyhow::Result<()> {
+    let runtime = runtime_with(
+        r#"
+        (def program array-head-u64-ref : ([n.] (cap.ref mem)) -> ([n.] (u64 val)) = (
+          mem.cast.u64
+          {
+            (u64.assert-nz ix.zero)
+            [b]
+          }
+          ix
+        ))
+        "#,
+    )?;
+
+    let values = [0x123456789abcdef0_u64, 7, 11];
+    let input = runtime.mem_u64(&values)?;
+    for _ in 0..2 {
+        let [head] = runtime.exec("array-head-u64-ref", [input.as_ref().into()])?;
+        assert!(matches!(head, Value::U64(value) if value == values[0]));
+    }
+
+    Ok(())
+}
+
+#[test]
+fn mem_own_identity_transfers_and_returns_owned_memory_regression() -> anyhow::Result<()> {
+    let runtime = runtime_with(
+        r#"
+        (def program mem-own-identity : (cap.own mem) -> (cap.own mem) = [memory])
+        (def program array-head-u64-ref : ([n.] (cap.ref mem)) -> ([n.] (u64 val)) = (
+          mem.cast.u64
+          {
+            (u64.assert-nz ix.zero)
+            [b]
+          }
+          ix
+        ))
+        "#,
+    )?;
+
+    let expected = [3_u64, 5, 8, 13];
+    let input = runtime.mem_u64(&expected)?;
+    let [output] = runtime.exec("mem-own-identity", [input.into()])?;
+    let Value::MemOwn(output) = output else {
+        anyhow::bail!("mem-own-identity returned non-owned memory: {output:?}");
+    };
+
+    let [head] = runtime.exec("array-head-u64-ref", [output.as_ref().into()])?;
+    assert!(matches!(head, Value::U64(3)));
+
+    assert_eq!(output.try_to_u64_vec()?, expected);
+    Ok(())
+}
+
+#[test]
+fn cap_ref_outputs_are_rejected_during_initialization() -> anyhow::Result<()> {
+    let result = Runtime::from_sources(
+        stdlib::sources().chain([r#"
+        (def program mem-ref-identity : (cap.ref mem) -> (cap.ref mem) = [memory])
+        "#]),
+        configured_gpu_dialect()?,
+    );
+
+    assert!(matches!(
+        result,
+        Err(InitError::UnsupportedRefOutput { name, index: 0 })
+            if name == "mem-ref-identity"
+    ));
     Ok(())
 }
 
@@ -812,51 +852,12 @@ fn array_head_u64_from_explicit_device_buffer() -> anyhow::Result<()> {
         .device_allocator()
         .allocate_from_bytes(&u64_bytes(&values))?;
 
-    let [head] = runtime.exec("array-head-u64", [buffer.into()])?;
+    let [head] = runtime.exec("array-head-u64", [Value::from(&buffer)])?;
     let Value::U64(head) = head else {
         anyhow::bail!("array-head-u64 returned non-u64 value: {head:?}");
     };
 
     assert_eq!(head, values[0]);
-    Ok(())
-}
-
-#[test]
-fn device_memory_ipc_is_usable_as_runtime_mem() -> anyhow::Result<()> {
-    let expected = [0x123456789abcdef0_u64, 7, 11];
-    if std::env::var_os(IPC_CHILD_ENV).is_some() {
-        let runtime = runtime_with(ARRAY_HEAD_U64_SOURCE)?;
-        let handle = ipc_handle_from_environment()?;
-        let imported = runtime.device_allocator().import_ipc(&handle)?;
-        let [head] = runtime.exec("array-head-u64", [imported.into()])?;
-        let Value::U64(head) = head else {
-            anyhow::bail!("array-head-u64 returned non-u64 value: {head:?}");
-        };
-        assert_eq!(head, expected[0]);
-        return Ok(());
-    }
-
-    let allocator = DeviceAllocator::new(configured_gpu_dialect()?)?;
-    let allocation = allocator.allocate_from_bytes(&u64_bytes(&expected))?;
-    let handle = allocation.export_ipc()?;
-    let output = Command::new(std::env::current_exe()?)
-        .args([
-            "--exact",
-            "device_memory_ipc_is_usable_as_runtime_mem",
-            "--nocapture",
-        ])
-        .env(IPC_CHILD_ENV, encode_ipc_handle(handle.as_bytes()))
-        .env(IPC_LENGTH_ENV, handle.byte_len().to_string())
-        .output()?;
-
-    if !output.status.success() {
-        anyhow::bail!(
-            "IPC child failed with {}\nstdout:\n{}\nstderr:\n{}",
-            output.status,
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr),
-        );
-    }
     Ok(())
 }
 
@@ -1095,8 +1096,8 @@ fn softmax_test() -> anyhow::Result<()> {
 
     let input_values = [1.0_f32, 2.0, 4.0];
     let input = runtime.mem_f32(&input_values)?;
-    let [result] = runtime.exec("nn.softmax", [input])?;
-    let Value::Mem(result) = result else {
+    let [result] = runtime.exec("nn.softmax", [input.as_ref().into()])?;
+    let Value::MemOwn(result) = result else {
         anyhow::bail!("nn.softmax returned non-mem value: {result:?}");
     };
 
@@ -1135,8 +1136,8 @@ fn rmsnorm_test() -> anyhow::Result<()> {
 
     let input_values = [1.0_f32, 2.0, 4.0, -1.0, -9.0, 13.29];
     let input = runtime.mem_f32(&input_values)?;
-    let [result] = runtime.exec("nn.rmsnorm", [input])?;
-    let Value::Mem(result) = result else {
+    let [result] = runtime.exec("nn.rmsnorm", [input.as_ref().into()])?;
+    let Value::MemOwn(result) = result else {
         anyhow::bail!("nn.rmsnorm returned non-mem value: {result:?}");
     };
 
@@ -1169,13 +1170,13 @@ fn broadcast_f32_test() -> anyhow::Result<()> {
     let runtime = runtime_with("")?;
 
     let [empty] = runtime.exec("tensor.broadcast-f32", [3.5_f32.into(), 0_u64.into()])?;
-    let Value::Mem(empty) = empty else {
+    let Value::MemOwn(empty) = empty else {
         anyhow::bail!("tensor.broadcast-f32 returned non-mem value: {empty:?}");
     };
     assert_eq!(empty.to_f32_vec(), Vec::<f32>::new());
 
     let [result] = runtime.exec("tensor.broadcast-f32", [3.5_f32.into(), 4_u64.into()])?;
-    let Value::Mem(result) = result else {
+    let Value::MemOwn(result) = result else {
         anyhow::bail!("tensor.broadcast-f32 returned non-mem value: {result:?}");
     };
     assert_eq!(result.to_f32_vec(), vec![3.5, 3.5, 3.5, 3.5]);
@@ -1187,13 +1188,13 @@ fn arange_f32_test() -> anyhow::Result<()> {
     let runtime = runtime_with("")?;
 
     let [empty] = runtime.exec("tensor.arange-f32", [0_u64.into()])?;
-    let Value::Mem(empty) = empty else {
+    let Value::MemOwn(empty) = empty else {
         anyhow::bail!("tensor.arange-f32 returned non-mem value: {empty:?}");
     };
     assert_eq!(empty.to_f32_vec(), Vec::<f32>::new());
 
     let [result] = runtime.exec("tensor.arange-f32", [5_u64.into()])?;
-    let Value::Mem(result) = result else {
+    let Value::MemOwn(result) = result else {
         anyhow::bail!("tensor.arange-f32 returned non-mem value: {result:?}");
     };
     assert_eq!(result.to_f32_vec(), vec![0.0, 1.0, 2.0, 3.0, 4.0]);
@@ -1207,12 +1208,15 @@ fn slice_f32_test() -> anyhow::Result<()> {
     let [result] = runtime.exec(
         "tensor.slice-f32",
         [
-            runtime.mem_f32(&[10.0_f32, 20.0, 30.0, 40.0])?,
+            runtime
+                .mem_f32(&[10.0_f32, 20.0, 30.0, 40.0])?
+                .as_ref()
+                .into(),
             0_u64.into(),
             2_u64.into(),
         ],
     )?;
-    let Value::Mem(result) = result else {
+    let Value::MemOwn(result) = result else {
         anyhow::bail!("tensor.slice-f32 returned non-mem value: {result:?}");
     };
     assert_eq!(result.to_f32_vec(), vec![10.0, 20.0]);
@@ -1220,12 +1224,15 @@ fn slice_f32_test() -> anyhow::Result<()> {
     let [result] = runtime.exec(
         "tensor.slice-f32",
         [
-            runtime.mem_f32(&[10.0_f32, 20.0, 30.0, 40.0])?,
+            runtime
+                .mem_f32(&[10.0_f32, 20.0, 30.0, 40.0])?
+                .as_ref()
+                .into(),
             1_u64.into(),
             2_u64.into(),
         ],
     )?;
-    let Value::Mem(result) = result else {
+    let Value::MemOwn(result) = result else {
         anyhow::bail!("tensor.slice-f32 returned non-mem value: {result:?}");
     };
     assert_eq!(result.to_f32_vec(), vec![20.0, 30.0]);
@@ -1233,12 +1240,15 @@ fn slice_f32_test() -> anyhow::Result<()> {
     let [result] = runtime.exec(
         "tensor.slice-f32",
         [
-            runtime.mem_f32(&[10.0_f32, 20.0, 30.0, 40.0])?,
+            runtime
+                .mem_f32(&[10.0_f32, 20.0, 30.0, 40.0])?
+                .as_ref()
+                .into(),
             2_u64.into(),
             0_u64.into(),
         ],
     )?;
-    let Value::Mem(result) = result else {
+    let Value::MemOwn(result) = result else {
         anyhow::bail!("tensor.slice-f32 returned non-mem value: {result:?}");
     };
     assert_eq!(result.to_f32_vec(), Vec::<f32>::new());
@@ -1246,12 +1256,15 @@ fn slice_f32_test() -> anyhow::Result<()> {
     let [result] = runtime.exec(
         "tensor.slice-f32",
         [
-            runtime.mem_f32(&[10.0_f32, 20.0, 30.0, 40.0])?,
+            runtime
+                .mem_f32(&[10.0_f32, 20.0, 30.0, 40.0])?
+                .as_ref()
+                .into(),
             0_u64.into(),
             4_u64.into(),
         ],
     )?;
-    let Value::Mem(result) = result else {
+    let Value::MemOwn(result) = result else {
         anyhow::bail!("tensor.slice-f32 returned non-mem value: {result:?}");
     };
     assert_eq!(result.to_f32_vec(), vec![10.0, 20.0, 30.0, 40.0]);
@@ -1279,9 +1292,12 @@ fn concat_f32_test() -> anyhow::Result<()> {
     ] {
         let [result] = runtime.exec(
             "tensor.concat-f32",
-            [runtime.mem_f32(&left)?, runtime.mem_f32(&right)?],
+            [
+                runtime.mem_f32(&left)?.as_ref().into(),
+                runtime.mem_f32(&right)?.as_ref().into(),
+            ],
         )?;
-        let Value::Mem(result) = result else {
+        let Value::MemOwn(result) = result else {
             anyhow::bail!("tensor.concat-f32 returned non-mem value: {result:?}");
         };
         assert_eq!(
@@ -1307,7 +1323,7 @@ fn argmax_f32_test() -> anyhow::Result<()> {
         (vec![3.0_f32, 3.0, 3.0], 0_u64),
     ] {
         let input = runtime.mem_f32(&input_values)?;
-        let [result] = runtime.exec("tensor.argmax-f32", [input])?;
+        let [result] = runtime.exec("tensor.argmax-f32", [input.as_ref().into()])?;
         let Value::U64(result) = result else {
             anyhow::bail!("tensor.argmax-f32 returned non-u64 value: {result:?}");
         };

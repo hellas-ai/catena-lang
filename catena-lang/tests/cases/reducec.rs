@@ -8,7 +8,7 @@ fn sum_u64_exec() -> anyhow::Result<()> {
     let runtime = runtime_with(BASIC_SOURCE)?;
 
     let input = runtime.mem_u64(&[2, 3, 5, 7, 11])?;
-    let [result] = runtime.exec("sum-u64", [input])?;
+    let [result] = runtime.exec("sum-u64", [input.as_ref().into()])?;
     let Value::U64(result) = result else {
         anyhow::bail!("sum-u64 returned non-u64 value: {result:?}");
     };
@@ -37,7 +37,7 @@ fn dot_u64_exec() -> anyhow::Result<()> {
 
     let lhs = runtime.mem_u64(&[2, 3, 5, 7])?;
     let rhs = runtime.mem_u64(&[11, 13, 17, 19])?;
-    let [result] = runtime.exec("dot-u64", [lhs, rhs])?;
+    let [result] = runtime.exec("dot-u64", [lhs.as_ref().into(), rhs.as_ref().into()])?;
     let Value::U64(result) = result else {
         anyhow::bail!("dot-u64 returned non-u64 value: {result:?}");
     };
@@ -52,7 +52,7 @@ fn sum_f32_exec() -> anyhow::Result<()> {
     let runtime = runtime_with("")?;
 
     let input = runtime.mem_f32(&[1.5_f32, -0.5, 2.0, 4.0])?;
-    let [result] = runtime.exec("sum-f32", [input])?;
+    let [result] = runtime.exec("sum-f32", [input.as_ref().into()])?;
     let Value::F32(result) = result else {
         anyhow::bail!("sum-f32 returned non-f32 value: {result:?}");
     };
@@ -66,7 +66,7 @@ fn mean_f32_exec() -> anyhow::Result<()> {
     let runtime = runtime_with("")?;
 
     let input = runtime.mem_f32(&[1.5_f32, -0.5, 2.0, 4.0])?;
-    let [result] = runtime.exec("mean-f32", [input])?;
+    let [result] = runtime.exec("mean-f32", [input.as_ref().into()])?;
     let Value::F32(result) = result else {
         anyhow::bail!("mean-f32 returned non-f32 value: {result:?}");
     };
@@ -80,7 +80,7 @@ fn max_f32_exec() -> anyhow::Result<()> {
     let runtime = runtime_with("")?;
 
     let input = runtime.mem_f32(&[1.5_f32, -0.5, 2.0, 4.0])?;
-    let [result] = runtime.exec("max-f32", [input])?;
+    let [result] = runtime.exec("max-f32", [input.as_ref().into()])?;
     let Value::F32(result) = result else {
         anyhow::bail!("max-f32 returned non-f32 value: {result:?}");
     };

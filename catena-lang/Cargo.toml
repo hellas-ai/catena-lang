@@ -2,6 +2,7 @@
 name = "catena-lang"
 version = "0.1.0"
 edition = "2024"
+autoexamples = false
 description = "catena: the deterministic array language"
 repository = "https://github.com/hellas-ai/catena-lang"
 documentation = "https://docs.rs/catena-lang"
@@ -27,6 +28,14 @@ serde = { version = "1.0.228", features = ["derive"] }
 [features]
 default = []
 runtime-tests = []
+
+[[example]]
+name = "runtime"
+path = "examples/runtime.rs"
+
+[[example]]
+name = "mem"
+path = "examples/mem.rs"
 
 [[test]]
 name = "runtime"

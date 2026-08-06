@@ -19,8 +19,8 @@ fn f32_matmul_row_major_bufs_from_mems() -> anyhow::Result<()> {
     let [result] = runtime.exec(
         "matmul-2x2-via-mem",
         [
-            a,
-            b,
+            a.as_ref().into(),
+            b.as_ref().into(),
             2_u64.into(),
             2_u64.into(),
             3_u64.into(),
@@ -29,7 +29,7 @@ fn f32_matmul_row_major_bufs_from_mems() -> anyhow::Result<()> {
             4_u64.into(),
         ],
     )?;
-    let Value::Mem(result) = result else {
+    let Value::MemOwn(result) = result else {
         anyhow::bail!("matmul-2x2-via-mem returned non-mem value: {result:?}");
     };
 
@@ -53,9 +53,9 @@ fn f32_matmul_right_identity_view() -> anyhow::Result<()> {
     let input = runtime.mem_f32(&input_values)?;
     let [result] = runtime.exec(
         "matmul-right-identity-2x2-via-mem",
-        [input, 2_u64.into(), 4_u64.into()],
+        [input.as_ref().into(), 2_u64.into(), 4_u64.into()],
     )?;
-    let Value::Mem(result) = result else {
+    let Value::MemOwn(result) = result else {
         anyhow::bail!("matmul-right-identity-2x2-via-mem returned non-mem value: {result:?}");
     };
 
@@ -71,9 +71,9 @@ fn f32_matmul_left_identity_view() -> anyhow::Result<()> {
     let input = runtime.mem_f32(&input_values)?;
     let [result] = runtime.exec(
         "matmul-left-identity-2x2-via-mem",
-        [input, 2_u64.into(), 4_u64.into()],
+        [input.as_ref().into(), 2_u64.into(), 4_u64.into()],
     )?;
-    let Value::Mem(result) = result else {
+    let Value::MemOwn(result) = result else {
         anyhow::bail!("matmul-left-identity-2x2-via-mem returned non-mem value: {result:?}");
     };
 

@@ -1,71 +1,19 @@
-//! Application-owned device memory and legacy HIP/CUDA IPC handles.
-//!
-//! These allocations are independent of memory allocated by generated Catena
-//! programs. An exported allocation remains owned by the exporting process;
-//! importing a handle creates a mapping of the same VRAM allocation without
-//! copying its contents.
+//! Application-owned device memory.
 
 use std::{
     env,
-    ffi::{CString, c_int, c_uint, c_void},
+    ffi::{CString, c_int, c_void},
     path::PathBuf,
     sync::Arc,
 };
 
 use libloading::{Library, Symbol};
 
-use super::mem::{Mem, MemError};
+use super::mem::{MemError, MemOwn};
 use crate::codegen::GpuDialect;
 
-const IPC_HANDLE_BYTES: usize = 64;
 const MEMCPY_HOST_TO_DEVICE: c_int = 1;
 const MEMCPY_DEVICE_TO_HOST: c_int = 2;
-const IPC_LAZY_ENABLE_PEER_ACCESS: c_uint = 1;
-
-/// An opaque legacy HIP/CUDA IPC handle for one device allocation.
-///
-/// The exporting process and its [`DeviceBuffer`] must remain alive until all
-/// importing processes have closed their mappings.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct IpcMemoryHandle {
-    dialect: GpuDialect,
-    byte_len: u64,
-    bytes: [u8; IPC_HANDLE_BYTES],
-}
-
-impl IpcMemoryHandle {
-    /// Reconstruct a transported handle from its metadata and opaque bytes.
-    ///
-    /// The metadata must come from the same call to [`DeviceBuffer::export_ipc`]
-    /// as the opaque bytes.
-    pub fn from_bytes(dialect: GpuDialect, byte_len: u64, bytes: [u8; IPC_HANDLE_BYTES]) -> Self {
-        Self {
-            dialect,
-            byte_len,
-            bytes,
-        }
-    }
-
-    pub fn dialect(&self) -> GpuDialect {
-        self.dialect
-    }
-
-    pub fn byte_len(&self) -> u64 {
-        self.byte_len
-    }
-
-    pub fn as_bytes(&self) -> &[u8; IPC_HANDLE_BYTES] {
-        &self.bytes
-    }
-
-    pub fn into_bytes(self) -> [u8; IPC_HANDLE_BYTES] {
-        self.bytes
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.byte_len == 0
-    }
-}
 
 /// Allocates application-owned GPU memory.
 #[derive(Debug, Clone)]
@@ -83,25 +31,6 @@ impl DeviceAllocator {
         self.gpu.dialect
     }
 
-    pub(crate) fn copy_device_to_host_raw(
-        &self,
-        destination: *mut c_void,
-        source: *const c_void,
-        byte_len: usize,
-    ) -> Result<(), MemError> {
-        self.gpu.copy(
-            destination,
-            source,
-            byte_len,
-            MEMCPY_DEVICE_TO_HOST,
-            "copy device to host",
-        )
-    }
-
-    pub(crate) fn free_raw(&self, data: *mut c_void) -> Result<(), MemError> {
-        self.gpu.free(data)
-    }
-
     /// Allocate uninitialized device-only memory.
     pub fn allocate(&self, byte_len: usize) -> Result<DeviceBuffer, MemError> {
         let mut data = std::ptr::null_mut();
@@ -112,7 +41,6 @@ impl DeviceAllocator {
             data,
             byte_len,
             gpu: self.gpu.clone(),
-            release: Release::Free,
         })
     }
 
@@ -126,45 +54,21 @@ impl DeviceAllocator {
         Ok(buffer)
     }
 
-    /// Map an allocation exported by another process without copying it.
-    ///
-    /// The exporting allocation must outlive the returned mapping. The handle's
-    /// dialect must match this allocator.
-    pub fn import_ipc(&self, handle: &IpcMemoryHandle) -> Result<DeviceBuffer, MemError> {
-        if self.dialect() != handle.dialect {
-            return Err(MemError::DialectMismatch {
-                allocator_dialect: self.dialect(),
-                handle_dialect: handle.dialect,
-            });
-        }
-        let byte_len = usize::try_from(handle.byte_len).map_err(|_| MemError::LengthTooLarge {
-            byte_len: handle.byte_len,
-        })?;
-        let mut data = std::ptr::null_mut();
-        if byte_len != 0 {
-            self.gpu.ipc_open(
-                &mut data,
-                RawIpcMemHandle {
-                    bytes: handle.bytes,
-                },
-            )?;
-        }
-        Ok(DeviceBuffer {
+    pub(crate) fn adopt_owned(&self, data: *mut c_void, byte_len: usize) -> DeviceBuffer {
+        DeviceBuffer {
             data,
             byte_len,
             gpu: self.gpu.clone(),
-            release: Release::IpcClose,
-        })
+        }
     }
 }
 
-/// An opaque application-owned handle to a device allocation or IPC mapping.
+/// An opaque application-owned handle to a device allocation.
 #[derive(Debug)]
 pub struct DeviceBuffer {
     data: *mut c_void,
     byte_len: usize,
     gpu: Arc<DeviceGpuRuntime>,
-    release: Release,
 }
 
 impl DeviceBuffer {
@@ -212,34 +116,14 @@ impl DeviceBuffer {
         )
     }
 
-    /// Export an opaque handle that another process can import.
-    ///
-    /// Imported mappings cannot be exported again.
-    pub fn export_ipc(&self) -> Result<IpcMemoryHandle, MemError> {
-        if self.release == Release::IpcClose {
-            return Err(MemError::CannotExportImported);
-        }
-        let mut raw = RawIpcMemHandle {
-            bytes: [0; IPC_HANDLE_BYTES],
-        };
-        if !self.data.is_null() {
-            self.gpu.ipc_get(&mut raw, self.data)?;
-        }
-        Ok(IpcMemoryHandle {
-            dialect: self.gpu.dialect,
-            byte_len: self.byte_len as u64,
-            bytes: raw.bytes,
-        })
-    }
-
-    /// Release the allocation or imported mapping and report release failures.
+    /// Release the allocation and report release failures.
     pub fn free(mut self) -> Result<(), MemError> {
         self.release_now()
     }
 
-    /// Transfer this allocation or imported mapping into a runtime memory value.
-    pub fn into_mem(self) -> Mem {
-        Mem::from_device_buffer(self)
+    /// Transfer this allocation into an owned runtime memory value.
+    pub fn into_mem_own(self) -> MemOwn {
+        MemOwn::from_device_buffer(self)
     }
 
     pub(crate) fn data(&self) -> *mut c_void {
@@ -250,12 +134,17 @@ impl DeviceBuffer {
         self.read(0, output)
     }
 
+    /// Relinquish this allocation to generated code without freeing it.
+    pub(crate) fn into_raw(mut self) {
+        self.data = std::ptr::null_mut();
+    }
+
     fn release_now(&mut self) -> Result<(), MemError> {
         if self.data.is_null() {
             return Ok(());
         }
         let data = std::mem::replace(&mut self.data, std::ptr::null_mut());
-        self.gpu.release(data, self.release)
+        self.gpu.free(data)
     }
 }
 
@@ -277,18 +166,6 @@ fn validate_range(byte_len: usize, offset: usize, length: usize) -> Result<(), M
         });
     }
     Ok(())
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Release {
-    Free,
-    IpcClose,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-struct RawIpcMemHandle {
-    bytes: [u8; IPC_HANDLE_BYTES],
 }
 
 #[derive(Debug)]
@@ -341,45 +218,11 @@ impl DeviceGpuRuntime {
         })
     }
 
-    fn ipc_get(&self, handle: &mut RawIpcMemHandle, data: *mut c_void) -> Result<(), MemError> {
-        let symbol = self.symbol("hipIpcGetMemHandle", "cudaIpcGetMemHandle");
-        let function: Symbol<'_, unsafe extern "C" fn(*mut RawIpcMemHandle, *mut c_void) -> c_int> =
-            unsafe { self.load_symbol(symbol)? };
-        self.check("export IPC memory handle", unsafe {
-            function(handle, data)
-        })
-    }
-
-    fn ipc_open(&self, data: &mut *mut c_void, handle: RawIpcMemHandle) -> Result<(), MemError> {
-        let symbol = self.symbol("hipIpcOpenMemHandle", "cudaIpcOpenMemHandle");
-        let function: Symbol<
-            '_,
-            unsafe extern "C" fn(*mut *mut c_void, RawIpcMemHandle, c_uint) -> c_int,
-        > = unsafe { self.load_symbol(symbol)? };
-        self.check("open IPC memory handle", unsafe {
-            function(data, handle, IPC_LAZY_ENABLE_PEER_ACCESS)
-        })
-    }
-
-    fn ipc_close(&self, data: *mut c_void) -> Result<(), MemError> {
-        let symbol = self.symbol("hipIpcCloseMemHandle", "cudaIpcCloseMemHandle");
-        let function: Symbol<'_, unsafe extern "C" fn(*mut c_void) -> c_int> =
-            unsafe { self.load_symbol(symbol)? };
-        self.check("close IPC memory handle", unsafe { function(data) })
-    }
-
     fn free(&self, data: *mut c_void) -> Result<(), MemError> {
         let symbol = self.symbol("hipFree", "cudaFree");
         let function: Symbol<'_, unsafe extern "C" fn(*mut c_void) -> c_int> =
             unsafe { self.load_symbol(symbol)? };
         self.check("free device memory", unsafe { function(data) })
-    }
-
-    fn release(&self, data: *mut c_void, release: Release) -> Result<(), MemError> {
-        match release {
-            Release::Free => self.free(data),
-            Release::IpcClose => self.ipc_close(data),
-        }
     }
 
     fn symbol(&self, hip: &'static str, cuda: &'static str) -> &'static str {
@@ -461,16 +304,5 @@ mod tests {
                 length: 2
             })
         ));
-    }
-
-    #[test]
-    fn ipc_handle_bytes_round_trip() {
-        let bytes = std::array::from_fn(|index| index as u8);
-        let handle = IpcMemoryHandle::from_bytes(GpuDialect::Hip, 4096, bytes);
-
-        assert_eq!(handle.dialect(), GpuDialect::Hip);
-        assert_eq!(handle.byte_len(), 4096);
-        assert_eq!(handle.as_bytes(), &bytes);
-        assert_eq!(handle.into_bytes(), bytes);
     }
 }

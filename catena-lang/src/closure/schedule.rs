@@ -54,6 +54,12 @@
 //! discovery runs again, `process` can be extracted without a nested marker in
 //! its body.
 //!
+//! The same dependency is recorded when an ordinary edge belonging to one
+//! region touches an internal wire of another region. That incidence is a
+//! structural relationship between the regions. If no region owns the external
+//! edge, the internal wire has genuinely escaped and region construction is
+//! invalid.
+//!
 //! The nested region is converted first. Region discovery then runs again on
 //! the rewritten graph before the enclosing region is considered ready.
 //!
@@ -171,19 +177,14 @@ impl Ord for RegionId {
 /// Why one region must be converted before another.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum RegionDependencyKind {
-    /// The prerequisite marker is delimited by the dependent region's body.
-    /// The nested region must be removed before its enclosing body is cut out.
+    /// The prerequisite marker or body is structurally connected inside the
+    /// dependent region. It must be removed before the dependent is cut out.
     NestedRegion,
 
     /// The dependent captures the opaque closure value produced by the
     /// prerequisite. The producer must first expand that value into its
     /// `(Environment, FnPointer)` representation.
     CapturedClosure { closure: NodeId },
-
-    /// An internal wire of the dependent is incident to an ordinary edge
-    /// owned by the prerequisite. Removing that owner must make the wire local
-    /// before the dependent can be extracted.
-    ExternalInternalUse { node: NodeId, edge: EdgeId },
 }
 
 /// A directed ordering constraint: `dependent` waits for `prerequisite`.
@@ -233,25 +234,18 @@ impl RegionDependencies {
 
 /// Build all known ordering constraints for one current graph snapshot.
 ///
-/// An internal wire used by an ordinary edge that belongs to no region is not
-/// a scheduling condition: it means region construction is inconsistent, so
-/// this function panics with the broken incidence.
+/// An internal wire used by an edge owned by another region creates a
+/// `NestedRegion` dependency. If no region owns that edge, region construction
+/// is inconsistent and this function panics with the broken incidence.
 pub(super) fn analyze(
     definition: &ClosureForgottenTerm,
     regions: &[ClosureRegion],
 ) -> RegionDependencies {
     let mut dependencies = Vec::new();
-    let edge_owners = edge_owners(definition.hypergraph.edges.len(), regions);
 
     for dependent in regions {
         add_captured_closure_dependencies(&mut dependencies, dependent, regions);
-        add_nested_region_dependencies(&mut dependencies, dependent, regions);
-        add_external_internal_use_dependencies(
-            &mut dependencies,
-            definition,
-            dependent,
-            &edge_owners,
-        );
+        add_nested_region_dependencies(&mut dependencies, definition, dependent, regions);
     }
 
     RegionDependencies { dependencies }
@@ -283,6 +277,7 @@ fn add_captured_closure_dependencies(
 
 fn add_nested_region_dependencies(
     dependencies: &mut Vec<RegionDependency>,
+    definition: &ClosureForgottenTerm,
     dependent: &ClosureRegion,
     regions: &[ClosureRegion],
 ) {
@@ -315,33 +310,13 @@ fn add_nested_region_dependencies(
             );
         }
     }
-}
 
-fn add_external_internal_use_dependencies(
-    dependencies: &mut Vec<RegionDependency>,
-    definition: &ClosureForgottenTerm,
-    dependent: &ClosureRegion,
-    edge_owners: &[BTreeSet<RegionId>],
-) {
-    let environment = dependent
-        .environment
-        .iter()
-        .map(|node| node.0)
-        .collect::<BTreeSet<_>>();
-    let internal = dependent
-        .nodes
-        .iter()
-        .copied()
-        .filter(|node| !environment.contains(&node.0) && *node != dependent.closure)
-        .map(|node| node.0)
-        .collect::<BTreeSet<_>>();
     let mut included = vec![false; definition.hypergraph.edges.len()];
     for edge in dependent.edges.iter().chain([&dependent.marker]) {
         included[edge.0] = true;
     }
 
     for (index, boundary) in definition.hypergraph.adjacency.iter().enumerate() {
-        let edge = EdgeId(index);
         if included[index]
             || matches!(
                 definition.hypergraph.edges[index],
@@ -355,40 +330,31 @@ fn add_external_internal_use_dependencies(
             if !internal.contains(&node.0) {
                 continue;
             }
-            let owners = &edge_owners[index];
-            if owners.is_empty() {
-                panic!(
-                    "internal wire w{} of closure region e{} escapes through unowned edge e{} (`{}`)",
-                    node.0, dependent.marker.0, edge.0, definition.hypergraph.edges[index],
-                );
-            }
-            for &prerequisite in owners {
-                assert_ne!(
-                    prerequisite,
-                    RegionId::from(dependent),
-                    "an excluded edge cannot be owned by the same closure region"
-                );
+            let edge = EdgeId(index);
+            let owners = regions
+                .iter()
+                .filter(|region| region.marker != dependent.marker && region.edges.contains(&edge))
+                .collect::<Vec<_>>();
+            assert!(
+                !owners.is_empty(),
+                "internal wire w{} of closure region e{} escapes through unowned edge e{} (`{}`)",
+                node.0,
+                dependent.marker.0,
+                index,
+                definition.hypergraph.edges[index],
+            );
+            for prerequisite in owners {
                 push_dependency(
                     dependencies,
                     RegionDependency {
                         dependent: dependent.into(),
-                        prerequisite,
-                        kind: RegionDependencyKind::ExternalInternalUse { node, edge },
+                        prerequisite: prerequisite.into(),
+                        kind: RegionDependencyKind::NestedRegion,
                     },
                 );
             }
         }
     }
-}
-
-fn edge_owners(edge_count: usize, regions: &[ClosureRegion]) -> Vec<BTreeSet<RegionId>> {
-    let mut owners = vec![BTreeSet::new(); edge_count];
-    for region in regions {
-        for &edge in &region.edges {
-            owners[edge.0].insert(region.into());
-        }
-    }
-    owners
 }
 
 fn push_dependency(dependencies: &mut Vec<RegionDependency>, dependency: RegionDependency) {
@@ -442,8 +408,65 @@ mod tests {
     }
 
     #[test]
+    fn region_owned_internal_use_is_a_nested_region_dependency() {
+        let mut term = ClosureForgottenTerm::empty();
+        let domain = term.new_node(Tree::Empty);
+        let internal = term.new_node(Tree::Empty);
+        let codomain = term.new_node(Tree::Empty);
+        let dependent_closure = term.new_node(Tree::Empty);
+        let nested_result = term.new_node(Tree::Empty);
+        let nested_closure = term.new_node(Tree::Empty);
+        let first = term.new_edge(
+            ClosureForgotten::Operation("first".parse().unwrap()),
+            (vec![domain], vec![internal]),
+        );
+        let second = term.new_edge(
+            ClosureForgotten::Operation("second".parse().unwrap()),
+            (vec![internal], vec![codomain]),
+        );
+        let nested_edge = term.new_edge(
+            ClosureForgotten::Operation("nested".parse().unwrap()),
+            (vec![internal], vec![nested_result]),
+        );
+        let dependent_marker = term.new_edge(
+            ClosureForgotten::ClosureMarker,
+            (vec![domain, codomain], vec![dependent_closure]),
+        );
+        let nested_marker = term.new_edge(
+            ClosureForgotten::ClosureMarker,
+            (vec![internal, nested_result], vec![nested_closure]),
+        );
+        let dependent = ClosureRegion {
+            marker: dependent_marker,
+            domain,
+            codomain,
+            closure: dependent_closure,
+            environment: vec![],
+            nodes: vec![domain, internal, codomain],
+            edges: vec![first, second],
+        };
+        let nested = ClosureRegion {
+            marker: nested_marker,
+            domain: internal,
+            codomain: nested_result,
+            closure: nested_closure,
+            environment: vec![internal],
+            nodes: vec![internal, nested_result],
+            edges: vec![nested_edge],
+        };
+
+        let dependencies = analyze(&term, &[dependent.clone(), nested.clone()]);
+
+        assert!(dependencies.dependencies.iter().any(|dependency| {
+            dependency.dependent == RegionId::from(&dependent)
+                && dependency.prerequisite == RegionId::from(&nested)
+                && dependency.kind == RegionDependencyKind::NestedRegion
+        }));
+    }
+
+    #[test]
     #[should_panic(expected = "escapes through unowned edge")]
-    fn unowned_external_use_is_a_construction_invariant_failure() {
+    fn external_internal_use_is_a_construction_invariant_failure() {
         let mut term = ClosureForgottenTerm::empty();
         let domain = term.new_node(Tree::Empty);
         let internal = term.new_node(Tree::Empty);

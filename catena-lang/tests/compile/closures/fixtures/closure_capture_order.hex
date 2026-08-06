@@ -2,7 +2,7 @@
 # produces a closure which captures two other closure values. Those producer
 # regions must be converted before the capturing region builds its environment.
 
-(def program choose-inner-closure :
+(def program choose-closure :
   {
     ({(bool val) (bool val)} =>)
     ({(bool val) (bool val)} =>)
@@ -20,19 +20,19 @@
   {(bool val) (bool val) (bool val) (bool val)}
   ->
   (bool val)
-= ([left-flag right-flag argument outer-flag.]
+= ([left-flag right-flag argument choice-flag.]
   {
     ({
       (name.bool.id lift)
       (name.bool.not lift)
       [.left-flag]
-    } partial.choose-inner-closure.3)
+    } partial.choose-closure.3)
     ({
       (name.bool.not lift)
       (name.bool.id lift)
       [.right-flag]
-    } partial.choose-inner-closure.3)
-    [.outer-flag]
+    } partial.choose-closure.3)
+    [.choice-flag]
     [.argument]
   }
   bool.if

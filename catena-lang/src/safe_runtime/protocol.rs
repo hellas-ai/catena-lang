@@ -88,7 +88,8 @@ impl TryFrom<Value> for WireValue {
             Value::U32(value) => Ok(Self::U32(value)),
             Value::U64(value) => Ok(Self::U64(value)),
             Value::F32(value) => Ok(Self::F32(value)),
-            Value::Mem(_) => Err(ValueKind::Mem),
+            Value::MemOwn(_) => Err(ValueKind::MemOwn),
+            Value::MemRef(_) => Err(ValueKind::MemRef),
         }
     }
 }

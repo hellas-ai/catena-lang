@@ -112,7 +112,7 @@ fn ffi_type(kind: ValueKind) -> Type {
         ValueKind::U32 => Type::u32(),
         ValueKind::U64 => Type::u64(),
         ValueKind::F32 => Type::f32(),
-        ValueKind::Mem => Type::structure([Type::pointer(), Type::u64()]),
+        ValueKind::MemOwn | ValueKind::MemRef => Type::structure([Type::pointer(), Type::u64()]),
     }
 }
 
@@ -122,7 +122,7 @@ fn input_arg(value: &Value) -> Arg<'_> {
         Value::U32(value) => Arg::new(value),
         Value::U64(value) => Arg::new(value),
         Value::F32(value) => Arg::new(value),
-        Value::Mem(value) => Arg::new(&value.abi),
+        Value::MemOwn(value) | Value::MemRef(value) => Arg::new(&value.abi),
     }
 }
 
@@ -132,6 +132,6 @@ fn output_pointer(value: &mut Value) -> *mut c_void {
         Value::U32(value) => (value as *mut u32).cast(),
         Value::U64(value) => (value as *mut u64).cast(),
         Value::F32(value) => (value as *mut f32).cast(),
-        Value::Mem(value) => (&mut value.abi as *mut CatenaMem).cast(),
+        Value::MemOwn(value) | Value::MemRef(value) => (&mut value.abi as *mut CatenaMem).cast(),
     }
 }

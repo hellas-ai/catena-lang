@@ -9,7 +9,8 @@ pub enum Value {
     U32(u32),
     U64(u64),
     F32(f32),
-    Mem(Mem),
+    MemOwn(Mem),
+    MemRef(Mem),
 }
 
 /// Semantic kinds of public runtime values.
@@ -19,7 +20,8 @@ pub enum ValueKind {
     U32,
     U64,
     F32,
-    Mem,
+    MemOwn,
+    MemRef,
 }
 
 impl Value {
@@ -39,13 +41,29 @@ impl Value {
         Value::F32(value)
     }
 
+    pub fn mem_own(value: DeviceBuffer) -> Self {
+        Value::MemOwn(value.into_mem())
+    }
+
+    pub fn mem_ref(value: &DeviceBuffer) -> Self {
+        Value::MemRef(value.clone_handle().into_mem())
+    }
+
     pub(crate) fn kind(&self) -> ValueKind {
         match self {
             Value::Bool(_) => ValueKind::Bool,
             Value::U32(_) => ValueKind::U32,
             Value::U64(_) => ValueKind::U64,
             Value::F32(_) => ValueKind::F32,
-            Value::Mem(_) => ValueKind::Mem,
+            Value::MemOwn(_) => ValueKind::MemOwn,
+            Value::MemRef(_) => ValueKind::MemRef,
+        }
+    }
+
+    pub(crate) fn mem(&self) -> Option<&Mem> {
+        match self {
+            Value::MemOwn(mem) | Value::MemRef(mem) => Some(mem),
+            _ => None,
         }
     }
 }
@@ -71,11 +89,5 @@ impl From<u32> for Value {
 impl From<f32> for Value {
     fn from(value: f32) -> Self {
         Value::f32(value)
-    }
-}
-
-impl From<DeviceBuffer> for Value {
-    fn from(value: DeviceBuffer) -> Self {
-        Value::Mem(value.into_mem())
     }
 }

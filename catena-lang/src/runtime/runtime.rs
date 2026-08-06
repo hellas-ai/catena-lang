@@ -10,7 +10,7 @@ use libloading::os::unix::{Library as UnixLibrary, RTLD_LAZY, RTLD_LOCAL};
 use serde::{Deserialize, Serialize};
 
 use super::artifact::{Artifact, ArtifactError};
-use super::device_mem::DeviceAllocator;
+use super::device_mem::{DeviceAllocator, DeviceBuffer};
 use super::executor::{Executor, ExecutorError};
 use super::mem::{Mem, MemError};
 use super::{
@@ -102,6 +102,8 @@ pub enum ExecError {
     },
     #[error("Argument {index} contains device memory from a different GPU dialect")]
     IncompatibleDeviceMemory { index: usize },
+    #[error("Function '{name}' returns unsupported referenced memory at output {index}")]
+    UnsupportedReferenceOutput { name: String, index: usize },
 }
 
 impl Runtime {
@@ -167,25 +169,46 @@ impl Runtime {
     }
 
     pub fn mem_u64(&self, values: &[u64]) -> Result<Value, MemError> {
-        self.device_allocator
-            .allocate_from_bytes(slice_as_bytes(values))
-            .map(Value::from)
+        self.buffer_u64(values)
+            .map(|buffer| Value::mem_ref(&buffer))
     }
 
     pub fn mem_f32(&self, values: &[f32]) -> Result<Value, MemError> {
+        self.buffer_f32(values)
+            .map(|buffer| Value::mem_ref(&buffer))
+    }
+
+    pub fn buffer_u64(&self, values: &[u64]) -> Result<DeviceBuffer, MemError> {
         self.device_allocator
             .allocate_from_bytes(slice_as_bytes(values))
-            .map(Value::from)
+    }
+
+    pub fn buffer_f32(&self, values: &[f32]) -> Result<DeviceBuffer, MemError> {
+        self.device_allocator
+            .allocate_from_bytes(slice_as_bytes(values))
+    }
+
+    pub fn mem_u64_owned(&self, values: &[u64]) -> Result<Value, MemError> {
+        self.device_allocator
+            .allocate_from_bytes(slice_as_bytes(values))
+            .map(Value::mem_own)
+    }
+
+    pub fn mem_f32_owned(&self, values: &[f32]) -> Result<Value, MemError> {
+        self.device_allocator
+            .allocate_from_bytes(slice_as_bytes(values))
+            .map(Value::mem_own)
     }
 
     /// Return the matching explicit allocator.
     ///
-    /// Imported buffers from this allocator can be converted to [`Value::Mem`].
+    /// Imported buffers from this allocator can be converted with
+    /// [`Value::mem_own`] or [`Value::mem_ref`].
     pub fn device_allocator(&self) -> &DeviceAllocator {
         &self.device_allocator
     }
 
-    /// Run a source-level `program` definition, which must have M arguments, and return its N arguments.
+    /// Run a source-level `program` definition, which must have M arguments, and return its N outputs.
     pub fn exec<const M: usize, const N: usize>(
         &self,
         name: &str,
@@ -205,14 +228,14 @@ impl Runtime {
             .signatures
             .get(name)
             .ok_or_else(|| ExecError::UnknownSourceFunction(name.to_string()))?;
-        self.exec_symbol(name, signature, args, output_count)
+        self.exec_symbol(name, signature, &args, output_count)
     }
 
     fn exec_symbol(
         &self,
         name: &str,
         signature: &FunctionSignature,
-        args: Vec<Value>,
+        args: &[Value],
         output_count: usize,
     ) -> Result<Vec<Value>, ExecError> {
         // Check arity/coarity lines up with what's in the function signature.
@@ -235,8 +258,9 @@ impl Runtime {
             .outputs
             .iter()
             .copied()
-            .map(|kind| self.zeroed_value(kind))
-            .collect();
+            .enumerate()
+            .map(|(index, kind)| self.zeroed_value(name, index, kind))
+            .collect::<Result<_, _>>()?;
 
         for (index, (value, expected)) in args
             .iter()
@@ -250,29 +274,33 @@ impl Runtime {
                     actual: value.kind(),
                 });
             }
-            if let Value::Mem(mem) = value
-                && let Some(dialect) = Some(mem.dialect())
+            if let Some(mem) = value.mem()
+                && self.device_allocator.dialect() != mem.dialect()
             {
-                if self.device_allocator.dialect() != dialect {
-                    return Err(ExecError::IncompatibleDeviceMemory { index });
-                }
+                return Err(ExecError::IncompatibleDeviceMemory { index });
             }
         }
 
         self.executor
-            .call(&signature.symbol, &args, &mut output_values);
+            .call(&signature.symbol, args, &mut output_values);
 
         Ok(output_values)
     }
 
-    fn zeroed_value(&self, kind: ValueKind) -> Value {
-        match kind {
+    fn zeroed_value(&self, name: &str, index: usize, kind: ValueKind) -> Result<Value, ExecError> {
+        Ok(match kind {
             ValueKind::Bool => Value::Bool(0),
             ValueKind::U32 => Value::U32(0),
             ValueKind::U64 => Value::U64(0),
             ValueKind::F32 => Value::F32(0.0),
-            ValueKind::Mem => Value::Mem(Mem::null(self.device_allocator.clone())),
-        }
+            ValueKind::MemOwn => Value::MemOwn(Mem::null(self.device_allocator.clone())),
+            ValueKind::MemRef => {
+                return Err(ExecError::UnsupportedReferenceOutput {
+                    name: name.to_string(),
+                    index,
+                });
+            }
+        })
     }
 }
 

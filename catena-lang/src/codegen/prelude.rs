@@ -29,7 +29,12 @@ typedef struct {{
 typedef struct {{
     void *data;
     uint64_t len;
-}} catena_mem_t;
+}} catena_mem_own_t;
+
+typedef struct {{
+    void *data;
+    uint64_t len;
+}} catena_mem_ref_t;
 
 typedef struct {{
     void *data;

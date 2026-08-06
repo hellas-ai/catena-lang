@@ -67,10 +67,8 @@ pub fn lower_type(ty: &Tree<(), Operation>) -> Result<LoweredType, LowerTypeErro
             ))))
         }
         Tree::Node(op, 0, children) if op.as_str() == "mem" => {
-            let [_cap] = expect_unary(op.as_str(), children)?;
-            Ok(LoweredType::Runtime(CType::Named(
-                "catena_mem_t".to_string(),
-            )))
+            let [cap] = expect_unary(op.as_str(), children)?;
+            memory_c_type(cap).map(LoweredType::Runtime)
         }
         Tree::Node(op, 0, children) if is_gpu_control_type(op.as_str()) && children.is_empty() => {
             Ok(LoweredType::Runtime(CType::Named(c_name_for_gpu_control(
@@ -122,8 +120,8 @@ pub fn lower_runtime_type(ty: &Tree<(), Operation>) -> Result<CType, LowerTypeEr
             Ok(CType::Pointer(Box::new(lower_runtime_type(element)?)))
         }
         Tree::Node(op, 0, children) if op.as_str() == "mem" => {
-            let [_cap] = expect_unary(op.as_str(), children)?;
-            Ok(CType::Named("catena_mem_t".to_string()))
+            let [cap] = expect_unary(op.as_str(), children)?;
+            memory_c_type(cap)
         }
         Tree::Node(op, 0, children) if op.as_str() == "ix" => {
             let [_extent] = expect_unary(op.as_str(), children)?;
@@ -178,6 +176,18 @@ fn contains_closure(ty: &Tree<(), Operation>) -> bool {
             op.as_str() == FN_HOM_TYPE || children.iter().any(contains_closure)
         }
         _ => false,
+    }
+}
+
+fn memory_c_type(cap: &Tree<(), Operation>) -> Result<CType, LowerTypeError> {
+    match cap {
+        Tree::Node(op, 0, children) if op.as_str() == "cap.own" && children.is_empty() => {
+            Ok(CType::Named("catena_mem_own_t".to_string()))
+        }
+        Tree::Node(op, 0, children) if op.as_str() == "cap.ref" && children.is_empty() => {
+            Ok(CType::Named("catena_mem_ref_t".to_string()))
+        }
+        _ => panic!("Unsupported memory capability: {cap:?}"),
     }
 }
 
@@ -314,6 +324,18 @@ mod tests {
             lower_type(&ty),
             Err(LowerTypeError::FunctionPointerRuntime)
         ));
+    }
+
+    #[test]
+    fn memory_capabilities_lower_to_distinct_runtime_types() {
+        assert_eq!(
+            lower_runtime_type(&node("mem", vec![node("cap.own", vec![])])).unwrap(),
+            CType::Named("catena_mem_own_t".to_string())
+        );
+        assert_eq!(
+            lower_runtime_type(&node("mem", vec![node("cap.ref", vec![])])).unwrap(),
+            CType::Named("catena_mem_ref_t".to_string())
+        );
     }
 
     #[test]

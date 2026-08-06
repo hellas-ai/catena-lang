@@ -9,6 +9,7 @@ use std::{
     env,
     ffi::{CString, c_int, c_uint, c_void},
     path::PathBuf,
+    rc::Rc,
     sync::Arc,
 };
 
@@ -108,19 +109,19 @@ impl DeviceAllocator {
         if byte_len != 0 {
             self.gpu.malloc(&mut data, byte_len)?;
         }
-        Ok(DeviceBuffer {
+        Ok(DeviceBuffer::new(DeviceAllocation {
             data,
             byte_len,
             gpu: self.gpu.clone(),
             release: Release::Free,
-        })
+        }))
     }
 
     /// Allocate device-only memory and synchronously upload all bytes.
     pub fn allocate_from_bytes(&self, bytes: &[u8]) -> Result<DeviceBuffer, MemError> {
         let mut buffer = self.allocate(bytes.len())?;
         if let Err(error) = buffer.write(0, bytes) {
-            let _ = buffer.release_now();
+            let _ = buffer.free();
             return Err(error);
         }
         Ok(buffer)
@@ -149,18 +150,23 @@ impl DeviceAllocator {
                 },
             )?;
         }
-        Ok(DeviceBuffer {
+        Ok(DeviceBuffer::new(DeviceAllocation {
             data,
             byte_len,
             gpu: self.gpu.clone(),
             release: Release::IpcClose,
-        })
+        }))
     }
 }
 
 /// An opaque application-owned handle to a device allocation or IPC mapping.
 #[derive(Debug)]
 pub struct DeviceBuffer {
+    allocation: Rc<DeviceAllocation>,
+}
+
+#[derive(Debug)]
+struct DeviceAllocation {
     data: *mut c_void,
     byte_len: usize,
     gpu: Arc<DeviceGpuRuntime>,
@@ -168,26 +174,38 @@ pub struct DeviceBuffer {
 }
 
 impl DeviceBuffer {
+    fn new(allocation: DeviceAllocation) -> Self {
+        Self {
+            allocation: Rc::new(allocation),
+        }
+    }
+
     pub fn byte_len(&self) -> usize {
-        self.byte_len
+        self.allocation.byte_len
     }
 
     pub fn is_empty(&self) -> bool {
-        self.byte_len == 0
+        self.allocation.byte_len == 0
     }
 
     pub fn dialect(&self) -> GpuDialect {
-        self.gpu.dialect
+        self.allocation.gpu.dialect
     }
 
     /// Synchronously upload bytes into a checked subrange of this allocation.
     pub fn write(&mut self, offset: usize, bytes: &[u8]) -> Result<(), MemError> {
-        validate_range(self.byte_len, offset, bytes.len())?;
+        validate_range(self.allocation.byte_len, offset, bytes.len())?;
         if bytes.is_empty() {
             return Ok(());
         }
-        let destination = unsafe { self.data.cast::<u8>().add(offset).cast::<c_void>() };
-        self.gpu.copy(
+        let destination = unsafe {
+            self.allocation
+                .data
+                .cast::<u8>()
+                .add(offset)
+                .cast::<c_void>()
+        };
+        self.allocation.gpu.copy(
             destination,
             bytes.as_ptr().cast(),
             bytes.len(),
@@ -198,12 +216,18 @@ impl DeviceBuffer {
 
     /// Synchronously read a checked subrange into host memory.
     pub fn read(&self, offset: usize, output: &mut [u8]) -> Result<(), MemError> {
-        validate_range(self.byte_len, offset, output.len())?;
+        validate_range(self.allocation.byte_len, offset, output.len())?;
         if output.is_empty() {
             return Ok(());
         }
-        let source = unsafe { self.data.cast::<u8>().add(offset).cast::<c_void>() };
-        self.gpu.copy(
+        let source = unsafe {
+            self.allocation
+                .data
+                .cast::<u8>()
+                .add(offset)
+                .cast::<c_void>()
+        };
+        self.allocation.gpu.copy(
             output.as_mut_ptr().cast(),
             source,
             output.len(),
@@ -216,25 +240,29 @@ impl DeviceBuffer {
     ///
     /// Imported mappings cannot be exported again.
     pub fn export_ipc(&self) -> Result<IpcMemoryHandle, MemError> {
-        if self.release == Release::IpcClose {
+        if self.allocation.release == Release::IpcClose {
             return Err(MemError::CannotExportImported);
         }
         let mut raw = RawIpcMemHandle {
             bytes: [0; IPC_HANDLE_BYTES],
         };
-        if !self.data.is_null() {
-            self.gpu.ipc_get(&mut raw, self.data)?;
+        if !self.allocation.data.is_null() {
+            self.allocation
+                .gpu
+                .ipc_get(&mut raw, self.allocation.data)?;
         }
         Ok(IpcMemoryHandle {
-            dialect: self.gpu.dialect,
-            byte_len: self.byte_len as u64,
+            dialect: self.allocation.gpu.dialect,
+            byte_len: self.allocation.byte_len as u64,
             bytes: raw.bytes,
         })
     }
 
     /// Release the allocation or imported mapping and report release failures.
-    pub fn free(mut self) -> Result<(), MemError> {
-        self.release_now()
+    pub fn free(self) -> Result<(), MemError> {
+        let mut allocation =
+            Rc::try_unwrap(self.allocation).map_err(|_| MemError::AllocationShared)?;
+        allocation.release_now()
     }
 
     /// Transfer this allocation or imported mapping into a runtime memory value.
@@ -243,13 +271,21 @@ impl DeviceBuffer {
     }
 
     pub(crate) fn data(&self) -> *mut c_void {
-        self.data
+        self.allocation.data
     }
 
     pub(crate) fn read_all(&self, output: &mut [u8]) -> Result<(), MemError> {
         self.read(0, output)
     }
 
+    pub(crate) fn clone_handle(&self) -> Self {
+        Self {
+            allocation: self.allocation.clone(),
+        }
+    }
+}
+
+impl DeviceAllocation {
     fn release_now(&mut self) -> Result<(), MemError> {
         if self.data.is_null() {
             return Ok(());
@@ -259,7 +295,7 @@ impl DeviceBuffer {
     }
 }
 
-impl Drop for DeviceBuffer {
+impl Drop for DeviceAllocation {
     fn drop(&mut self) {
         let _ = self.release_now();
     }

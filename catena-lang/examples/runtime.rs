@@ -35,19 +35,24 @@ fn main() -> anyhow::Result<()> {
             .join(", ")
     );
 
-    // Execute array-head-u64 with values above
-    let input = runtime.mem_u64(&values)?;
-    let [head] = runtime.exec("array-head-u64", [input])?;
-    let Value::U64(head) = head else {
-        anyhow::bail!("array-head-u64 returned non-u64 value: {head:?}");
-    };
+    // Keep the referenced input alive and execute array-head-u64 with it twice.
+    let input = runtime.buffer_u64(&values)?;
+    for invocation in 1..=2 {
+        let [head] = runtime.exec("array-head-u64", [Value::mem_ref(&input)])?;
+        let Value::U64(head) = head else {
+            anyhow::bail!("array-head-u64 returned non-u64 value: {head:?}");
+        };
 
-    println!("array-head-u64: 0x{head:x} (expected 0x{:x})", values[0]);
-    anyhow::ensure!(
-        head == values[0],
-        "array head mismatch: got 0x{head:x}, expected 0x{:x}",
-        values[0]
-    );
+        println!(
+            "array-head-u64 invocation {invocation}: 0x{head:x} (expected 0x{:x})",
+            values[0]
+        );
+        anyhow::ensure!(
+            head == values[0],
+            "array head mismatch on invocation {invocation}: got 0x{head:x}, expected 0x{:x}",
+            values[0]
+        );
+    }
 
     Ok(())
 }

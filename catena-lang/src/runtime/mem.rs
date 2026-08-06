@@ -49,6 +49,8 @@ pub enum MemError {
     },
     #[error("an imported IPC mapping cannot be exported again")]
     CannotExportImported,
+    #[error("device allocation cannot be freed while referenced handles remain")]
+    AllocationShared,
     #[error("memory length {byte_len} is not a whole number of {element_size}-byte elements")]
     InvalidElementLength { byte_len: u64, element_size: usize },
 }

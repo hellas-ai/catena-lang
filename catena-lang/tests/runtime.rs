@@ -1,20 +1,10 @@
 use catena_lang::{
     codegen::GpuDialect,
-    runtime::{DeviceAllocator, InitError, Runtime, Value, ValueKind},
+    runtime::{InitError, MemRef, Runtime, Value, ValueKind},
     stdlib,
 };
 
 const GPU_DIALECT_ENV: &str = "CATENA_GPU_DIALECT";
-const ARRAY_HEAD_U64_SOURCE: &str = r#"
-    (def program array-head-u64 : ([n.] (cap.ref mem)) -> ([n.] (u64 val)) = (
-      mem.cast.u64
-      {
-        (u64.assert-nz ix.zero)
-        [b]
-      }
-      ix
-    ))
-"#;
 
 /// Create a runtime with a provided user source file
 fn runtime_with(source: &'static str) -> anyhow::Result<Runtime> {
@@ -41,13 +31,6 @@ fn configured_gpu_dialect() -> anyhow::Result<GpuDialect> {
             value
         ),
     }
-}
-
-fn u64_bytes(values: &[u64]) -> Vec<u8> {
-    values
-        .iter()
-        .flat_map(|value| value.to_ne_bytes())
-        .collect()
 }
 
 #[test]
@@ -782,6 +765,33 @@ fn cap_ref_input_is_borrowed_and_reusable() -> anyhow::Result<()> {
 }
 
 #[test]
+fn raw_device_pointer_can_be_passed_as_an_explicit_borrow() -> anyhow::Result<()> {
+    let runtime = runtime_with(
+        r#"
+        (def program array-head-u64-ref : ([n.] (cap.ref mem)) -> ([n.] (u64 val)) = (
+          mem.cast.u64
+          {
+            (u64.assert-nz ix.zero)
+            [b]
+          }
+          ix
+        ))
+        "#,
+    )?;
+
+    let values = [17_u64, 19, 23];
+    let owner = runtime.mem_u64(&values)?;
+    // SAFETY: `owner` is the lifetime guard for this exact allocation.
+    let borrowed = unsafe {
+        MemRef::from_raw_parts(owner.as_ptr(), owner.byte_len(), owner.dialect(), &owner)
+    };
+
+    let outputs = runtime.exec_values("array-head-u64-ref", vec![borrowed.into()])?;
+    assert!(matches!(outputs.as_slice(), [Value::U64(17)]));
+    Ok(())
+}
+
+#[test]
 fn mem_own_identity_transfers_and_returns_owned_memory_regression() -> anyhow::Result<()> {
     let runtime = runtime_with(
         r#"
@@ -825,39 +835,6 @@ fn cap_ref_outputs_are_rejected_during_initialization() -> anyhow::Result<()> {
         Err(InitError::UnsupportedRefOutput { name, index: 0 })
             if name == "mem-ref-identity"
     ));
-    Ok(())
-}
-
-#[test]
-fn explicit_device_buffer_upload_and_readback() -> anyhow::Result<()> {
-    let allocator = DeviceAllocator::new(configured_gpu_dialect()?)?;
-    let expected = b"device-resident weights";
-    let mut buffer = allocator.allocate_from_bytes(expected)?;
-
-    buffer.write(7, b"MEMORY")?;
-    let mut actual = vec![0; expected.len()];
-    buffer.read(0, &mut actual)?;
-
-    let mut patched = expected.to_vec();
-    patched[7..13].copy_from_slice(b"MEMORY");
-    assert_eq!(actual, patched);
-    Ok(())
-}
-
-#[test]
-fn array_head_u64_from_explicit_device_buffer() -> anyhow::Result<()> {
-    let runtime = runtime_with(ARRAY_HEAD_U64_SOURCE)?;
-    let values = [0x123456789abcdef0_u64, 7, 11];
-    let buffer = runtime
-        .device_allocator()
-        .allocate_from_bytes(&u64_bytes(&values))?;
-
-    let [head] = runtime.exec("array-head-u64", [Value::from(&buffer)])?;
-    let Value::U64(head) = head else {
-        anyhow::bail!("array-head-u64 returned non-u64 value: {head:?}");
-    };
-
-    assert_eq!(head, values[0]);
     Ok(())
 }
 

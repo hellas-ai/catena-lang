@@ -171,7 +171,6 @@ impl SafeRuntime {
             .send(&Request::Execute {
                 name: name.to_string(),
                 args,
-                output_count: N,
             })
             .map_err(map_exec_worker_error)?;
 
@@ -231,13 +230,9 @@ fn run_child_loop(mut reader: impl Read, mut writer: impl io::Write) -> Result<(
         match request {
             Request::Initialize { .. } => return Err(ChildMainError::AlreadyInitialized),
             Request::Shutdown => return Ok(()),
-            Request::Execute {
-                name,
-                args,
-                output_count,
-            } => {
+            Request::Execute { name, args } => {
                 let args = args.into_iter().map(Value::from).collect::<Vec<_>>();
-                let response = match runtime.exec_values(&name, args, output_count) {
+                let response = match runtime.exec_values(&name, args) {
                     Ok(values) => {
                         match values
                             .into_iter()

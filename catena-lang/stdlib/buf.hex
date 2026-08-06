@@ -45,6 +45,12 @@
     ({[.m n] f32} buf val) # val(buf m n f32)
   })
 
+  # mem.cast.bf16 : mem m -> (n : u64) ● val(buf m n bf16)
+  (arr mem.cast.bf16 : ([m n.m] mem) -> {[m n.]
+    ({[.n] u64} :)   # n : u64
+    ({[.m n] bf16} buf val) # val(buf m n bf16)
+  })
+
   # Transport a u64 buffer across a proven length equality.
   (arr buf.u64.cast-same-length : {[m n p.]
     ({[.m p] u64} buf val) # val(buf m p u64)
@@ -56,6 +62,12 @@
     ({[.m p] f32} buf val) # val(buf m p f32)
     ([.n p] = |-)           # n = p
   } -> ([m n p.] ({[.m n] f32} buf val)))
+
+  # Transport a bf16 buffer across a proven length equality.
+  (arr buf.bf16.cast-same-length : {[m n p.]
+    ({[.m p] bf16} buf val) # val(buf m p bf16)
+    ([.n p] = |-)            # n = p
+  } -> ([m n p.] ({[.m n] bf16} buf val)))
 
   # Materialize an owned buffer from an indexed producer.
   #

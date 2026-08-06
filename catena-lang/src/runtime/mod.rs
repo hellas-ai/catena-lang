@@ -10,20 +10,21 @@ pub mod mem;
 mod gpu_api;
 
 /// Compile generated GPU C++ to a shared object.
-pub mod artifact;
+mod artifact;
 
 /// Marshal catena values into the C ABI and invoke compiled symbols
-pub(crate) mod executor;
+mod executor;
 
 /// manage and run compiled catena programs
 pub mod runtime;
 
 /// Runtime-call signature metadata.
-pub mod signature;
+mod signature;
 
 //#[cfg(test)]
 //mod tests;
 
+pub use artifact::ArtifactError;
 pub use mem::{MemError, MemOwn, MemRef};
 pub use runtime::{ExecError, InitError, Runtime};
 pub use value::Value;

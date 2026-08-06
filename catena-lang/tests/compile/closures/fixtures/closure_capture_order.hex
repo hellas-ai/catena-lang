@@ -1,0 +1,38 @@
+# Minimal end-to-end reproduction: an outer closure captures two inner closure
+# values which are still opaque in the same closure-conversion layer.
+
+(def program choose-inner-closure :
+  {
+    ({(bool val) (bool val)} =>)
+    ({(bool val) (bool val)} =>)
+    (bool val)
+    (bool val)
+  }
+  ->
+  (bool val)
+= ([left right flag argument.]
+  {[.left] [.right] [.flag] [.argument]}
+  bool.if
+))
+
+(def program closure-capture-order :
+  {(bool val) (bool val) (bool val) (bool val)}
+  ->
+  (bool val)
+= ([left-flag right-flag argument outer-flag.]
+  {
+    ({
+      (name.bool.id lift)
+      (name.bool.not lift)
+      [.left-flag]
+    } partial.choose-inner-closure.3)
+    ({
+      (name.bool.not lift)
+      (name.bool.id lift)
+      [.right-flag]
+    } partial.choose-inner-closure.3)
+    [.outer-flag]
+    [.argument]
+  }
+  bool.if
+))

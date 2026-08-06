@@ -2,6 +2,7 @@
 
 mod basic;
 mod boundaries;
+mod capture_order;
 mod context;
 mod materialize;
 mod matmul;

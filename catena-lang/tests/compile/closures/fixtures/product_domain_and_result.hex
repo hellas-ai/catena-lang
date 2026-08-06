@@ -1,4 +1,6 @@
-# Products on both sides of a closure remain packed while `=>` is forgotten.
+# Exercise closure conversion and code generation with products on both sides
+# of a closure. This fixture does not impose a special scheduling rule for
+# products; captured closure values determine the conversion order.
 
 (def program product-domain-result-id :
   ({(bool val) (bool val)} *)

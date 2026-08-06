@@ -127,6 +127,10 @@
 //! region first would make its context projection copy the old single opaque
 //! value, which would no longer match the expanded pair.
 //!
+//! The dependency graph must be acyclic. Recursive closure construction is not
+//! supported, and strict structural containment cannot be cyclic. A cycle
+//! therefore indicates a bug in region discovery or dependency construction.
+//!
 use std::collections::BTreeSet;
 
 use open_hypergraphs::lax::{EdgeId, NodeId};
@@ -206,8 +210,24 @@ impl RegionDependencies {
             .any(|dependency| dependency.dependent == id)
     }
 
-    pub(super) fn all(&self) -> impl Iterator<Item = &RegionDependency> {
-        self.dependencies.iter()
+    /// Return the first ready region in marker order.
+    ///
+    /// A non-empty region set without a ready member contains a dependency
+    /// cycle. Recursive closure construction is unsupported, so such a cycle
+    /// is a compiler invariant failure rather than a user-facing error.
+    pub(super) fn require_ready_region<'a>(
+        &self,
+        regions: &'a [ClosureRegion],
+    ) -> &'a ClosureRegion {
+        regions
+            .iter()
+            .find(|region| self.is_ready(region))
+            .unwrap_or_else(|| {
+                panic!(
+                    "closure region dependencies must be acyclic: {:#?}",
+                    self.dependencies
+                )
+            })
     }
 }
 
@@ -386,57 +406,39 @@ mod tests {
     #[test]
     fn captured_closure_makes_the_consumer_wait_for_its_producer() {
         let mut term = ClosureForgottenTerm::empty();
-        let producer_domain = term.new_node(Tree::Empty);
-        let producer_codomain = term.new_node(Tree::Empty);
-        let producer_closure = term.new_node(Tree::Empty);
-        let producer_marker = term.new_edge(
-            ClosureForgotten::ClosureMarker,
-            (
-                vec![producer_domain, producer_codomain],
-                vec![producer_closure],
-            ),
-        );
-        let consumer_domain = term.new_node(Tree::Empty);
-        let consumer_codomain = term.new_node(Tree::Empty);
-        let consumer_closure = term.new_node(Tree::Empty);
-        let consumer_marker = term.new_edge(
-            ClosureForgotten::ClosureMarker,
-            (
-                vec![consumer_domain, consumer_codomain],
-                vec![consumer_closure],
-            ),
-        );
-        let producer = ClosureRegion {
-            marker: producer_marker,
-            domain: producer_domain,
-            codomain: producer_codomain,
-            closure: producer_closure,
-            environment: vec![],
-            nodes: vec![producer_domain, producer_codomain],
-            edges: vec![],
-        };
-        let consumer = ClosureRegion {
-            marker: consumer_marker,
-            domain: consumer_domain,
-            codomain: consumer_codomain,
-            closure: consumer_closure,
-            environment: vec![producer_closure],
-            nodes: vec![producer_closure, consumer_domain, consumer_codomain],
-            edges: vec![],
-        };
+        let producer = empty_region(&mut term);
+        let mut consumer = empty_region(&mut term);
+        consumer.environment.push(producer.closure);
+        consumer.nodes.push(producer.closure);
 
         let dependencies = analyze(&term, &[producer.clone(), consumer.clone()]);
 
         assert!(dependencies.is_ready(&producer));
         assert!(!dependencies.is_ready(&consumer));
-        assert!(dependencies.all().any(|dependency| {
+        assert!(dependencies.dependencies.iter().any(|dependency| {
             dependency.dependent == RegionId::from(&consumer)
                 && dependency.prerequisite == RegionId::from(&producer)
                 && dependency.kind
                     == RegionDependencyKind::CapturedClosure {
-                        closure: producer_closure,
+                        closure: producer.closure,
                     }
         }));
+    }
+
+    #[test]
+    #[should_panic(expected = "closure region dependencies must be acyclic")]
+    fn cyclic_closure_captures_are_an_invariant_failure() {
+        let mut term = ClosureForgottenTerm::empty();
+        let mut first = empty_region(&mut term);
+        let mut second = empty_region(&mut term);
+        first.environment.push(second.closure);
+        first.nodes.push(second.closure);
+        second.environment.push(first.closure);
+        second.nodes.push(first.closure);
+        let regions = [first, second];
+
+        let dependencies = analyze(&term, &regions);
+        dependencies.require_ready_region(&regions);
     }
 
     #[test]
@@ -475,5 +477,24 @@ mod tests {
         };
 
         analyze(&term, &[region]);
+    }
+
+    fn empty_region(term: &mut ClosureForgottenTerm) -> ClosureRegion {
+        let domain = term.new_node(Tree::Empty);
+        let codomain = term.new_node(Tree::Empty);
+        let closure = term.new_node(Tree::Empty);
+        let marker = term.new_edge(
+            ClosureForgotten::ClosureMarker,
+            (vec![domain, codomain], vec![closure]),
+        );
+        ClosureRegion {
+            marker,
+            domain,
+            codomain,
+            closure,
+            environment: vec![],
+            nodes: vec![domain, codomain],
+            edges: vec![],
+        }
     }
 }

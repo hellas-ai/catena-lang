@@ -66,8 +66,6 @@ pub enum ConversionError {
     EraseContexts(#[from] context::EraseContextsError),
     #[error(transparent)]
     InlineNamedCalls(#[from] inline_named_calls::InlineNamedCallsError),
-    #[error("closure region dependency cycle: {dependencies}")]
-    RegionDependencyCycle { dependencies: String },
 }
 
 /// Closure-convert graphs produced by `forget_closures` as one compiler pass.

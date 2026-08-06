@@ -1,4 +1,6 @@
-# Closure results which are products must remain one logical marker codomain.
+# Exercise closure conversion and code generation with product-valued closure
+# results. The product shape is independent of the captured-closure dependency
+# which determines conversion order.
 
 (def program product-result-copy :
   (bool val)

@@ -1,4 +1,6 @@
-# Closure arguments which are products must remain one logical marker domain.
+# Exercise closure conversion and code generation with product-valued closure
+# domains. The product shape is part of the closure type; dependency ordering
+# is determined separately by the captured closure values.
 
 (def program product-domain-and :
   ({(bool val) (bool val)} *)
@@ -18,8 +20,8 @@
   ({[.lhs rhs]} bool.or)
 ))
 
-# This helper has closures on its public boundary, so the early definition
-# pass inlines its inner bool.if into each partially-applied outer branch.
+# This helper has closures on its public boundary, so the early definition pass
+# inlines its bool.if before closure regions are discovered.
 (def program choose-product-domain-views :
   {
     ({({(bool val) (bool val)} *) (bool val)} =>)

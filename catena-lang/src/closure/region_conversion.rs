@@ -47,7 +47,7 @@ pub(super) fn run(
 
     while region_count(&discovered_regions) != 0 {
         // Step 1: build typed ordering dependencies and choose the first region with no unresolved prerequisites.
-        let selected = schedule_next_region(&state.terms, &discovered_regions)?;
+        let selected = schedule_next_region(&state.terms, &discovered_regions);
         let generated_id = state.next_generated_id;
         state.next_generated_id += 1;
 
@@ -80,30 +80,24 @@ pub(super) fn run(
 fn schedule_next_region(
     definitions: &TheoryTermMap<ClosureForgotten<Operation>>,
     discovered_regions: &region::ClosureRegionMap,
-) -> Result<ScheduledRegion, ConversionError> {
-    let mut unresolved = Vec::new();
+) -> ScheduledRegion {
     for (theory, theory_regions) in discovered_regions {
         for (definition, regions) in theory_regions {
+            if regions.is_empty() {
+                continue;
+            }
             let term = &definitions[theory][definition];
             let dependencies = schedule::analyze(term, regions);
-            if let Some(region) = regions.iter().find(|region| dependencies.is_ready(region)) {
-                return Ok(ScheduledRegion {
-                    theory: theory.clone(),
-                    definition: definition.clone(),
-                    region: region.clone(),
-                });
-            }
-            unresolved.extend(
-                dependencies
-                    .all()
-                    .map(|dependency| format!("{theory}.{definition}: {dependency:?}")),
-            );
+            let region = dependencies.require_ready_region(regions);
+            return ScheduledRegion {
+                theory: theory.clone(),
+                definition: definition.clone(),
+                region: region.clone(),
+            };
         }
     }
 
-    Err(ConversionError::RegionDependencyCycle {
-        dependencies: unresolved.join(", "),
-    })
+    unreachable!("the scheduler is only called while closure regions remain")
 }
 
 fn add_closure_and_name(

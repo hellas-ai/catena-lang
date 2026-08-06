@@ -3,8 +3,9 @@
 # These definitions deliberately stop at ordinary closure-using operations.  The
 # forget_closures pass bends the CMC wiring and inserts one !closure edge at each
 # place where a non-CMC operation observes a closure. Closure conversion can
-# then discover a region by walking backwards from the first !closure input and
-# forwards again until it reaches the second input.
+# then discover the directed body lying forward of the marker domain and
+# backward of its codomain. Inputs produced outside that body are its captured
+# environment.
 
 # A closure-free baseline.  The compile pipeline must leave it alone and must
 # not manufacture generated closure arrows.

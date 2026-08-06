@@ -1,5 +1,6 @@
-# Minimal end-to-end reproduction: an outer closure captures two inner closure
-# values which are still opaque in the same closure-conversion layer.
+# Minimal end-to-end CapturedClosure dependency. Each partially applied helper
+# produces a closure which captures two other closure values. Those producer
+# regions must be converted before the capturing region builds its environment.
 
 (def program choose-inner-closure :
   {

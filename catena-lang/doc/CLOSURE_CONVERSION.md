@@ -15,34 +15,103 @@ Applying the "forget closures" pass leads to this simplified code:
 However, closures cannot always be fully removed this way. For example, when:
 
 1. A closure type appears on a program boundary
-2. A closure type is *eliminated* by an operation or definition (like `if` or `reduce`)
+2. A closure type is _eliminated_ by an operation or definition (like `if` or `reduce`)
 
 This document provides a solution, outlined below.
 
+## Intuition behind forget and closure convertion
+
+A hypergraph operation is an edge between typed wires. For example, a closure
+body from `A` to `B` is drawn as:
+
+```text
+A ──▶ [ body ] ──▶ B
+```
+
+`forget_closures` removes `defer`, `run`, `compose`, and `tensor` by bending
+their wires. Where an ordinary operation observes a closure, it leaves a
+marker connecting the closure domain and result to the opaque closure value:
+
+```text
+A ──▶ [ body ] ──▶ B
+│                   │
+└──────▶ !closure ◀─┘──▶ (A => B)
+```
+
+For example, consider a closure which adds a captured value:
+
+```text
+f = x => offset + x
+```
+
+After forgetting closures, but before closure conversion, its hypergraph is:
+
+```text
+offset ──────────┐
+                 ▼
+x ───────────▶ [add] ─────────▶ result
+│                                  │
+└────────────▶ [!closure] ◀────────┘
+                    │
+                    ▼
+                 closure ──▶ [consumer]
+```
+
+Equivalently, its hyperedges are:
+
+```text
+[add]      : offset, x -> result
+[!closure] : x, result -> closure
+[consumer] : closure -> ...
+```
+
+`forget_closures` does not build an environment. Closure conversion discovers
+that `offset` enters an operation inside the region but is produced outside it,
+so it becomes an environment input. By contrast, `x` enters through the
+marker's domain and remains an invocation argument:
+
+```text
+environment = offset
+domain      = x
+
+closure function: Environment(offset) * x -> result
+```
+
+Closure conversion finds the region between `A` and `B`, cuts it into a new
+function, and replaces the opaque value with an explicit environment and
+function pointer:
+
+```text
+before: captures ──▶ [ body ] ──▶ (A => B)
+
+after:  captures ──▶ [ pack environment ] ──▶ Env
+                    [ name closure body   ] ──▶ Fn
+```
+
 # Closure Conversion
 
-- A program must be *closure-converted* if it has a `=>` type on:
-    - A global boundary
-    - A non-CMC operation
+- A program must be _closure-converted_ if it has a `=>` type on:
+  - A global boundary
+  - A non-CMC operation
 - Any such node must be closure converted (others are left unchanged)
 - Closure conversion happens as follows
-    - Any such `=>` type marked as 'for conversion'
-    - Traverse leftwards in the hypergraph until one meets `defer` and `lift` ops which delimit the scope
-    - Cut that region from the hypergraph
-    - Place it in a new definition (e.g. anonymous.closure.i)
-    - Replace it in the graph
+  - Any such `=>` type marked as 'for conversion'
+  - Traverse leftwards in the hypergraph until one meets `defer` and `lift` ops which delimit the scope
+  - Cut that region from the hypergraph
+  - Place it in a new definition (e.g. anonymous.closure.i)
+  - Replace it in the graph
 
-The *type* of the replaced closure is figured as follows.
+The _type_ of the replaced closure is figured as follows.
 
 - Choose a new unique name for a definition: `closure.i`
-    - (assume `closure` prefix is reserved for now)
+  - (assume `closure` prefix is reserved for now)
 - On the left hand side of the morphism, we have a number of maps in one of two forms:
-    - `defer : A -> (I => A)`
-    - `lift : (A -> B) -> (A => B)`
+  - `defer : A -> (I => A)`
+  - `lift : (A -> B) -> (A => B)`
 - Then...
 - Order these (somewhat arbitrarily) by edge ID, combined sources define interface of `closure.i`
 
-# Conversion for *definitions* and *primitives on closures*.
+# Conversion for _definitions_ and _primitives on closures_.
 
 We propose the following additional primitives involving closures:
 
@@ -52,7 +121,7 @@ We propose the following additional primitives involving closures:
 
     if (A => B) ● (A => B) ● Bool ● A -> B
 
-In addition, we want *user code* to be able to use closures
+In addition, we want _user code_ to be able to use closures
 (this is important for lowering catgrad programs, since we use `Ix n => Dtype`
 as the lowered type of a tensor with type `(Shape, Dtype)`.)
 
@@ -64,7 +133,6 @@ and consider user definitions later.
 Each of the primitives goes to its "closure converted" variant,
 currently with the same name + `c` suffix.
 So, ...
-
 
     # if
     if (A => B) ● (A => B) ● Bool ● A -> B
@@ -98,24 +166,24 @@ The problem above is that we need a dependent type:
 
     if (b : Bool) ● (X, X ● A => B) ● (Y, Y ● A => B) -> (b ? X : Y, (b ? X : Y) ● A -> B)
 
-Meaning we need a *type level dependent sum* - the returned closure env still
+Meaning we need a _type level dependent sum_ - the returned closure env still
 depends on b.
 
 # Implementation
 
-This section describes the *implementation* of closure conversion.
-Closure conversion is implemented *for each definition*.
+This section describes the _implementation_ of closure conversion.
+Closure conversion is implemented _for each definition_.
 So for the purposes of this section, fix a particular definition `d`.
 
 - For each operation `x` in `d`
-    - For each *source node* `w` of `x`
-        - If the type of `w` declared by `x` is not a closure, continue. Otherwise...
-        - Assume type of the closure is `A => B`
-        - Cut the "closure region" `c` (see below) ending at `w` from the graph
-        - Add a new definition `closure.d.x_id.w_id` whose body is `(c × id) ; ev`
-        - ... and whose type is `X ● A -> B`
-        - Run name elaboration on closures
-        - ... and then replace the "cut" closure with `id_X ● name.closure.d.x_id.w_id`
+  - For each _source node_ `w` of `x`
+    - If the type of `w` declared by `x` is not a closure, continue. Otherwise...
+    - Assume type of the closure is `A => B`
+    - Cut the "closure region" `c` (see below) ending at `w` from the graph
+    - Add a new definition `closure.d.x_id.w_id` whose body is `(c × id) ; ev`
+    - ... and whose type is `X ● A -> B`
+    - Run name elaboration on closures
+    - ... and then replace the "cut" closure with `id_X ● name.closure.d.x_id.w_id`
 
 The "closure region" is:
 

@@ -100,6 +100,7 @@ fn compile_into(report: &mut CompileReport) -> Result<(), CompileError> {
 
     // Compute out closures by bending wires
     let forgotten_closures = crate::pass::forget_closures::run(&theory_set, &definition_types)?;
+    report.forgotten_closures = Some(forgotten_closures.clone());
 
     let closure_conversion = crate::closure::run(&theory_set, &forgotten_closures)?;
     report.closure_conversion = Some(closure_conversion);

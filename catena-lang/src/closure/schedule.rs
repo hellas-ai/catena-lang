@@ -1,0 +1,479 @@
+//! Explicit ordering dependencies between closure regions in one graph snapshot.
+//!
+//! A closure marker delimits a region containing the operations which compute
+//! a closure result from its argument. Regions can depend on one another for
+//! two different reasons.
+//!
+//! ## `NestedRegion`
+//!
+//! A `NestedRegion` dependency means that one closure region is structurally
+//! inside another. In this deliberately simplified graph, the nested marker's
+//! domain, body, and result occur while computing the enclosing body:
+//!
+//! ```text
+//! enclosing-argument
+//!         │
+//!         v
+//!   [ enclosing prefix ]
+//!         │
+//!         ├────> [ nested body ] ────┐
+//!         │                          │
+//!         └────────> !closure <──────┘──> nested-closure
+//!                                            │
+//!                                            v
+//!                                    [ enclosing suffix ]
+//!                                            │
+//!                                            v
+//!                                      enclosing-result
+//! ```
+//!
+//! The enclosing region cannot be extracted while the nested marker still
+//! delimits part of its computation. The dependency therefore has the order:
+//!
+//! ```text
+//! enclosing region ──NestedRegion──> nested region
+//! ```
+//!
+//! For example, in high-level pseudocode:
+//!
+//! ```text
+//! buildProcessor(scale) =
+//!     closure process(value) {               // enclosing region
+//!         clampToZero =
+//!             closure (x) {                  // nested region
+//!                 max(x, 0)
+//!             }
+//!
+//!         clampToZero(value * scale)
+//!     }
+//! ```
+//!
+//! `clampToZero` is constructed as part of the computation of `process`, so its
+//! closure marker is structurally inside the `process` region. Conversion must
+//! first replace `clampToZero` with its closure representation. After region
+//! discovery runs again, `process` can be extracted without a nested marker in
+//! its body.
+//!
+//! The nested region is converted first. Region discovery then runs again on
+//! the rewritten graph before the enclosing region is considered ready.
+//!
+//! ## `CapturedClosure`
+//!
+//! A `CapturedClosure` dependency does not require structural nesting. First,
+//! a producer region creates an opaque closure value:
+//!
+//! ```text
+//! producer-argument ──> [ producer body ] ──> producer-result
+//!          │                                      │
+//!          └──────────> !closure <────────────────┘──> captured-closure
+//! ```
+//!
+//! A separate capturing region receives that value as part of its environment:
+//!
+//! ```text
+//! captured-closure ──────────────────────────┐
+//! capturing-argument ─> [ capturing body ] ──┴─> capturing-result
+//!          │                                          │
+//!          └──────────> !closure <────────────────────┘──> closure
+//! ```
+//!
+//! These can be sibling regions in the hypergraph. Their dependency is caused
+//! by the value flowing between them:
+//!
+//! ```text
+//! capturing region ──CapturedClosure──> producer region
+//! ```
+//!
+//! For example, in high-level pseudocode:
+//!
+//! ```text
+//! buildChooser(useNegative) =
+//!     positive =
+//!         closure (value) {                   // producer region
+//!             abs(value)
+//!         }
+//!
+//!     negative =
+//!         closure (value) {                   // producer region
+//!             -abs(value)
+//!         }
+//!
+//!     closure choose(value) {                 // capturing region
+//!         if useNegative {
+//!             negative(value)
+//!         } else {
+//!             positive(value)
+//!         }
+//!     }
+//! ```
+//!
+//! `choose` captures the closure values `positive` and `negative`. Their bodies
+//! are not structurally inside the `choose` region; their opaque closure values
+//! enter `choose` through its environment. Both producer regions must be
+//! converted before `choose`, so the environment of `choose` is built from the
+//! final closure representations rather than the old opaque values.
+//!
+//! Closure conversion expands the captured value into its runtime
+//! representation:
+//!
+//! ```text
+//! captured-closure
+//!     ==>
+//! (captured-environment, captured-function-pointer)
+//! ```
+//!
+//! The producer region must be converted first so rediscovery sees both runtime
+//! components as inputs of the capturing region. Converting the capturing
+//! region first would make its context projection copy the old single opaque
+//! value, which would no longer match the expanded pair.
+//!
+use std::collections::BTreeSet;
+
+use open_hypergraphs::lax::{EdgeId, NodeId};
+
+use super::region::ClosureRegion;
+use crate::pass::forget_closures::{ClosureForgotten, ClosureForgottenTerm};
+
+/// Snapshot-local identity of a region.
+///
+/// Rewriting and quotienting renumber graph identifiers, so this identity must
+/// never be retained across conversion steps. The scheduler rediscovers all
+/// regions and rebuilds their dependencies after every replacement.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct RegionId {
+    pub(super) marker: EdgeId,
+}
+
+impl From<&ClosureRegion> for RegionId {
+    fn from(region: &ClosureRegion) -> Self {
+        Self {
+            marker: region.marker,
+        }
+    }
+}
+
+impl PartialOrd for RegionId {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for RegionId {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.marker.0.cmp(&other.marker.0)
+    }
+}
+
+/// Why one region must be converted before another.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum RegionDependencyKind {
+    /// The prerequisite marker is delimited by the dependent region's body.
+    /// The nested region must be removed before its enclosing body is cut out.
+    NestedRegion,
+
+    /// The dependent captures the opaque closure value produced by the
+    /// prerequisite. The producer must first expand that value into its
+    /// `(Environment, FnPointer)` representation.
+    CapturedClosure { closure: NodeId },
+
+    /// An internal wire of the dependent is incident to an ordinary edge
+    /// owned by the prerequisite. Removing that owner must make the wire local
+    /// before the dependent can be extracted.
+    ExternalInternalUse { node: NodeId, edge: EdgeId },
+}
+
+/// A directed ordering constraint: `dependent` waits for `prerequisite`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct RegionDependency {
+    pub(super) dependent: RegionId,
+    pub(super) prerequisite: RegionId,
+    pub(super) kind: RegionDependencyKind,
+}
+
+/// Complete dependency analysis for the regions of one definition.
+#[derive(Debug)]
+pub(super) struct RegionDependencies {
+    dependencies: Vec<RegionDependency>,
+}
+
+impl RegionDependencies {
+    /// A region is ready exactly when it has no unresolved prerequisites.
+    pub(super) fn is_ready(&self, region: &ClosureRegion) -> bool {
+        let id = RegionId::from(region);
+        !self
+            .dependencies
+            .iter()
+            .any(|dependency| dependency.dependent == id)
+    }
+
+    pub(super) fn all(&self) -> impl Iterator<Item = &RegionDependency> {
+        self.dependencies.iter()
+    }
+}
+
+/// Build all known ordering constraints for one current graph snapshot.
+///
+/// An internal wire used by an ordinary edge that belongs to no region is not
+/// a scheduling condition: it means region construction is inconsistent, so
+/// this function panics with the broken incidence.
+pub(super) fn analyze(
+    definition: &ClosureForgottenTerm,
+    regions: &[ClosureRegion],
+) -> RegionDependencies {
+    let mut dependencies = Vec::new();
+    let edge_owners = edge_owners(definition.hypergraph.edges.len(), regions);
+
+    for dependent in regions {
+        add_captured_closure_dependencies(&mut dependencies, dependent, regions);
+        add_nested_region_dependencies(&mut dependencies, dependent, regions);
+        add_external_internal_use_dependencies(
+            &mut dependencies,
+            definition,
+            dependent,
+            &edge_owners,
+        );
+    }
+
+    RegionDependencies { dependencies }
+}
+
+fn add_captured_closure_dependencies(
+    dependencies: &mut Vec<RegionDependency>,
+    dependent: &ClosureRegion,
+    regions: &[ClosureRegion],
+) {
+    for prerequisite in regions {
+        if prerequisite.marker == dependent.marker
+            || !dependent.environment.contains(&prerequisite.closure)
+        {
+            continue;
+        }
+        push_dependency(
+            dependencies,
+            RegionDependency {
+                dependent: dependent.into(),
+                prerequisite: prerequisite.into(),
+                kind: RegionDependencyKind::CapturedClosure {
+                    closure: prerequisite.closure,
+                },
+            },
+        );
+    }
+}
+
+fn add_nested_region_dependencies(
+    dependencies: &mut Vec<RegionDependency>,
+    dependent: &ClosureRegion,
+    regions: &[ClosureRegion],
+) {
+    let environment = dependent
+        .environment
+        .iter()
+        .map(|node| node.0)
+        .collect::<BTreeSet<_>>();
+    let internal = dependent
+        .nodes
+        .iter()
+        .copied()
+        .filter(|node| !environment.contains(&node.0) && *node != dependent.closure)
+        .map(|node| node.0)
+        .collect::<BTreeSet<_>>();
+
+    for prerequisite in regions {
+        if prerequisite.marker == dependent.marker {
+            continue;
+        }
+        if internal.contains(&prerequisite.domain.0) || internal.contains(&prerequisite.codomain.0)
+        {
+            push_dependency(
+                dependencies,
+                RegionDependency {
+                    dependent: dependent.into(),
+                    prerequisite: prerequisite.into(),
+                    kind: RegionDependencyKind::NestedRegion,
+                },
+            );
+        }
+    }
+}
+
+fn add_external_internal_use_dependencies(
+    dependencies: &mut Vec<RegionDependency>,
+    definition: &ClosureForgottenTerm,
+    dependent: &ClosureRegion,
+    edge_owners: &[BTreeSet<RegionId>],
+) {
+    let environment = dependent
+        .environment
+        .iter()
+        .map(|node| node.0)
+        .collect::<BTreeSet<_>>();
+    let internal = dependent
+        .nodes
+        .iter()
+        .copied()
+        .filter(|node| !environment.contains(&node.0) && *node != dependent.closure)
+        .map(|node| node.0)
+        .collect::<BTreeSet<_>>();
+    let mut included = vec![false; definition.hypergraph.edges.len()];
+    for edge in dependent.edges.iter().chain([&dependent.marker]) {
+        included[edge.0] = true;
+    }
+
+    for (index, boundary) in definition.hypergraph.adjacency.iter().enumerate() {
+        let edge = EdgeId(index);
+        if included[index]
+            || matches!(
+                definition.hypergraph.edges[index],
+                ClosureForgotten::ClosureMarker
+            )
+        {
+            continue;
+        }
+
+        for &node in boundary.sources.iter().chain(&boundary.targets) {
+            if !internal.contains(&node.0) {
+                continue;
+            }
+            let owners = &edge_owners[index];
+            if owners.is_empty() {
+                panic!(
+                    "internal wire w{} of closure region e{} escapes through unowned edge e{} (`{}`)",
+                    node.0, dependent.marker.0, edge.0, definition.hypergraph.edges[index],
+                );
+            }
+            for &prerequisite in owners {
+                assert_ne!(
+                    prerequisite,
+                    RegionId::from(dependent),
+                    "an excluded edge cannot be owned by the same closure region"
+                );
+                push_dependency(
+                    dependencies,
+                    RegionDependency {
+                        dependent: dependent.into(),
+                        prerequisite,
+                        kind: RegionDependencyKind::ExternalInternalUse { node, edge },
+                    },
+                );
+            }
+        }
+    }
+}
+
+fn edge_owners(edge_count: usize, regions: &[ClosureRegion]) -> Vec<BTreeSet<RegionId>> {
+    let mut owners = vec![BTreeSet::new(); edge_count];
+    for region in regions {
+        for &edge in &region.edges {
+            owners[edge.0].insert(region.into());
+        }
+    }
+    owners
+}
+
+fn push_dependency(dependencies: &mut Vec<RegionDependency>, dependency: RegionDependency) {
+    if !dependencies.contains(&dependency) {
+        dependencies.push(dependency);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use metacat::tree::Tree;
+
+    use super::*;
+
+    #[test]
+    fn captured_closure_makes_the_consumer_wait_for_its_producer() {
+        let mut term = ClosureForgottenTerm::empty();
+        let producer_domain = term.new_node(Tree::Empty);
+        let producer_codomain = term.new_node(Tree::Empty);
+        let producer_closure = term.new_node(Tree::Empty);
+        let producer_marker = term.new_edge(
+            ClosureForgotten::ClosureMarker,
+            (
+                vec![producer_domain, producer_codomain],
+                vec![producer_closure],
+            ),
+        );
+        let consumer_domain = term.new_node(Tree::Empty);
+        let consumer_codomain = term.new_node(Tree::Empty);
+        let consumer_closure = term.new_node(Tree::Empty);
+        let consumer_marker = term.new_edge(
+            ClosureForgotten::ClosureMarker,
+            (
+                vec![consumer_domain, consumer_codomain],
+                vec![consumer_closure],
+            ),
+        );
+        let producer = ClosureRegion {
+            marker: producer_marker,
+            domain: producer_domain,
+            codomain: producer_codomain,
+            closure: producer_closure,
+            environment: vec![],
+            nodes: vec![producer_domain, producer_codomain],
+            edges: vec![],
+        };
+        let consumer = ClosureRegion {
+            marker: consumer_marker,
+            domain: consumer_domain,
+            codomain: consumer_codomain,
+            closure: consumer_closure,
+            environment: vec![producer_closure],
+            nodes: vec![producer_closure, consumer_domain, consumer_codomain],
+            edges: vec![],
+        };
+
+        let dependencies = analyze(&term, &[producer.clone(), consumer.clone()]);
+
+        assert!(dependencies.is_ready(&producer));
+        assert!(!dependencies.is_ready(&consumer));
+        assert!(dependencies.all().any(|dependency| {
+            dependency.dependent == RegionId::from(&consumer)
+                && dependency.prerequisite == RegionId::from(&producer)
+                && dependency.kind
+                    == RegionDependencyKind::CapturedClosure {
+                        closure: producer_closure,
+                    }
+        }));
+    }
+
+    #[test]
+    #[should_panic(expected = "escapes through unowned edge")]
+    fn unowned_external_use_is_a_construction_invariant_failure() {
+        let mut term = ClosureForgottenTerm::empty();
+        let domain = term.new_node(Tree::Empty);
+        let internal = term.new_node(Tree::Empty);
+        let codomain = term.new_node(Tree::Empty);
+        let closure = term.new_node(Tree::Empty);
+        let escaped = term.new_node(Tree::Empty);
+        let first = term.new_edge(
+            ClosureForgotten::Operation("first".parse().unwrap()),
+            (vec![domain], vec![internal]),
+        );
+        let second = term.new_edge(
+            ClosureForgotten::Operation("second".parse().unwrap()),
+            (vec![internal], vec![codomain]),
+        );
+        term.new_edge(
+            ClosureForgotten::Operation("outside".parse().unwrap()),
+            (vec![internal], vec![escaped]),
+        );
+        let marker = term.new_edge(
+            ClosureForgotten::ClosureMarker,
+            (vec![domain, codomain], vec![closure]),
+        );
+        let region = ClosureRegion {
+            marker,
+            domain,
+            codomain,
+            closure,
+            environment: vec![],
+            nodes: vec![domain, internal, codomain],
+            edges: vec![first, second],
+        };
+
+        analyze(&term, &[region]);
+    }
+}

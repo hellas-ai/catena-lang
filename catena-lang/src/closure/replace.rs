@@ -17,10 +17,7 @@ use thiserror::Error;
 
 use crate::{
     check::AnnotatedTerm,
-    closure::{
-        definition::{ClosureContextMap, closure_operation},
-        region::{ClosureRegion, ClosureRegionMap, find_regions},
-    },
+    closure::{definition::closure_operation, region::ClosureRegion},
     hexpr::objects_to_hexpr,
     nonstrict::to_packer,
     pass::forget_closures::{ClosureForgotten, ClosureForgottenTerm},
@@ -37,154 +34,88 @@ const CONVERTED_PRIMITIVES: &[(&str, &str)] = &[
     ("materialize", "materializec"),
 ];
 
-pub(super) struct PartialReplacement {
+pub(super) struct SelectedReplacement {
     pub(super) theory_set: TheorySet,
     pub(super) terms: TheoryTermMap<ClosureForgotten<Operation>>,
 }
 
-/// Replace only the supplied non-overlapping regions that are currently ready
-/// for extraction.
-/// Other closure markers deliberately remain for a later conversion round.
-pub(super) fn run_partial(
+/// Replace the one region explicitly selected by the scheduler.
+/// Other closure markers deliberately remain for later conversion steps.
+pub(super) fn replace_region_with_closure_representation(
     theory_set: &TheorySet,
     forgotten: &TheoryTermMap<ClosureForgotten<Operation>>,
-    regions: &ClosureRegionMap,
-    closure_contexts: &ClosureContextMap,
-) -> Result<PartialReplacement, ReplaceClosuresError> {
+    theory_id: &TheoryId,
+    definition_name: &Operation,
+    region: &ClosureRegion,
+    original_context_leaves: &[usize],
+    generated_id: usize,
+) -> Result<SelectedReplacement, ReplaceClosuresError> {
     let mut output = theory_set.clone();
     let mut terms = forgotten.clone();
 
-    for (theory_id, selected_definitions) in regions {
-        let theory = theory_set
-            .theories
-            .get(theory_id)
-            .ok_or_else(|| ReplaceClosuresError::MissingTheory(theory_id.to_string()))?;
-        let Theory::Theory { syntax, arrows } = theory else {
-            return Err(ReplaceClosuresError::NotUserTheory(theory_id.to_string()));
-        };
-        let syntax_theory = theory_set
-            .theories
-            .get(syntax)
-            .ok_or_else(|| ReplaceClosuresError::MissingSyntaxTheory(syntax.to_string()))?;
-
-        for (definition_name, selected_regions) in selected_definitions {
-            if selected_regions.is_empty() {
-                continue;
-            }
-            let original_arrow = arrows.get(definition_name).ok_or_else(|| {
-                ReplaceClosuresError::MissingDefinition {
-                    theory: theory_id.to_string(),
-                    definition: definition_name.to_string(),
-                }
+    let theory = theory_set
+        .theories
+        .get(theory_id)
+        .ok_or_else(|| ReplaceClosuresError::MissingTheory(theory_id.to_string()))?;
+    let Theory::Theory { syntax, arrows } = theory else {
+        return Err(ReplaceClosuresError::NotUserTheory(theory_id.to_string()));
+    };
+    let syntax_theory = theory_set
+        .theories
+        .get(syntax)
+        .ok_or_else(|| ReplaceClosuresError::MissingSyntaxTheory(syntax.to_string()))?;
+    let original_arrow =
+        arrows
+            .get(definition_name)
+            .ok_or_else(|| ReplaceClosuresError::MissingDefinition {
+                theory: theory_id.to_string(),
+                definition: definition_name.to_string(),
             })?;
-            let term = terms
-                .get_mut(theory_id)
-                .and_then(|definitions| definitions.get_mut(definition_name))
-                .ok_or_else(|| ReplaceClosuresError::MissingDefinition {
-                    theory: theory_id.to_string(),
-                    definition: definition_name.to_string(),
-                })?;
+    let term = terms
+        .get_mut(theory_id)
+        .and_then(|definitions| definitions.get_mut(definition_name))
+        .ok_or_else(|| ReplaceClosuresError::MissingDefinition {
+            theory: theory_id.to_string(),
+            definition: definition_name.to_string(),
+        })?;
+    let replacement = build_closure_value(
+        definition_name,
+        arrows,
+        term,
+        region,
+        original_context_leaves,
+        generated_id,
+    )?;
+    *term = splice_region(term, region, &replacement)?;
+    term.quotient()
+        .map_err(|error| ReplaceClosuresError::Quotient {
+            theory: theory_id.to_string(),
+            definition: definition_name.to_string(),
+            error: format!("{error:?}"),
+        })?;
 
-            for original_region in selected_regions {
-                let generated_closure = closure_operation(definition_name, original_region.closure);
-                let original_context_leaves = closure_contexts
-                    .get(theory_id)
-                    .and_then(|contexts| contexts.get(&generated_closure))
-                    .ok_or_else(|| ReplaceClosuresError::MissingClosureContext {
-                        operation: generated_closure.to_string(),
-                    })?;
-                let current_region = find_regions(term)
-                    .map_err(|_| ReplaceClosuresError::RemainingClosureMarker)?
-                    .into_iter()
-                    .find(|region| region_is_ready_for_extraction(term, region))
-                    .ok_or_else(|| region_count_changed(theory_id, definition_name))?;
-                let replacement = build_closure_value(
-                    definition_name,
-                    arrows,
-                    term,
-                    &current_region,
-                    original_region,
-                    original_context_leaves,
-                )?;
-                *term = splice_region(term, &current_region, &replacement)?;
-                term.quotient()
-                    .map_err(|error| ReplaceClosuresError::Quotient {
-                        theory: theory_id.to_string(),
-                        definition: definition_name.to_string(),
-                        error: format!("{error:?}"),
-                    })?;
-            }
+    let printable = term.clone().map_edges(|operation| match operation {
+        ClosureForgotten::Operation(operation) => operation,
+        ClosureForgotten::ClosureMarker => "closure.marker".parse().unwrap(),
+    });
+    let Theory::Theory { arrows, .. } = output
+        .theories
+        .get_mut(theory_id)
+        .expect("validated theory should remain present")
+    else {
+        unreachable!("validated user theory should remain a user theory")
+    };
+    declare_context_arrows(
+        syntax_theory,
+        arrows,
+        &printable,
+        original_arrow.type_maps.0.sources.len(),
+    )?;
 
-            let printable = term.clone().map_edges(|operation| match operation {
-                ClosureForgotten::Operation(operation) => operation,
-                ClosureForgotten::ClosureMarker => "closure.marker".parse().unwrap(),
-            });
-            let Theory::Theory { arrows, .. } = output
-                .theories
-                .get_mut(theory_id)
-                .expect("validated theory should remain present")
-            else {
-                unreachable!("validated user theory should remain a user theory")
-            };
-            declare_context_arrows(
-                syntax_theory,
-                arrows,
-                &printable,
-                original_arrow.type_maps.0.sources.len(),
-            )?;
-        }
-    }
-
-    Ok(PartialReplacement {
+    Ok(SelectedReplacement {
         theory_set: output,
         terms,
     })
-}
-
-/// A region is ready for extraction when none of its internal wires are used by
-/// an ordinary operation outside the region. Enclosing regions become ready
-/// after their nested markers have been extracted and the graph rediscovered.
-pub(super) fn region_is_ready_for_extraction(
-    definition: &ClosureForgottenTerm,
-    region: &ClosureRegion,
-) -> bool {
-    let environment = region
-        .environment
-        .iter()
-        .map(|node| node.0)
-        .collect::<BTreeSet<_>>();
-    let internal = region
-        .nodes
-        .iter()
-        .filter(|node| !environment.contains(&node.0) && **node != region.closure)
-        .map(|node| node.0)
-        .collect::<BTreeSet<_>>();
-    let included = region
-        .edges
-        .iter()
-        .chain([&region.marker])
-        .map(|edge| edge.0)
-        .collect::<BTreeSet<_>>();
-
-    definition
-        .hypergraph
-        .adjacency
-        .iter()
-        .enumerate()
-        .filter(|(index, _)| !included.contains(index))
-        .filter(|(index, _)| {
-            !matches!(
-                definition.hypergraph.edges[*index],
-                ClosureForgotten::ClosureMarker
-            )
-        })
-        .all(|(_, boundary)| {
-            boundary
-                .sources
-                .iter()
-                .chain(&boundary.targets)
-                .all(|node| !internal.contains(&node.0))
-        })
 }
 
 fn rewrite_all_converted_primitives(terms: &mut TheoryTermMap) {
@@ -249,12 +180,8 @@ pub enum ReplaceClosuresError {
     MissingDefinition { theory: String, definition: String },
     #[error("missing generated name operation `{operation}`")]
     MissingNameOperation { operation: String },
-    #[error("missing context mapping for generated closure `{operation}`")]
-    MissingClosureContext { operation: String },
     #[error("generated name operation `{operation}` has {targets} targets; expected one")]
     InvalidNameTargets { operation: String, targets: usize },
-    #[error("closure region count changed while rewriting `{theory}.{definition}`")]
-    RegionCountChanged { theory: String, definition: String },
     #[error("region node w{node} is out of bounds")]
     NodeOutOfBounds { node: usize },
     #[error("region edge e{edge} is out of bounds")]
@@ -308,13 +235,6 @@ pub(super) fn build_rewritten_definitions(
     Ok(terms)
 }
 
-fn region_count_changed(theory_id: &TheoryId, definition_name: &Operation) -> ReplaceClosuresError {
-    ReplaceClosuresError::RegionCountChanged {
-        theory: theory_id.to_string(),
-        definition: definition_name.to_string(),
-    }
-}
-
 /// Build the value which replaces one opaque closure node.
 ///
 /// Before replacement, the marker delimits the body and produces one opaque
@@ -342,13 +262,13 @@ fn build_closure_value(
     arrows: &BTreeMap<Operation, TheoryArrow>,
     definition: &ClosureForgottenTerm,
     region: &ClosureRegion,
-    original_region: &ClosureRegion,
     original_context_leaves: &[usize],
+    generated_id: usize,
 ) -> Result<ClosureForgottenTerm, ReplaceClosuresError> {
     let generated_name = generated_name_boundary(
         definition_name,
         arrows,
-        original_region.closure,
+        generated_id,
         original_context_leaves,
     )?;
 
@@ -370,7 +290,7 @@ fn build_closure_value(
     let projected = add_context_projection(
         &mut replacement,
         definition_name,
-        original_region.closure,
+        generated_id,
         &capture_sources,
         &generated_name.source_types,
     );
@@ -394,10 +314,10 @@ struct GeneratedNameBoundary {
 fn generated_name_boundary(
     definition_name: &Operation,
     arrows: &BTreeMap<Operation, TheoryArrow>,
-    original_closure: NodeId,
+    generated_id: usize,
     original_context_leaves: &[usize],
 ) -> Result<GeneratedNameBoundary, ReplaceClosuresError> {
-    let operation = name_operation(definition_name, original_closure);
+    let operation = name_operation(definition_name, generated_id);
     let arrow =
         arrows
             .get(&operation)
@@ -433,7 +353,7 @@ struct ProjectedInputs {
 fn add_context_projection(
     replacement: &mut ClosureForgottenTerm,
     definition_name: &Operation,
-    original_closure: NodeId,
+    generated_id: usize,
     capture_sources: &[NodeId],
     name_source_types: &[Obj],
 ) -> ProjectedInputs {
@@ -451,7 +371,7 @@ fn add_context_projection(
         .copied()
         .collect::<Vec<_>>();
     replacement.new_edge(
-        ClosureForgotten::Operation(context_operation(definition_name, original_closure)),
+        ClosureForgotten::Operation(context_operation(definition_name, generated_id)),
         (capture_sources.to_vec(), targets),
     );
     ProjectedInputs {
@@ -918,19 +838,19 @@ fn collect_leaf_indices(object: &Obj, leaves: &mut impl Extend<usize>) {
     }
 }
 
-fn name_operation(definition: &Operation, closure: NodeId) -> Operation {
-    format!("{NAME_PREFIX}{}", closure_operation(definition, closure))
-        .parse()
-        .expect("generated name operation should parse")
-}
-
-fn context_operation(definition: &Operation, closure: NodeId) -> Operation {
+fn name_operation(definition: &Operation, generated_id: usize) -> Operation {
     format!(
-        "{GENERATED_CONTEXT_PREFIX}closure.{definition}.{}",
-        closure.0
+        "{NAME_PREFIX}{}",
+        closure_operation(definition, generated_id)
     )
     .parse()
-    .expect("generated context operation should parse")
+    .expect("generated name operation should parse")
+}
+
+fn context_operation(definition: &Operation, generated_id: usize) -> Operation {
+    format!("{GENERATED_CONTEXT_PREFIX}closure.{definition}.{generated_id}",)
+        .parse()
+        .expect("generated context operation should parse")
 }
 
 fn context_vars(arity: usize) -> Vec<LVar> {

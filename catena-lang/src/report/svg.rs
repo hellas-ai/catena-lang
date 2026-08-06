@@ -105,10 +105,7 @@ pub fn dump_svgs(report: &CompileReport, dir: &Path) -> io::Result<()> {
             }
 
             dump_typed_stage_svg(
-                &report
-                    .closure_conversion
-                    .as_ref()
-                    .map(|conversion| conversion.closure_forgotten_definitions.clone()),
+                &report.forgotten_closures,
                 "forget_closures",
                 theory_id,
                 definition_name,

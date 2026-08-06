@@ -1,15 +1,16 @@
 use super::device_mem::DeviceBuffer;
-use super::mem::Mem;
+use super::mem::{MemOwn, MemRef};
 use serde::{Deserialize, Serialize};
 
 /// Public Catena runtime values accepted at program boundaries.
 #[derive(Debug)]
-pub enum Value {
+pub enum Value<'a> {
     Bool(u8),
     U32(u32),
     U64(u64),
     F32(f32),
-    Mem(Mem),
+    MemOwn(MemOwn),
+    MemRef(MemRef<'a>),
 }
 
 /// Semantic kinds of public runtime values.
@@ -19,10 +20,11 @@ pub enum ValueKind {
     U32,
     U64,
     F32,
-    Mem,
+    MemOwn,
+    MemRef,
 }
 
-impl Value {
+impl<'a> Value<'a> {
     pub fn bool(value: bool) -> Self {
         Value::Bool(u8::from(value))
     }
@@ -45,37 +47,56 @@ impl Value {
             Value::U32(_) => ValueKind::U32,
             Value::U64(_) => ValueKind::U64,
             Value::F32(_) => ValueKind::F32,
-            Value::Mem(_) => ValueKind::Mem,
+            Value::MemOwn(_) => ValueKind::MemOwn,
+            Value::MemRef(_) => ValueKind::MemRef,
         }
     }
 }
 
-impl From<bool> for Value {
+impl<'a> From<bool> for Value<'a> {
     fn from(value: bool) -> Self {
         Value::bool(value)
     }
 }
 
-impl From<u64> for Value {
+impl<'a> From<u64> for Value<'a> {
     fn from(value: u64) -> Self {
         Value::u64(value)
     }
 }
 
-impl From<u32> for Value {
+impl<'a> From<u32> for Value<'a> {
     fn from(value: u32) -> Self {
         Value::u32(value)
     }
 }
 
-impl From<f32> for Value {
+impl<'a> From<f32> for Value<'a> {
     fn from(value: f32) -> Self {
         Value::f32(value)
     }
 }
 
-impl From<DeviceBuffer> for Value {
+impl From<DeviceBuffer> for Value<'static> {
     fn from(value: DeviceBuffer) -> Self {
-        Value::Mem(value.into_mem())
+        Value::MemOwn(value.into_mem_own())
+    }
+}
+
+impl<'a> From<&'a DeviceBuffer> for Value<'a> {
+    fn from(value: &'a DeviceBuffer) -> Self {
+        Value::MemRef(MemRef::from_device_buffer(value))
+    }
+}
+
+impl From<MemOwn> for Value<'static> {
+    fn from(value: MemOwn) -> Self {
+        Value::MemOwn(value)
+    }
+}
+
+impl<'a> From<MemRef<'a>> for Value<'a> {
+    fn from(value: MemRef<'a>) -> Self {
+        Value::MemRef(value)
     }
 }

@@ -6,16 +6,44 @@ use libffi::middle::{Arg, Cif, CodePtr, Type};
 use libloading::Library;
 use thiserror::Error;
 
-use super::{
-    signature::SignatureTable,
-    value::{Value, ValueKind},
-};
+use super::{signature::SignatureTable, value::ValueKind};
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct CatenaMem {
     pub(crate) data: *mut c_void,
     pub(crate) len: u64,
+}
+
+/// Temporary storage for values crossing the generated C ABI.
+///
+/// Unlike [`super::value::Value`], this type does not express Rust ownership:
+/// an owned input has already relinquished its allocation before becoming an
+/// `AbiValue`, while a memory output is not wrapped in an owning Rust value
+/// until generated code has filled its [`CatenaMem`] slot. It must therefore
+/// remain private to the synchronous executor boundary.
+#[derive(Debug)]
+pub(crate) enum AbiValue {
+    Bool(u8),
+    U32(u32),
+    U64(u64),
+    F32(f32),
+    Mem(CatenaMem),
+}
+
+impl AbiValue {
+    pub(crate) fn zeroed(kind: ValueKind) -> Self {
+        match kind {
+            ValueKind::Bool => Self::Bool(0),
+            ValueKind::U32 => Self::U32(0),
+            ValueKind::U64 => Self::U64(0),
+            ValueKind::F32 => Self::F32(0.0),
+            ValueKind::MemOwn | ValueKind::MemRef => Self::Mem(CatenaMem {
+                data: std::ptr::null_mut(),
+                len: 0,
+            }),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -85,7 +113,7 @@ impl Executor {
     }
 
     /// Invoke a prepared symbol. Runtime validation guarantees the value shapes and kinds.
-    pub(crate) fn call(&self, symbol: &str, inputs: &[Value], outputs: &mut [Value]) {
+    pub(crate) fn call(&self, symbol: &str, inputs: &[AbiValue], outputs: &mut [AbiValue]) {
         let function = self
             .functions
             .get(symbol)
@@ -112,26 +140,26 @@ fn ffi_type(kind: ValueKind) -> Type {
         ValueKind::U32 => Type::u32(),
         ValueKind::U64 => Type::u64(),
         ValueKind::F32 => Type::f32(),
-        ValueKind::Mem => Type::structure([Type::pointer(), Type::u64()]),
+        ValueKind::MemOwn | ValueKind::MemRef => Type::structure([Type::pointer(), Type::u64()]),
     }
 }
 
-fn input_arg(value: &Value) -> Arg<'_> {
+fn input_arg(value: &AbiValue) -> Arg<'_> {
     match value {
-        Value::Bool(value) => Arg::new(value),
-        Value::U32(value) => Arg::new(value),
-        Value::U64(value) => Arg::new(value),
-        Value::F32(value) => Arg::new(value),
-        Value::Mem(value) => Arg::new(&value.abi),
+        AbiValue::Bool(value) => Arg::new(value),
+        AbiValue::U32(value) => Arg::new(value),
+        AbiValue::U64(value) => Arg::new(value),
+        AbiValue::F32(value) => Arg::new(value),
+        AbiValue::Mem(value) => Arg::new(value),
     }
 }
 
-fn output_pointer(value: &mut Value) -> *mut c_void {
+fn output_pointer(value: &mut AbiValue) -> *mut c_void {
     match value {
-        Value::Bool(value) => (value as *mut u8).cast(),
-        Value::U32(value) => (value as *mut u32).cast(),
-        Value::U64(value) => (value as *mut u64).cast(),
-        Value::F32(value) => (value as *mut f32).cast(),
-        Value::Mem(value) => (&mut value.abi as *mut CatenaMem).cast(),
+        AbiValue::Bool(value) => (value as *mut u8).cast(),
+        AbiValue::U32(value) => (value as *mut u32).cast(),
+        AbiValue::U64(value) => (value as *mut u64).cast(),
+        AbiValue::F32(value) => (value as *mut f32).cast(),
+        AbiValue::Mem(value) => (value as *mut CatenaMem).cast(),
     }
 }

@@ -11,8 +11,8 @@ use serde::{Deserialize, Serialize};
 
 use super::artifact::{Artifact, ArtifactError};
 use super::device_mem::DeviceAllocator;
-use super::executor::{Executor, ExecutorError};
-use super::mem::{Mem, MemError};
+use super::executor::{AbiValue, Executor, ExecutorError};
+use super::mem::{MemError, MemOwn};
 use super::{
     signature::{FunctionSignature, SignatureTable, signatures},
     value::{Value, ValueKind},
@@ -74,6 +74,8 @@ pub enum InitError {
         #[source]
         source: libloading::Error,
     },
+    #[error("Function '{name}' has unsupported cap.ref output at index {index}")]
+    UnsupportedRefOutput { name: String, index: usize },
     #[error(transparent)]
     Mem(#[from] MemError),
 }
@@ -102,6 +104,8 @@ pub enum ExecError {
     },
     #[error("Argument {index} contains device memory from a different GPU dialect")]
     IncompatibleDeviceMemory { index: usize },
+    #[error("generated memory length {byte_len} cannot be represented on this platform")]
+    InvalidOutputMemoryLength { byte_len: u64 },
 }
 
 impl Runtime {
@@ -133,6 +137,9 @@ impl Runtime {
             .as_ref()
             .ok_or(InitError::MissingGpuModules)?;
         let signature_table = signatures(modules);
+        if let Some((name, index)) = ref_output(&signature_table) {
+            return Err(InitError::UnsupportedRefOutput { name, index });
+        }
 
         let report_dir = tempfile::Builder::new()
             .prefix("catena-report-")
@@ -166,41 +173,42 @@ impl Runtime {
         })
     }
 
-    pub fn mem_u64(&self, values: &[u64]) -> Result<Value, MemError> {
+    pub fn mem_u64(&self, values: &[u64]) -> Result<MemOwn, MemError> {
         self.device_allocator
             .allocate_from_bytes(slice_as_bytes(values))
-            .map(Value::from)
+            .map(|buffer| buffer.into_mem_own())
     }
 
-    pub fn mem_f32(&self, values: &[f32]) -> Result<Value, MemError> {
+    pub fn mem_f32(&self, values: &[f32]) -> Result<MemOwn, MemError> {
         self.device_allocator
             .allocate_from_bytes(slice_as_bytes(values))
-            .map(Value::from)
+            .map(|buffer| buffer.into_mem_own())
     }
 
     /// Return the matching explicit allocator.
     ///
-    /// Imported buffers from this allocator can be converted to [`Value::Mem`].
+    /// Buffers from this allocator can be borrowed as [`Value::MemRef`] or
+    /// transferred as [`Value::MemOwn`].
     pub fn device_allocator(&self) -> &DeviceAllocator {
         &self.device_allocator
     }
 
     /// Run a source-level `program` definition, which must have M arguments, and return its N arguments.
-    pub fn exec<const M: usize, const N: usize>(
+    pub fn exec<'a, const M: usize, const N: usize>(
         &self,
         name: &str,
-        args: [Value; M],
-    ) -> Result<[Value; N], ExecError> {
+        args: [Value<'a>; M],
+    ) -> Result<[Value<'static>; N], ExecError> {
         self.exec_values(name, args.into(), N)
             .map(|values| values.try_into().expect("output arity already validated"))
     }
 
-    pub(crate) fn exec_values(
+    pub(crate) fn exec_values<'a>(
         &self,
         name: &str,
-        args: Vec<Value>,
+        args: Vec<Value<'a>>,
         output_count: usize,
-    ) -> Result<Vec<Value>, ExecError> {
+    ) -> Result<Vec<Value<'static>>, ExecError> {
         let signature = self
             .signatures
             .get(name)
@@ -208,13 +216,13 @@ impl Runtime {
         self.exec_symbol(name, signature, args, output_count)
     }
 
-    fn exec_symbol(
+    fn exec_symbol<'a>(
         &self,
         name: &str,
         signature: &FunctionSignature,
-        args: Vec<Value>,
+        args: Vec<Value<'a>>,
         output_count: usize,
-    ) -> Result<Vec<Value>, ExecError> {
+    ) -> Result<Vec<Value<'static>>, ExecError> {
         // Check arity/coarity lines up with what's in the function signature.
         if signature.inputs.len() != args.len() {
             return Err(ExecError::InputArityMismatch {
@@ -231,12 +239,12 @@ impl Runtime {
             });
         }
 
-        let mut output_values: Vec<Value> = signature
+        let mut raw_outputs = signature
             .outputs
             .iter()
             .copied()
-            .map(|kind| self.zeroed_value(kind))
-            .collect();
+            .map(AbiValue::zeroed)
+            .collect::<Vec<_>>();
 
         for (index, (value, expected)) in args
             .iter()
@@ -250,30 +258,64 @@ impl Runtime {
                     actual: value.kind(),
                 });
             }
-            if let Value::Mem(mem) = value
-                && let Some(dialect) = Some(mem.dialect())
-            {
+            let memory_dialect = match value {
+                Value::MemOwn(memory) => Some(memory.dialect()),
+                Value::MemRef(memory) => Some(memory.dialect()),
+                _ => None,
+            };
+            if let Some(dialect) = memory_dialect {
                 if self.device_allocator.dialect() != dialect {
                     return Err(ExecError::IncompatibleDeviceMemory { index });
                 }
             }
         }
 
-        self.executor
-            .call(&signature.symbol, &args, &mut output_values);
+        let raw_inputs = args
+            .into_iter()
+            .map(|value| match value {
+                Value::Bool(value) => AbiValue::Bool(value),
+                Value::U32(value) => AbiValue::U32(value),
+                Value::U64(value) => AbiValue::U64(value),
+                Value::F32(value) => AbiValue::F32(value),
+                Value::MemOwn(memory) => AbiValue::Mem(memory.into_abi()),
+                Value::MemRef(memory) => AbiValue::Mem(memory.abi),
+            })
+            .collect::<Vec<_>>();
 
-        Ok(output_values)
+        self.executor
+            .call(&signature.symbol, &raw_inputs, &mut raw_outputs);
+
+        raw_outputs
+            .into_iter()
+            .map(|output| self.resolve_output(output))
+            .collect()
     }
 
-    fn zeroed_value(&self, kind: ValueKind) -> Value {
-        match kind {
-            ValueKind::Bool => Value::Bool(0),
-            ValueKind::U32 => Value::U32(0),
-            ValueKind::U64 => Value::U64(0),
-            ValueKind::F32 => Value::F32(0.0),
-            ValueKind::Mem => Value::Mem(Mem::null(self.device_allocator.clone())),
+    fn resolve_output(&self, output: AbiValue) -> Result<Value<'static>, ExecError> {
+        match output {
+            AbiValue::Bool(value) => Ok(Value::Bool(value)),
+            AbiValue::U32(value) => Ok(Value::U32(value)),
+            AbiValue::U64(value) => Ok(Value::U64(value)),
+            AbiValue::F32(value) => Ok(Value::F32(value)),
+            AbiValue::Mem(abi) => {
+                let byte_len = usize::try_from(abi.len)
+                    .map_err(|_| ExecError::InvalidOutputMemoryLength { byte_len: abi.len })?;
+                Ok(Value::from(
+                    self.device_allocator.adopt_owned(abi.data, byte_len),
+                ))
+            }
         }
     }
+}
+
+fn ref_output(signatures: &SignatureTable) -> Option<(String, usize)> {
+    signatures.iter().find_map(|(name, signature)| {
+        signature
+            .outputs
+            .iter()
+            .position(|kind| *kind == ValueKind::MemRef)
+            .map(|index| (name.clone(), index))
+    })
 }
 
 fn slice_as_bytes<T>(values: &[T]) -> &[u8] {

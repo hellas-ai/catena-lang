@@ -2,7 +2,7 @@ use std::{ffi::c_int, path::PathBuf};
 
 use thiserror::Error;
 
-use super::device_mem::{DeviceAllocator, DeviceBuffer};
+use super::device_mem::DeviceBuffer;
 use crate::{codegen::GpuDialect, runtime::executor::CatenaMem};
 
 #[derive(Debug, Error)]
@@ -42,31 +42,26 @@ pub enum MemError {
     RangeOverflow { offset: usize, length: usize },
     #[error("device memory length {byte_len} cannot be represented on this platform")]
     LengthTooLarge { byte_len: u64 },
-    #[error("IPC handle uses {handle_dialect:?}, but the allocator uses {allocator_dialect:?}")]
-    DialectMismatch {
-        allocator_dialect: GpuDialect,
-        handle_dialect: GpuDialect,
-    },
-    #[error("an imported IPC mapping cannot be exported again")]
-    CannotExportImported,
     #[error("memory length {byte_len} is not a whole number of {element_size}-byte elements")]
     InvalidElementLength { byte_len: u64, element_size: usize },
 }
 
-/// Mem values represent a device pointer and byte length which can be passed into a Catena program.
+/// A uniquely owned device allocation which can be transferred into a Catena program.
 #[derive(Debug)]
-pub struct Mem {
+pub struct MemOwn {
     pub(crate) abi: CatenaMem,
-    owner: MemOwner,
+    buffer: DeviceBuffer,
 }
 
-#[derive(Debug)]
-enum MemOwner {
-    Generated(DeviceAllocator),
-    Device(DeviceBuffer),
+/// A borrowed device allocation which can be passed into a Catena program without
+/// transferring ownership.
+#[derive(Debug, Clone, Copy)]
+pub struct MemRef<'a> {
+    pub(crate) abi: CatenaMem,
+    buffer: &'a DeviceBuffer,
 }
 
-impl Mem {
+impl MemOwn {
     pub fn to_f32_vec(&self) -> Vec<f32> {
         self.try_to_f32_vec()
             .expect("failed to read memory as f32 values")
@@ -105,16 +100,7 @@ impl Mem {
         let mut values = vec![T::default(); len];
         let output =
             unsafe { std::slice::from_raw_parts_mut(values.as_mut_ptr().cast::<u8>(), byte_len) };
-        match &self.owner {
-            MemOwner::Generated(allocator) => {
-                allocator.copy_device_to_host_raw(
-                    output.as_mut_ptr().cast(),
-                    self.abi.data,
-                    byte_len,
-                )?;
-            }
-            MemOwner::Device(device) => device.read_all(output)?,
-        }
+        self.buffer.read_all(output)?;
         Ok(values)
     }
 
@@ -125,36 +111,49 @@ impl Mem {
         };
         Self {
             abi,
-            owner: MemOwner::Device(device),
+            buffer: device,
+        }
+    }
+
+    pub fn byte_len(&self) -> u64 {
+        self.abi.len
+    }
+
+    pub fn as_ref(&self) -> MemRef<'_> {
+        MemRef {
+            abi: self.abi,
+            buffer: &self.buffer,
         }
     }
 
     pub(crate) fn dialect(&self) -> GpuDialect {
-        match &self.owner {
-            MemOwner::Generated(allocator) => allocator.dialect(),
-            MemOwner::Device(device) => device.dialect(),
-        }
+        self.buffer.dialect()
     }
 
-    pub(crate) fn null(allocator: DeviceAllocator) -> Self {
-        Self {
-            abi: CatenaMem {
-                data: std::ptr::null_mut(),
-                len: 0,
-            },
-            owner: MemOwner::Generated(allocator),
-        }
+    pub(crate) fn into_abi(self) -> CatenaMem {
+        let abi = self.abi;
+        self.buffer.into_raw();
+        abi
     }
 }
 
-impl Drop for Mem {
-    fn drop(&mut self) {
-        if self.abi.data.is_null() {
-            return;
+impl<'a> MemRef<'a> {
+    pub(crate) fn from_device_buffer(buffer: &'a DeviceBuffer) -> Self {
+        Self {
+            abi: CatenaMem {
+                data: buffer.data(),
+                len: buffer.byte_len() as u64,
+            },
+            buffer,
         }
-        if let MemOwner::Generated(allocator) = &self.owner {
-            let _ = allocator.free_raw(self.abi.data);
-        }
+    }
+
+    pub fn byte_len(&self) -> u64 {
+        self.abi.len
+    }
+
+    pub(crate) fn dialect(&self) -> GpuDialect {
+        self.buffer.dialect()
     }
 }
 

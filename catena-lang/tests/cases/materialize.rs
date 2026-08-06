@@ -7,7 +7,7 @@ fn materialize_empty_source_exec() -> anyhow::Result<()> {
     let runtime = runtime_with(SOURCE)?;
 
     let [result] = runtime.exec("materialize-indexes-source", [0_u64.into()])?;
-    let Value::Mem(result) = result else {
+    let Value::MemOwn(result) = result else {
         anyhow::bail!("materialize-indexes-source returned non-mem value: {result:?}");
     };
 
@@ -20,7 +20,7 @@ fn materialize_indexes_source_exec() -> anyhow::Result<()> {
     let runtime = runtime_with(SOURCE)?;
 
     let [result] = runtime.exec("materialize-indexes-source", [4_u64.into()])?;
-    let Value::Mem(result) = result else {
+    let Value::MemOwn(result) = result else {
         anyhow::bail!("materialize-indexes-source returned non-mem value: {result:?}");
     };
 

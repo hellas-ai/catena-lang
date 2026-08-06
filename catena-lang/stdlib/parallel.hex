@@ -60,6 +60,16 @@
     ([level workers groups.]
       ({[.level workers groups]} context)))
 
+  # Expose the context associated with a worker while preserving the worker
+  # for indexing and domain-specific scoping.
+  (arr parallel.worker-context :
+    ({[level workers groups.] [.level workers groups]} worker)
+    ->
+    ([level workers groups.] {
+      ({[.level workers groups]} context)
+      ({[.level workers groups]} worker)
+    }))
+
   # Return the current worker's flat physical index in this context.
   (arr parallel.worker-index : {[level workers groups.]
     ({[.level workers groups]} context)

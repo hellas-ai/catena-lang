@@ -242,7 +242,7 @@
   ([.grid-worker]
     gpu.scope-worker-to-block [block-worker-0.])
   ([.block-worker-0]
-    gpu.context [block-context-0 block-worker.])
+    parallel.worker-context [block-context-0 block-worker.])
 
   ([.k] u64.copies2-param [k-value step-inner k-param.])
   ([.tile-size] u64.copies2-param

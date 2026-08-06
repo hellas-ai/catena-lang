@@ -242,7 +242,7 @@
   ([.grid-worker]
     gpu.scope-worker-to-block [block-worker-0.])
   ([.block-worker-0]
-    gpu.context [block-context block-worker.])
+    parallel.worker-context [block-context block-worker.])
 
   ({[.block-context] [.tile-count]}
     parallel.allocate

@@ -98,16 +98,6 @@
       1
     } worker)))
 
-  # Expose the context associated with a GPU worker while preserving the
-  # worker for indexing and further scoping.
-  (arr gpu.context :
-    ({[level workers groups.] [.level workers groups]} worker)
-    ->
-    ([level workers groups.] {
-      ({[.level workers groups]} context)
-      ({[.level workers groups]} worker)
-    }))
-
   # Launch parameter construction
   (arr gpu.3d.intro : (u64 val [x . x x x]) -> gpu.3d)
   (arr gpu.launch_params.intro : (gpu.3d val [x . x x]) -> (gpu.launch_params val))

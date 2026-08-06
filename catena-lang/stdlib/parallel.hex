@@ -41,15 +41,14 @@
       ({[.group-x group-y]} *)
     } parallel.plan)))
 
-  # Preserve a plan while exposing its root context and worker types as erased
-  # arguments to polymorphic structural constructors.
+  # Preserve a plan while exposing its root worker type as an erased argument
+  # to polymorphic structural constructors.
   (arr parallel.plan.root-types :
     ([level workers groups.]
       ({[.level workers groups]} parallel.plan))
     ->
     ([level workers groups.] {
       ({[.level workers groups]} parallel.plan)
-      ({[.level workers groups]} context)
       ({[.level workers groups]} worker)
     }))
 
@@ -71,18 +70,14 @@
 
   # Project the callback index for one-work-item-per-worker materialization.
   (arr parallel.work-item-index : {[level workers groups.]
-    ({[.level workers groups]} context)
     ({[.level workers groups]} worker)
   }
   ->
   ([level workers groups.]
     ({
       ({
-        ({[.level workers groups]} context)
-        ({
-          ({[.level workers groups]} worker)
-          ([.workers] ix val)
-        } *)
+        ({[.level workers groups]} worker)
+        ([.workers] ix val)
       } *)
       ([.workers] ix val)
     } =>)))
@@ -172,11 +167,8 @@
     } writable val)
     ({
       ({
-        ({[.level workers groups]} context)
-        ({
-          ({[.level workers groups]} worker)
-          ([.output-count] ix val)
-        } *)
+        ({[.level workers groups]} worker)
+        ([.output-count] ix val)
       } *)
       (f32 val)
     } =>)

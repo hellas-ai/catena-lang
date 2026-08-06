@@ -151,7 +151,7 @@
     [.block-context]
     [.a-tile]
     ({
-      ({[.block-context] [.block-worker]} parallel.work-item-index)
+      ([.block-worker] parallel.work-item-index)
       ({
         [.n-param]
         [.inner-param]
@@ -168,7 +168,7 @@
     [.block-context-1]
     [.b-tile]
     ({
-      ({[.block-context-1] [.block-worker]} parallel.work-item-index)
+      ([.block-worker] parallel.work-item-index)
       ({
         [.inner-param]
         [.m-param]
@@ -229,26 +229,20 @@
         ({[.grid-x grid-y tile-size tile-size]} gpu.grid.2d)
         ({({[.grid-x grid-y]} *) ({[.tile-size tile-size]} *)} *)
         ({[.grid-x grid-y]} *)
-      } context)
-      ({
-        ({
-          ({[.grid-x grid-y tile-size tile-size]} gpu.grid.2d)
-          ({({[.grid-x grid-y]} *) ({[.tile-size tile-size]} *)} *)
-          ({[.grid-x grid-y]} *)
-        } worker)
-        ({([.n] ix val) ([.m] ix val)} *)
-      } *)
+      } worker)
+      ({([.n] ix val) ([.m] ix val)} *)
     } *)
   })
   ->
   ([grid-x grid-y n k m tile-size.] (f32 val))
 = {[n-param m-param a b k tile-size tile-element-count _grid-x _grid-y work-item.]
-  ([.work-item] *.elim [grid-context assignment.])
+  ([.work-item] *.elim [grid-worker c-index.])
   # c-index is the logical 2D index of C. The physical worker index is
   # represented independently by grid-worker.
-  ([.assignment] *.elim [grid-worker c-index.])
-  ({[.grid-context] [.grid-worker]}
-    gpu.current-block [block-context-0 block-worker.])
+  ([.grid-worker]
+    gpu.scope-worker-to-block [block-worker-0.])
+  ([.block-worker-0]
+    gpu.context [block-context-0 block-worker.])
 
   ([.k] u64.copies2-param [k-value step-inner k-param.])
   ([.tile-size] u64.copies2-param
@@ -327,7 +321,7 @@
 
   ({[.launch-grid-x] [.launch-grid-y] [.block-x] [.block-y]}
     gpu.launch-config.2d [plan.])
-  ([.plan] parallel.plan.root-types [typed-plan context-type worker-type.])
+  ([.plan] parallel.plan.root-types [typed-plan worker-type.])
   ([.typed-plan] parallel.schedule [grid-context.])
   ({[.grid-context] [.output-len]}
     parallel.allocate [allocated-context output.])
@@ -337,12 +331,9 @@
     [.output]
     ({
       ({
-        ([.context-type] name.identity lift)
-        ({
-          ([.worker-type] name.identity lift)
-          ({[.indices-n] [.indices-m] [.indices-m-len]}
-            partial.f32.row-major.indices.1)
-        } tensor)
+        ([.worker-type] name.identity lift)
+        ({[.indices-n] [.indices-m] [.indices-m-len]}
+          partial.f32.row-major.indices.1)
       } tensor)
       ({
         [.grid-x-param]

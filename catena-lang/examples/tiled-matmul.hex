@@ -237,11 +237,12 @@
   ->
   ([q n k m k-tiles tile-size.] (f32 val))
 = {[a b tile-count k-tiles tile-size task.]
-  ([.task] *.elim [grid-context worker-and-index.])
+  ([.task] *.elim [_grid-context worker-and-index.])
   ([.worker-and-index] *.elim [grid-worker output-index.])
-  ({[.grid-context] [.grid-worker]}
-    gpu.current-block
-    [block-context block-worker.])
+  ([.grid-worker]
+    gpu.scope-worker-to-block [block-worker-0.])
+  ([.block-worker-0]
+    gpu.context [block-context block-worker.])
 
   ({[.block-context] [.tile-count]}
     parallel.allocate

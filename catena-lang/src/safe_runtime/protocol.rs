@@ -3,10 +3,7 @@ use std::io::{self, Read, Write};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use thiserror::Error;
 
-use crate::{
-    codegen::GpuDialect,
-    runtime::{ExecError, Value, ValueKind},
-};
+use crate::{codegen::GpuDialect, runtime::ExecError};
 
 const MAX_FRAME_LEN: usize = 64 * 1024 * 1024;
 
@@ -17,8 +14,12 @@ pub(crate) enum Request {
         dialect: WireGpuDialect,
     },
     Execute {
+        execution_id: u64,
         name: String,
         args: Vec<WireValue>,
+    },
+    Acknowledge {
+        execution_id: u64,
     },
     Shutdown,
 }
@@ -26,16 +27,22 @@ pub(crate) enum Request {
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) enum Response {
     Initialized(Result<(), String>),
-    Executed(Result<Vec<WireValue>, RemoteExecError>),
+    Executed {
+        execution_id: u64,
+        result: Result<Vec<WireValue>, RemoteExecError>,
+    },
+    Acknowledged {
+        execution_id: u64,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) enum RemoteExecError {
     Runtime(ExecError),
-    UnsupportedValueKind(ValueKind),
+    Memory(String),
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) enum WireGpuDialect {
     Hip,
     Cuda,
@@ -59,37 +66,27 @@ impl From<WireGpuDialect> for GpuDialect {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) enum WireCapability {
+    Own,
+    Ref,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub(crate) struct WireMemory {
+    pub(crate) capability: WireCapability,
+    pub(crate) dialect: WireGpuDialect,
+    pub(crate) byte_len: u64,
+    pub(crate) handle: Vec<u8>,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) enum WireValue {
     Bool(u8),
     U32(u32),
     U64(u64),
     F32(f32),
-}
-
-impl From<WireValue> for Value {
-    fn from(value: WireValue) -> Self {
-        match value {
-            WireValue::Bool(value) => Value::Bool(value),
-            WireValue::U32(value) => Value::U32(value),
-            WireValue::U64(value) => Value::U64(value),
-            WireValue::F32(value) => Value::F32(value),
-        }
-    }
-}
-
-impl TryFrom<Value> for WireValue {
-    type Error = ValueKind;
-
-    fn try_from(value: Value) -> Result<Self, Self::Error> {
-        match value {
-            Value::Bool(value) => Ok(Self::Bool(value)),
-            Value::U32(value) => Ok(Self::U32(value)),
-            Value::U64(value) => Ok(Self::U64(value)),
-            Value::F32(value) => Ok(Self::F32(value)),
-            Value::Mem(_) => Err(ValueKind::Mem),
-        }
-    }
+    Mem(WireMemory),
 }
 
 #[derive(Debug, Error)]
@@ -161,31 +158,49 @@ mod tests {
     use super::*;
 
     #[test]
-    fn frames_round_trip() {
+    fn memory_execute_and_acknowledgement_round_trip() {
         let mut bytes = Vec::new();
         write_frame(
             &mut bytes,
             &Request::Execute {
-                name: "f".to_string(),
-                args: vec![WireValue::U64(7)],
+                execution_id: 7,
+                name: "identity".to_string(),
+                args: vec![WireValue::Mem(WireMemory {
+                    capability: WireCapability::Own,
+                    dialect: WireGpuDialect::Hip,
+                    byte_len: 16,
+                    handle: vec![3; 64],
+                })],
             },
         )
         .unwrap();
+        write_frame(&mut bytes, &Request::Acknowledge { execution_id: 7 }).unwrap();
 
-        let decoded: Request = read_frame(&mut bytes.as_slice()).unwrap().unwrap();
+        let mut bytes = bytes.as_slice();
+        let Request::Execute {
+            execution_id, args, ..
+        } = read_frame(&mut bytes).unwrap().unwrap()
+        else {
+            panic!("decoded the wrong request kind");
+        };
+        assert_eq!(execution_id, 7);
         assert!(matches!(
-            decoded,
-            Request::Execute {
-                name,
-                args,
-            } if name == "f" && matches!(args.as_slice(), [WireValue::U64(7)])
+            args.as_slice(),
+            [WireValue::Mem(WireMemory {
+                capability: WireCapability::Own,
+                byte_len: 16,
+                ..
+            })]
+        ));
+        assert!(matches!(
+            read_frame(&mut bytes).unwrap(),
+            Some(Request::Acknowledge { execution_id: 7 })
         ));
     }
 
     #[test]
     fn clean_eof_has_no_frame() {
-        let result = read_frame::<Request>(&mut &[][..]).unwrap();
-        assert!(result.is_none());
+        assert!(read_frame::<Request>(&mut &[][..]).unwrap().is_none());
     }
 
     #[test]

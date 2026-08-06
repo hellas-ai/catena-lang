@@ -1,4 +1,4 @@
-use std::{env, path::PathBuf};
+use std::env;
 
 use catena_lang::{
     codegen::GpuDialect,
@@ -9,6 +9,10 @@ use catena_lang::{
 
 const GPU_DIALECT_ENV: &str = "CATENA_GPU_DIALECT";
 
+const MEMORY_SOURCE: &str = r#"
+(def program safe-mem-own-identity : (cap.own mem) -> (cap.own mem) = [memory])
+"#;
+
 fn main() -> anyhow::Result<()> {
     // If child mode is enabled after being spawned by the parent, run the child loop.
     // Otherwise, continue with the normal runtime execution as a parent process.
@@ -16,9 +20,8 @@ fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let runtime = SafeRuntime::new(
-        stdlib::paths_from(&root).chain([root.join("examples/example.hex")]),
+    let runtime = SafeRuntime::from_sources(
+        stdlib::sources().chain([include_str!("example.hex"), MEMORY_SOURCE]),
         configured_gpu_dialect()?,
     )?;
 
@@ -30,6 +33,14 @@ fn main() -> anyhow::Result<()> {
     anyhow::ensure!(result == 4, "two-times-two returned {result}, expected 4");
 
     let [] = runtime.exec("require-true", [true.into()])?;
+
+    let input = runtime.mem_u64(&[3, 5, 8, 13])?;
+    let [output] = runtime.exec("safe-mem-own-identity", [input.into()])?;
+    let Value::MemOwn(output) = output else {
+        anyhow::bail!("safe-mem-own-identity returned non-owned memory: {output:?}");
+    };
+    anyhow::ensure!(output.try_to_u64_vec()? == [3, 5, 8, 13]);
+    println!("safe-mem-own-identity: returned Value::MemOwn with intact contents");
 
     match runtime.exec::<1, 0>("require-true", [false.into()]) {
         Err(SafeExecError::ChildTerminated { status, stderr }) => {

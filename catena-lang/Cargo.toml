@@ -37,7 +37,17 @@ path = "examples/runtime.rs"
 name = "mem"
 path = "examples/mem.rs"
 
+[[example]]
+name = "safe_runtime"
+path = "examples/safe_runtime.rs"
+
 [[test]]
 name = "runtime"
 path = "tests/runtime.rs"
+required-features = ["runtime-tests"]
+
+[[test]]
+name = "safe_runtime"
+path = "tests/safe_runtime.rs"
+harness = false
 required-features = ["runtime-tests"]

@@ -40,7 +40,7 @@ impl<'a> Value<'a> {
         Value::F32(value)
     }
 
-    pub(crate) fn kind(&self) -> ValueKind {
+    pub(super) fn kind(&self) -> ValueKind {
         match self {
             Value::Bool(_) => ValueKind::Bool,
             Value::U32(_) => ValueKind::U32,

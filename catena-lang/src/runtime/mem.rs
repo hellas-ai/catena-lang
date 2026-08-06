@@ -44,7 +44,7 @@ pub enum MemError {
 /// A uniquely owned device allocation which can be transferred into a Catena program.
 #[derive(Debug)]
 pub struct MemOwn {
-    pub(crate) abi: CatenaMem,
+    pub(super) abi: CatenaMem,
     gpu: Arc<GpuApi>,
 }
 
@@ -52,7 +52,7 @@ pub struct MemOwn {
 /// transferring ownership.
 #[derive(Debug, Clone, Copy)]
 pub struct MemRef<'a> {
-    pub(crate) abi: CatenaMem,
+    pub(super) abi: CatenaMem,
     dialect: GpuDialect,
     _lifetime: PhantomData<&'a ()>,
 }
@@ -171,7 +171,7 @@ impl MemOwn {
         }
     }
 
-    pub(crate) fn into_abi(mut self) -> CatenaMem {
+    pub(super) fn into_abi(mut self) -> CatenaMem {
         CatenaMem {
             data: std::mem::replace(&mut self.abi.data, std::ptr::null_mut()),
             len: self.abi.len,

@@ -37,7 +37,7 @@ fn main() -> anyhow::Result<()> {
 
     // Execute array-head-u64 with values above
     let input = runtime.mem_u64(&values)?;
-    let [head] = runtime.exec("array-head-u64", [input])?;
+    let [head] = runtime.exec("array-head-u64", [input.borrow()])?;
     let Value::U64(head) = head else {
         anyhow::bail!("array-head-u64 returned non-u64 value: {head:?}");
     };

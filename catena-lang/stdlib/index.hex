@@ -38,6 +38,31 @@
     ([i.] {[.i] [.i]})
   )
 
+  # Reduce an index modulo n and retain the resulting Ix n bound.
+  (def ix.rem :
+    ([x n.] {
+      ({[.n] u64} :)
+      ([.x] ix val)
+    })
+    ->
+    ([x n.] ([.n] ix val))
+  = {[modulus index.]
+    ([.modulus] u64.copies2 [rem-modulus bound.]
+      ([.index] ix.to-u64 [coordinate.]
+        ({[.coordinate] ([.rem-modulus] :.forget)} u64.rem [remainder.]
+          ([.remainder] u64.name [named-remainder.]
+            ({[.bound] [.named-remainder]} u64.gt
+              [within-bound if-within-bound _if-out-of-bound.]
+              ([.within-bound if-within-bound] assert-then [bound-proof.]
+                ({[.named-remainder] [.bound] [.bound-proof]} u64.to-ix)
+              )
+            )
+          )
+        )
+      )
+    )
+  })
+
   # Row-major layout helpers for flattened matrix buffers.
   # These operations are common enough that we define them as primitives instead
   # of proving their arithmetic with inline certificates at each use site.
@@ -85,4 +110,5 @@
     (u64 val)
     ([.tile-size] ix val)
   } -> ([n tile-size.] ([.n] ix val)))
+
 })

@@ -24,6 +24,31 @@
 
 })
 
+# Convert the logical C index to its position inside a tile. c-index is
+# already 2D, so both coordinates need their independent remainder:
+# (c-row % tile-size, c-col % tile-size).
+(def program tiled-matmul.in-tile-c-index :
+  ([n m tile-size.] {
+    ({[.tile-size] u64} :)
+    ({([.n] ix val) ([.m] ix val)} *)
+  })
+  ->
+  ([n m tile-size.] {
+    ([.tile-size] ix val)
+    ([.tile-size] ix val)
+  } *)
+= {[tile-size c-index.]
+  ([.tile-size] u64.copies2 [row-width col-width.]
+    ([.c-index] *.elim [c-row c-col.]
+      ({[.row-width] [.c-row]} ix.rem [in-tile-c-row.]
+        ({[.col-width] [.c-col]} ix.rem [in-tile-c-col.]
+          ({[.in-tile-c-row] [.in-tile-c-col]} *.intro)
+        )
+      )
+    )
+  )
+})
+
 # Map a local row-inner tile coordinate to its source matrix coordinate.
 (def program tiled-matmul.row-inner-tile-reindex :
   ([rows inner tile-size.] {
@@ -131,14 +156,16 @@
   ->
   ([p n k m k-tiles tile-size.] (f32 val))
 = {[n-param m-param a b c-index tile-size inner _k-tiles block-context block-worker a-tile b-tile k-tile.]
-  ([.c-index] *.elim [output-row output-col.])
+  ([.c-index] *.elim [output-row-0 output-col-0.])
+  ([.output-row-0] ix.copy [output-row-for-tile output-row.])
+  ([.output-col-0] ix.copy [output-col-for-tile output-col.])
+  ({[.output-row-for-tile] [.output-col-for-tile]}
+    *.intro [c-index-for-tile.])
   ([.k-tile] ix.to-u64 [k-tile-u64.])
   ([.inner] u64.copy-param [inner-value inner-param.])
   ([.tile-size] u64.copy-param [tile-size-value tile-size-param.])
-  ({[.block-context] [.block-worker]}
-    parallel.worker-index [local-flat-index.])
-  ({[.tile-size] [.local-flat-index]}
-    shape.2d.indices [local-c-index.])
+  ({[.tile-size] [.c-index-for-tile]}
+    tiled-matmul.in-tile-c-index [in-tile-c-index.])
 
   ({
     [.block-context]
@@ -193,7 +220,7 @@
     [.tile-size]
     [.a-tile-view]
     [.b-tile-view]
-    [.local-c-index]
+    [.in-tile-c-index]
   } f32.matmul.cell-dot [tile-result.])
 
   # This second synchronization restores both captured tiles to writable, but

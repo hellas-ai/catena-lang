@@ -1,0 +1,44 @@
+# Closure results which are products must remain one logical marker codomain.
+
+(def program product-result-copy :
+  (bool val)
+  ->
+  ({(bool val) (bool val)} *)
+= (bool.copy *.intro))
+
+(def program choose-product-result-views :
+  {
+    ({(bool val) ({(bool val) (bool val)} *)} =>)
+    ({(bool val) ({(bool val) (bool val)} *)} =>)
+    (bool val)
+    (bool val)
+  }
+  ->
+  ({(bool val) (bool val)} *)
+= ([left-view right-view flag argument.]
+  {[.left-view] [.right-view] [.flag] [.argument]}
+  bool.if
+))
+
+(def program product-result-if :
+  {(bool val) (bool val) (bool val)}
+  ->
+  ({(bool val) (bool val)} *)
+= ([argument outer-flag inner-flag.]
+  ([.inner-flag] bool.copy [left-inner-flag right-inner-flag.])
+  {
+    ({
+      (name.product-result-copy lift)
+      (name.product-result-copy lift)
+      [.left-inner-flag]
+    } partial.choose-product-result-views.3)
+    ({
+      (name.product-result-copy lift)
+      (name.product-result-copy lift)
+      [.right-inner-flag]
+    } partial.choose-product-result-views.3)
+    [.outer-flag]
+    [.argument]
+  }
+  bool.if
+))

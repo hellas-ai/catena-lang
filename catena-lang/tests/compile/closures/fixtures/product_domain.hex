@@ -1,0 +1,63 @@
+# Closure arguments which are products must remain one logical marker domain.
+
+(def program product-domain-and :
+  ({(bool val) (bool val)} *)
+  ->
+  (bool val)
+= ([pair.]
+  ([.pair] *.elim [lhs rhs.])
+  ({[.lhs rhs]} bool.and)
+))
+
+(def program product-domain-or :
+  ({(bool val) (bool val)} *)
+  ->
+  (bool val)
+= ([pair.]
+  ([.pair] *.elim [lhs rhs.])
+  ({[.lhs rhs]} bool.or)
+))
+
+# This helper has closures on its public boundary, so the early definition
+# pass inlines its inner bool.if into each partially-applied outer branch.
+(def program choose-product-domain-views :
+  {
+    ({({(bool val) (bool val)} *) (bool val)} =>)
+    ({({(bool val) (bool val)} *) (bool val)} =>)
+    (bool val)
+    (bool val)
+    (bool val)
+  }
+  ->
+  (bool val)
+= ([left-view right-view fixed flag varying.]
+  ({[.fixed] [.varying]} *.intro [argument.])
+  {[.left-view] [.right-view] [.flag] [.argument]}
+  bool.if
+))
+
+(def program product-domain-if :
+  {(bool val) (bool val) (bool val) (bool val)}
+  ->
+  (bool val)
+= ([fixed varying outer-flag inner-flag.]
+  ([.fixed] bool.copy [left-fixed right-fixed.])
+  ([.inner-flag] bool.copy [left-inner-flag right-inner-flag.])
+  {
+    ({
+      (name.product-domain-and lift)
+      (name.product-domain-or lift)
+      [.left-fixed]
+      [.left-inner-flag]
+    } partial.choose-product-domain-views.4)
+    ({
+      (name.product-domain-or lift)
+      (name.product-domain-and lift)
+      [.right-fixed]
+      [.right-inner-flag]
+    } partial.choose-product-domain-views.4)
+    [.outer-flag]
+    [.varying]
+  }
+  bool.if
+))

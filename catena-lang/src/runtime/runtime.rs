@@ -196,7 +196,19 @@ impl Runtime {
         name: &str,
         args: [Value<'a>; M],
     ) -> Result<[Value<'static>; N], ExecError> {
-        self.exec_values(name, args.into(), N)
+        let signature = self
+            .signatures
+            .get(name)
+            .ok_or_else(|| ExecError::UnknownSourceFunction(name.to_string()))?;
+        if signature.outputs.len() != N {
+            return Err(ExecError::OutputArityMismatch {
+                name: name.to_string(),
+                expected: signature.outputs.len(),
+                actual: N,
+            });
+        }
+
+        self.exec_symbol(name, signature, args.into())
             .map(|values| values.try_into().expect("output arity already validated"))
     }
 
@@ -210,13 +222,12 @@ impl Runtime {
         &self,
         name: &str,
         args: Vec<Value<'a>>,
-        output_count: usize,
     ) -> Result<Vec<Value<'static>>, ExecError> {
         let signature = self
             .signatures
             .get(name)
             .ok_or_else(|| ExecError::UnknownSourceFunction(name.to_string()))?;
-        self.exec_symbol(name, signature, args, output_count)
+        self.exec_symbol(name, signature, args)
     }
 
     fn exec_symbol<'a>(
@@ -224,9 +235,8 @@ impl Runtime {
         name: &str,
         signature: &FunctionSignature,
         args: Vec<Value<'a>>,
-        output_count: usize,
     ) -> Result<Vec<Value<'static>>, ExecError> {
-        // Check arity/coarity lines up with what's in the function signature.
+        // Check input arity lines up with what's in the function signature.
         if signature.inputs.len() != args.len() {
             return Err(ExecError::InputArityMismatch {
                 name: name.to_string(),
@@ -234,14 +244,6 @@ impl Runtime {
                 actual: args.len(),
             });
         }
-        if signature.outputs.len() != output_count {
-            return Err(ExecError::OutputArityMismatch {
-                name: name.to_string(),
-                expected: signature.outputs.len(),
-                actual: output_count,
-            });
-        }
-
         let mut raw_outputs = signature
             .outputs
             .iter()

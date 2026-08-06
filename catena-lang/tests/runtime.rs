@@ -786,7 +786,7 @@ fn raw_device_pointer_can_be_passed_as_an_explicit_borrow() -> anyhow::Result<()
         MemRef::from_raw_parts(owner.as_ptr(), owner.byte_len(), owner.dialect(), &owner)
     };
 
-    let outputs = runtime.exec_values("array-head-u64-ref", vec![borrowed.into()], 1)?;
+    let outputs = runtime.exec_values("array-head-u64-ref", vec![borrowed.into()])?;
     assert!(matches!(outputs.as_slice(), [Value::U64(17)]));
     Ok(())
 }

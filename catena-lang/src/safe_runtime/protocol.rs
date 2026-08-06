@@ -19,7 +19,6 @@ pub(crate) enum Request {
     Execute {
         name: String,
         args: Vec<WireValue>,
-        output_count: usize,
     },
     Shutdown,
 }
@@ -169,7 +168,6 @@ mod tests {
             &Request::Execute {
                 name: "f".to_string(),
                 args: vec![WireValue::U64(7)],
-                output_count: 1,
             },
         )
         .unwrap();
@@ -180,7 +178,6 @@ mod tests {
             Request::Execute {
                 name,
                 args,
-                output_count: 1,
             } if name == "f" && matches!(args.as_slice(), [WireValue::U64(7)])
         ));
     }

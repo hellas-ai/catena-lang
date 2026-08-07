@@ -108,22 +108,13 @@
     ({[.m n] f32} buf val)
   }))
 
-  # Synchronize after reads, making the buffer writable again. This and
-  # `parallel.await` are both sync operations, but need different names because
-  # their signatures differ. TODO: the bare input does not prove which context
-  # made the buffer available.
-  (arr parallel.release : {[level workers groups m n.]
-    ({[.level workers groups]} context)
-    ({[.m n] f32} buf val)
-  }
-  ->
-  ([level workers groups m n.] {
-    ({[.level workers groups]} context)
-    ({
-      ({[.level workers groups]} context)
-      ({[.m n] f32} buf)
-    } writable val)
-  }))
+  # Synchronize after reads. This must wait for slower readers before another
+  # iteration writes into shared storage. TODO: track the released buffers in
+  # the type once buffer ownership is threaded back out of reader closures.
+  (arr parallel.release :
+    ({[level workers groups.] [.level workers groups]} context)
+    ->
+    ({[level workers groups.] [.level workers groups]} context))
 
   # Synchronize workers in one context without changing buffer state.
   (arr parallel.barrier :

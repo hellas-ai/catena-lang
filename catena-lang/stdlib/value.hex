@@ -114,12 +114,30 @@
   ([.value] :.ty [copy param.] {[.copy] [.param]})
 ))
 
+(def program u64.copy-params2 :
+  ([x.] ({[.x] u64} :))
+  ->
+  ([x.] {({[.x] u64} :) [.x] [.x]})
+= ([value.]
+  ([.value] :.ty [copy-a param-a.]
+    ([.copy-a] :.ty [copy-b param-b.]
+      {[.copy-b] [.param-a] [.param-b]}
+    )
+  )
+))
+
 (def program u64.params3 :
   ([x.] ({[.x] u64} :))
   ->
   ([x.] {[.x] [.x] [.x]})
 = ([value.]
-  {([.value] :.param) ([.value] :.param) ([.value] :.param)}
+  ([.value] :.ty [copy-a param-a.]
+    ([.copy-a] :.ty [copy-b param-b.]
+      ([.copy-b] :.ty [_copy-c param-c.]
+        {[.param-a] [.param-b] [.param-c]}
+      )
+    )
+  )
 ))
 
 (def program u64.copy-params3 :
@@ -132,6 +150,20 @@
       ([.copy-b] :.ty [copy-c param-c.]
         {[.copy-c] [.param-a] [.param-b] [.param-c]}
       )
+    )
+  )
+))
+
+# Copy an unnamed runtime u64 by naming it, contracting the typed value, then
+# forgetting the two names again.
+(def program u64.copy :
+  (u64 val)
+  ->
+  {(u64 val) (u64 val)}
+= ([value.]
+  ([.value] u64.name [named.]
+    ([.named] u64.copies2 [copy-a copy-b.]
+      {([.copy-a] :.forget) ([.copy-b] :.forget)}
     )
   )
 ))

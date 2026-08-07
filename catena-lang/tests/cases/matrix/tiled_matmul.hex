@@ -48,9 +48,9 @@
   ({[.a-raw] [.a-same-length]} buf.f32.cast-same-length [a.])
   ({[.b-raw] [.b-same-length]} buf.f32.cast-same-length [b.])
 
-  ({([.nk-len] :.param) [.a]} partial.f32.row-major.flat-at.1 [a-flat.])
+  ({cap.ref.type ([.nk-len] :.param) [.a]} partial.f32.row-major.flat-at.1 [a-flat.])
   ({[.a-rows] [.a-cols] [.a-flat]} f32.row-major.matrix-view [a-view.])
-  ({([.km-len] :.param) [.b]} partial.f32.row-major.flat-at.1 [b-flat.])
+  ({cap.ref.type ([.km-len] :.param) [.b]} partial.f32.row-major.flat-at.1 [b-flat.])
   ({[.b-rows] [.b-cols] [.b-flat]} f32.row-major.matrix-view [b-view.])
 
   ([.nm-len] u64.copies2 [output-len mem-len.])

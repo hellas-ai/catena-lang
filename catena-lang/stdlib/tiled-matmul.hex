@@ -116,6 +116,7 @@
     ({[.tile-size] u64} :)
     ({[.k] u64} :)
     ({[.k-tiles] u64} :)
+    ({({[.tile-size tile-size]} *) u64} :)
     ({({[.tile-size tile-size]} gpu.block.2d) ({[.tile-size tile-size]} *) 1} context)
     ({({[.tile-size tile-size]} gpu.block.2d) ({[.tile-size tile-size]} *) 1} worker)
     ({
@@ -130,18 +131,31 @@
   })
   ->
   ([n k m k-tiles tile-size.] (f32 val))
-= {[n-param m-param a b c-index tile-size inner _k-tiles block-context block-worker a-tile b-tile k-tile.]
+= {[n-param m-param a b c-index tile-size inner _k-tiles tile-element-count
+    block-context block-worker a-tile b-tile k-tile.]
   ([.c-index] *.elim [output-row-0 output-col-0.])
   ([.output-row-0] ix.copy [c-row output-row.])
   ([.output-col-0] ix.copy [c-col output-col.])
-  ([.k-tile] ix.to-u64 [k-tile-u64.])
-  ([.inner] u64.copy-param [inner-value inner-param.])
-  ([.tile-size] u64.copy-param [tile-size-value tile-size-param.])
+  ([.k-tile] ix.to-u64 [k-tile-u64-0.])
+  ([.k-tile-u64-0] u64.copy [row-k-tile-u64 col-k-tile-u64.])
+  ([.inner] u64.copy-params2 [inner-values row-inner-param col-inner-param.])
+  ([.inner-values] u64.copies2 [row-inner-value col-inner-value.])
+  ([.tile-size] u64.copy-params2
+    [tile-size-params-1 row-tile-size-param col-tile-size-param.])
+  ([.tile-size-params-1] u64.copy-params2
+    [tile-size-values tile-n tile-m.])
+  ([.tile-element-count] u64.copy-params2
+    [_tile-element-count a-flat-length-param b-flat-length-param.])
+  ([.tile-size-values] u64.copies6
+    [row-tile-size-value col-tile-size-value widths-tile-size
+      a-dimensions-tile-size b-dimensions-tile-size dot-tile-size.])
+  ([.widths-tile-size] u64.copies2 [row-width col-width.])
+  ([.a-dimensions-tile-size] u64.copies2 [a-tile-rows a-tile-cols.])
+  ([.b-dimensions-tile-size] u64.copies2 [b-tile-rows b-tile-cols.])
 
   # Convert the logical C index to its position inside a tile. c-index is
   # already 2D, so both coordinates need their independent remainder:
   # (c-row % tile-size, c-col % tile-size).
-  ([.tile-size] u64.copies2 [row-width col-width.])
   ({[.row-width] [.c-row]} ix.rem [in-tile-c-row.])
   ({[.col-width] [.c-col]} ix.rem [in-tile-c-col.])
   ({[.in-tile-c-row] [.in-tile-c-col]} *.intro [in-tile-c-index.])
@@ -151,27 +165,27 @@
     [.a-tile]
     ({
       [.n-param]
-      [.inner-param]
-      [.tile-size-param]
+      [.row-inner-param]
+      [.row-tile-size-param]
       [.a]
-      [.inner-value]
-      [.tile-size-value]
+      [.row-inner-value]
+      [.row-tile-size-value]
       [.output-row]
-      [.k-tile-u64]
+      [.row-k-tile-u64]
     } partial.f32.tiled-matmul.row-inner-tile-load.5)
   } parallel.materialize [block-context-1 pending-a.])
   ({
     [.block-context-1]
     [.b-tile]
     ({
-      [.inner-param]
+      [.col-inner-param]
       [.m-param]
-      [.tile-size-param]
+      [.col-tile-size-param]
       [.b]
-      [.inner-value]
-      [.tile-size-value]
+      [.col-inner-value]
+      [.col-tile-size-value]
       [.output-col]
-      [.k-tile-u64]
+      [.col-k-tile-u64]
     } partial.f32.tiled-matmul.inner-col-tile-load.5)
   } parallel.materialize [block-context-2 pending-b.])
 
@@ -180,36 +194,35 @@
   ({[.block-context-3] [.pending-b]}
     parallel.await [block-context-4 b-ready.])
 
-  ({cap.own.type ({[.tile-size-param] [.tile-size-param]} *.intro) [.a-ready]}
+  ({cap.own.type [.a-flat-length-param] [.a-ready]}
     partial.f32.row-major.flat-at.1 [a-flat-view.])
-  ({cap.own.type ({[.tile-size-param] [.tile-size-param]} *.intro) [.b-ready]}
+  ({cap.own.type [.b-flat-length-param] [.b-ready]}
     partial.f32.row-major.flat-at.1 [b-flat-view.])
-  ({[.tile-size] [.tile-size] [.a-flat-view]}
+  ({[.a-tile-rows] [.a-tile-cols] [.a-flat-view]}
     f32.row-major.matrix-view [a-tile-view.])
-  ({[.tile-size] [.tile-size] [.b-flat-view]}
+  ({[.b-tile-rows] [.b-tile-cols] [.b-flat-view]}
     f32.row-major.matrix-view [b-tile-view.])
-  ([.tile-size] u64.params3 [tile-n tile-m _tile-unused.])
   ({
     [.tile-n]
     [.tile-m]
-    [.tile-size]
+    [.dot-tile-size]
     [.a-tile-view]
     [.b-tile-view]
     [.in-tile-c-index]
   } f32.matmul.cell-dot [tile-result.])
 
-  # This second synchronization restores both captured tiles to writable, but
-  # standard reduce does not currently enforce that invariant in its types.
-  ({[.block-context-4] [.a-ready]}
-    parallel.release [block-context-5 _next-a-tile.])
-  ({[.block-context-5] [.b-ready]}
-    parallel.release [_block-context _next-b-tile.])
+  # TODO: the types do not enforce this synchronization yet, but release is
+  # required to wait for slower readers before the next iteration writes.
+  ({[.block-context-4] []}
+    parallel.release [_block-context.])
   [.tile-result]
 })
 
 # Evaluate one logical C cell selected independently of the physical worker.
 (def program gpu.f32.tiled-matmul.cell.kernel :
   ([grid-x grid-y n k m tile-size.] {
+    [.n]
+    [.m]
     [.n]
     [.m]
     ({({([.n] ix val) ([.k] ix val)} *) (f32 val)} =>)
@@ -230,7 +243,8 @@
   })
   ->
   ([grid-x grid-y n k m tile-size.] (f32 val))
-= {[n-param m-param a b k tile-size tile-element-count _grid-x _grid-y work-item.]
+= {[n-param m-param step-n-param step-m-param a b k tile-size
+    tile-element-count _grid-x _grid-y work-item.]
   ([.work-item] *.elim [grid-worker c-index.])
   # c-index is the logical 2D index of C. The physical worker index is
   # represented independently by grid-worker.
@@ -242,12 +256,14 @@
   ([.k] u64.copies2-param [k-value step-inner k-param.])
   ([.tile-size] u64.copies2-param
     [k-tile-size step-tile-size tile-size-param.])
+  ([.tile-element-count] u64.copies3
+    [a-tile-element-count b-tile-element-count step-tile-element-count.])
   ({([.k-value] :.forget) ([.k-tile-size] :.forget)}
     u64.div u64.name [k-tile-count.])
 
-  ({[.block-context-0] [.tile-element-count]}
+  ({[.block-context-0] [.a-tile-element-count]}
     parallel.allocate [block-context-1 a-tile.])
-  ({[.block-context-1] [.tile-element-count]}
+  ({[.block-context-1] [.b-tile-element-count]}
     parallel.allocate [block-context-2 b-tile.])
 
   ([.k-tile-count] u64.copies2-param
@@ -256,9 +272,9 @@
     (const.u32.0x00000000 u32.bitcast-f32)
     (name.f32.add lift)
     ({
-      [.n-param]
+      [.step-n-param]
       [.k-param]
-      [.m-param]
+      [.step-m-param]
       [.k-tiles-param]
       [.tile-size-param]
       [.n-param]
@@ -269,11 +285,12 @@
       [.step-tile-size]
       [.step-inner]
       [.step-count]
+      [.step-tile-element-count]
       [.block-context-2]
       [.block-worker]
       [.a-tile]
       [.b-tile]
-    } partial.gpu.f32.tiled-matmul.tile-step.12)
+    } partial.gpu.f32.tiled-matmul.tile-step.13)
     [.reduce-count]
   } reduce [result.])
   [.result]
@@ -296,8 +313,10 @@
   ->
   ([n m k tile-size.] ({cap.own ({[.n m]} *) f32} buf val))
 = {[n m k output-len tile-size tile-element-count a b.]
-  ([.n] u64.copy-params3 [grid-n indices-n kernel-n _n-unused.])
-  ([.m] u64.copy-params3 [m-runtime indices-m kernel-m _m-unused.])
+  ([.n] u64.copy-params2 [n-copies indices-n kernel-n-type.])
+  ([.n-copies] u64.copy-params2 [grid-n kernel-n-value step-n-value.])
+  ([.m] u64.copy-params2 [m-copies indices-m kernel-m-type.])
+  ([.m-copies] u64.copy-params2 [m-runtime kernel-m-value step-m-value.])
   ([.m-runtime] u64.copies2 [grid-m indices-m-len.])
   ([.tile-size] u64.copies6
     [grid-x-tile grid-y-tile block-x block-y kernel-tile-size _tile-unused.])
@@ -333,12 +352,14 @@
       ({
         [.grid-x-param]
         [.grid-y-param]
-        [.kernel-n]
+        [.kernel-n-type]
         [.k-param]
-        [.kernel-m]
+        [.kernel-m-type]
         [.tile-size-param]
-        [.kernel-n]
-        [.kernel-m]
+        [.kernel-n-value]
+        [.kernel-m-value]
+        [.step-n-value]
+        [.step-m-value]
         [.a]
         [.b]
         [.kernel-k]
@@ -346,7 +367,7 @@
         [.tile-element-count]
         [.kernel-grid-x-value]
         [.kernel-grid-y-value]
-      } partial.gpu.f32.tiled-matmul.cell.kernel.9)
+      } partial.gpu.f32.tiled-matmul.cell.kernel.11)
     } compose)
   } parallel.materialize [materialized-context pending-output.])
   ({[.materialized-context] [.pending-output]}

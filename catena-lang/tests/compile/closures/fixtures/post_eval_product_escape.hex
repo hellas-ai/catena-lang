@@ -1,0 +1,31 @@
+# Minimal reproduction of the post-inlining adapter which triggers the tiled
+# matmul failure. Evaluating the partially applied definition produces a
+# product. The generated `*.elim` sends one component to the outer closure's
+# codomain and the other into a continuation outside the discovered region.
+#
+#                          /-> body result -> closure codomain
+# partial body -> eval -> *.elim
+#                          \-> input -> bool.not
+
+# The closure argument makes this helper follow the same closure-boundary
+# inlining path as the tiled kernel. Partial application captures it and the
+# result, leaving only the outer closure's boolean input.
+(def program post-eval-product-body :
+  {({1 (bool val)} =>) (bool val) (bool val)}
+  ->
+  (bool val)
+= {[closed result input.]
+  ([.closed] run [_closed-result.])
+  ([.input] bool.not [_ignored.])
+  [.result]
+})
+
+(def program post-eval-product-escape :
+  []
+  ->
+  (bool val)
+= (
+  (bool.t defer [closed.])
+  ({[.closed] bool.f} partial.post-eval-product-body.2 [outer.])
+  ({(name.bool.id lift) [.outer] bool.t bool.f} bool.if)
+))

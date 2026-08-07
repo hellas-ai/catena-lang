@@ -2,8 +2,9 @@
 //!
 //! A `!closure` edge has two sources: its domain and codomain control-flow
 //! endpoints. The core of a region is the directed slice that lies on a path
-//! from the domain to the codomain.  Sources needed by that slice but produced
-//! outside it form the captured environment.
+//! from the domain to the codomain, together with discard-terminated subregions
+//! reachable from the domain. Sources needed by that body but produced outside
+//! it form the captured environment.
 
 use std::collections::{BTreeMap, VecDeque};
 
@@ -77,11 +78,14 @@ pub fn run(
 ///    every reachable edge.
 /// 2. Walk backward from `codomain`, again without crossing markers, and mark
 ///    every edge from which the codomain is reachable.
-/// 3. Intersect those two edge sets. An edge is in the control-flow body exactly
-///    when it lies on a directed path from the closure domain to its codomain.
-/// 4. Add `name.*` producers used by included `eval` edges. These are static
+/// 3. Find discard-terminated subregions reachable from the domain. Their
+///    results do not reach the codomain, but their operations remain part of
+///    closure evaluation and may have side effects.
+/// 4. Include forward-reachable edges which either reach the codomain or belong
+///    to a discard-terminated subregion.
+/// 5. Add `name.*` producers used by included `eval` edges. These are static
 ///    dependencies of the body rather than captured runtime values.
-/// 5. Treat inputs of included edges that have no producer inside the body as
+/// 6. Treat inputs of included edges that have no producer inside the body as
 ///    environment values. If forgetting `defer` removed the entire control
 ///    path, the unproduced codomain itself is the captured value.
 ///
@@ -119,13 +123,15 @@ fn find_region(
 
     let forward = reachable_forward(term, connectivity, *domain);
     let backward = reachable_backward(term, connectivity, *codomain);
-    let discarded = reachable_backward_from_forward_sinks(term, connectivity, &forward);
+    let discard_terminated = reachable_backward_from_discard_sinks(term, connectivity, &forward);
     let mut included_edges = forward
         .iter()
-        .zip(backward.iter().zip(discarded))
-        .map(|(from_domain, (to_codomain, to_discard))| {
-            *from_domain && (*to_codomain || to_discard)
-        })
+        .zip(backward.iter().zip(discard_terminated))
+        .map(
+            |(from_domain, (to_codomain, in_discard_terminated_subregion))| {
+                *from_domain && (*to_codomain || in_discard_terminated_subregion)
+            },
+        )
         .collect::<Vec<_>>();
 
     include_named_dependencies(term, connectivity, &mut included_edges);
@@ -207,7 +213,7 @@ fn reachable_backward(
     reached_edges
 }
 
-/// Mark forward-reachable branches which terminate without producing a value.
+/// Mark forward-reachable subregions which terminate by discarding their result.
 ///
 /// A closure may ignore all or part of its argument, for example:
 ///
@@ -216,11 +222,14 @@ fn reachable_backward(
 ///                    `─> unit.elim
 /// ```
 ///
-/// These edges cannot reach the codomain, but they remain part of the closure
-/// body. Start at reachable sink edges and walk backwards to recover the whole
-/// discarded branch; the caller intersects the result with forward reachability
-/// from the closure domain.
-fn reachable_backward_from_forward_sinks(
+/// A discard sink is either an explicitly targetless operation such as
+/// `unit.elim`, or an operation whose result is neither consumed nor exposed at
+/// the definition boundary. These edges cannot reach the codomain, but they
+/// remain part of the closure body because their evaluation may have side
+/// effects. Walk backwards from them to recover each discard-terminated
+/// subregion; the caller intersects the result with forward reachability from
+/// the closure domain.
+fn reachable_backward_from_discard_sinks(
     term: &ClosureForgottenTerm,
     connectivity: &Connectivity,
     forward: &[bool],
@@ -230,7 +239,7 @@ fn reachable_backward_from_forward_sinks(
     let mut pending = VecDeque::new();
 
     for (index, reachable) in forward.iter().copied().enumerate() {
-        if !reachable || !term.hypergraph.adjacency[index].targets.is_empty() {
+        if !reachable || !is_discard_sink(term, connectivity, EdgeId(index)) {
             continue;
         }
         reached_edges[index] = true;
@@ -258,6 +267,14 @@ fn reachable_backward_from_forward_sinks(
     }
 
     reached_edges
+}
+
+fn is_discard_sink(term: &ClosureForgottenTerm, connectivity: &Connectivity, edge: EdgeId) -> bool {
+    let targets = &term.hypergraph.adjacency[edge.0].targets;
+    targets.is_empty()
+        || targets.iter().any(|target| {
+            !term.targets.contains(target) && connectivity.consumers_by_node[target.0].is_empty()
+        })
 }
 
 /// Named function pointers are static dependencies of an `eval`, not runtime
@@ -467,6 +484,36 @@ mod tests {
         assert_eq!(region.environment, vec![captured_codomain]);
         assert_eq!(region.edges, vec![discard]);
         assert_eq!(region.nodes, vec![domain, captured_codomain]);
+    }
+
+    #[test]
+    fn unconsumed_result_terminates_a_discard_terminated_subregion() {
+        let mut term = ClosureForgottenTerm::empty();
+        let domain = term.new_node(obj("A"));
+        let packed = term.new_node(obj("B*D"));
+        let codomain = term.new_node(obj("B"));
+        let discarded_input = term.new_node(obj("D"));
+        let discarded_result = term.new_node(obj("E"));
+        let closure = term.new_node(obj("A=>B"));
+
+        let evaluate = term.new_edge(region_op("eval"), (vec![domain], vec![packed]));
+        let eliminate = term.new_edge(
+            region_op("*.elim"),
+            (vec![packed], vec![codomain, discarded_input]),
+        );
+        let effect = term.new_edge(
+            region_op("effect"),
+            (vec![discarded_input], vec![discarded_result]),
+        );
+        term.new_edge(
+            ClosureForgotten::ClosureMarker,
+            (vec![domain, codomain], vec![closure]),
+        );
+
+        let [region] = find_regions(&term).unwrap().try_into().unwrap();
+        assert_eq!(region.environment, vec![]);
+        assert_eq!(region.edges, vec![evaluate, eliminate, effect]);
+        assert!(region.nodes.contains(&discarded_result));
     }
 
     #[test]

@@ -7,5 +7,6 @@ mod context;
 mod materialize;
 mod matmul;
 mod named_calls;
+mod post_eval_product_escape;
 mod products;
 mod reduce;

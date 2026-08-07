@@ -83,24 +83,17 @@ impl GpuDialect {
         }
     }
 
-    pub(crate) fn device_alloc_fn(self) -> &'static str {
+    pub(crate) fn device_alloc_async_fn(self) -> &'static str {
         match self {
-            Self::Hip => "hipMalloc",
-            Self::Cuda => "cudaMalloc",
+            Self::Hip => "hipMallocAsync",
+            Self::Cuda => "cudaMallocAsync",
         }
     }
 
-    pub(crate) fn device_free_fn(self) -> &'static str {
+    pub(crate) fn device_free_async_fn(self) -> &'static str {
         match self {
-            Self::Hip => "hipFree",
-            Self::Cuda => "cudaFree",
-        }
-    }
-
-    pub fn synchronize_fn(self) -> &'static str {
-        match self {
-            Self::Hip => "hipDeviceSynchronize",
-            Self::Cuda => "cudaDeviceSynchronize",
+            Self::Hip => "hipFreeAsync",
+            Self::Cuda => "cudaFreeAsync",
         }
     }
 

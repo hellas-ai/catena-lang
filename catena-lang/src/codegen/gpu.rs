@@ -165,6 +165,27 @@ fn render_module_body(
                 assignment,
             )?;
             out.push('\n');
+        } else if assignment.op.as_str() == "materializec.into" {
+            materializec::render_into_kernel(
+                out,
+                &materializec::kernel_name(&module.entry.name, assignment)?,
+                assignment,
+            )?;
+            out.push('\n');
+        } else if assignment.op.as_str() == "materializec.borrow" {
+            materializec::render_borrow_kernel(
+                out,
+                &materializec::kernel_name(&module.entry.name, assignment)?,
+                assignment,
+            )?;
+            out.push('\n');
+        } else if assignment.op.as_str() == "materializec.reduce-f32" {
+            materializec::render_reduce_f32_kernel(
+                out,
+                &materializec::kernel_name(&module.entry.name, assignment)?,
+                assignment,
+            )?;
+            out.push('\n');
         }
     }
 
@@ -304,6 +325,13 @@ fn render_assignment(
         "reducec" => reducec::render(out, assignment)?,
         "gpu.materialize" => render_materialize_call(out, function, assignment, dialect)?,
         "materializec" => materializec::render_call(out, function, assignment, dialect)?,
+        "materializec.into" => materializec::render_into_call(out, function, assignment, dialect)?,
+        "materializec.borrow" => {
+            materializec::render_borrow_call(out, function, assignment, dialect)?
+        }
+        "materializec.reduce-f32" => {
+            materializec::render_reduce_f32_call(out, function, assignment, dialect)?
+        }
         op => {
             return Err(GpuRenderError::UnsupportedOp(
                 op.parse().unwrap_or_else(|_| assignment.op.clone()),
@@ -1253,10 +1281,10 @@ fn render_materialize_call(
         name = output.name
     ));
     out.push_str(&format!(
-        "        catena_host_gpu_check({device_alloc_fn}((void **)&{name}_data, {name}_len * sizeof({element})));\n",
+        "        catena_host_gpu_check({device_alloc_async_fn}((void **)&{name}_data, {name}_len * sizeof({element}), nullptr));\n",
         name = output.name,
         element = c_type(element),
-        device_alloc_fn = dialect.device_alloc_fn(),
+        device_alloc_async_fn = dialect.device_alloc_async_fn(),
     ));
     out.push_str(&format!(
         "        {kernel_name}<<<dim3({launch}.grid_dim.x, {launch}.grid_dim.y, {launch}.grid_dim.z), dim3({launch}.block_dim.x, {launch}.block_dim.y, {launch}.block_dim.z)>>>\n"
@@ -1274,10 +1302,6 @@ fn render_materialize_call(
         }
     }
     out.push_str(");\n");
-    out.push_str(&format!(
-        "        catena_host_gpu_check({synchronize_fn}());\n",
-        synchronize_fn = dialect.synchronize_fn()
-    ));
     out.push_str("    }\n");
     out.push_str(&format!("    {} = {}_data;\n", output.name, output.name));
     Ok(())
@@ -1682,8 +1706,8 @@ mod tests {
         assert!(source.contains(
             "#ifndef __HIP_DEVICE_COMPILE__\nextern \"C\" __host__ void program_materialize(uint64_t len, uint64_t * *out_out) {"
         ));
-        assert!(source.contains("catena_host_gpu_check(hipMalloc((void **)"));
-        assert!(source.contains("catena_host_gpu_check(hipDeviceSynchronize"));
+        assert!(source.contains("catena_host_gpu_check(hipMallocAsync((void **)"));
+        assert!(!source.contains("hipDeviceSynchronize"));
         assert!(!source.contains("catena_gpu_check"));
     }
 }

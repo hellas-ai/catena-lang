@@ -263,6 +263,30 @@ impl Runtime {
     pub fn mem_f32(&self, values: &[f32]) -> Result<MemOwn, MemError> {
         MemOwn::from_f32_slice(values, self.gpu.dialect())
     }
+    /// Allocate an application-owned F32 device buffer initialized to zero.
+    pub fn mem_f32_zeroed(&self, element_count: usize) -> Result<MemOwn, MemError> {
+        let element_size = std::mem::size_of::<f32>();
+        let byte_len =
+            element_count
+                .checked_mul(element_size)
+                .ok_or(MemError::AllocationSizeOverflow {
+                    element_count,
+                    element_size,
+                })?;
+        self.mem_zeroed_bytes(byte_len as u64)
+    }
+
+    pub(crate) fn mem_zeroed_bytes(&self, byte_len: u64) -> Result<MemOwn, MemError> {
+        let byte_len =
+            usize::try_from(byte_len).map_err(|_| MemError::LengthTooLarge { byte_len })?;
+        let data = self.gpu.allocate(byte_len)?;
+        // SAFETY: `data` is the unique allocation returned immediately above
+        // by this same GPU API, and ownership is transferred into `MemOwn`.
+        let memory =
+            unsafe { MemOwn::from_raw_parts_with_gpu(data, byte_len as u64, self.gpu.clone()) };
+        self.gpu.zero(data, byte_len)?;
+        Ok(memory)
+    }
 }
 
 impl Artifact {

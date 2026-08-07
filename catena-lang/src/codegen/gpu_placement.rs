@@ -70,7 +70,12 @@ fn function_directly_requires_host(function: &GpuFunction) -> bool {
     function.assignments.iter().any(|assignment| {
         matches!(
             assignment.op.as_str(),
-            "gpu.materialize" | "materializec" | "buf.free"
+            "gpu.materialize"
+                | "materializec"
+                | "materializec.into"
+                | "materializec.borrow"
+                | "materializec.reduce-f32"
+                | "buf.free"
         )
     })
 }

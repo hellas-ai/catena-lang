@@ -41,3 +41,125 @@
     }
     buf.to-mem
 ))
+
+# Fill a selected range of an existing owned F32 buffer with its local index.
+(def program materialize-into-f32-producer :
+  ([n.] {(u64 val) ([.n] ix val)})
+  ->
+  ([n.] (f32 val))
+= ([_offset i.]
+  ([.i] ix.to-u64 u64.to-f32)
+))
+
+(def program materialize-into-f32 :
+  {(cap.own mem) (u64 val) (u64 val)}
+  ->
+  (cap.own mem)
+= ([memory offset len.]
+  ([.memory] mem.cast.f32 [capacity buffer.])
+  ([.len] u64.name [named-len.])
+  {
+    [.buffer]
+    [.capacity]
+    [.offset]
+    [.named-len]
+    [.offset]
+    (([.named-len] :.param) name.materialize-into-f32-producer)
+  } materializec.into [filled.]
+  ({[.capacity] [.filled]} buf.to-mem)
+))
+
+# Copy a prefix while returning the owner of the source allocation. The source
+# reference exists only inside the materialization primitive.
+(def program materialize-borrow-f32-producer :
+  ([capacity n.] {
+    ({cap.ref [.capacity] f32} buf val)
+    ({({[.capacity] u64} :) ([.n] ix val)} *)
+  })
+  ->
+  ([capacity n.] (f32 val))
+= ([input env.]
+  ([.env] *.elim [capacity-value i.])
+  ([.i] ix.to-u64 [raw-index.])
+  ([.raw-index] u64.name [named-index.])
+  ([.capacity-value named-index] u64.gt [in-bounds if-in-bounds _if-out-of-bounds.])
+  ([.in-bounds if-in-bounds] assert-then [proof.])
+  ([.named-index capacity-value proof] u64.to-ix [index.])
+  ({[.index input]} ix)
+))
+
+(def program materialize-borrow-f32 :
+  {(cap.own mem) (u64 val)}
+  ->
+  {(cap.own mem) (cap.own mem)}
+= ([memory len.]
+  ([.memory] mem.cast.f32 [capacity buffer.])
+  ([.len] u64.name [named-len.])
+  {
+    [.buffer]
+    [.capacity]
+    [.named-len]
+    [.capacity]
+    ({
+      ([.capacity] :.param)
+      ([.named-len] :.param)
+    } name.materialize-borrow-f32-producer)
+  } materializec.borrow [buffer-after copied.]
+  {
+    ({[.capacity] [.buffer-after]} buf.to-mem)
+    ({[.named-len] [.copied]} buf.to-mem)
+  }
+))
+
+(def program materialize-reduce-f32-term :
+  ([n k.] {
+    ({({(cap.ref mem) (u64 val)} *) ({([.n] ix val) ([.k] ix val)} *)} *)
+  })
+  ->
+  ([n k.] (f32 val))
+= ([env.]
+  ([.env] *.elim [inputs indices.])
+  ([.inputs] *.elim [memory columns.])
+  ([.indices] *.elim [row-index column-index.])
+  ([.row-index] ix.to-u64 [row.])
+  ([.column-index] ix.to-u64 [column.])
+  ([.row columns] u64.mul [row-offset.])
+  ([.row-offset column] u64.add [flat-index.])
+  ([.memory] mem.cast.f32 [element-count buffer.])
+  ([.flat-index] u64.name [named-index.])
+  ([.element-count named-index] u64.gt [in-bounds if-in-bounds _if-out-of-bounds.])
+  ([.in-bounds if-in-bounds] assert-then [proof.])
+  ([.named-index element-count proof] u64.to-ix [index.])
+  ({[.index buffer]} ix)
+))
+
+(def program materialize-reduce-f32-identity-epilogue :
+  ([n.] {({({(cap.ref mem) (u64 val)} *) ({([.n] ix val) (f32 val)} *)} *)})
+  ->
+  ([n.] (f32 val))
+= ([env.]
+  ([.env] *.elim [_inputs index-and-sum.])
+  ([.index-and-sum] *.elim [_index sum.])
+  [.sum]
+))
+
+(def program materialize-reduce-f32-rows :
+  {(cap.ref mem) (u64 val) (u64 val)}
+  ->
+  (cap.own mem)
+= ([memory rows columns.]
+  ([.rows] u64.name [named-rows.])
+  ([.columns] u64.name [named-columns.])
+  ({[.memory] [.columns]} *.intro [env.])
+  {
+    [.named-rows]
+    [.named-columns]
+    [.env]
+    ({
+      ([.named-rows] :.param)
+      ([.named-columns] :.param)
+    } name.materialize-reduce-f32-term)
+    (([.named-rows] :.param) name.materialize-reduce-f32-identity-epilogue)
+  } materializec.reduce-f32 [output.]
+  ({[.named-rows] [.output]} buf.to-mem)
+))

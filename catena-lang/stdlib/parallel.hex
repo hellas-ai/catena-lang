@@ -78,25 +78,6 @@
   ->
   ([level workers groups.] ([.workers] ix val)))
 
-  # Convert a flat index of a 2D shape into its row and column coordinates.
-  (def shape.2d.indices : {[x y.]
-    ({[.y] u64} :)
-    (({[.x y]} *) ix val)
-  }
-  ->
-  ([x y.] {([.x] ix val) ([.y] ix val)} *)
-  = ([y-len flat.]
-    ([.y-len] u64.copies2 [row-cols col-cols.]
-      ([.flat] ix.copy [flat-for-row flat-for-col.]
-        ({[.row-cols] [.flat-for-row]} row-major-row [row.]
-          ({[.col-cols] [.flat-for-col]} row-major-col [column.]
-            ({[.row] [.column]} *.intro)
-          )
-        )
-      )
-    )
-  ))
-
   # Allocate an owned f32 buffer in an execution context. Its size is
   # independent of the context's worker and group counts.
   (arr parallel.allocate : {[level workers groups n.]

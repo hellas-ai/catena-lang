@@ -140,7 +140,17 @@
   })
   ->
   ([n m.] {([.n] ix val) ([.m] ix val)} *)
-= shape.2d.indices)
+= ([m-len flat.]
+  ([.m-len] u64.copies2 [row-cols col-cols.]
+    ([.flat] ix.copy [flat-for-row flat-for-col.]
+      ({[.row-cols] [.flat-for-row]} row-major-row [i.]
+        ({[.col-cols] [.flat-for-col]} row-major-col [j.]
+          ({[.i] [.j]} *.intro)
+        )
+      )
+    )
+  )
+))
 
 # Materialize a row-major product from two already constructed matrix views.
 # This helper deliberately has closures on its boundary: direct callers inline

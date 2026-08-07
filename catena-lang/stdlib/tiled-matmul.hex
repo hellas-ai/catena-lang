@@ -61,7 +61,7 @@
   ([rows inner tile-size.] (f32 val))
 = {[view inner tile-size output-row inner-tile-index worker flat-index.]
   # materialize owns the worker; this loader only needs its logical index.
-  ({[.tile-size] [.flat-index]} shape.2d.indices [local-index.])
+  ({[.tile-size] [.flat-index]} f32.row-major.indices [local-index.])
   ({[.inner] [.tile-size] [.output-row] [.inner-tile-index] [.local-index]}
     tiled-matmul.row-inner-tile-reindex [matrix-index.])
   ({[.matrix-index] [.view]} evaluate)
@@ -82,7 +82,7 @@
   ([inner cols tile-size.] (f32 val))
 = {[view inner tile-size output-col inner-tile-index worker flat-index.]
   # materialize owns the worker; this loader only needs its logical index.
-  ({[.tile-size] [.flat-index]} shape.2d.indices [local-index.])
+  ({[.tile-size] [.flat-index]} f32.row-major.indices [local-index.])
   ({[.inner] [.tile-size] [.output-col] [.inner-tile-index] [.local-index]}
     tiled-matmul.inner-col-tile-reindex [matrix-index.])
   ({[.matrix-index] [.view]} evaluate)

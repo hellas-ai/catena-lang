@@ -210,6 +210,18 @@ impl Runtime {
         MemOwn::from_f32_slice(values, self.gpu.dialect())
     }
 
+    /// Allocate an application-owned F32 device buffer initialized to zero.
+    pub fn mem_f32_zeroed(&self, element_count: usize) -> Result<MemOwn, MemError> {
+        let element_size = std::mem::size_of::<f32>();
+        let byte_len = element_count.checked_mul(element_size).ok_or(
+            MemError::AllocationSizeOverflow {
+                element_count,
+                element_size,
+            },
+        )?;
+        self.mem_zeroed_bytes(byte_len as u64)
+    }
+
     pub(crate) fn mem_zeroed_bytes(&self, byte_len: u64) -> Result<MemOwn, MemError> {
         let byte_len =
             usize::try_from(byte_len).map_err(|_| MemError::LengthTooLarge { byte_len })?;

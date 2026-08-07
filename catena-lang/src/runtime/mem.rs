@@ -38,6 +38,11 @@ pub enum MemError {
     },
     #[error("device memory length {byte_len} cannot be represented on this platform")]
     LengthTooLarge { byte_len: u64 },
+    #[error("{element_count} elements of {element_size} bytes overflow the allocation size")]
+    AllocationSizeOverflow {
+        element_count: usize,
+        element_size: usize,
+    },
     #[error("memory length {byte_len} is not a whole number of {element_size}-byte elements")]
     InvalidElementLength { byte_len: u64, element_size: usize },
 }

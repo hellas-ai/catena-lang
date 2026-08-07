@@ -86,6 +86,53 @@
     ({({[.x] ([.n] ix val)} *) ([.t] val)} -> val)
   } -> {[x n t.] ({cap.own [.n t]} buf val)})
 
+  # Fill a contiguous range of an existing owned buffer. The capacity witness
+  # ties the runtime bounds check to the buffer's type-level capacity. The
+  # operation consumes and returns the owned buffer, so it cannot alias a live
+  # owner while the producer kernel writes it.
+  (arr materializec.into : {[x capacity n t.]
+    ({cap.own [.capacity t]} buf val)
+    ({[.capacity] u64} :)
+    (u64 val)
+    ({[.n] u64} :)
+    ([.x])
+    ({({[.x] ([.n] ix val)} *) ([.t] val)} -> val)
+  } -> {[x capacity n t.] ({cap.own [.capacity t]} buf val)})
+
+  # Scope a read-only borrow of an owned buffer to one materialization. Both
+  # the original owner and the newly materialized buffer are returned only
+  # after the reading kernel has been enqueued, preserving linear ownership
+  # without exposing a freely-copyable reference outside the operation.
+  (arr materializec.borrow : {[x capacity n a b.]
+    ({cap.own [.capacity a]} buf val)
+    ({[.capacity] u64} :)
+    ({[.n] u64} :)
+    ([.x])
+    ({({({cap.ref [.capacity a]} buf val) ({[.x] ([.n] ix val)} *)} *) ([.b] val)} -> val)
+  } -> {[x capacity n a b.] {
+    ({cap.own [.capacity a]} buf val)
+    ({cap.own [.n b]} buf val)
+  }})
+
+  # Materialize F32 outputs by cooperatively reducing one independent domain
+  # per output. The reduction order is part of this operation's semantics:
+  # first materialize term(0)..term(k-1) as F32, then add adjacent logical
+  # indices (0+1, 2+3, ...), carry an unmatched final value unchanged, and
+  # repeat that rule over the surviving values until one remains. The empty
+  # reduction is +0.0. Thread scheduling and block width must not change this
+  # tree. The current GPU implementation supports k <= 4096.
+  #
+  # A GPU block computes one output, then applies the epilogue to the exactly
+  # specified reduced sum. This is the Catena-native building block for
+  # GEMV-style kernels without baking matrix semantics into the runtime.
+  (arr materializec.reduce-f32 : {[x n k.]
+    ({[.n] u64} :)
+    ({[.k] u64} :)
+    ([.x])
+    ({({[.x] ({([.n] ix val) ([.k] ix val)} *)} *) (f32 val)} -> val)
+    ({({[.x] ({([.n] ix val) (f32 val)} *)} *) (f32 val)} -> val)
+  } -> {[x n k.] ({cap.own [.n] f32} buf val)})
+
   # TODO: make all mem.cast.* into definitions, using the below:
   #   mem.cast : mem ● (s : u64) ● sizeof(t, s) -> (n : u64) ● val(buf n t)
   # and introduce

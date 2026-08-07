@@ -27,16 +27,3 @@ fn compile_with_sources(
     let raw = RawTheorySet::from_texts(catena_lang::stdlib::sources().chain(sources))?;
     compile(raw).map_err(Into::into)
 }
-
-/// Run the public compiler entry point and require closure conversion to
-/// complete, while allowing an unrelated later lowering or codegen failure.
-fn compile_through_closure_conversion_with_sources(
-    sources: impl IntoIterator<Item = &'static str>,
-) -> anyhow::Result<CompileReport> {
-    let raw = RawTheorySet::from_texts(catena_lang::stdlib::sources().chain(sources))?;
-    match compile(raw) {
-        Ok(report) => Ok(report),
-        Err(failure) if failure.report.closure_conversion.is_some() => Ok(failure.report),
-        Err(failure) => Err(failure.into()),
-    }
-}

@@ -311,6 +311,137 @@ fn two_times_two_float() -> anyhow::Result<()> {
 }
 
 #[test]
+fn bf16_core_numeric_ops() -> anyhow::Result<()> {
+    use half::bf16;
+
+    let runtime = runtime_with(
+        r#"
+        (def program bf16-one : [] -> (bf16 val) = bf16.one)
+        (def program bf16-add : {(bf16 val) (bf16 val)} -> (bf16 val) = bf16.add)
+        (def program bf16-sub : {(bf16 val) (bf16 val)} -> (bf16 val) = bf16.sub)
+        (def program bf16-neg : (bf16 val) -> (bf16 val) = bf16.neg)
+        (def program bf16-mul : {(bf16 val) (bf16 val)} -> (bf16 val) = bf16.mul)
+        (def program bf16-fma : {(bf16 val) (bf16 val) (bf16 val)} -> (bf16 val) = bf16.fma)
+        (def program bf16-div : {(bf16 val) (bf16 val)} -> (bf16 val) = bf16.div)
+        (def program bf16-lt : {(bf16 val) (bf16 val)} -> (bool val) = bf16.lt)
+        (def program bf16-eq : {(bf16 val) (bf16 val)} -> (bool val) = bf16.eq)
+        (def program bf16-ne : {(bf16 val) (bf16 val)} -> (bool val) = bf16.ne)
+        (def program bf16-gt : {(bf16 val) (bf16 val)} -> (bool val) = bf16.gt)
+        (def program bf16-lte : {(bf16 val) (bf16 val)} -> (bool val) = bf16.lte)
+        (def program bf16-gte : {(bf16 val) (bf16 val)} -> (bool val) = bf16.gte)
+        (def program bf16-select : {(bool val) (bf16 val) (bf16 val)} -> (bf16 val) = bf16.select)
+        (def program bf16-to-f32 : (bf16 val) -> (f32 val) = bf16.to-f32)
+        (def program f32-to-bf16 : (f32 val) -> (bf16 val) = f32.to-bf16)
+        "#,
+    )?;
+
+    let a = bf16::from_f32(1.5);
+    let b = bf16::from_f32(0.75);
+    let c = bf16::from_f32(-0.5);
+
+    let [Value::BF16(one)] = runtime.exec("bf16-one", [])? else {
+        anyhow::bail!("bf16-one returned the wrong value kind");
+    };
+    assert_eq!(one, bf16::ONE);
+
+    for (name, expected) in [
+        ("bf16-add", bf16::from_f32(a.to_f32() + b.to_f32())),
+        ("bf16-sub", bf16::from_f32(a.to_f32() - b.to_f32())),
+        ("bf16-mul", bf16::from_f32(a.to_f32() * b.to_f32())),
+        ("bf16-div", bf16::from_f32(a.to_f32() / b.to_f32())),
+    ] {
+        let [Value::BF16(actual)] = runtime.exec(name, [a.into(), b.into()])? else {
+            anyhow::bail!("{name} returned the wrong value kind");
+        };
+        assert_eq!(actual.to_bits(), expected.to_bits(), "{name}");
+    }
+
+    let [Value::BF16(negated)] = runtime.exec("bf16-neg", [a.into()])? else {
+        anyhow::bail!("bf16-neg returned the wrong value kind");
+    };
+    assert_eq!(negated.to_bits(), bf16::from_f32(-a.to_f32()).to_bits());
+
+    let [Value::BF16(fused)] = runtime.exec("bf16-fma", [a.into(), b.into(), c.into()])? else {
+        anyhow::bail!("bf16-fma returned the wrong value kind");
+    };
+    assert_eq!(
+        fused.to_bits(),
+        bf16::from_f32(a.to_f32().mul_add(b.to_f32(), c.to_f32())).to_bits()
+    );
+
+    for (name, lhs, rhs, expected) in [
+        ("bf16-lt", b, a, true),
+        ("bf16-eq", a, a, true),
+        ("bf16-ne", a, b, true),
+        ("bf16-gt", a, b, true),
+        ("bf16-lte", b, a, true),
+        ("bf16-gte", a, b, true),
+    ] {
+        let [Value::Bool(actual)] = runtime.exec(name, [lhs.into(), rhs.into()])? else {
+            anyhow::bail!("{name} returned the wrong value kind");
+        };
+        assert_eq!(actual != 0, expected, "{name}");
+    }
+
+    let [Value::BF16(selected)] = runtime.exec("bf16-select", [true.into(), a.into(), b.into()])?
+    else {
+        anyhow::bail!("bf16-select returned the wrong value kind");
+    };
+    assert_eq!(selected.to_bits(), a.to_bits());
+
+    let [Value::F32(as_f32)] = runtime.exec("bf16-to-f32", [a.into()])? else {
+        anyhow::bail!("bf16-to-f32 returned the wrong value kind");
+    };
+    assert_eq!(as_f32, a.to_f32());
+
+    let midpoint = f32::from_bits(0x3f80_8000);
+    let [Value::BF16(rounded)] = runtime.exec("f32-to-bf16", [midpoint.into()])? else {
+        anyhow::bail!("f32-to-bf16 returned the wrong value kind");
+    };
+    assert_eq!(rounded.to_bits(), bf16::from_f32(midpoint).to_bits());
+
+    for special in [f32::INFINITY, f32::NEG_INFINITY, 0.0, -0.0, f32::NAN] {
+        let [Value::BF16(actual)] = runtime.exec("f32-to-bf16", [special.into()])? else {
+            anyhow::bail!("f32-to-bf16 returned the wrong value kind");
+        };
+        if special.is_nan() {
+            assert!(actual.is_nan());
+        } else {
+            assert_eq!(actual.to_bits(), bf16::from_f32(special).to_bits());
+        }
+    }
+
+    Ok(())
+}
+
+#[test]
+fn bf16_memory_round_trip_and_cast() -> anyhow::Result<()> {
+    use half::bf16;
+
+    let runtime = runtime_with(
+        r#"
+        (def program array-head-bf16 : ([n.] (cap.ref mem)) -> ([n.] (bf16 val)) = (
+          mem.cast.bf16
+          {
+            (u64.assert-nz ix.zero)
+            [b]
+          }
+          ix
+        ))
+        "#,
+    )?;
+    let values = [bf16::from_f32(1.5), bf16::from_f32(-2.25)];
+    let memory = runtime.mem_bf16(&values)?;
+    assert_eq!(memory.try_to_bf16_vec()?, values);
+
+    let [Value::BF16(head)] = runtime.exec("array-head-bf16", [memory.as_ref().into()])? else {
+        anyhow::bail!("array-head-bf16 returned the wrong value kind");
+    };
+    assert_eq!(head.to_bits(), values[0].to_bits());
+    Ok(())
+}
+
+#[test]
 fn f32_fma_basic_test() -> anyhow::Result<()> {
     let runtime = runtime_with(
         r#"

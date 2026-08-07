@@ -25,6 +25,7 @@ mod signature;
 //mod tests;
 
 pub use artifact::ArtifactError;
+pub use half::bf16;
 pub use mem::{MemError, MemOwn, MemRef};
 pub use runtime::{ExecError, InitError, Runtime};
 pub use value::Value;

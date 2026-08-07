@@ -65,20 +65,22 @@ pub(crate) enum WireValue {
     U32(u32),
     U64(u64),
     F32(f32),
+    BF16(u16),
 }
 
-impl From<WireValue> for Value {
+impl From<WireValue> for Value<'static> {
     fn from(value: WireValue) -> Self {
         match value {
             WireValue::Bool(value) => Value::Bool(value),
             WireValue::U32(value) => Value::U32(value),
             WireValue::U64(value) => Value::U64(value),
             WireValue::F32(value) => Value::F32(value),
+            WireValue::BF16(bits) => Value::BF16(half::bf16::from_bits(bits)),
         }
     }
 }
 
-impl TryFrom<Value> for WireValue {
+impl TryFrom<Value<'_>> for WireValue {
     type Error = ValueKind;
 
     fn try_from(value: Value) -> Result<Self, Self::Error> {
@@ -87,7 +89,9 @@ impl TryFrom<Value> for WireValue {
             Value::U32(value) => Ok(Self::U32(value)),
             Value::U64(value) => Ok(Self::U64(value)),
             Value::F32(value) => Ok(Self::F32(value)),
-            Value::Mem(_) => Err(ValueKind::Mem),
+            Value::BF16(value) => Ok(Self::BF16(value.to_bits())),
+            Value::MemOwn(_) => Err(ValueKind::MemOwn),
+            Value::MemRef(_) => Err(ValueKind::MemRef),
         }
     }
 }
@@ -180,6 +184,18 @@ mod tests {
                 args,
             } if name == "f" && matches!(args.as_slice(), [WireValue::U64(7)])
         ));
+    }
+
+    #[test]
+    fn bf16_values_round_trip_as_bits() {
+        let value = half::bf16::from_f32(1.5);
+        let wire = WireValue::try_from(Value::BF16(value)).unwrap();
+        assert!(matches!(wire, WireValue::BF16(bits) if bits == value.to_bits()));
+
+        let Value::BF16(decoded) = Value::from(wire) else {
+            panic!("decoded BF16 wire value had the wrong kind");
+        };
+        assert_eq!(decoded.to_bits(), value.to_bits());
     }
 
     #[test]

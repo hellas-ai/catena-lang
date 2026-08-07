@@ -56,9 +56,12 @@ pub const FILES: &[StdlibFile] = stdlib_files![
     "gpu.hex",
     "identity-matrix.hex",
     "matrix.hex",
+    "matrix-bf16.hex",
     "tensor.hex",
+    "tensor-bf16.hex",
     "math.hex",
     "sum.hex",
+    "sum-bf16.hex",
     "nn.hex",
 ];
 

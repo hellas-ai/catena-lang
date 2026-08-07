@@ -494,6 +494,34 @@ fn f32_fma_is_fused_test() -> anyhow::Result<()> {
 }
 
 #[test]
+fn bf16_fma_is_fused_test() -> anyhow::Result<()> {
+    use half::bf16;
+
+    let a = bf16::from_bits(0x3fc4);
+    let b = bf16::from_bits(0x4005);
+    let c = bf16::from_bits(0x3f1e);
+    let fused = bf16::from_f32(a.to_f32().mul_add(b.to_f32(), c.to_f32()));
+    let product = bf16::from_f32(a.to_f32() * b.to_f32());
+    let separate = bf16::from_f32(product.to_f32() + c.to_f32());
+    assert_eq!(fused.to_bits(), 0x4073);
+    assert_eq!(separate.to_bits(), 0x4074);
+
+    let runtime = runtime_with(
+        r#"
+        (def program bf16-fma-fused :
+          {(bf16 val) (bf16 val) (bf16 val)} -> (bf16 val)
+        = bf16.fma)
+        "#,
+    )?;
+    let [Value::BF16(result)] = runtime.exec("bf16-fma-fused", [a.into(), b.into(), c.into()])?
+    else {
+        anyhow::bail!("bf16-fma-fused returned the wrong value kind");
+    };
+    assert_eq!(result.to_bits(), fused.to_bits());
+    Ok(())
+}
+
+#[test]
 fn sin_approx_test() -> anyhow::Result<()> {
     let runtime = runtime_with("")?;
 
@@ -806,6 +834,53 @@ fn f32_cmp_ops_test() -> anyhow::Result<()> {
             result, expected,
             "{name} returned {result}, expected {expected}"
         );
+    }
+    Ok(())
+}
+
+#[test]
+fn bf16_cmp_ops_test() -> anyhow::Result<()> {
+    let runtime = runtime_with(
+        r#"
+        (def program bf16-lt-test : [] -> (bool val) = (
+          {(const.u32.0x3FC00000 u32.bitcast-f32 f32.to-bf16)
+           (const.u32.0x40200000 u32.bitcast-f32 f32.to-bf16)}
+          bf16.lt))
+        (def program bf16-eq-test : [] -> (bool val) = (
+          {(const.u32.0x3FC00000 u32.bitcast-f32 f32.to-bf16)
+           (const.u32.0x40200000 u32.bitcast-f32 f32.to-bf16)}
+          bf16.eq))
+        (def program bf16-ne-test : [] -> (bool val) = (
+          {(const.u32.0x3FC00000 u32.bitcast-f32 f32.to-bf16)
+           (const.u32.0x40200000 u32.bitcast-f32 f32.to-bf16)}
+          bf16.ne))
+        (def program bf16-gt-test : [] -> (bool val) = (
+          {(const.u32.0x3FC00000 u32.bitcast-f32 f32.to-bf16)
+           (const.u32.0x40200000 u32.bitcast-f32 f32.to-bf16)}
+          bf16.gt))
+        (def program bf16-lte-test : [] -> (bool val) = (
+          {(const.u32.0x3FC00000 u32.bitcast-f32 f32.to-bf16)
+           (const.u32.0x40200000 u32.bitcast-f32 f32.to-bf16)}
+          bf16.lte))
+        (def program bf16-gte-test : [] -> (bool val) = (
+          {(const.u32.0x3FC00000 u32.bitcast-f32 f32.to-bf16)
+           (const.u32.0x40200000 u32.bitcast-f32 f32.to-bf16)}
+          bf16.gte))
+        "#,
+    )?;
+
+    for (name, expected) in [
+        ("bf16-lt-test", 1_u8),
+        ("bf16-eq-test", 0_u8),
+        ("bf16-ne-test", 1_u8),
+        ("bf16-gt-test", 0_u8),
+        ("bf16-lte-test", 1_u8),
+        ("bf16-gte-test", 0_u8),
+    ] {
+        let [Value::Bool(result)] = runtime.exec(name, [])? else {
+            anyhow::bail!("{name} returned the wrong value kind");
+        };
+        assert_eq!(result, expected, "{name}");
     }
     Ok(())
 }
@@ -1310,6 +1385,26 @@ fn arange_f32_test() -> anyhow::Result<()> {
 }
 
 #[test]
+fn arange_bf16_test() -> anyhow::Result<()> {
+    use half::bf16;
+
+    let runtime = runtime_with("")?;
+    let [Value::MemOwn(empty)] = runtime.exec("tensor.arange-bf16", [0_u64.into()])? else {
+        anyhow::bail!("tensor.arange-bf16 returned the wrong value kind");
+    };
+    assert!(empty.to_bf16_vec().is_empty());
+
+    let [Value::MemOwn(result)] = runtime.exec("tensor.arange-bf16", [5_u64.into()])? else {
+        anyhow::bail!("tensor.arange-bf16 returned the wrong value kind");
+    };
+    assert_eq!(
+        result.to_bf16_vec(),
+        [0.0_f32, 1.0, 2.0, 3.0, 4.0].map(bf16::from_f32)
+    );
+    Ok(())
+}
+
+#[test]
 fn slice_f32_test() -> anyhow::Result<()> {
     let runtime = runtime_with("")?;
 
@@ -1380,6 +1475,31 @@ fn slice_f32_test() -> anyhow::Result<()> {
 }
 
 #[test]
+fn slice_bf16_test() -> anyhow::Result<()> {
+    use half::bf16;
+
+    let runtime = runtime_with("")?;
+    let input_values = [10.0_f32, 20.0, 30.0, 40.0].map(bf16::from_f32);
+    for (start, len, expected) in [
+        (0_u64, 2_u64, vec![input_values[0], input_values[1]]),
+        (1, 2, vec![input_values[1], input_values[2]]),
+        (2, 0, vec![]),
+        (0, 4, input_values.to_vec()),
+    ] {
+        let input = runtime.mem_bf16(&input_values)?;
+        let [Value::MemOwn(result)] = runtime.exec(
+            "tensor.slice-bf16",
+            [input.as_ref().into(), start.into(), len.into()],
+        )?
+        else {
+            anyhow::bail!("tensor.slice-bf16 returned the wrong value kind");
+        };
+        assert_eq!(result.to_bf16_vec(), expected, "slice({start}, {len})");
+    }
+    Ok(())
+}
+
+#[test]
 fn concat_f32_test() -> anyhow::Result<()> {
     let runtime = runtime_with("")?;
 
@@ -1415,6 +1535,47 @@ fn concat_f32_test() -> anyhow::Result<()> {
         );
     }
 
+    Ok(())
+}
+
+#[test]
+fn concat_bf16_test() -> anyhow::Result<()> {
+    use half::bf16;
+
+    let runtime = runtime_with("")?;
+    let values = |values: &[f32]| {
+        values
+            .iter()
+            .copied()
+            .map(bf16::from_f32)
+            .collect::<Vec<_>>()
+    };
+    for (left, right, expected) in [
+        (
+            values(&[1.0, 2.0]),
+            values(&[3.0, 4.0]),
+            values(&[1.0, 2.0, 3.0, 4.0]),
+        ),
+        (
+            values(&[1.0]),
+            values(&[2.0, 3.0, 4.0]),
+            values(&[1.0, 2.0, 3.0, 4.0]),
+        ),
+        (vec![], values(&[3.0, 4.0]), values(&[3.0, 4.0])),
+        (values(&[1.0, 2.0]), vec![], values(&[1.0, 2.0])),
+        (vec![], vec![], vec![]),
+    ] {
+        let left_mem = runtime.mem_bf16(&left)?;
+        let right_mem = runtime.mem_bf16(&right)?;
+        let [Value::MemOwn(result)] = runtime.exec(
+            "tensor.concat-bf16",
+            [left_mem.as_ref().into(), right_mem.as_ref().into()],
+        )?
+        else {
+            anyhow::bail!("tensor.concat-bf16 returned the wrong value kind");
+        };
+        assert_eq!(result.to_bf16_vec(), expected);
+    }
     Ok(())
 }
 

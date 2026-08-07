@@ -1,0 +1,102 @@
+# bf16 buffer reductions using reducec.
+
+################################################################################
+# Sum
+
+# Adapter from the environmentful reducec accumulator convention to direct bf16.add.
+(def program bf16.add-env :
+  {1 ({(bf16 val) (bf16 val)} *)}
+  ->
+  (bf16 val)
+= ([env pair.]
+  ([.pair] *.elim [acc value.])
+  {[.acc value]} bf16.add
+))
+
+# Read one bf16 element from a converted buffer at an index.
+(def program bf16-at :
+  ([n.] {
+    ({cap.ref [.n] bf16} buf val)
+    ([.n] ix val)
+  })
+  ->
+  ([n.] (bf16 val))
+= ([input i.]
+  {[.i input]} ix
+))
+
+# Sum all bf16 elements in a memory buffer.
+(def program sum-bf16 :
+  (cap.ref mem)
+  ->
+  (bf16 val)
+= (
+  mem.cast.bf16
+  [len input.]
+    {
+      (const.u32.0x00000000 u32.bitcast-f32 f32.to-bf16)
+      unit.intro
+      name.bf16.add-env
+      ({[.input] (([.len] :.param) name.bf16-at)})
+      [.len]
+    }
+    reducec
+))
+
+# Mean all bf16 elements in a memory buffer. Caller must provide a non-empty input.
+(def program mean-bf16 :
+  (cap.ref mem)
+  ->
+  (bf16 val)
+= (
+  mem.cast.bf16
+  [len input.]
+    {
+      ({
+        (const.u32.0x00000000 u32.bitcast-f32 f32.to-bf16)
+        unit.intro
+        name.bf16.add-env
+        ({[.input] (([.len] :.param) name.bf16-at)})
+        [.len]
+      } reducec [sum.])
+      ([.len] :.forget [len-val.])
+      ([.len-val] u64.to-f32 f32.to-bf16 [len-bf16.])
+      ([.sum len-bf16] bf16.div [mean.])
+      [.mean]
+    }
+))
+
+################################################################################
+# Max
+
+# Adapter from the environmentful reducec accumulator convention to max(acc, value).
+(def program bf16.max-env :
+  {1 ({(bf16 val) (bf16 val)} *)}
+  ->
+  (bf16 val)
+= ([env pair.]
+  ([.pair] *.elim [acc value.])
+  {
+    ([.acc value] bf16.gte [keep-acc.])
+    ([.keep-acc acc value] bf16.select [result.])
+    [.result]
+  }
+))
+
+(def program max-bf16 :
+  (cap.ref mem)
+  ->
+  (bf16 val)
+= (
+  mem.cast.bf16
+  [len input.]
+    {
+      (const.u32.0xFF800000 u32.bitcast-f32 f32.to-bf16)
+      unit.intro
+      name.bf16.max-env
+      ({[.input] (([.len] :.param) name.bf16-at)})
+      [.len]
+    }
+    reducec
+))
+

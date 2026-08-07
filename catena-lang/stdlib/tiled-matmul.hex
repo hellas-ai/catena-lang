@@ -16,13 +16,21 @@
   ->
   ([rows inner tile-size.] {([.rows] ix val) ([.inner] ix val)} *)
 = {[inner tile-size output-row inner-tile-index local-index.]
-  ([.tile-size] u64.copies2 [row-tile-size inner-tile-size.])
-  ([.local-index] *.elim [local-row local-col.])
-  ({[.row-tile-size] [.output-row] [.local-row]}
-    ix.same-tile-coordinate [matrix-row.])
-  ({[.inner] [.inner-tile-size] [.inner-tile-index] [.local-col]}
-    ix.tile-offset-coordinate [matrix-inner.])
-  ({[.matrix-row] [.matrix-inner]} *.intro)
+  # output-row already contains this worker's row within the output tile.
+  ([.local-index] *.elim [_local-row local-col.])
+  ([.inner] u64.copies2 [inner-limit inner-bound.])
+  ([.local-col] ix.to-u64 [local-col-u64.])
+  ({[.inner-tile-index] ([.tile-size] :.forget)}
+    u64.mul [inner-tile-offset.])
+  ({[.inner-tile-offset] [.local-col-u64]} u64.add [matrix-inner-u64.])
+  ([.matrix-inner-u64] u64.name [matrix-inner-named.])
+  ({[.inner-limit] [.matrix-inner-named]} u64.gt
+    [matrix-inner-in-bounds if-matrix-inner-in-bounds _if-matrix-inner-oob.])
+  ({[.matrix-inner-in-bounds] [.if-matrix-inner-in-bounds]}
+    assert-then [matrix-inner-proof.])
+  ({[.matrix-inner-named] [.inner-bound] [.matrix-inner-proof]}
+    u64.to-ix [matrix-inner.])
+  ({[.output-row] [.matrix-inner]} *.intro)
 })
 
 # Map a local inner-column tile coordinate to its source matrix coordinate.
@@ -37,13 +45,21 @@
   ->
   ([inner cols tile-size.] {([.inner] ix val) ([.cols] ix val)} *)
 = {[inner tile-size output-col inner-tile-index local-index.]
-  ([.tile-size] u64.copies2 [inner-tile-size col-tile-size.])
-  ([.local-index] *.elim [local-row local-col.])
-  ({[.inner] [.inner-tile-size] [.inner-tile-index] [.local-row]}
-    ix.tile-offset-coordinate [matrix-inner.])
-  ({[.col-tile-size] [.output-col] [.local-col]}
-    ix.same-tile-coordinate [matrix-col.])
-  ({[.matrix-inner] [.matrix-col]} *.intro)
+  # output-col already contains this worker's column within the output tile.
+  ([.local-index] *.elim [local-row _local-col.])
+  ([.inner] u64.copies2 [inner-limit inner-bound.])
+  ([.local-row] ix.to-u64 [local-row-u64.])
+  ({[.inner-tile-index] ([.tile-size] :.forget)}
+    u64.mul [inner-tile-offset.])
+  ({[.inner-tile-offset] [.local-row-u64]} u64.add [matrix-inner-u64.])
+  ([.matrix-inner-u64] u64.name [matrix-inner-named.])
+  ({[.inner-limit] [.matrix-inner-named]} u64.gt
+    [matrix-inner-in-bounds if-matrix-inner-in-bounds _if-matrix-inner-oob.])
+  ({[.matrix-inner-in-bounds] [.if-matrix-inner-in-bounds]}
+    assert-then [matrix-inner-proof.])
+  ({[.matrix-inner-named] [.inner-bound] [.matrix-inner-proof]}
+    u64.to-ix [matrix-inner.])
+  ({[.matrix-inner] [.output-col]} *.intro)
 })
 
 # Evaluate the row-inner source view at one flat local tile index.

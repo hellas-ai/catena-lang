@@ -22,6 +22,10 @@
 
 
 (theory program type {
+  # Erased capability witnesses for polymorphic buffer operations.
+  (arr cap.own.type : [] -> cap.own)
+  (arr cap.ref.type : [] -> cap.ref)
+
   ################################################################################
   # Only owned typed buffers can be deallocated. Borrowed buffers and untyped
   # memory handles deliberately have no free operation.
@@ -60,14 +64,6 @@
     ({[.m p] f32} buf val) # val(buf m p f32)
     ([.n p] = |-)           # n = p
   } -> ([m n p.] ({[.m n] f32} buf val)))
-
-  # Construct an indexed read view over any bare f32 buffer. Capability is
-  # intentionally generic; writable and pending buffers remain inaccessible
-  # because those states wrap the buffer type.
-  (arr buf.f32.view :
-    ([m n.] ({[.m n] f32} buf val))
-    ->
-    ([m n.] ({([.n] ix val) (f32 val)} =>)))
 
   # Materialize an owned buffer from an indexed producer.
   #

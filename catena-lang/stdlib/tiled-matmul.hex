@@ -180,8 +180,10 @@
   ({[.block-context-3] [.pending-b]}
     parallel.await [block-context-4 b-ready.])
 
-  ([.a-ready] buf.f32.view [a-flat-view.])
-  ([.b-ready] buf.f32.view [b-flat-view.])
+  ({cap.own.type ({[.tile-size-param] [.tile-size-param]} *.intro) [.a-ready]}
+    partial.f32.row-major.flat-at.1 [a-flat-view.])
+  ({cap.own.type ({[.tile-size-param] [.tile-size-param]} *.intro) [.b-ready]}
+    partial.f32.row-major.flat-at.1 [b-flat-view.])
   ({[.tile-size] [.tile-size] [.a-flat-view]}
     f32.row-major.matrix-view [a-tile-view.])
   ({[.tile-size] [.tile-size] [.b-flat-view]}

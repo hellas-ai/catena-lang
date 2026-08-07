@@ -80,12 +80,12 @@
 # Read a flat f32 buffer with the buffer first, so partial application can
 # capture it and produce an indexed flat view.
 (def program f32.row-major.flat-at :
-  ([n.] {
-    ({cap.ref [.n] f32} buf val)
+  ([cap n.] {
+    ({[.cap n] f32} buf val)
     ([.n] ix val)
   })
   ->
-  ([n.] (f32 val))
+  ([cap n.] (f32 val))
 = ([input i.]
   {[.i input]} ix
 ))

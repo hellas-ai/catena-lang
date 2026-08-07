@@ -4,31 +4,6 @@
 # Each block has shape tile-size x tile-size and therefore
 # tile-size*tile-size workers.
 
-# Convert the logical C index to its position inside a tile. c-index is
-# already 2D, so both coordinates need their independent remainder:
-# (c-row % tile-size, c-col % tile-size).
-(def program tiled-matmul.in-tile-c-index :
-  ([n m tile-size.] {
-    ({[.tile-size] u64} :)
-    ({([.n] ix val) ([.m] ix val)} *)
-  })
-  ->
-  ([n m tile-size.] {
-    ([.tile-size] ix val)
-    ([.tile-size] ix val)
-  } *)
-= {[tile-size c-index.]
-  ([.tile-size] u64.copies2 [row-width col-width.]
-    ([.c-index] *.elim [c-row c-col.]
-      ({[.row-width] [.c-row]} ix.rem [in-tile-c-row.]
-        ({[.col-width] [.c-col]} ix.rem [in-tile-c-col.]
-          ({[.in-tile-c-row] [.in-tile-c-col]} *.intro)
-        )
-      )
-    )
-  )
-})
-
 # Map a local row-inner tile coordinate to its source matrix coordinate.
 (def program tiled-matmul.row-inner-tile-reindex :
   ([rows inner tile-size.] {
@@ -79,11 +54,13 @@
     ({[.tile-size] u64} :)
     ([.rows] ix val)
     (u64 val)
+    ({({[.tile-size tile-size]} gpu.block.2d) ({[.tile-size tile-size]} *) 1} worker)
     (({[.tile-size tile-size]} *) ix val)
   })
   ->
   ([rows inner tile-size.] (f32 val))
-= {[view inner tile-size output-row inner-tile-index flat-index.]
+= {[view inner tile-size output-row inner-tile-index worker flat-index.]
+  # materialize owns the worker; this loader only needs its logical index.
   ({[.tile-size] [.flat-index]} shape.2d.indices [local-index.])
   ({[.inner] [.tile-size] [.output-row] [.inner-tile-index] [.local-index]}
     tiled-matmul.row-inner-tile-reindex [matrix-index.])
@@ -98,11 +75,13 @@
     ({[.tile-size] u64} :)
     ([.cols] ix val)
     (u64 val)
+    ({({[.tile-size tile-size]} gpu.block.2d) ({[.tile-size tile-size]} *) 1} worker)
     (({[.tile-size tile-size]} *) ix val)
   })
   ->
   ([inner cols tile-size.] (f32 val))
-= {[view inner tile-size output-col inner-tile-index flat-index.]
+= {[view inner tile-size output-col inner-tile-index worker flat-index.]
+  # materialize owns the worker; this loader only needs its logical index.
   ({[.tile-size] [.flat-index]} shape.2d.indices [local-index.])
   ({[.inner] [.tile-size] [.output-col] [.inner-tile-index] [.local-index]}
     tiled-matmul.inner-col-tile-reindex [matrix-index.])
@@ -144,42 +123,43 @@
   ([.k-tile] ix.to-u64 [k-tile-u64.])
   ([.inner] u64.copy-param [inner-value inner-param.])
   ([.tile-size] u64.copy-param [tile-size-value tile-size-param.])
-  ({[.tile-size] [.c-index-for-tile]}
-    tiled-matmul.in-tile-c-index [in-tile-c-index.])
+
+  # Convert the logical C index to its position inside a tile. c-index is
+  # already 2D, so both coordinates need their independent remainder:
+  # (c-row % tile-size, c-col % tile-size).
+  ([.tile-size] u64.copies2 [row-width col-width.])
+  ([.c-index-for-tile] *.elim [c-row c-col.])
+  ({[.row-width] [.c-row]} ix.rem [in-tile-c-row.])
+  ({[.col-width] [.c-col]} ix.rem [in-tile-c-col.])
+  ({[.in-tile-c-row] [.in-tile-c-col]} *.intro [in-tile-c-index.])
 
   ({
     [.block-context]
     [.a-tile]
     ({
-      ([.block-worker] parallel.work-item-index)
-      ({
-        [.n-param]
-        [.inner-param]
-        [.tile-size-param]
-        [.a]
-        [.inner-value]
-        [.tile-size-value]
-        [.output-row]
-        [.k-tile-u64]
-      } partial.f32.tiled-matmul.row-inner-tile-load.5)
-    } compose)
+      [.n-param]
+      [.inner-param]
+      [.tile-size-param]
+      [.a]
+      [.inner-value]
+      [.tile-size-value]
+      [.output-row]
+      [.k-tile-u64]
+    } partial.f32.tiled-matmul.row-inner-tile-load.5)
   } parallel.materialize [block-context-1 pending-a.])
   ({
     [.block-context-1]
     [.b-tile]
     ({
-      ([.block-worker] parallel.work-item-index)
-      ({
-        [.inner-param]
-        [.m-param]
-        [.tile-size-param]
-        [.b]
-        [.inner-value]
-        [.tile-size-value]
-        [.output-col]
-        [.k-tile-u64]
-      } partial.f32.tiled-matmul.inner-col-tile-load.5)
-    } compose)
+      [.inner-param]
+      [.m-param]
+      [.tile-size-param]
+      [.b]
+      [.inner-value]
+      [.tile-size-value]
+      [.output-col]
+      [.k-tile-u64]
+    } partial.f32.tiled-matmul.inner-col-tile-load.5)
   } parallel.materialize [block-context-2 pending-b.])
 
   ({[.block-context-2] [.pending-a]}

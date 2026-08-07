@@ -78,20 +78,6 @@
   ->
   ([level workers groups.] ([.workers] ix val)))
 
-  # Project the callback index for one-work-item-per-worker materialization.
-  (arr parallel.work-item-index : {[level workers groups.]
-    ({[.level workers groups]} worker)
-  }
-  ->
-  ([level workers groups.]
-    ({
-      ({
-        ({[.level workers groups]} worker)
-        ([.workers] ix val)
-      } *)
-      ([.workers] ix val)
-    } =>)))
-
   # Convert a flat index of a 2D shape into its row and column coordinates.
   (def shape.2d.indices : {[x y.]
     ({[.y] u64} :)

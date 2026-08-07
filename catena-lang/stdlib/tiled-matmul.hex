@@ -144,8 +144,7 @@
     [tile-size-params-1 row-tile-size-param col-tile-size-param.])
   ([.tile-size-params-1] u64.copy-params2
     [tile-size-values tile-n tile-m.])
-  ([.tile-element-count] u64.copy-params2
-    [_tile-element-count a-flat-length-param b-flat-length-param.])
+  ([.tile-element-count] u64.copies2 [a-flat-length b-flat-length.])
   ([.tile-size-values] u64.copies6
     [row-tile-size-value col-tile-size-value widths-tile-size
       a-dimensions-tile-size b-dimensions-tile-size dot-tile-size.])
@@ -194,10 +193,10 @@
   ({[.block-context-3] [.pending-b]}
     parallel.await [block-context-4 b-ready.])
 
-  ({cap.own.type [.a-flat-length-param] [.a-ready]}
-    partial.f32.row-major.flat-at.1 [a-flat-view.])
-  ({cap.own.type [.b-flat-length-param] [.b-ready]}
-    partial.f32.row-major.flat-at.1 [b-flat-view.])
+  ({cap.own.type [.a-flat-length] [.a-ready]}
+    f32.row-major.buffer-view [a-flat-view.])
+  ({cap.own.type [.b-flat-length] [.b-ready]}
+    f32.row-major.buffer-view [b-flat-view.])
   ({[.a-tile-rows] [.a-tile-cols] [.a-flat-view]}
     f32.row-major.matrix-view [a-tile-view.])
   ({[.b-tile-rows] [.b-tile-cols] [.b-flat-view]}

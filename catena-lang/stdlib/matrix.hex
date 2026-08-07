@@ -75,10 +75,9 @@
 
 # Row-major specialization
 #
-# These arrows adapt flat row-major storage to the generic matrix-view core.
+# These definitions adapt flat row-major storage to the generic matrix-view core.
 
-# Read a flat f32 buffer with the buffer first, so partial application can
-# capture it and produce an indexed flat view.
+# Read a flat f32 buffer with the buffer first.
 (def program f32.row-major.flat-at :
   ([cap n.] {
     ({[.cap n] f32} buf val)
@@ -88,6 +87,47 @@
   ([cap n.] (f32 val))
 = ([input i.]
   {[.i input]} ix
+))
+
+# Structural helpers for explicitly capturing a flat buffer. Keeping these as
+# definitions lets buffer-view give each named function its own length witness.
+(def program f32.row-major.index-id :
+  ([n.] ([.n] ix val))
+  ->
+  ([n.] ([.n] ix val))
+= [i])
+
+(def program f32.row-major.index-with-unit :
+  ([n.] ([.n] ix val))
+  ->
+  ([n.] {1 ([.n] ix val)} *)
+= ([i.] {unit.intro [.i]} *.intro))
+
+# Capture a buffer as an indexed flat view without generated partial
+# application. The capability witness is needed only by name.flat-at, while
+# the concrete length provides distinct parameters for all three named arrows.
+(def program f32.row-major.buffer-view :
+  ([cap n.] {
+    [.cap]
+    ({[.n] u64} :)
+    ({[.cap n] f32} buf val)
+  })
+  ->
+  ([cap n.] ({([.n] ix val) (f32 val)} =>))
+= ([cap-type len input.]
+  ([.len] u64.params3 [with-unit-len index-id-len flat-at-len.]
+    {
+      ({
+        ([.with-unit-len] name.f32.row-major.index-with-unit lift)
+        ({
+          ([.input] defer)
+          ([.index-id-len] name.f32.row-major.index-id lift)
+        } tensor)
+      } compose)
+      ({[.cap-type] [.flat-at-len]} name.f32.row-major.flat-at lift)
+    }
+    compose
+  )
 ))
 
 # Read one element from a flat row-major view:

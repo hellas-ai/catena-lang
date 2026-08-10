@@ -75,3 +75,6 @@ pub use runtime::Runtime;
 pub use runtime::{ExecError, InitError};
 pub use value::Value;
 pub use value::ValueKind;
+
+// TODO: remove me
+pub use half::bf16;

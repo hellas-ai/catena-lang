@@ -180,6 +180,10 @@ impl Runtime {
         self.mem_from_bytes(slice_as_bytes(values))
     }
 
+    pub fn mem_bf16(&self, values: &[half::bf16]) -> Result<MemOwn, MemError> {
+        self.mem_from_bytes(slice_as_bytes(values))
+    }
+
     fn mem_from_bytes(&self, bytes: &[u8]) -> Result<MemOwn, MemError> {
         let data = self.gpu.allocate(bytes.len())?;
         // SAFETY: `data` is the unique allocation returned immediately above
@@ -282,6 +286,7 @@ impl Runtime {
                 Value::U32(value) => AbiValue::U32(value),
                 Value::U64(value) => AbiValue::U64(value),
                 Value::F32(value) => AbiValue::F32(value),
+                Value::BF16(value) => AbiValue::BF16(value),
                 Value::MemOwn(memory) => AbiValue::Mem(memory.into_abi()),
                 Value::MemRef(memory) => AbiValue::Mem(memory.abi),
             })
@@ -302,6 +307,7 @@ impl Runtime {
             AbiValue::U32(value) => Ok(Value::U32(value)),
             AbiValue::U64(value) => Ok(Value::U64(value)),
             AbiValue::F32(value) => Ok(Value::F32(value)),
+            AbiValue::BF16(value) => Ok(Value::BF16(value)),
             AbiValue::Mem(abi) => {
                 // SAFETY: cap.ref outputs are rejected at initialization, so
                 // every memory output transfers a GPU allocation owned by the

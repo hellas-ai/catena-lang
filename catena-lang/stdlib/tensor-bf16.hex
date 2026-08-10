@@ -1,0 +1,169 @@
+# Broadcast one bf16 value into an owned buffer of length n.
+(def program tensor.broadcast-bf16-at :
+  ([n.] {(bf16 val) ([.n] ix val)})
+  ->
+  ([n.] (bf16 val))
+= ([value i.]
+  [.value]
+))
+
+(def program tensor.broadcast-bf16 :
+  {(bf16 val) ({[n] u64} :)}
+  ->
+  ([n.] (cap.own mem))
+= ([value len.]
+  {
+    [.len]
+    ({[.len] [.value] (([.len] :.param) name.tensor.broadcast-bf16-at)}
+      materializec)
+  }
+  buf.to-mem
+))
+
+# Materialize the runtime index itself as bf16.
+(def program tensor.arange-bf16-at :
+  ([n.] {1 ([.n] ix val)})
+  ->
+  ([n.] (bf16 val))
+= ([env i.]
+  ([.i] ix.to-u64 [i-u64.])
+  ([.i-u64] u64.to-f32 f32.to-bf16 [result.])
+  [.result]
+))
+
+# Materialize [0, n) as bf16.
+(def program tensor.arange-bf16 :
+  ({[n] u64} :)
+  ->
+  ([n.] (cap.own mem))
+= ([len.]
+  {
+    [.len]
+    ({[.len] unit.intro (([.len] :.param) name.tensor.arange-bf16-at)}
+      materializec)
+  }
+  buf.to-mem
+))
+
+# Read one slice element by casting the input mem inside the producer.
+(def program tensor.slice-bf16-at :
+  ([n.] {
+    ({(cap.ref mem) (u64 val)} *)
+    ([.n] ix val)
+  })
+  ->
+  ([n.] (bf16 val))
+= {[env i.]
+  ([.env] *.elim [input-mem start-val.])
+  ([.input-mem] mem.cast.bf16 [input-len input.])
+  ([.i] ix.to-u64 [out-i-u64.])
+  ([.start-val out-i-u64] u64.add [input-i-u64.])
+  ([.input-i-u64] u64.name [input-i-u64-named.])
+  ([.input-len input-i-u64-named] u64.gt [in-bounds if-in-bounds _if-oob.])
+  ([.in-bounds if-in-bounds] assert-then [input-i-proof.])
+  ([.input-i-u64-named input-len input-i-proof] u64.to-ix [input-i.])
+  ({[.input-i input]} ix [result.])
+  [.result]
+})
+
+# Slice `len` bf16 elements starting at `start`.
+(def program tensor.slice-bf16 :
+  {(cap.ref mem) ({[start] u64} :) ({[len] u64} :)}
+  ->
+  ([start len.] (cap.own mem))
+= ([input-mem start len.]
+  ([.start] :.forget [start-val.])
+  {
+    [.len]
+    ({[.len] ({[.input-mem] [.start-val]} *.intro) (([.len] :.param) name.tensor.slice-bf16-at)}
+      materializec)
+  }
+  buf.to-mem
+))
+
+# Read a borrowed bf16 buffer using an index relative to a runtime offset.
+(def program tensor.ref.bf16.at-offset :
+  ([len.] {
+    ({
+      (u64 val)
+      ({({[.len] u64} :) ({cap.ref [.len] bf16} buf val)} *)
+    } *)
+    (u64 val)
+  } *)
+  ->
+  ([len.] (bf16 val))
+= ([arg.]
+  ([.arg] *.elim [env global-i-val.])
+  ([.env] *.elim [offset-val input.])
+  ([.input] *.elim [len-named buffer.])
+  ([.global-i-val offset-val] u64.sub [local-i-val.])
+  ([.local-i-val] u64.name [local-i-named.])
+  ([.len-named local-i-named] u64.gt [in-bounds if-in-bounds _if-oob.])
+  ([.in-bounds if-in-bounds] assert-then [local-i-proof.])
+  ([.local-i-named len-named local-i-proof] u64.to-ix [local-i.])
+  ({[.local-i buffer]} ix [result.])
+  [.result]
+))
+
+# Select the source buffer for one output index.
+(def program tensor.concat-bf16-at :
+  ([left-len right-len total-len.] {
+    ({
+      ({({[.left-len] u64} :) ({cap.ref [.left-len] bf16} buf val)} *)
+      ({({[.right-len] u64} :) ({cap.ref [.right-len] bf16} buf val)} *)
+    } *)
+    ([.total-len] ix val)
+  })
+  ->
+  ([left-len right-len total-len.] (bf16 val))
+= ([inputs output-i.]
+  ([.inputs] *.elim [left-input right-input.])
+  ([.left-input] *.elim [left-len-named left.])
+  ([.right-input] *.elim [right-len-named right.])
+  ([.output-i] ix.to-u64 [output-i-val.])
+  ([.left-len-named] :.forget [left-len-val.])
+  ([.output-i-val left-len-val] u64.lt [use-left-val.])
+  (const.u64.0x0000000000000000 [zero-val.])
+  ({[.zero-val] [.left-input]} *.intro [left-env.])
+  ({[.left-len-val] [.right-input]} *.intro [right-env.])
+  {
+    [.left-env]
+    (([.left-len-named] :.param) name.tensor.ref.bf16.at-offset)
+    [.right-env]
+    (([.right-len-named] :.param) name.tensor.ref.bf16.at-offset)
+    [.use-left-val]
+    [.output-i-val]
+  }
+  bool.ifc
+))
+
+# Concatenate two borrowed bf16 buffers into one owned buffer.
+(def program tensor.concat-bf16 :
+  {(cap.ref mem) (cap.ref mem)}
+  ->
+  (cap.own mem)
+= (
+  {mem.cast.bf16 mem.cast.bf16}
+  [left-len-named left right-len-named right.]
+    ([.left-len-named] :.forget [left-len-val.])
+    ([.right-len-named] :.forget [right-len-val.])
+    ([.left-len-val right-len-val] u64.add [total-len-val.])
+    ([.total-len-val] u64.name [total-len-named.])
+    ({[.left-len-named] [.left]} *.intro [left-input.])
+    ({[.right-len-named] [.right]} *.intro [right-input.])
+    ({[.left-input] [.right-input]} *.intro [inputs.])
+    {
+      [.total-len-named]
+      ({
+        [.total-len-named]
+        [.inputs]
+        ({
+          ([.left-len-named] :.param)
+          ([.right-len-named] :.param)
+          ([.total-len-named] :.param)
+        } name.tensor.concat-bf16-at)
+      } materializec)
+    }
+    buf.to-mem
+))
+

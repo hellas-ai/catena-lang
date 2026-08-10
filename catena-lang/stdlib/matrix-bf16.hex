@@ -1,0 +1,226 @@
+# Identity matrices represented as indexed bf16 views.
+
+#   identity-at(i,j) = if i == j then 1.0 else 0.0
+#
+# A complete identity-matrix view is `name.bf16.matrix.identity-at lift`
+# specialized with the matrix dimension parameter.
+(def program bf16.matrix.identity-at :
+  ([n.] ({([.n] ix val) ([.n] ix val)} *))
+  ->
+  ([n.] (bf16 val))
+= ([ij.]
+  ([.ij] *.elim [i j.]
+    ([.i] ix.to-u64 [i-u64.]
+      ([.j] ix.to-u64 [j-u64.]
+        ({[.i-u64 j-u64]} u64.ne [different.]
+          ([.different] bool.not [same.]
+            {
+              [.same]
+              bf16.one
+              (const.u32.0x00000000 u32.bitcast-f32 f32.to-bf16)
+            }
+            bf16.select
+          )
+        )
+      )
+    )
+  )
+))
+# bf16 matrix multiplication.
+#
+# The generic core works only with indexed matrix views:
+#
+#   A : (i,k) => A[i,k]
+#   B : (k,j) => B[k,j]
+#
+# It computes C[i,j] = sum_k A[i,k] * B[k,j] without assuming a buffer
+# layout. The row-major section below specializes flat buffers into these
+# views and materializes the resulting matrix back into row-major order.
+#
+# Generic matrix multiplication
+
+# Compute one term of a dot product over arbitrary matrix views:
+#
+#   product-at(A, B, (i,j), k) = A[i,k] * B[k,j]
+#
+# Capturing `A`, `B`, and `(i,j)` produces the function of `k` consumed by
+# `reduce`.
+(def program bf16.matmul.product-at :
+  ([n m k.] {
+    ({({([.n] ix val) ([.k] ix val)} *) (bf16 val)} =>)
+    ({({([.k] ix val) ([.m] ix val)} *) (bf16 val)} =>)
+    ({([.n] ix val) ([.m] ix val)} *)
+    ([.k] ix val)
+  })
+  ->
+  ([n m k.] (bf16 val))
+= ([a-view b-view ij k.]
+  ([.ij] *.elim [i j.]
+    ([.k] ix.copy [a-k b-k.]
+      ({[.i] [.a-k]} *.intro [a-index.]
+        {[.a-index] [.a-view]} evaluate [a-value.]
+        ({[.b-k] [.j]} *.intro [b-index.]
+          {[.b-index] [.b-view]} evaluate [b-value.]
+          {[.a-value b-value]} bf16.mul)
+      )
+    )
+  )
+))
+
+# Reduce the products along the shared dimension:
+#
+#   cell-dot(A, B, (i,j)) =
+#     reduce(+, map(partial product-at(A, B, (i,j)), k), 0)
+(def program bf16.matmul.cell-dot :
+  ([n m k.] {
+    [.n]
+    [.m]
+    ({[.k] u64} :)
+    ({({([.n] ix val) ([.k] ix val)} *) (bf16 val)} =>)
+    ({({([.k] ix val) ([.m] ix val)} *) (bf16 val)} =>)
+    ({([.n] ix val) ([.m] ix val)} *)
+  })
+  ->
+  ([n m k.] (bf16 val))
+= ([n-param m-param k-len a-view b-view ij.]
+  ([.k-len] u64.copy-param [reduce-len k-param.]
+    {
+      (const.u32.0x00000000 u32.bitcast-f32 f32.to-bf16)
+      (name.bf16.add lift)
+      ({
+        [.n-param]
+        [.m-param]
+        [.k-param]
+        [.a-view]
+        [.b-view]
+        [.ij]
+      } partial.bf16.matmul.product-at.3)
+      [.reduce-len]
+    }
+    reduce
+  )
+))
+
+# Row-major specialization
+#
+# These arrows adapt flat row-major storage to the generic matrix-view core.
+
+# Read a flat bf16 buffer with the buffer first, so partial application can
+# capture it and produce an indexed flat view.
+(def program bf16.row-major.flat-at :
+  ([n.] {
+    ({cap.ref [.n] bf16} buf val)
+    ([.n] ix val)
+  })
+  ->
+  ([n.] (bf16 val))
+= ([input i.]
+  {[.i input]} ix
+))
+
+# Read one element from a flat row-major view:
+#
+#   matrix-at(cols, flat-view, (i,j)) =
+#     flat-view(row-major-index(cols, i, j))
+#
+# Capturing `cols` and `flat-view` constructs a matrix view that waits only
+# for `(i,j)`.
+(def program bf16.row-major.matrix-at :
+  ([n m.] {
+    ({[.m] u64} :)
+    ({(({[.n] [.m]} *) ix val) (bf16 val)} =>)
+    ({([.n] ix val) ([.m] ix val)} *)
+  })
+  ->
+  ([n m.] (bf16 val))
+= ([m-len flat-view ij.]
+  ({[.m-len] [.ij]} row-major-index [flat-index.]
+    {[.flat-index] [.flat-view]} evaluate)
+))
+
+# Convert concrete row and column lengths into the erased parameters expected
+# by `partial.bf16.row-major.matrix-at.2`. The column length is also retained as
+# the runtime row-major stride.
+(def program bf16.row-major.matrix-view :
+  ([n m.] {
+    ({[.n] u64} :)
+    ({[.m] u64} :)
+    ({(({[.n] [.m]} *) ix val) (bf16 val)} =>)
+  })
+  ->
+  ([n m.] ({({([.n] ix val) ([.m] ix val)} *) (bf16 val)} =>))
+= ([n-len m-len flat-view.]
+  ([.m-len] u64.copy-param [stride-len m-param.]
+    ({
+      ([.n-len] :.param)
+      [.m-param]
+      [.stride-len]
+      [.flat-view]
+    } partial.bf16.row-major.matrix-at.2)
+  )
+))
+
+# Convert one flat row-major index into its row and column indices.
+(def program bf16.row-major.indices :
+  ([n m.] {
+    ({[.m] u64} :)
+    (({[.n] [.m]} *) ix val)
+  })
+  ->
+  ([n m.] {([.n] ix val) ([.m] ix val)} *)
+= ([m-len flat.]
+  ([.m-len] u64.copies2 [row-cols col-cols.]
+    ([.flat] ix.copy [flat-for-row flat-for-col.]
+      ({[.row-cols] [.flat-for-row]} row-major-row [i.]
+        ({[.col-cols] [.flat-for-col]} row-major-col [j.]
+          ({[.i] [.j]} *.intro)
+        )
+      )
+    )
+  )
+))
+
+# Materialize a row-major product from two already constructed matrix views.
+# This helper deliberately has closures on its boundary: direct callers inline
+# it before closure conversion, leaving only the captured cell producer region.
+(def program bf16.matmul.row-major.materialize :
+  ([n m k.] {
+    ({[.n] u64} :)
+    ({[.m] u64} :)
+    ({[.k] u64} :)
+    ({({[.n] [.m]} *) u64} :)
+    ({({([.n] ix val) ([.k] ix val)} *) (bf16 val)} =>)
+    ({({([.k] ix val) ([.m] ix val)} *) (bf16 val)} =>)
+  })
+  ->
+  ([n m k.] ({cap.own ({[.n] [.m]} *) bf16} buf val))
+= ([n-len m-len k-len output-len a-view b-view.]
+  ([.n-len] u64.params3 [indices-n dot-n cell-n.]
+    ([.m-len] u64.copy-params3 [indices-m-len indices-m dot-m cell-m.]
+      ([.k-len] u64.copy-param [cell-k producer-k.]
+        {
+          [.output-len]
+          ({
+            ({
+              [.indices-n]
+              [.indices-m]
+              [.indices-m-len]
+            } partial.bf16.row-major.indices.1)
+            ({
+              [.dot-n]
+              [.dot-m]
+              [.producer-k]
+              [.cell-n]
+              [.cell-m]
+              [.cell-k]
+              [.a-view]
+              [.b-view]
+            } partial.bf16.matmul.cell-dot.5)
+          } compose)
+        }
+        materialize
+      )
+    )
+  )
+))
+

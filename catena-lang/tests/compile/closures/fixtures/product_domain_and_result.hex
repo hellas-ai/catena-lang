@@ -1,0 +1,51 @@
+# Exercise closure conversion and code generation with products on both sides
+# of a closure. This fixture does not impose a special scheduling rule for
+# products; captured closure values determine the conversion order.
+
+(def program product-domain-result-id :
+  ({(bool val) (bool val)} *)
+  ->
+  ({(bool val) (bool val)} *)
+= [pair])
+
+(def program choose-product-domain-result-views :
+  {
+    ({({(bool val) (bool val)} *) ({(bool val) (bool val)} *)} =>)
+    ({({(bool val) (bool val)} *) ({(bool val) (bool val)} *)} =>)
+    (bool val)
+    (bool val)
+    (bool val)
+  }
+  ->
+  ({(bool val) (bool val)} *)
+= ([left-view right-view fixed flag varying.]
+  ({[.fixed] [.varying]} *.intro [argument.])
+  {[.left-view] [.right-view] [.flag] [.argument]}
+  bool.if
+))
+
+(def program product-domain-result-if :
+  {(bool val) (bool val) (bool val) (bool val)}
+  ->
+  ({(bool val) (bool val)} *)
+= ([fixed varying outer-flag inner-flag.]
+  ([.fixed] bool.copy [left-fixed right-fixed.])
+  ([.inner-flag] bool.copy [left-inner-flag right-inner-flag.])
+  {
+    ({
+      (name.product-domain-result-id lift)
+      (name.product-domain-result-id lift)
+      [.left-fixed]
+      [.left-inner-flag]
+    } partial.choose-product-domain-result-views.4)
+    ({
+      (name.product-domain-result-id lift)
+      (name.product-domain-result-id lift)
+      [.right-fixed]
+      [.right-inner-flag]
+    } partial.choose-product-domain-result-views.4)
+    [.outer-flag]
+    [.varying]
+  }
+  bool.if
+))

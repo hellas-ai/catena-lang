@@ -85,8 +85,8 @@
 
 # Nested products can contain several closures alongside ordinary data.
 # The closure-boundary helper is expanded before forgetting, after which forget
-# recursively exposes both inner closures and conversion produces two explicit
-# environment/function-pointer pairs for bool.ifc.
+# recursively exposes both contained closures. Conversion then produces two
+# explicit environment/function-pointer pairs for bool.ifc.
 (def program consume-nested :
   ({({({1 (bool val)} =>) ({1 (bool val)} =>)} *) (bool val)} *)
   ->

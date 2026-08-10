@@ -14,27 +14,23 @@ use thiserror::Error;
 
 use crate::{
     check::AnnotatedTerm,
-    closure::region::{ClosureRegion, ClosureRegionMap},
+    closure::region::ClosureRegion,
     elaborate::{ElaborateError, name_symbols},
     hexpr::{objects_to_hexpr, term_to_hexpr},
     nonstrict::{to_packer, to_unpacker, unpack_packed_object},
     pass::forget_closures::{ClosureForgotten, ClosureForgottenTerm},
     prefixes::{GENERATED_VARIABLE_PREFIX, NAME_PREFIX},
-    report::TheoryTermMap,
 };
 
 type Obj = Tree<(), Operation>;
 
-/// Compact generated-context leaves mapped back to leaves of the original
-/// definition, keyed by generated `closure.*` operation.
-pub type ClosureContextMap = BTreeMap<TheoryId, BTreeMap<Operation, Vec<usize>>>;
-
-/// Generated declarations together with their still-annotated closure bodies.
+/// One generated declaration together with its still-annotated closure body.
 #[derive(Debug, Clone)]
-pub struct DefinedClosures {
-    pub generated_theory: TheorySet,
-    pub generated_functions: TheoryTermMap,
-    pub closure_contexts: ClosureContextMap,
+pub(super) struct DefinedClosure {
+    pub(super) generated_theory: TheorySet,
+    pub(super) operation: Operation,
+    pub(super) function: AnnotatedTerm,
+    pub(super) original_context_leaves: Vec<usize>,
 }
 
 #[derive(Debug, Error)]
@@ -88,89 +84,63 @@ pub enum DefineClosuresError {
     TypeMapDomainMismatch,
 }
 
-/// Insert a `closure.*` definition and matching `name.closure.*` declaration
-/// for every discovered region. Original definitions are left unchanged for
-/// the later replacement stage.
-pub fn run(
+/// Insert the generated `closure.*` definition and matching
+/// `name.closure.*` declaration for one explicitly scheduled region.
+/// Original definitions are left unchanged for the replacement stage.
+pub(super) fn define_closure_and_name(
     theory_set: &TheorySet,
-    forgotten: &TheoryTermMap<ClosureForgotten<Operation>>,
-    regions: &ClosureRegionMap,
-) -> Result<DefinedClosures, DefineClosuresError> {
-    let mut generated_theory = theory_set.clone();
-    let mut generated_functions = BTreeMap::new();
-    let mut closure_contexts = BTreeMap::new();
-
-    for (theory_id, definitions) in regions {
-        let original_theory = theory_set
-            .theories
-            .get(theory_id)
-            .ok_or_else(|| DefineClosuresError::MissingTheory(theory_id.to_string()))?;
-        let Theory::Theory { syntax, arrows } = original_theory else {
-            return Err(DefineClosuresError::NotUserTheory(theory_id.to_string()));
-        };
-        let syntax_theory = theory_set
-            .theories
-            .get(syntax)
-            .ok_or_else(|| DefineClosuresError::MissingSyntaxTheory(syntax.to_string()))?;
-        let forgotten_definitions = forgotten
-            .get(theory_id)
-            .ok_or_else(|| DefineClosuresError::MissingTheory(theory_id.to_string()))?;
-
-        let mut generated_arrows = BTreeMap::new();
-        let mut generated_bodies = BTreeMap::new();
-        let mut generated_contexts = BTreeMap::new();
-        for (definition_name, definition_regions) in definitions {
-            if definition_regions.is_empty() {
-                continue;
-            }
-            if !arrows.contains_key(definition_name) {
-                return Err(DefineClosuresError::MissingDefinition {
-                    theory: theory_id.to_string(),
-                    definition: definition_name.to_string(),
-                });
-            }
-            let term = forgotten_definitions.get(definition_name).ok_or_else(|| {
-                DefineClosuresError::MissingDefinition {
-                    theory: theory_id.to_string(),
-                    definition: definition_name.to_string(),
-                }
-            })?;
-
-            for region in definition_regions {
-                let generated = define_region(
-                    theory_id,
-                    definition_name,
-                    syntax_theory,
-                    arrows,
-                    term,
-                    region,
-                )?;
-                let closure_name = generated.closure.name.clone();
-                generated_contexts.insert(closure_name.clone(), generated.original_context_leaves);
-                generated_bodies.insert(closure_name.clone(), generated.body);
-                generated_arrows.insert(closure_name, generated.closure);
-                generated_arrows.insert(generated.name.name.clone(), generated.name);
-            }
-        }
-
-        let Theory::Theory { arrows, .. } = generated_theory
-            .theories
-            .get_mut(theory_id)
-            .expect("validated theory should remain present")
-        else {
-            unreachable!("validated user theory should remain a user theory")
-        };
-        arrows.extend(generated_arrows);
-        if !generated_bodies.is_empty() {
-            generated_functions.insert(theory_id.clone(), generated_bodies);
-            closure_contexts.insert(theory_id.clone(), generated_contexts);
-        }
+    theory_id: &TheoryId,
+    definition_name: &Operation,
+    term: &ClosureForgottenTerm,
+    region: &ClosureRegion,
+    generated_id: usize,
+) -> Result<DefinedClosure, DefineClosuresError> {
+    let original_theory = theory_set
+        .theories
+        .get(theory_id)
+        .ok_or_else(|| DefineClosuresError::MissingTheory(theory_id.to_string()))?;
+    let Theory::Theory { syntax, arrows } = original_theory else {
+        return Err(DefineClosuresError::NotUserTheory(theory_id.to_string()));
+    };
+    if !arrows.contains_key(definition_name) {
+        return Err(DefineClosuresError::MissingDefinition {
+            theory: theory_id.to_string(),
+            definition: definition_name.to_string(),
+        });
     }
+    let syntax_theory = theory_set
+        .theories
+        .get(syntax)
+        .ok_or_else(|| DefineClosuresError::MissingSyntaxTheory(syntax.to_string()))?;
+    let generated = define_region(
+        theory_id,
+        definition_name,
+        syntax_theory,
+        arrows,
+        term,
+        region,
+        generated_id,
+    )?;
+    let operation = generated.closure.name.clone();
+    let function = generated.body;
+    let original_context_leaves = generated.original_context_leaves;
 
-    Ok(DefinedClosures {
+    let mut generated_theory = theory_set.clone();
+    let Theory::Theory { arrows, .. } = generated_theory
+        .theories
+        .get_mut(theory_id)
+        .expect("validated theory should remain present")
+    else {
+        unreachable!("validated user theory should remain a user theory")
+    };
+    arrows.insert(operation.clone(), generated.closure);
+    arrows.insert(generated.name.name.clone(), generated.name);
+
+    Ok(DefinedClosure {
         generated_theory,
-        generated_functions,
-        closure_contexts,
+        operation,
+        function,
+        original_context_leaves,
     })
 }
 
@@ -185,9 +155,9 @@ struct GeneratedClosure {
 
 /// Turn one discovered region into:
 ///
-/// - `closure.<definition>.<node>`, an executable arrow whose inputs are the
+/// - `closure.<definition>.<generated-id>`, an executable arrow whose inputs are the
 ///   packed runtime environment and the original closure argument; and
-/// - `name.closure.<definition>.<node>`, the corresponding function pointer.
+/// - `name.closure.<definition>.<generated-id>`, the corresponding function pointer.
 fn define_region(
     theory_id: &TheoryId,
     definition_name: &Operation,
@@ -195,6 +165,7 @@ fn define_region(
     arrows: &BTreeMap<Operation, TheoryArrow>,
     term: &ClosureForgottenTerm,
     region: &ClosureRegion,
+    generated_id: usize,
 ) -> Result<GeneratedClosure, DefineClosuresError> {
     let body = build_body(theory_id, definition_name, arrows, term, region)?;
 
@@ -207,7 +178,7 @@ fn define_region(
     let original_context_leaves = context.original_leaf_by_compact_leaf.clone();
     let body = context.relabel_term(body);
 
-    let closure_name = closure_operation(definition_name, region.closure);
+    let closure_name = closure_operation(definition_name, generated_id);
     let raw_closure = RawTheoryArrow {
         name: closure_name.clone(),
         type_maps: type_maps_for_term(&body, context.arity()),
@@ -593,8 +564,8 @@ fn interpret_type_map(syntax: &Theory, map: &Hexpr) -> Result<Term, DefineClosur
         })
 }
 
-pub(crate) fn closure_operation(definition: &Operation, closure: NodeId) -> Operation {
-    format!("closure.{definition}.{}", closure.0)
+pub(crate) fn closure_operation(definition: &Operation, generated_id: usize) -> Operation {
+    format!("closure.{definition}.{generated_id}")
         .parse()
         .expect("generated closure operation should parse")
 }

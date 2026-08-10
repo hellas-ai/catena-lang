@@ -1,14 +1,13 @@
-//! Convert `ClosureMarker` regions from the innermost layer outward.
+//! Convert `ClosureMarker` regions in explicit dependency order.
 //!
-//! A conversion round extracts every region that is currently self-contained.
-//! Nested enclosing regions are rediscovered and handled by later rounds.
-
-use std::collections::BTreeMap;
+//! One ready region is converted at a time. Rewriting invalidates graph-local
+//! node and edge identifiers, so regions and their dependencies are rebuilt
+//! from the new graph after every step.
 
 use hexpr::Operation;
-use metacat::theory::TheorySet;
+use metacat::theory::{TheoryId, TheorySet};
 
-use super::{ConversionError, definition, region, replace};
+use super::{ConversionError, definition, region, replace, schedule};
 use crate::{
     check::partial_definition_types, pass::forget_closures::ClosureForgotten, report::TheoryTermMap,
 };
@@ -24,6 +23,13 @@ struct ConversionState {
     terms: TheoryTermMap<ClosureForgotten<Operation>>,
     theory: TheorySet,
     generated_functions: TheoryTermMap,
+    next_generated_id: usize,
+}
+
+struct ScheduledRegion {
+    theory: TheoryId,
+    definition: Operation,
+    region: region::ClosureRegion,
 }
 
 pub(super) fn run(
@@ -34,31 +40,32 @@ pub(super) fn run(
         terms,
         theory: theory_set.clone(),
         generated_functions: TheoryTermMap::new(),
+        next_generated_id: 0,
     };
     let mut discovered_regions = region::run(&state.terms)?;
     let initial_regions = discovered_regions.clone();
 
     while region_count(&discovered_regions) != 0 {
-        // Step 1: choose the innermost/self-contained regions that can safely
-        // be removed from the current graph.
-        let ready_regions = regions_ready_for_extraction(&state.terms, &discovered_regions);
-        require_progress(&discovered_regions, &ready_regions)?;
+        // Step 1: build typed ordering dependencies and choose the first region with no unresolved prerequisites.
+        let selected = schedule_next_region(&state.terms, &discovered_regions);
+        let generated_id = state.next_generated_id;
+        state.next_generated_id += 1;
 
-        // Step 2: generate and validate functions for this ready layer.
-        let closure_contexts = define_ready_layer(&mut state, &ready_regions)?;
+        // Step 2: generate and validate the selected function.
+        let original_context_leaves = add_closure_and_name(&mut state, &selected, generated_id)?;
         validate_generated_theory(&state.theory)?;
 
-        // Step 3: replace its markers with explicit
+        // Step 3: replace its marker with explicit
         // environment/function-pointer values.
-        replace_ready_layer(&mut state, &ready_regions, &closure_contexts)?;
+        replace_region_with_closure_representation(
+            &mut state,
+            &selected,
+            &original_context_leaves,
+            generated_id,
+        )?;
 
-        // Step 4: discover the next enclosing layer in the rewritten graph.
-        //
-        // We intentionally do not build and maintain a region nesting tree.
-        // Extraction deletes and unifies nodes, renumbers graph identifiers,
-        // and can change an enclosing region's body and environment. Updating
-        // a saved tree through those mutations is more complex and fragile
-        // than rediscovering regions from the new graph.
+        // Step 4: rediscover regions and rebuild dependencies. Extraction
+        // deletes and unifies nodes, so the previous snapshot is now stale.
         discovered_regions = region::run(&state.terms)?;
     }
 
@@ -70,50 +77,50 @@ pub(super) fn run(
     })
 }
 
-fn regions_ready_for_extraction(
+fn schedule_next_region(
     definitions: &TheoryTermMap<ClosureForgotten<Operation>>,
     discovered_regions: &region::ClosureRegionMap,
-) -> region::ClosureRegionMap {
-    discovered_regions
-        .iter()
-        .filter_map(|(theory, theory_regions)| {
-            let ready_definitions = theory_regions
-                .iter()
-                .filter_map(|(definition, regions)| {
-                    let term = &definitions[theory][definition];
-                    let ready_regions = regions
-                        .iter()
-                        .filter(|region| replace::region_is_ready_for_extraction(term, region))
-                        .cloned()
-                        .collect::<Vec<_>>();
-                    (!ready_regions.is_empty()).then_some((definition.clone(), ready_regions))
-                })
-                .collect::<BTreeMap<_, _>>();
-            (!ready_definitions.is_empty()).then_some((theory.clone(), ready_definitions))
-        })
-        .collect()
-}
-
-fn require_progress(
-    discovered_regions: &region::ClosureRegionMap,
-    ready_regions: &region::ClosureRegionMap,
-) -> Result<(), ConversionError> {
-    if region_count(ready_regions) == 0 {
-        return Err(ConversionError::NoRegionReadyForExtraction {
-            markers: region_count(discovered_regions),
-        });
+) -> ScheduledRegion {
+    for (theory, theory_regions) in discovered_regions {
+        for (definition, regions) in theory_regions {
+            if regions.is_empty() {
+                continue;
+            }
+            let term = &definitions[theory][definition];
+            let dependencies = schedule::analyze(term, regions);
+            let region = dependencies.require_ready_region(regions);
+            return ScheduledRegion {
+                theory: theory.clone(),
+                definition: definition.clone(),
+                region: region.clone(),
+            };
+        }
     }
-    Ok(())
+
+    unreachable!("the scheduler is only called while closure regions remain")
 }
 
-fn define_ready_layer(
+fn add_closure_and_name(
     state: &mut ConversionState,
-    ready_regions: &region::ClosureRegionMap,
-) -> Result<definition::ClosureContextMap, ConversionError> {
-    let defined = definition::run(&state.theory, &state.terms, ready_regions)?;
+    selected: &ScheduledRegion,
+    generated_id: usize,
+) -> Result<Vec<usize>, ConversionError> {
+    let term = &state.terms[&selected.theory][&selected.definition];
+    let defined = definition::define_closure_and_name(
+        &state.theory,
+        &selected.theory,
+        &selected.definition,
+        term,
+        &selected.region,
+        generated_id,
+    )?;
     state.theory = defined.generated_theory;
-    merge_generated_functions(&mut state.generated_functions, defined.generated_functions);
-    Ok(defined.closure_contexts)
+    state
+        .generated_functions
+        .entry(selected.theory.clone())
+        .or_default()
+        .insert(defined.operation, defined.function);
+    Ok(defined.original_context_leaves)
 }
 
 fn validate_generated_theory(theory: &TheorySet) -> Result<(), ConversionError> {
@@ -126,13 +133,21 @@ fn validate_generated_theory(theory: &TheorySet) -> Result<(), ConversionError> 
     Ok(())
 }
 
-fn replace_ready_layer(
+fn replace_region_with_closure_representation(
     state: &mut ConversionState,
-    ready_regions: &region::ClosureRegionMap,
-    closure_contexts: &definition::ClosureContextMap,
+    selected: &ScheduledRegion,
+    original_context_leaves: &[usize],
+    generated_id: usize,
 ) -> Result<(), ConversionError> {
-    let replaced =
-        replace::run_partial(&state.theory, &state.terms, ready_regions, closure_contexts)?;
+    let replaced = replace::replace_region_with_closure_representation(
+        &state.theory,
+        &state.terms,
+        &selected.theory,
+        &selected.definition,
+        &selected.region,
+        original_context_leaves,
+        generated_id,
+    )?;
     state.theory = replaced.theory_set;
     state.terms = replaced.terms;
     replace::rewrite_ready_converted_primitives(&mut state.terms);
@@ -145,10 +160,4 @@ fn region_count(regions: &region::ClosureRegionMap) -> usize {
         .flat_map(|definitions| definitions.values())
         .map(Vec::len)
         .sum()
-}
-
-fn merge_generated_functions(output: &mut TheoryTermMap, next: TheoryTermMap) {
-    for (theory, definitions) in next {
-        output.entry(theory).or_default().extend(definitions);
-    }
 }

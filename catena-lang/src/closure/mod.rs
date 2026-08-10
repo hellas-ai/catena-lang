@@ -25,6 +25,7 @@ mod inline_named_calls;
 mod region_conversion;
 /// Replace regions with explicit environments, function pointers, and context operations.
 pub mod replace;
+mod schedule;
 
 /// Complete output of closure conversion.
 #[derive(Debug, Clone)]
@@ -65,8 +66,6 @@ pub enum ConversionError {
     EraseContexts(#[from] context::EraseContextsError),
     #[error(transparent)]
     InlineNamedCalls(#[from] inline_named_calls::InlineNamedCallsError),
-    #[error("no closure region is ready for extraction while {markers} markers remain")]
-    NoRegionReadyForExtraction { markers: usize },
 }
 
 /// Closure-convert graphs produced by `forget_closures` as one compiler pass.

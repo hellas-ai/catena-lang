@@ -35,6 +35,9 @@ pub struct ClosureRegion {
     pub closure: NodeId,
     /// Values entering the body from the surrounding graph.
     pub environment: Vec<NodeId>,
+    /// Erased/type-level arguments of `name.*` operations entering the body.
+    /// These parameterize the generated closure but are not runtime captures.
+    pub context: Vec<NodeId>,
     /// Nodes belonging to the body, including its boundary.
     pub nodes: Vec<NodeId>,
     /// Body edges. The `!closure` marker itself is not included.
@@ -85,9 +88,11 @@ pub fn run(
 ///    to a discard-terminated subregion.
 /// 5. Add `name.*` producers used by included `eval` edges. These are static
 ///    dependencies of the body rather than captured runtime values.
-/// 6. Treat inputs of included edges that have no producer inside the body as
-///    environment values. If forgetting `defer` removed the entire control
-///    path, the unproduced codomain itself is the captured value.
+/// 6. Classify free inputs of included `name.*` edges as static context. The
+///    generated closure later canonicalizes equal metavariables.
+/// 7. Treat other inputs of included edges that have no producer inside the
+///    body as runtime environment values. If forgetting `defer` removed the
+///    entire control path, the unproduced codomain itself is the captured value.
 ///
 /// The resulting region contains the intersected body, its static named
 /// dependencies, and the environment boundary; the marker edge is only the
@@ -136,8 +141,23 @@ fn find_region(
 
     include_named_dependencies(term, connectivity, &mut included_edges);
 
-    let environment = environment_nodes(term, connectivity, &included_edges, *domain, *codomain);
-    let nodes = region_nodes(term, &included_edges, *domain, *codomain, &environment);
+    let context = context_nodes(term, connectivity, &included_edges);
+    let environment = environment_nodes(
+        term,
+        connectivity,
+        &included_edges,
+        *domain,
+        *codomain,
+        &context,
+    );
+    let nodes = region_nodes(
+        term,
+        &included_edges,
+        *domain,
+        *codomain,
+        &environment,
+        &context,
+    );
     let edges = included_edges
         .into_iter()
         .enumerate()
@@ -150,6 +170,7 @@ fn find_region(
         codomain: *codomain,
         closure: *closure,
         environment,
+        context,
         nodes,
         edges,
     })
@@ -311,6 +332,7 @@ fn environment_nodes(
     included_edges: &[bool],
     domain: NodeId,
     codomain: NodeId,
+    context: &[NodeId],
 ) -> Vec<NodeId> {
     let mut environment = vec![false; term.hypergraph.nodes.len()];
 
@@ -319,7 +341,10 @@ fn environment_nodes(
             continue;
         }
         for &source in &term.hypergraph.adjacency[edge_index].sources {
-            if source != domain && !has_included_producer(connectivity, included_edges, source) {
+            if source != domain
+                && !context.contains(&source)
+                && !has_included_producer(connectivity, included_edges, source)
+            {
                 environment[source.0] = true;
             }
         }
@@ -339,17 +364,49 @@ fn environment_nodes(
         .collect()
 }
 
+/// Collect free erased arguments of included `name.*` operations.
+///
+/// Their producers remain in the surrounding graph. The generated
+/// `name.closure.*` call consumes these values when the closure is constructed;
+/// they are not packed into its runtime environment.
+fn context_nodes(
+    term: &ClosureForgottenTerm,
+    connectivity: &Connectivity,
+    included_edges: &[bool],
+) -> Vec<NodeId> {
+    let mut context = vec![false; term.hypergraph.nodes.len()];
+    for (edge_index, included) in included_edges.iter().copied().enumerate() {
+        if !included || !is_named_operation(term, EdgeId(edge_index)) {
+            continue;
+        }
+        for &source in &term.hypergraph.adjacency[edge_index].sources {
+            if !has_included_producer(connectivity, included_edges, source) {
+                context[source.0] = true;
+            }
+        }
+    }
+    context
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, included)| included.then_some(NodeId(index)))
+        .collect()
+}
+
 fn region_nodes(
     term: &ClosureForgottenTerm,
     included_edges: &[bool],
     domain: NodeId,
     codomain: NodeId,
     environment: &[NodeId],
+    context: &[NodeId],
 ) -> Vec<NodeId> {
     let mut included_nodes = vec![false; term.hypergraph.nodes.len()];
     included_nodes[domain.0] = true;
     included_nodes[codomain.0] = true;
     for &node in environment {
+        included_nodes[node.0] = true;
+    }
+    for &node in context {
         included_nodes[node.0] = true;
     }
     for (edge_index, included) in included_edges.iter().copied().enumerate() {
@@ -445,7 +502,50 @@ mod tests {
         assert_eq!(region.codomain, codomain);
         assert_eq!(region.closure, closure);
         assert_eq!(region.environment, vec![]);
+        assert_eq!(region.context, vec![]);
         assert_eq!(region.edges, vec![name, eval]);
+    }
+
+    #[test]
+    fn named_parameters_are_static_context_inputs() {
+        let mut term = ClosureForgottenTerm::empty();
+        let domain = term.new_node(obj("A"));
+        let first_context = term.new_node(obj("n"));
+        let first_pointer = term.new_node(obj("pointer"));
+        let middle = term.new_node(obj("A"));
+        let second_context = term.new_node(obj("n"));
+        let second_pointer = term.new_node(obj("pointer"));
+        let codomain = term.new_node(obj("A"));
+        let closure = term.new_node(obj("A=>A"));
+
+        let first_name = term.new_edge(
+            region_op("name.first"),
+            (vec![first_context], vec![first_pointer]),
+        );
+        let first_eval = term.new_edge(
+            region_op("eval"),
+            (vec![domain, first_pointer], vec![middle]),
+        );
+        let second_name = term.new_edge(
+            region_op("name.second"),
+            (vec![second_context], vec![second_pointer]),
+        );
+        let second_eval = term.new_edge(
+            region_op("eval"),
+            (vec![middle, second_pointer], vec![codomain]),
+        );
+        term.new_edge(
+            ClosureForgotten::ClosureMarker,
+            (vec![domain, codomain], vec![closure]),
+        );
+
+        let [region] = find_regions(&term).unwrap().try_into().unwrap();
+        assert_eq!(region.environment, vec![]);
+        assert_eq!(region.context, vec![first_context, second_context]);
+        assert_eq!(
+            region.edges,
+            vec![first_name, first_eval, second_name, second_eval]
+        );
     }
 
     #[test]

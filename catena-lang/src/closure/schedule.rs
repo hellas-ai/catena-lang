@@ -137,7 +137,7 @@
 //! supported, and strict structural containment cannot be cyclic. A cycle
 //! therefore indicates a bug in region discovery or dependency construction.
 //!
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, VecDeque};
 
 use open_hypergraphs::lax::{EdgeId, NodeId};
 
@@ -185,6 +185,11 @@ pub(super) enum RegionDependencyKind {
     /// prerequisite. The producer must first expand that value into its
     /// `(Environment, FnPointer)` representation.
     CapturedClosure { closure: NodeId },
+
+    /// The dependent computes a static input used to construct the
+    /// prerequisite closure. Converting that closure first turns the context
+    /// path into ordinary flow inside the dependent region.
+    NestedContext { context: NodeId },
 }
 
 /// A directed ordering constraint: `dependent` waits for `prerequisite`.
@@ -284,6 +289,7 @@ fn add_nested_region_dependencies(
     let environment = dependent
         .environment
         .iter()
+        .chain(&dependent.context)
         .map(|node| node.0)
         .collect::<BTreeSet<_>>();
     let internal = dependent
@@ -335,26 +341,91 @@ fn add_nested_region_dependencies(
                 .iter()
                 .filter(|region| region.marker != dependent.marker && region.edges.contains(&edge))
                 .collect::<Vec<_>>();
+            if !owners.is_empty() {
+                for prerequisite in owners {
+                    push_dependency(
+                        dependencies,
+                        RegionDependency {
+                            dependent: dependent.into(),
+                            prerequisite: prerequisite.into(),
+                            kind: RegionDependencyKind::NestedRegion,
+                        },
+                    );
+                }
+                continue;
+            }
+
+            let context_prerequisites =
+                reachable_context_prerequisites(definition, edge, dependent, regions);
             assert!(
-                !owners.is_empty(),
+                !context_prerequisites.is_empty(),
                 "internal wire w{} of closure region e{} escapes through unowned edge e{} (`{}`)",
                 node.0,
                 dependent.marker.0,
                 index,
                 definition.hypergraph.edges[index],
             );
-            for prerequisite in owners {
+            for (prerequisite, context) in context_prerequisites {
                 push_dependency(
                     dependencies,
                     RegionDependency {
                         dependent: dependent.into(),
                         prerequisite: prerequisite.into(),
-                        kind: RegionDependencyKind::NestedRegion,
+                        kind: RegionDependencyKind::NestedContext { context },
                     },
                 );
             }
         }
     }
+}
+
+/// Find nested closures whose static context is reached through an otherwise
+/// unowned continuation of the dependent region. The intervening operations
+/// remain outside the nested closure; after that closure is replaced, region
+/// discovery can see them as ordinary flow in the dependent body.
+fn reachable_context_prerequisites<'a>(
+    definition: &ClosureForgottenTerm,
+    start: EdgeId,
+    dependent: &ClosureRegion,
+    regions: &'a [ClosureRegion],
+) -> Vec<(&'a ClosureRegion, NodeId)> {
+    let mut reached_nodes = vec![false; definition.hypergraph.nodes.len()];
+    let mut pending = VecDeque::new();
+    for &target in &definition.hypergraph.adjacency[start.0].targets {
+        reached_nodes[target.0] = true;
+        pending.push_back(target);
+    }
+
+    let mut found: Vec<(&ClosureRegion, NodeId)> = Vec::new();
+    while let Some(node) = pending.pop_front() {
+        for region in regions {
+            if region.marker != dependent.marker && region.context.contains(&node) {
+                if !found.iter().any(|(found_region, found_node)| {
+                    found_region.marker == region.marker && *found_node == node
+                }) {
+                    found.push((region, node));
+                }
+            }
+        }
+
+        for (index, boundary) in definition.hypergraph.adjacency.iter().enumerate() {
+            if !boundary.sources.contains(&node)
+                || matches!(
+                    definition.hypergraph.edges[index],
+                    ClosureForgotten::ClosureMarker
+                )
+            {
+                continue;
+            }
+            for &target in &boundary.targets {
+                if !reached_nodes[target.0] {
+                    reached_nodes[target.0] = true;
+                    pending.push_back(target);
+                }
+            }
+        }
+    }
+    found
 }
 
 fn push_dependency(dependencies: &mut Vec<RegionDependency>, dependency: RegionDependency) {
@@ -442,6 +513,7 @@ mod tests {
             codomain,
             closure: dependent_closure,
             environment: vec![],
+            context: vec![],
             nodes: vec![domain, internal, codomain],
             edges: vec![first, second],
         };
@@ -451,6 +523,7 @@ mod tests {
             codomain: nested_result,
             closure: nested_closure,
             environment: vec![internal],
+            context: vec![],
             nodes: vec![internal, nested_result],
             edges: vec![nested_edge],
         };
@@ -461,6 +534,54 @@ mod tests {
             dependency.dependent == RegionId::from(&dependent)
                 && dependency.prerequisite == RegionId::from(&nested)
                 && dependency.kind == RegionDependencyKind::NestedRegion
+        }));
+    }
+
+    #[test]
+    fn context_path_makes_outer_region_wait_for_nested_closure() {
+        let mut term = ClosureForgottenTerm::empty();
+        let domain = term.new_node(Tree::Empty);
+        let internal = term.new_node(Tree::Empty);
+        let codomain = term.new_node(Tree::Empty);
+        let context = term.new_node(Tree::Empty);
+        let dependent_closure = term.new_node(Tree::Empty);
+        let first = term.new_edge(
+            ClosureForgotten::Operation("first".parse().unwrap()),
+            (vec![domain], vec![internal]),
+        );
+        let second = term.new_edge(
+            ClosureForgotten::Operation("second".parse().unwrap()),
+            (vec![internal], vec![codomain]),
+        );
+        term.new_edge(
+            ClosureForgotten::Operation("context-adapter".parse().unwrap()),
+            (vec![internal], vec![context]),
+        );
+        let dependent_marker = term.new_edge(
+            ClosureForgotten::ClosureMarker,
+            (vec![domain, codomain], vec![dependent_closure]),
+        );
+        let mut nested = empty_region(&mut term);
+        nested.context.push(context);
+        nested.nodes.push(context);
+        let dependent = ClosureRegion {
+            marker: dependent_marker,
+            domain,
+            codomain,
+            closure: dependent_closure,
+            environment: vec![],
+            context: vec![],
+            nodes: vec![domain, internal, codomain],
+            edges: vec![first, second],
+        };
+
+        let dependencies = analyze(&term, &[dependent.clone(), nested.clone()]);
+
+        assert!(!dependencies.is_ready(&dependent));
+        assert!(dependencies.dependencies.iter().any(|dependency| {
+            dependency.dependent == RegionId::from(&dependent)
+                && dependency.prerequisite == RegionId::from(&nested)
+                && dependency.kind == RegionDependencyKind::NestedContext { context }
         }));
     }
 
@@ -495,6 +616,7 @@ mod tests {
             codomain,
             closure,
             environment: vec![],
+            context: vec![],
             nodes: vec![domain, internal, codomain],
             edges: vec![first, second],
         };
@@ -516,6 +638,7 @@ mod tests {
             codomain,
             closure,
             environment: vec![],
+            context: vec![],
             nodes: vec![domain, codomain],
             edges: vec![],
         }

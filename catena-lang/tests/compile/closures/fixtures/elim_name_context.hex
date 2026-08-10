@@ -1,0 +1,81 @@
+# This fixture isolates a product elimination whose outputs are used on both
+# sides of a closure boundary.
+#
+# `elim-parameter-bundle` returns the typed u64 argument together with two
+# copies of its parameter packed in one product. `elim-name-context` explicitly
+# unpacks that product:
+#
+#   parameter-bundle -- *.elim +-- body-n -- name.elim-name-context-body
+#                              +-- false-n - name.context-...-false
+#
+# `body-n` selects the named function that becomes the manually constructed
+# outer closure. The sibling outputs configure operations outside that closure
+# body. Region discovery must follow the dependency from
+# name.elim-name-context-body back through *.elim without incorrectly pulling
+# unrelated sibling operations into the body.
+#
+# The program itself creates a closed true value, captures it in a function of
+# the typed u64 argument, and selects that function with bool.if. The function
+# runs and discards the closed value, then applies an indexed identity to false.
+# Its concrete result is therefore false.
+
+(def program elim-indexed-id :
+  ([n.] (bool val))
+  ->
+  ([n.] (bool val))
+= [value])
+
+(def program elim-parameter-bundle :
+  ([n.] ({[.n] u64} :))
+  ->
+  ([n.] {
+    ({[.n] u64} :)
+    ({[.n] [.n]} *)
+  })
+= ([len.]
+  ([.len] :.ty [copy param-a.]
+    ([.copy] :.ty [argument-len param-b.]
+      {[.argument-len] ({[.param-a] [.param-b]} *.intro)}
+    )
+  )
+))
+
+(def program elim-name-context-body :
+  ([n.] {
+    ({1 (bool val)} =>)
+    ({[.n] u64} :)
+  })
+  ->
+  ([n.] (bool val))
+= ([closed len.]
+  ([.closed] run [_closed-result.])
+  (([.len] :.param) name.elim-indexed-id lift [branch.])
+  ({[.branch] (name.bool.id lift) bool.t bool.f} bool.if)
+))
+
+(def program elim-name-context :
+  ([n.] ({[.n] u64} :))
+  ->
+  ([n.] (bool val))
+= ([len.]
+  (bool.t defer [closed.])
+  ([.len] elim-parameter-bundle [argument-len params.])
+  ([.argument-len] u64.copy-params3
+    [final-argument unit-n identity-n _unused-n.])
+  ([.params] *.elim [body-n false-n.])
+
+  # Manual application: capture closed, leaving final-argument open.
+  ({
+    ({
+      ([.unit-n] name.context-typed-u64-with-unit lift)
+      ({
+        ([.closed] defer)
+        ([.identity-n] name.context-typed-u64-id lift)
+      } tensor)
+    } compose)
+    ([.body-n] name.elim-name-context-body lift)
+  } compose [outer.])
+
+  ({[.outer] ([.false-n] name.context-typed-u64-false lift) bool.t
+    [.final-argument]} bool.if)
+))

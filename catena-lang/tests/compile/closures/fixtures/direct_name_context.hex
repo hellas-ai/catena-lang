@@ -1,0 +1,74 @@
+(def program indexed-bool-id :
+  ([n.] (bool val))
+  ->
+  ([n.] (bool val))
+= [value])
+
+# The closure input forces inlining. The typed argument supplies context to a
+# named branch of the inner bool.if.
+#
+# What this program represents:
+#
+#   1. `direct-name-context` creates a closed closure returning true.
+#   2. It captures that closure in `direct-name-context-body`, while leaving
+#      the typed u64 value as the new closure's argument.
+#   3. The body runs and discards the closed closure.
+#   4. It uses the typed argument to select an indexed identity function.
+#   5. The inner bool.if selects that identity and applies it to false.
+#
+# The concrete result is therefore false. The test is about retaining every
+# dependency needed to construct and select that identity closure.
+#
+# Intended shape after inlining direct-name-context-body:
+#
+#   closed ----------------------+
+#                                 +-- outer : typed-u64 => bool --+
+#   typed-u64 -- argument -------+                                |
+#                                                                  v
+#   inside outer(argument):                              outer bool.if
+#
+#     closed -- run -- discard
+#
+#     argument -- :.param -- name.indexed-bool-id -- lift --+
+#                                                               +-- inner bool.if
+#                         name.bool.id ----------- lift --------+
+#
+# The outer closure region must include both body paths, including the context
+# dependency leading to name.indexed-bool-id.
+(def program direct-name-context-body :
+  ([n.] {
+    ({1 (bool val)} =>)
+    ({[.n] u64} :)
+  })
+  ->
+  ([n.] (bool val))
+= ([closed len.]
+  ([.closed] run [_closed-result.])
+  (([.len] :.param) name.indexed-bool-id lift [branch.])
+  ({[.branch] (name.bool.id lift) bool.t bool.f} bool.if)
+))
+
+(def program direct-name-context :
+  ([n.] ({[.n] u64} :))
+  ->
+  ([n.] (bool val))
+= ([len.]
+  (bool.t defer [closed.])
+  ([.len] u64.copy-params3 [len-copy unit-n identity-n body-n.])
+  ([.len-copy] u64.copy-param [argument-len false-n.])
+
+  # Manual partial application: capture `closed`, leaving len as the argument.
+  ({
+    ({
+      ([.unit-n] name.context-typed-u64-with-unit lift)
+      ({
+        ([.closed] defer)
+        ([.identity-n] name.context-typed-u64-id lift)
+      } tensor)
+    } compose)
+    ([.body-n] name.direct-name-context-body lift)
+  } compose [outer.])
+
+  ({[.outer] ([.false-n] name.context-typed-u64-false lift) bool.t
+    [.argument-len]} bool.if)
+))

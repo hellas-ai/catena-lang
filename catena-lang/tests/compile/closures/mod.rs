@@ -4,6 +4,7 @@ mod basic;
 mod boundaries;
 mod capture_order;
 mod context;
+mod discard_terminated;
 mod materialize;
 mod matmul;
 mod named_calls;

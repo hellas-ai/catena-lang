@@ -1,0 +1,23 @@
+# The closure-typed input causes this helper to be inlined before closure
+# conversion. After partial application, the generated branch runs `closed` to
+# produce its result and applies `bool.not` to its argument only to discard the
+# result. That discarded computation must still belong to the branch region.
+(def program discard-argument-return-closed :
+  {({1 (bool val)} =>) (bool val)}
+  ->
+  (bool val)
+= {[closed input.]
+  ([.input] bool.not [_discarded.])
+  ([.closed] run [result.])
+  [.result]
+})
+
+(def program discard-terminated-region :
+  []
+  ->
+  (bool val)
+= (
+  (bool.t defer [closed.])
+  ([.closed] partial.discard-argument-return-closed.1 [discarding-branch.])
+  ({[.discarding-branch] (name.bool.id lift) bool.t bool.f} bool.if)
+))

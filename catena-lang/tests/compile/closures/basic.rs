@@ -6,8 +6,9 @@ use crate::support::*;
 /// marker, region, or generated arrow should be introduced accidentally.
 #[test]
 fn closure_free_definition_is_unchanged() {
-    assert!(regions("identity").is_empty());
-    let forgotten = &conversion().closure_forgotten_definitions[&program()][&op("identity")];
+    assert!(regions("closure-fixture-identity").is_empty());
+    let forgotten =
+        &conversion().closure_forgotten_definitions[&program()][&op("closure-fixture-identity")];
     assert!(
         forgotten
             .hypergraph
@@ -15,7 +16,7 @@ fn closure_free_definition_is_unchanged() {
             .iter()
             .all(|edge| { !matches!(edge, ClosureForgotten::ClosureMarker) })
     );
-    assert!(generated_with_prefix("closure.identity.").is_empty());
+    assert!(generated_with_prefix("closure.closure-fixture-identity.").is_empty());
 }
 
 /// Closure construction, composition with a named arrow, and immediate `run`
@@ -164,7 +165,7 @@ fn asymmetric_parallel_regions_are_both_replaced() {
 #[test]
 fn runtime_only_final_graphs_are_monogamous() {
     for definition in [
-        "identity",
+        "closure-fixture-identity",
         "deferred-identity",
         "named-if",
         "captured-if",

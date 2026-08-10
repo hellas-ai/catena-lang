@@ -1,4 +1,4 @@
-//! GPU lowering for the generic parallel execution primitives.
+//! CUDA/HIP lowering for generic parallel execution primitives.
 //!
 //! The topology remains visible in the lowered context type:
 //!
@@ -11,14 +11,19 @@
 //! underlying pointer. The operations here preserve that pointer while adding
 //! allocation, launch, or synchronization behavior.
 
+use hexpr::Operation;
+use metacat::tree::Tree;
+
 use crate::codegen::{
     GpuAssign, GpuDialect, GpuFunction, GpuValue, GpuVar,
-    components::{input_components, runtime_values, single_function, single_value, value_expr},
+    components::{runtime_values, value_expr},
     gpu::{GpuRenderError, render_function_application},
-    lower_types::{CType, LoweredType},
+    lower_types::{CType, LowerTypeError, LoweredType},
     render_utils::{c_type, invalid_inputs, invalid_outputs, param_decl},
     runtime_type,
 };
+
+use super::{materialize_parts, preserved_runtime_values};
 
 const GRID_CONTEXT: &str = "catena_gpu_grid_context_t";
 const BLOCK_CONTEXT: &str = "catena_gpu_block_context_t";
@@ -27,6 +32,61 @@ const BLOCK_CONTEXT: &str = "catena_gpu_block_context_t";
 pub(in crate::codegen) enum ContextKind {
     Grid,
     Block,
+}
+
+/// Whether this backend supplies a concrete representation for the parallel
+/// type constructor. Generic parallel decoding does not choose these types.
+pub(in crate::codegen) fn is_runtime_type(name: &str) -> bool {
+    matches!(
+        name,
+        "shape.2d" | "gpu.grid.2d" | "parallel.plan" | "context" | "worker"
+    )
+}
+
+/// Choose the CUDA/HIP runtime representation of a parallel type.
+pub(in crate::codegen) fn lower_runtime_type(
+    name: &str,
+    children: &[Tree<(), Operation>],
+) -> Result<CType, LowerTypeError> {
+    let (expected, c_name) = match name {
+        "shape.2d" => (2, "catena_dim3_t"),
+        "gpu.grid.2d" => (4, "catena_launch_params_t"),
+        "parallel.plan" => (3, "catena_launch_params_t"),
+        "context" | "worker" => (3, scoped_runtime_name(name, children)?),
+        _ => unreachable!("checked by is_runtime_type"),
+    };
+    if children.len() != expected {
+        return Err(LowerTypeError::InvalidArity {
+            name: name.to_string(),
+            expected,
+            actual: children.len(),
+        });
+    }
+    Ok(CType::Named(c_name.to_string()))
+}
+
+fn scoped_runtime_name<'a>(
+    type_name: &str,
+    children: &'a [Tree<(), Operation>],
+) -> Result<&'a str, LowerTypeError> {
+    let Some(Tree::Node(level, _, _)) = children.first() else {
+        return Err(no_runtime_representation(type_name, children));
+    };
+    match (type_name, level.as_str()) {
+        ("context", "gpu.grid.2d") => Ok(GRID_CONTEXT),
+        ("context", "gpu.block.2d") => Ok(BLOCK_CONTEXT),
+        ("worker", "gpu.grid.2d") => Ok("catena_gpu_grid_worker_t"),
+        ("worker", "gpu.block.2d") => Ok("catena_gpu_block_worker_t"),
+        _ => Err(no_runtime_representation(type_name, children)),
+    }
+}
+
+fn no_runtime_representation(type_name: &str, children: &[Tree<(), Operation>]) -> LowerTypeError {
+    LowerTypeError::NoRuntimeRepresentation(Tree::Node(
+        type_name.parse().expect("type name should parse"),
+        0,
+        children.to_vec(),
+    ))
 }
 
 pub(in crate::codegen) fn context_kind(assignment: &GpuAssign) -> Option<ContextKind> {
@@ -256,19 +316,7 @@ pub(in crate::codegen) fn render_synchronize(
     assignment: &GpuAssign,
     dialect: GpuDialect,
 ) -> Result<(), GpuRenderError> {
-    let runtime_inputs = assignment
-        .inputs
-        .iter()
-        .filter(|input| matches!(input, GpuValue::Var(var) if runtime_type(var).is_some()))
-        .collect::<Vec<_>>();
-    let runtime_outputs = assignment
-        .outputs
-        .iter()
-        .filter(|output| runtime_type(output).is_some())
-        .collect::<Vec<_>>();
-    if runtime_inputs.len() != runtime_outputs.len() {
-        return Err(invalid_outputs(assignment, runtime_inputs.len()));
-    }
+    let preserved = preserved_runtime_values(assignment)?;
 
     match context_kind(assignment) {
         Some(ContextKind::Grid) => out.push_str(&format!(
@@ -278,7 +326,7 @@ pub(in crate::codegen) fn render_synchronize(
         Some(ContextKind::Block) => out.push_str("    catena_block_barrier();\n"),
         None => {}
     }
-    for (input, output) in runtime_inputs.into_iter().zip(runtime_outputs) {
+    for (input, output) in preserved.inputs.into_iter().zip(preserved.outputs) {
         out.push_str(&format!("    {} = {};\n", output.name, value_expr(input)));
     }
     Ok(())
@@ -447,55 +495,6 @@ pub(in crate::codegen) fn materialize_kernel_name(
         "parallel_materialize_{function_name}_{}",
         buffer.name
     ))
-}
-
-struct MaterializeParts<'a> {
-    context: &'a GpuValue,
-    buffer: &'a GpuValue,
-    buffer_var: &'a GpuVar,
-    environment: &'a [GpuValue],
-    function: &'a GpuValue,
-}
-
-fn materialize_parts(assignment: &GpuAssign) -> Result<MaterializeParts<'_>, GpuRenderError> {
-    let components = input_components(assignment)?;
-    let [context, buffer, environment, function] = components.as_slice() else {
-        return Err(GpuRenderError::InvalidInputComponentCount {
-            op: assignment.op.clone(),
-            expected: 4,
-            actual: components.len(),
-        });
-    };
-    let context = single_value(context)
-        .map_err(|error| component_error(assignment, "context", error.actual))?;
-    let buffer = single_value(buffer)
-        .map_err(|error| component_error(assignment, "buffer", error.actual))?;
-    let GpuValue::Var(buffer_var) = buffer else {
-        unreachable!("single runtime value must be a variable")
-    };
-    let function = single_function(function)
-        .map_err(|error| component_error(assignment, "producer", error.actual))?;
-    Ok(MaterializeParts {
-        context,
-        buffer,
-        buffer_var,
-        environment,
-        function,
-    })
-}
-
-fn component_error(
-    assignment: &GpuAssign,
-    component: &'static str,
-    actual: usize,
-) -> GpuRenderError {
-    GpuRenderError::InvalidInputComponentValueCount {
-        op: assignment.op.clone(),
-        component,
-        description: "runtime value",
-        expected: 1,
-        actual,
-    }
 }
 
 #[cfg(test)]

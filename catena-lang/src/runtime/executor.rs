@@ -2,7 +2,6 @@
 
 use std::{collections::HashMap, ffi::c_void};
 
-use half::bf16;
 use libffi::middle::{Arg, Cif, CodePtr, Type};
 use libloading::Library;
 use thiserror::Error;
@@ -26,10 +25,10 @@ pub(crate) struct CatenaMem {
 #[derive(Debug)]
 pub(crate) enum AbiValue {
     Bool(u8),
+    U16(u16),
     U32(u32),
     U64(u64),
     F32(f32),
-    BF16(bf16),
     Mem(CatenaMem),
 }
 
@@ -37,10 +36,10 @@ impl AbiValue {
     pub(crate) fn zeroed(kind: ValueKind) -> Self {
         match kind {
             ValueKind::Bool => Self::Bool(0),
+            ValueKind::U16 => Self::U16(0),
             ValueKind::U32 => Self::U32(0),
             ValueKind::U64 => Self::U64(0),
             ValueKind::F32 => Self::F32(0.0),
-            ValueKind::BF16 => Self::BF16(bf16::ZERO),
             ValueKind::MemOwn | ValueKind::MemRef => Self::Mem(CatenaMem {
                 data: std::ptr::null_mut(),
                 len: 0,
@@ -140,10 +139,10 @@ impl Executor {
 fn ffi_type(kind: ValueKind) -> Type {
     match kind {
         ValueKind::Bool => Type::u8(),
+        ValueKind::U16 => Type::u16(),
         ValueKind::U32 => Type::u32(),
         ValueKind::U64 => Type::u64(),
         ValueKind::F32 => Type::f32(),
-        ValueKind::BF16 => Type::structure([Type::u16()]),
         ValueKind::MemOwn | ValueKind::MemRef => Type::structure([Type::pointer(), Type::u64()]),
     }
 }
@@ -151,10 +150,10 @@ fn ffi_type(kind: ValueKind) -> Type {
 fn input_arg(value: &AbiValue) -> Arg<'_> {
     match value {
         AbiValue::Bool(value) => Arg::new(value),
+        AbiValue::U16(value) => Arg::new(value),
         AbiValue::U32(value) => Arg::new(value),
         AbiValue::U64(value) => Arg::new(value),
         AbiValue::F32(value) => Arg::new(value),
-        AbiValue::BF16(value) => Arg::new(value),
         AbiValue::Mem(value) => Arg::new(value),
     }
 }
@@ -162,10 +161,10 @@ fn input_arg(value: &AbiValue) -> Arg<'_> {
 fn output_pointer(value: &mut AbiValue) -> *mut c_void {
     match value {
         AbiValue::Bool(value) => (value as *mut u8).cast(),
+        AbiValue::U16(value) => (value as *mut u16).cast(),
         AbiValue::U32(value) => (value as *mut u32).cast(),
         AbiValue::U64(value) => (value as *mut u64).cast(),
         AbiValue::F32(value) => (value as *mut f32).cast(),
-        AbiValue::BF16(value) => (value as *mut bf16).cast(),
         AbiValue::Mem(value) => (value as *mut CatenaMem).cast(),
     }
 }

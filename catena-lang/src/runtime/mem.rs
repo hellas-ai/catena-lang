@@ -82,9 +82,9 @@ impl MemOwn {
         Ok(unsafe { Self::from_raw_parts_with_gpu(data, byte_len, gpu) })
     }
 
-    pub fn to_bf16_vec(&self) -> Vec<half::bf16> {
-        self.try_to_bf16_vec()
-            .expect("failed to read memory as bf16 values")
+    pub fn to_u16_vec(&self) -> Vec<u16> {
+        self.try_to_u16_vec()
+            .expect("failed to read memory as u16 values")
     }
 
     pub fn to_f32_vec(&self) -> Vec<f32> {
@@ -102,8 +102,8 @@ impl MemOwn {
         self.try_to_vec()
     }
 
-    /// Read this buffer as BF16 values, reporting copy and element-size errors.
-    pub fn try_to_bf16_vec(&self) -> Result<Vec<half::bf16>, MemError> {
+    /// Read this buffer into host memory, reporting copy and element-size errors.
+    pub fn try_to_u16_vec(&self) -> Result<Vec<u16>, MemError> {
         self.try_to_vec()
     }
 

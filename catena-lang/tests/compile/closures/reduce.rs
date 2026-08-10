@@ -16,8 +16,9 @@ fn scalar_reduce_converts_both_closure_arguments() {
     assert_fully_lowered("scalar-reduce");
 }
 
-/// Minimal context is computed independently for each generated closure: the
-/// closed accumulator name is nullary, while the indexed producer needs `n`.
+/// Minimal static context is computed independently for each generated
+/// closure: the closed accumulator name is nullary, while the indexed producer
+/// needs `n`. Neither closure needs a runtime environment.
 ///
 /// ```text
 /// name.accumulator : () ─▶ fn-ptr
@@ -27,7 +28,7 @@ fn scalar_reduce_converts_both_closure_arguments() {
 fn reduce_names_use_only_the_context_their_bodies_need() {
     let term = final_term("context-reduce");
     let reduce = only_operation(term, "reducec");
-    assert_eq!(reduce.source_sizes, vec![1, 0, 1, 1, 1, 1]);
+    assert_eq!(reduce.source_sizes, vec![1, 0, 1, 0, 1, 1]);
     assert_eq!(reduce.target_sizes, vec![1]);
 
     let mut name_sources = term
@@ -51,7 +52,7 @@ fn reduce_names_use_only_the_context_their_bodies_need() {
 #[test]
 fn product_accumulator_has_matching_expanded_boundaries() {
     let reduce = only_operation(final_term("pair-reduce"), "reducec");
-    assert_eq!(reduce.source_sizes, vec![2, 0, 1, 1, 1, 1]);
+    assert_eq!(reduce.source_sizes, vec![2, 0, 1, 0, 1, 1]);
     assert_eq!(reduce.target_sizes, vec![2]);
     assert_fully_lowered("pair-reduce");
 }

@@ -1,0 +1,103 @@
+# What this program represents:
+#
+#   1. `contextual-bool-view` captures a bool and returns the closure
+#      `input -> captured and input`. The `and` operation is selected using a
+#      typed u64 value, so constructing the view has a context dependency.
+#   2. `nested-view-body` runs and discards an independent closed closure.
+#   3. In that same body it constructs `contextual-bool-view`, capturing true.
+#      The resulting view therefore behaves like the identity function.
+#   4. An inner bool.if selects the view and applies it to false.
+#   5. `nested-context-view` manually captures the independent closure in
+#      `nested-view-body`, leaving the typed u64 value as its argument. An outer
+#      bool.if selects this body closure.
+#
+# The concrete result is false. The test is about the region of the outer
+# closure: it must contain the complete construction of the view used by the
+# inner bool.if, including the context dependency of name.context-indexed-and.
+#
+# Intended shape after the closure-boundary definitions are inlined:
+#
+#   closed -------------------+
+#                              +-- outer : typed-u64 => bool -- outer bool.if
+#   typed-u64 -- argument ----+
+#
+#   inside outer(argument):
+#
+#     closed -- run -- discard
+#
+#     argument + bool.t -- contextual-bool-view -- view : bool => bool
+#         |                                            |
+#         +-- :.param -- name.context-indexed-and -----+
+#                                                      |
+#     name.bool.id ------------------------------------+-- inner bool.if
+#
+# Every path shown inside `outer` contributes to its behavior and must belong
+# to the same closure region.
+
+(def program context-view-bool-with-unit :
+  (bool val)
+  ->
+  ({1 (bool val)} *)
+= ([value.] {unit.intro [.value]} *.intro))
+
+(def program context-indexed-and :
+  ([n.] {(bool val) (bool val)})
+  ->
+  ([n.] (bool val))
+= bool.and)
+
+(def program contextual-bool-view :
+  ([n.] {
+    ({[.n] u64} :)
+    (bool val)
+  })
+  ->
+  ([n.] ({(bool val) (bool val)} =>))
+= ([len captured.]
+  ([.len] :.param [and-n.])
+  ({
+    ({
+      (name.context-view-bool-with-unit lift)
+      ({([.captured] defer) (name.bool.id lift)} tensor)
+    } compose)
+    ([.and-n] name.context-indexed-and lift)
+  } compose)
+))
+
+(def program nested-view-body :
+  ([n.] {
+    ({1 (bool val)} =>)
+    ({[.n] u64} :)
+  })
+  ->
+  ([n.] (bool val))
+= ([closed len.]
+  ([.closed] run [_closed-result.])
+  ({[.len] bool.t} contextual-bool-view [view.])
+  ({[.view] (name.bool.id lift) bool.t bool.f} bool.if)
+))
+
+(def program nested-context-view :
+  ([n.] ({[.n] u64} :))
+  ->
+  ([n.] (bool val))
+= ([len.]
+  (bool.t defer [closed.])
+  ([.len] u64.copy-params3 [len-copy unit-n identity-n body-n.])
+  ([.len-copy] u64.copy-param [argument-len false-n.])
+
+  # Manual application: capture closed, leaving len as the argument.
+  ({
+    ({
+      ([.unit-n] name.context-typed-u64-with-unit lift)
+      ({
+        ([.closed] defer)
+        ([.identity-n] name.context-typed-u64-id lift)
+      } tensor)
+    } compose)
+    ([.body-n] name.nested-view-body lift)
+  } compose [outer.])
+
+  ({[.outer] ([.false-n] name.context-typed-u64-false lift) bool.t
+    [.argument-len]} bool.if)
+))

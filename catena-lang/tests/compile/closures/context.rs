@@ -80,7 +80,7 @@ fn body_dependencies_form_a_minimal_ordered_context() {
     let internal = final_term("internal-context-if");
     assert_eq!(
         only_operation(internal, "bool.ifc").source_sizes,
-        vec![2, 1, 0, 1, 1, 1]
+        vec![0, 1, 0, 1, 1, 1]
     );
     assert!(internal.hypergraph.edges.iter().any(|edge| {
         edge.operation

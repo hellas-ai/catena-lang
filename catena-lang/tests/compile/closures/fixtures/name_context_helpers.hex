@@ -1,0 +1,19 @@
+# Structural functions used to capture one closure value manually while
+# leaving a typed-u64 value as the resulting closure's argument.
+(def program context-typed-u64-id :
+  ([n.] ({[.n] u64} :))
+  ->
+  ([n.] ({[.n] u64} :))
+= [value])
+
+(def program context-typed-u64-with-unit :
+  ([n.] ({[.n] u64} :))
+  ->
+  ([n.] {1 ({[.n] u64} :)} *)
+= ([value.] {unit.intro [.value]} *.intro))
+
+(def program context-typed-u64-false :
+  ([n.] ({[.n] u64} :))
+  ->
+  ([n.] (bool val))
+= ([_value.] bool.f))

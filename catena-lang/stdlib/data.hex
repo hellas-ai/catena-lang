@@ -10,6 +10,7 @@
 
   (arr u64 : 0 -> 1)
   (arr u32 : 0 -> 1)
+  (arr u16 : 0 -> 1)
   (arr f32 : 0 -> 1)
   (arr bf16 : 0 -> 1)
 })
@@ -108,6 +109,8 @@
   (arr bf16.select : {(bool val) (bf16 val) (bf16 val)} -> (bf16 val))
   (arr bf16.to-f32 : (bf16 val) -> (f32 val))
   (arr f32.to-bf16 : (f32 val) -> (bf16 val))
+  (arr bf16.bitcast-u16 : (bf16 val) -> (u16 val))
+  (arr u16.bitcast-bf16 : (u16 val) -> (bf16 val))
   ##############################################################################
   # u64 methods
   #

@@ -176,11 +176,11 @@ impl Runtime {
         self.mem_from_bytes(slice_as_bytes(values))
     }
 
-    pub fn mem_f32(&self, values: &[f32]) -> Result<MemOwn, MemError> {
+    pub fn mem_u16(&self, values: &[u16]) -> Result<MemOwn, MemError> {
         self.mem_from_bytes(slice_as_bytes(values))
     }
 
-    pub fn mem_bf16(&self, values: &[half::bf16]) -> Result<MemOwn, MemError> {
+    pub fn mem_f32(&self, values: &[f32]) -> Result<MemOwn, MemError> {
         self.mem_from_bytes(slice_as_bytes(values))
     }
 
@@ -283,10 +283,10 @@ impl Runtime {
             .into_iter()
             .map(|value| match value {
                 Value::Bool(value) => AbiValue::Bool(value),
+                Value::U16(value) => AbiValue::U16(value),
                 Value::U32(value) => AbiValue::U32(value),
                 Value::U64(value) => AbiValue::U64(value),
                 Value::F32(value) => AbiValue::F32(value),
-                Value::BF16(value) => AbiValue::BF16(value),
                 Value::MemOwn(memory) => AbiValue::Mem(memory.into_abi()),
                 Value::MemRef(memory) => AbiValue::Mem(memory.abi),
             })
@@ -304,10 +304,10 @@ impl Runtime {
     fn resolve_output(&self, output: AbiValue) -> Result<Value<'static>, ExecError> {
         match output {
             AbiValue::Bool(value) => Ok(Value::Bool(value)),
+            AbiValue::U16(value) => Ok(Value::U16(value)),
             AbiValue::U32(value) => Ok(Value::U32(value)),
             AbiValue::U64(value) => Ok(Value::U64(value)),
             AbiValue::F32(value) => Ok(Value::F32(value)),
-            AbiValue::BF16(value) => Ok(Value::BF16(value)),
             AbiValue::Mem(abi) => {
                 // SAFETY: cap.ref outputs are rejected at initialization, so
                 // every memory output transfers a GPU allocation owned by the

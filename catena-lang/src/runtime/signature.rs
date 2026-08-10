@@ -63,10 +63,10 @@ pub(crate) fn signatures(modules: &GpuModuleMap) -> SignatureTable {
 fn value_kind(ty: &CType) -> Option<ValueKind> {
     match ty {
         CType::Bool => Some(ValueKind::Bool),
+        CType::U16 => Some(ValueKind::U16),
         CType::U32 => Some(ValueKind::U32),
         CType::U64 => Some(ValueKind::U64),
         CType::F32 => Some(ValueKind::F32),
-        CType::BF16 => Some(ValueKind::BF16),
         CType::Named(name) if name == "catena_mem_own_t" => Some(ValueKind::MemOwn),
         CType::Named(name) if name == "catena_mem_ref_t" => Some(ValueKind::MemRef),
         _ => None,

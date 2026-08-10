@@ -122,6 +122,16 @@ __host__ __device__ static inline catena_bf16_t catena_bf16_from_f32(float value
 
 __host__ __device__ static inline float catena_bf16_to_f32(catena_bf16_t value) {
     return (float)value;
+}
+
+__host__ __device__ static inline catena_bf16_t catena_u16_bitcast_bf16(uint16_t bits) {
+    catena_bf16_t value;
+    value.data = bits;
+    return value;
+}
+
+__host__ __device__ static inline uint16_t catena_bf16_bitcast_u16(catena_bf16_t value) {
+    return value.data;
 }"#
         }
         GpuDialect::Cuda => {
@@ -136,6 +146,14 @@ __host__ __device__ static inline catena_bf16_t catena_bf16_from_f32(float value
 
 __host__ __device__ static inline float catena_bf16_to_f32(catena_bf16_t value) {
     return __bfloat162float(value);
+}
+
+__host__ __device__ static inline catena_bf16_t catena_u16_bitcast_bf16(uint16_t bits) {
+    return __ushort_as_bfloat16(bits);
+}
+
+__host__ __device__ static inline uint16_t catena_bf16_bitcast_u16(catena_bf16_t value) {
+    return __bfloat16_as_ushort(value);
 }"#
         }
     }
@@ -213,10 +231,12 @@ mod tests {
         assert!(hip.contains("#include <hip/hip_bfloat16.h>"));
         assert!(hip.contains("typedef hip_bfloat16 catena_bf16_t;"));
         assert!(hip.contains("return catena_bf16_t(value);"));
+        assert!(hip.contains("value.data = bits;"));
 
         let cuda = render_gpu_prelude(GpuDialect::Cuda);
         assert!(cuda.contains("#include <cuda_bf16.h>"));
         assert!(cuda.contains("typedef __nv_bfloat16 catena_bf16_t;"));
         assert!(cuda.contains("return __float2bfloat16_rn(value);"));
+        assert!(cuda.contains("return __ushort_as_bfloat16(bits);"));
     }
 }

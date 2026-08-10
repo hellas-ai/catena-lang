@@ -449,6 +449,8 @@ fn render_primitive_assignment(
         "bf16.select" => render_select(out, assignment)?,
         "bf16.to-f32" => render_bf16_to_f32(out, assignment)?,
         "f32.to-bf16" => render_f32_to_bf16(out, assignment)?,
+        "bf16.bitcast-u16" => render_bf16_bitcast_u16(out, assignment)?,
+        "u16.bitcast-bf16" => render_u16_bitcast_bf16(out, assignment)?,
         "ix.to-u64" => render_forget(out, assignment)?,
         "ix.zero" => render_ix_zero(out, assignment)?,
         "ix" => render_ix(out, assignment)?,
@@ -617,6 +619,36 @@ fn render_f32_to_bf16(out: &mut String, assignment: &GpuAssign) -> Result<(), Gp
     };
     out.push_str(&format!(
         "    {} = catena_bf16_from_f32({});\n",
+        output.name,
+        value_expr(input),
+    ));
+    Ok(())
+}
+
+fn render_bf16_bitcast_u16(out: &mut String, assignment: &GpuAssign) -> Result<(), GpuRenderError> {
+    let [input] = assignment.inputs.as_slice() else {
+        return Err(invalid_inputs(assignment, 1));
+    };
+    let [output] = assignment.outputs.as_slice() else {
+        return Err(invalid_outputs(assignment, 1));
+    };
+    out.push_str(&format!(
+        "    {} = catena_bf16_bitcast_u16({});\n",
+        output.name,
+        value_expr(input),
+    ));
+    Ok(())
+}
+
+fn render_u16_bitcast_bf16(out: &mut String, assignment: &GpuAssign) -> Result<(), GpuRenderError> {
+    let [input] = assignment.inputs.as_slice() else {
+        return Err(invalid_inputs(assignment, 1));
+    };
+    let [output] = assignment.outputs.as_slice() else {
+        return Err(invalid_outputs(assignment, 1));
+    };
+    out.push_str(&format!(
+        "    {} = catena_u16_bitcast_bf16({});\n",
         output.name,
         value_expr(input),
     ));

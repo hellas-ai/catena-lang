@@ -1,15 +1,14 @@
 use super::mem::{MemOwn, MemRef};
-use half::bf16;
 use serde::{Deserialize, Serialize};
 
 /// Public Catena runtime values accepted at program boundaries.
 #[derive(Debug)]
 pub enum Value<'a> {
     Bool(u8),
+    U16(u16),
     U32(u32),
     U64(u64),
     F32(f32),
-    BF16(bf16),
     MemOwn(MemOwn),
     MemRef(MemRef<'a>),
 }
@@ -18,10 +17,10 @@ pub enum Value<'a> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ValueKind {
     Bool,
+    U16,
     U32,
     U64,
     F32,
-    BF16,
     MemOwn,
     MemRef,
 }
@@ -35,6 +34,10 @@ impl<'a> Value<'a> {
         Value::U64(value)
     }
 
+    pub fn u16(value: u16) -> Self {
+        Value::U16(value)
+    }
+
     pub fn u32(value: u32) -> Self {
         Value::U32(value)
     }
@@ -43,17 +46,13 @@ impl<'a> Value<'a> {
         Value::F32(value)
     }
 
-    pub fn bf16(value: bf16) -> Self {
-        Value::BF16(value)
-    }
-
     pub(super) fn kind(&self) -> ValueKind {
         match self {
             Value::Bool(_) => ValueKind::Bool,
+            Value::U16(_) => ValueKind::U16,
             Value::U32(_) => ValueKind::U32,
             Value::U64(_) => ValueKind::U64,
             Value::F32(_) => ValueKind::F32,
-            Value::BF16(_) => ValueKind::BF16,
             Value::MemOwn(_) => ValueKind::MemOwn,
             Value::MemRef(_) => ValueKind::MemRef,
         }
@@ -72,6 +71,12 @@ impl<'a> From<u64> for Value<'a> {
     }
 }
 
+impl<'a> From<u16> for Value<'a> {
+    fn from(value: u16) -> Self {
+        Value::u16(value)
+    }
+}
+
 impl<'a> From<u32> for Value<'a> {
     fn from(value: u32) -> Self {
         Value::u32(value)
@@ -81,12 +86,6 @@ impl<'a> From<u32> for Value<'a> {
 impl<'a> From<f32> for Value<'a> {
     fn from(value: f32) -> Self {
         Value::f32(value)
-    }
-}
-
-impl<'a> From<bf16> for Value<'a> {
-    fn from(value: bf16) -> Self {
-        Value::bf16(value)
     }
 }
 

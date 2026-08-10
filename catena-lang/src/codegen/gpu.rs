@@ -10,7 +10,7 @@ use crate::codegen::{
         GpuFunctionPlacement, direct_function_placement, function_placement, function_placements,
     },
     lower_types::{CType, LoweredType},
-    ops::{ifc, materializec, reducec, row_major},
+    ops::{ifc, materializec, parallel, reducec, row_major},
     prelude::render_gpu_prelude,
     render_utils::{c_type, invalid_inputs, invalid_outputs, param_decl},
     runtime_type,
@@ -165,6 +165,15 @@ fn render_module_body(
                 assignment,
             )?;
             out.push('\n');
+        } else if assignment.op.as_str() == "parallel.materializec"
+            && parallel::context_kind(assignment) == Some(parallel::ContextKind::Grid)
+        {
+            parallel::render_materialize_kernel(
+                out,
+                &parallel::materialize_kernel_name(&module.entry.name, assignment)?,
+                assignment,
+            )?;
+            out.push('\n');
         }
     }
 
@@ -292,6 +301,17 @@ fn render_assignment(
 ) -> Result<(), GpuRenderError> {
     if let Some(symbol) = &assignment.call_symbol {
         return render_call(out, symbol, assignment);
+    }
+
+    match assignment.op.as_str() {
+        "parallel.allocate" => return parallel::render_allocate(out, assignment, dialect),
+        "parallel.await" | "parallel.release" | "parallel.barrier" => {
+            return parallel::render_synchronize(out, assignment, dialect);
+        }
+        "parallel.materializec" => {
+            return parallel::render_materialize(out, function, assignment);
+        }
+        _ => {}
     }
 
     if render_primitive_assignment(out, assignment)? {
@@ -437,6 +457,14 @@ fn render_primitive_assignment(
         "row-major-index" => row_major::render_index(out, assignment)?,
         "row-major-row" => row_major::render_row(out, assignment)?,
         "row-major-col" => row_major::render_col(out, assignment)?,
+        "shape.2d" => parallel::render_shape_2d(out, assignment)?,
+        "gpu.grid.2d" => parallel::render_grid_2d(out, assignment)?,
+        "parallel.plan" => parallel::render_plan(out, assignment)?,
+        "parallel.plan.root-types" => parallel::render_root_types(out, assignment)?,
+        "parallel.schedule" => parallel::render_schedule(out, assignment)?,
+        "gpu.scope-worker-to-block" => parallel::render_scope_worker_to_block(out, assignment)?,
+        "parallel.worker-context" => parallel::render_worker_context(out, assignment)?,
+        "parallel.worker-index" => parallel::render_worker_index(out, assignment)?,
         "u64.to-ix" => render_u64_to_ix(out, assignment)?,
         op if op.starts_with(CONST_U64_PREFIX) => {
             render_int_const(out, assignment, CONST_U64_PREFIX, "ULL")?

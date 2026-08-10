@@ -1,6 +1,9 @@
 use std::collections::{BTreeMap, HashSet};
 
-use crate::codegen::{GpuFunction, GpuModuleMap};
+use crate::codegen::{
+    GpuFunction, GpuModuleMap,
+    ops::parallel::{self, ContextKind},
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum GpuFunctionPlacement {
@@ -71,7 +74,10 @@ fn function_directly_requires_host(function: &GpuFunction) -> bool {
         matches!(
             assignment.op.as_str(),
             "gpu.materialize" | "materializec" | "buf.free"
-        )
+        ) || matches!(
+            assignment.op.as_str(),
+            "parallel.allocate" | "parallel.materializec"
+        ) && parallel::context_kind(assignment) == Some(ContextKind::Grid)
     })
 }
 

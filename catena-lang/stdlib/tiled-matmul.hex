@@ -320,9 +320,10 @@
   ([.tile-size] u64.copies6
     [grid-x-tile grid-y-tile block-x block-y kernel-tile-size _tile-unused.])
 
-  ({([.grid-n] :.forget) ([.grid-x-tile] :.forget)}
+  # CUDA/HIP X follows row-major columns (m), while Y follows rows (n).
+  ({([.grid-m] :.forget) ([.grid-x-tile] :.forget)}
     u64.div u64.name [grid-x.])
-  ({([.grid-m] :.forget) ([.grid-y-tile] :.forget)}
+  ({([.grid-n] :.forget) ([.grid-y-tile] :.forget)}
     u64.div u64.name [grid-y.])
 
   ([.grid-x] u64.copies2 [launch-grid-x kernel-grid-x.])

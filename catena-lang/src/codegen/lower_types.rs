@@ -66,6 +66,13 @@ pub fn lower_type(ty: &Tree<(), Operation>) -> Result<LoweredType, LowerTypeErro
                 lower_runtime_type(element)?,
             ))))
         }
+        Tree::Node(op, 0, children) if is_buffer_state_modifier(op.as_str()) => {
+            let [_context, buffer] = expect_binary(op.as_str(), children)?;
+            lower_runtime_type(buffer).map(LoweredType::Runtime)
+        }
+        Tree::Node(op, 0, children) if is_parallel_runtime_type(op.as_str()) => {
+            parallel_runtime_type(op.as_str(), children).map(LoweredType::Runtime)
+        }
         Tree::Node(op, 0, children) if op.as_str() == "mem" => {
             let [cap] = expect_unary(op.as_str(), children)?;
             memory_c_type(cap).map(LoweredType::Runtime)
@@ -118,6 +125,13 @@ pub fn lower_runtime_type(ty: &Tree<(), Operation>) -> Result<CType, LowerTypeEr
         Tree::Node(op, 0, children) if op.as_str() == "buf" => {
             let [_cap, _len, element] = expect_ternary(op.as_str(), children)?;
             Ok(CType::Pointer(Box::new(lower_runtime_type(element)?)))
+        }
+        Tree::Node(op, 0, children) if is_buffer_state_modifier(op.as_str()) => {
+            let [_context, buffer] = expect_binary(op.as_str(), children)?;
+            lower_runtime_type(buffer)
+        }
+        Tree::Node(op, 0, children) if is_parallel_runtime_type(op.as_str()) => {
+            parallel_runtime_type(op.as_str(), children)
         }
         Tree::Node(op, 0, children) if op.as_str() == "mem" => {
             let [cap] = expect_unary(op.as_str(), children)?;
@@ -240,6 +254,66 @@ fn is_gpu_control_type(name: &str) -> bool {
     )
 }
 
+/// Buffer-state modifiers describe access and synchronization obligations.
+/// They do not change the runtime representation of the wrapped buffer; the
+/// context argument is a type-level witness and therefore erases.
+fn is_buffer_state_modifier(name: &str) -> bool {
+    matches!(name, "writable" | "readable" | "pending")
+}
+
+fn is_parallel_runtime_type(name: &str) -> bool {
+    matches!(
+        name,
+        "shape.2d" | "gpu.grid.2d" | "parallel.plan" | "context" | "worker"
+    )
+}
+
+fn parallel_runtime_type(
+    name: &str,
+    children: &[Tree<(), Operation>],
+) -> Result<CType, LowerTypeError> {
+    let (expected, c_name) = match name {
+        "shape.2d" => (2, "catena_dim3_t"),
+        "gpu.grid.2d" => (4, "catena_launch_params_t"),
+        "parallel.plan" => (3, "catena_launch_params_t"),
+        "context" => (3, gpu_scoped_runtime_name(name, children)?),
+        "worker" => (3, gpu_scoped_runtime_name(name, children)?),
+        _ => unreachable!("checked by is_parallel_runtime_type"),
+    };
+    if children.len() != expected {
+        return Err(LowerTypeError::InvalidArity {
+            name: name.to_string(),
+            expected,
+            actual: children.len(),
+        });
+    }
+    Ok(CType::Named(c_name.to_string()))
+}
+
+fn gpu_scoped_runtime_name<'a>(
+    type_name: &str,
+    children: &'a [Tree<(), Operation>],
+) -> Result<&'a str, LowerTypeError> {
+    let Some(Tree::Node(level, _, _)) = children.first() else {
+        return Err(LowerTypeError::NoRuntimeRepresentation(Tree::Node(
+            type_name.parse().expect("type name should parse"),
+            0,
+            children.to_vec(),
+        )));
+    };
+    match (type_name, level.as_str()) {
+        ("context", "gpu.grid.2d") => Ok("catena_gpu_grid_context_t"),
+        ("context", "gpu.block.2d") => Ok("catena_gpu_block_context_t"),
+        ("worker", "gpu.grid.2d") => Ok("catena_gpu_grid_worker_t"),
+        ("worker", "gpu.block.2d") => Ok("catena_gpu_block_worker_t"),
+        _ => Err(LowerTypeError::NoRuntimeRepresentation(Tree::Node(
+            type_name.parse().expect("type name should parse"),
+            0,
+            children.to_vec(),
+        ))),
+    }
+}
+
 fn c_name_for_gpu_control(name: &str) -> String {
     match name {
         "gpu.3d" => "catena_dim3_t",
@@ -306,6 +380,62 @@ mod tests {
             lower_interface(&ty).unwrap(),
             vec![CType::Named("catena_gpu_env_t".to_string()), CType::Bool]
         );
+    }
+
+    #[test]
+    fn buffer_state_modifiers_lower_to_the_wrapped_buffer() {
+        let context = node("context", vec![leaf(0), leaf(1), leaf(2)]);
+        let buffer = node(
+            "buf",
+            vec![node("cap.own", vec![]), leaf(3), node("f32", vec![])],
+        );
+
+        for modifier in ["writable", "readable", "pending"] {
+            let ty = node(
+                "val",
+                vec![node(modifier, vec![context.clone(), buffer.clone()])],
+            );
+            assert_eq!(
+                lower_type(&ty).unwrap(),
+                LoweredType::Runtime(CType::Pointer(Box::new(CType::F32)))
+            );
+        }
+    }
+
+    #[test]
+    fn parallel_values_have_concrete_runtime_representations() {
+        let cases = [
+            (node("shape.2d", vec![leaf(0), leaf(1)]), "catena_dim3_t"),
+            (
+                node("gpu.grid.2d", vec![leaf(0), leaf(1), leaf(2), leaf(3)]),
+                "catena_launch_params_t",
+            ),
+            (
+                node("parallel.plan", vec![leaf(0), leaf(1), leaf(2)]),
+                "catena_launch_params_t",
+            ),
+            (
+                node(
+                    "context",
+                    vec![node("gpu.grid.2d", vec![]), leaf(1), leaf(2)],
+                ),
+                "catena_gpu_grid_context_t",
+            ),
+            (
+                node(
+                    "worker",
+                    vec![node("gpu.block.2d", vec![]), leaf(1), leaf(2)],
+                ),
+                "catena_gpu_block_worker_t",
+            ),
+        ];
+
+        for (ty, c_name) in cases {
+            assert_eq!(
+                lower_type(&ty).unwrap(),
+                LoweredType::Runtime(CType::Named(c_name.to_string()))
+            );
+        }
     }
 
     #[test]

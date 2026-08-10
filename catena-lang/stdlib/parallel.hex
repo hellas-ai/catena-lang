@@ -149,4 +149,35 @@
       ({cap.own [.output-count] f32} buf)
     } pending val)
   }))
+
+  # Closure-converted form of parallel.materialize. The producer's captured
+  # environment and function pointer replace its source-level closure value.
+  (arr parallel.materializec : {[
+    environment level workers groups output-count.
+  ]
+    ({[.level workers groups]} context)
+    ({
+      ({[.level workers groups]} context)
+      ({cap.own [.output-count] f32} buf)
+    } writable val)
+    ([.environment])
+    ({
+      ({
+        ([.environment])
+        ({
+          ({[.level workers groups]} worker)
+          ([.output-count] ix val)
+        } *)
+      } *)
+      (f32 val)
+    } -> val)
+  }
+  ->
+  ([environment level workers groups output-count.] {
+    ({[.level workers groups]} context)
+    ({
+      ({[.level workers groups]} context)
+      ({cap.own [.output-count] f32} buf)
+    } pending val)
+  }))
 })

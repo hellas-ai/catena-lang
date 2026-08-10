@@ -1,65 +1,12 @@
 # Execution contexts and workers
 (theory type nat {
-  # Shapes describe multidimensional coordinates. They are not part of the
-  # generic context representation; domains use them where physical layout
-  # matters.
-  (arr shape.2d : 2 -> 1)
-
   # A context describes one execution level, its total worker count, and the
   # number of groups at the next scope. Lowering interprets the nominal level.
   (arr context : 3 -> 1)
   (arr worker : 3 -> 1)
-
-  # A runtime configuration which schedules one root context.
-  (arr parallel.plan : 3 -> 1)
 })
 
 (theory program type {
-  # Reify two named extents as a runtime 2D shape. Its cardinality is fixed
-  # by the same type-level extents and cannot be supplied independently.
-  (arr shape.2d : {[x y.]
-    ({[.x] u64} :)
-    ({[.y] u64} :)
-  }
-  ->
-  ([x y.] ({[.x y]} shape.2d val)))
-
-  # Construct a plan from the shape of its groups and the shape of the workers
-  # within each group. `level` is a domain-specific runtime configuration.
-  (arr parallel.plan : {[
-    level group-x group-y worker-x worker-y.
-  ]
-    ([.level] val)
-    ({[.group-x group-y]} shape.2d val)
-    ({[.worker-x worker-y]} shape.2d val)
-  }
-  ->
-  ([level group-x group-y worker-x worker-y.]
-    ({
-      [.level]
-      ({({[.group-x group-y]} *) ({[.worker-x worker-y]} *)} *)
-      ({[.group-x group-y]} *)
-    } parallel.plan)))
-
-  # Preserve a plan while exposing its root worker type as an erased argument
-  # to polymorphic structural constructors.
-  (arr parallel.plan.root-types :
-    ([level workers groups.]
-      ({[.level workers groups]} parallel.plan))
-    ->
-    ([level workers groups.] {
-      ({[.level workers groups]} parallel.plan)
-      ({[.level workers groups]} worker)
-    }))
-
-  # Schedule a plan and select its root context.
-  (arr parallel.schedule :
-    ([level workers groups.]
-      ({[.level workers groups]} parallel.plan))
-    ->
-    ([level workers groups.]
-      ({[.level workers groups]} context)))
-
   # Expose the context associated with a worker while preserving the worker
   # for indexing and domain-specific scoping.
   (arr parallel.worker-context :

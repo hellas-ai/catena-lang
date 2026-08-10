@@ -334,9 +334,7 @@
   ([.kernel-grid-y] :.ty [kernel-grid-y-value grid-y-param.])
 
   ({[.launch-grid-x] [.launch-grid-y] [.block-x] [.block-y]}
-    gpu.launch-config.2d [plan.])
-  ([.plan] parallel.plan.root-types [typed-plan worker-type.])
-  ([.typed-plan] parallel.schedule [grid-context.])
+    gpu.root-context.2d [grid-context worker-type.])
   ({[.grid-context] [.output-len]}
     parallel.allocate [allocated-context output.])
 

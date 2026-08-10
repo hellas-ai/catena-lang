@@ -353,15 +353,6 @@ mod tests {
     #[test]
     fn parallel_values_have_concrete_runtime_representations() {
         let cases = [
-            (node("shape.2d", vec![leaf(0), leaf(1)]), "catena_dim3_t"),
-            (
-                node("gpu.grid.2d", vec![leaf(0), leaf(1), leaf(2), leaf(3)]),
-                "catena_launch_params_t",
-            ),
-            (
-                node("parallel.plan", vec![leaf(0), leaf(1), leaf(2)]),
-                "catena_launch_params_t",
-            ),
             (
                 node(
                     "context",

@@ -37,10 +37,7 @@ pub(in crate::codegen) enum ContextKind {
 /// Whether this backend supplies a concrete representation for the parallel
 /// type constructor. Generic parallel decoding does not choose these types.
 pub(in crate::codegen) fn is_runtime_type(name: &str) -> bool {
-    matches!(
-        name,
-        "shape.2d" | "gpu.grid.2d" | "parallel.plan" | "context" | "worker"
-    )
+    matches!(name, "context" | "worker")
 }
 
 /// Choose the CUDA/HIP runtime representation of a parallel type.
@@ -49,9 +46,6 @@ pub(in crate::codegen) fn lower_runtime_type(
     children: &[Tree<(), Operation>],
 ) -> Result<CType, LowerTypeError> {
     let (expected, c_name) = match name {
-        "shape.2d" => (2, "catena_dim3_t"),
-        "gpu.grid.2d" => (4, "catena_launch_params_t"),
-        "parallel.plan" => (3, "catena_launch_params_t"),
         "context" | "worker" => (3, scoped_runtime_name(name, children)?),
         _ => unreachable!("checked by is_runtime_type"),
     };
@@ -102,96 +96,27 @@ pub(in crate::codegen) fn context_kind(assignment: &GpuAssign) -> Option<Context
     })
 }
 
-pub(in crate::codegen) fn render_shape_2d(
-    out: &mut String,
-    assignment: &GpuAssign,
-) -> Result<(), GpuRenderError> {
-    let [x, y] = assignment.inputs.as_slice() else {
-        return Err(invalid_inputs(assignment, 2));
-    };
-    let [shape] = assignment.outputs.as_slice() else {
-        return Err(invalid_outputs(assignment, 1));
-    };
-    out.push_str(&format!(
-        "    {} = {{ (uint32_t){}, (uint32_t){}, 1 }};\n",
-        shape.name,
-        value_expr(x),
-        value_expr(y)
-    ));
-    Ok(())
-}
-
-pub(in crate::codegen) fn render_grid_2d(
+pub(in crate::codegen) fn render_root_context_2d(
     out: &mut String,
     assignment: &GpuAssign,
 ) -> Result<(), GpuRenderError> {
     let [grid_x, grid_y, block_x, block_y] = assignment.inputs.as_slice() else {
         return Err(invalid_inputs(assignment, 4));
     };
-    let [level] = assignment.outputs.as_slice() else {
-        return Err(invalid_outputs(assignment, 1));
+    let [context, worker] = assignment.outputs.as_slice() else {
+        return Err(invalid_outputs(assignment, 2));
     };
     out.push_str(&format!(
-        "    {} = {{ {{(uint32_t){}, (uint32_t){}, 1}}, {{(uint32_t){}, (uint32_t){}, 1}} }};\n",
-        level.name,
+        "    {} = {{ {{ {{(uint32_t){}, (uint32_t){}, 1}}, {{(uint32_t){}, (uint32_t){}, 1}} }} }};\n",
+        context.name,
         value_expr(grid_x),
         value_expr(grid_y),
         value_expr(block_x),
         value_expr(block_y)
     ));
-    Ok(())
-}
-
-pub(in crate::codegen) fn render_plan(
-    out: &mut String,
-    assignment: &GpuAssign,
-) -> Result<(), GpuRenderError> {
-    let [level, group_shape, worker_shape] = assignment.inputs.as_slice() else {
-        return Err(invalid_inputs(assignment, 3));
-    };
-    let [plan] = assignment.outputs.as_slice() else {
-        return Err(invalid_outputs(assignment, 1));
-    };
     out.push_str(&format!(
-        "    {} = {{ {}, {} }};\n",
-        plan.name,
-        value_expr(group_shape),
-        value_expr(worker_shape)
-    ));
-    out.push_str(&format!("    (void){};\n", value_expr(level)));
-    Ok(())
-}
-
-pub(in crate::codegen) fn render_root_types(
-    out: &mut String,
-    assignment: &GpuAssign,
-) -> Result<(), GpuRenderError> {
-    let [plan] = assignment.inputs.as_slice() else {
-        return Err(invalid_inputs(assignment, 1));
-    };
-    let [typed_plan, worker] = assignment.outputs.as_slice() else {
-        return Err(invalid_outputs(assignment, 2));
-    };
-    let plan = value_expr(plan);
-    out.push_str(&format!("    {} = {};\n", typed_plan.name, plan));
-    out.push_str(&format!("    {} = {{ {}, 0 }};\n", worker.name, plan));
-    Ok(())
-}
-
-pub(in crate::codegen) fn render_schedule(
-    out: &mut String,
-    assignment: &GpuAssign,
-) -> Result<(), GpuRenderError> {
-    let [plan] = assignment.inputs.as_slice() else {
-        return Err(invalid_inputs(assignment, 1));
-    };
-    let [context] = assignment.outputs.as_slice() else {
-        return Err(invalid_outputs(assignment, 1));
-    };
-    out.push_str(&format!(
-        "    {} = {{ {} }};\n",
-        context.name,
-        value_expr(plan)
+        "    {} = {{ {}.launch, 0 }};\n",
+        worker.name, context.name
     ));
     Ok(())
 }

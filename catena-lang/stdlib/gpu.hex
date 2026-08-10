@@ -25,9 +25,10 @@
 })
 
 (theory program type {
-  # Reify the GPU-specific root level. This is the only domain-specific value
-  # needed by generic plan construction.
-  (arr gpu.grid.2d : {[
+  # Construct the root GPU context. The topology-specific constructor fixes
+  # both the total worker space and its grouping into blocks, while the generic
+  # parallel operations consume only the resulting context and worker types.
+  (arr gpu.root-context.2d : {[
     grid-x grid-y block-x block-y.
   ]
     ({[.grid-x] u64} :)
@@ -37,48 +38,18 @@
   }
   ->
   ([grid-x grid-y block-x block-y.]
-    ({[.grid-x grid-y block-x block-y]} gpu.grid.2d val)))
-
-  # Build a physical 2D GPU plan. The grid context contains every thread and
-  # groups them by block. Runtime plan construction uses only generic parallel
-  # shape and plan primitives.
-  (def gpu.launch-config.2d : {[
-    grid-x grid-y block-x block-y.
-  ]
-    ({[.grid-x] u64} :)
-    ({[.grid-y] u64} :)
-    ({[.block-x] u64} :)
-    ({[.block-y] u64} :)
-  }
-  ->
-  ([grid-x grid-y block-x block-y.]
-    ({
-      ({[.grid-x grid-y block-x block-y]} gpu.grid.2d)
-      ({({[.grid-x grid-y]} *) ({[.block-x block-y]} *)} *)
-      ({[.grid-x grid-y]} *)
-    } parallel.plan))
-  = ([grid-x grid-y block-x block-y.]
-    ([.grid-x] u64.copies2 [level-grid-x shape-grid-x.]
-      ([.grid-y] u64.copies2 [level-grid-y shape-grid-y.]
-        ([.block-x] u64.copies2 [level-block-x shape-block-x.]
-          ([.block-y] u64.copies2 [level-block-y shape-block-y.]
-            ({
-              [.level-grid-x]
-              [.level-grid-y]
-              [.level-block-x]
-              [.level-block-y]
-            } gpu.grid.2d [level.]
-              ({[.shape-grid-x] [.shape-grid-y]} shape.2d [grid-shape.]
-                ({[.shape-block-x] [.shape-block-y]} shape.2d [block-shape.]
-                  ({[.level] [.grid-shape] [.block-shape]} parallel.plan)
-                )
-              )
-            )
-          )
-        )
-      )
-    )
-  ))
+    {
+      ({
+        ({[.grid-x grid-y block-x block-y]} gpu.grid.2d)
+        ({({[.grid-x grid-y]} *) ({[.block-x block-y]} *)} *)
+        ({[.grid-x grid-y]} *)
+      } context)
+      ({
+        ({[.grid-x grid-y block-x block-y]} gpu.grid.2d)
+        ({({[.grid-x grid-y]} *) ({[.block-x block-y]} *)} *)
+        ({[.grid-x grid-y]} *)
+      } worker)
+    }))
 
   # Reinterpret a grid worker relative to its containing block.
   (arr gpu.scope-worker-to-block : {[

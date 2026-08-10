@@ -7,6 +7,7 @@ mod context;
 mod discard_terminated;
 mod materialize;
 mod matmul;
+mod name_context_dependencies;
 mod named_calls;
 mod products;
 mod reduce;

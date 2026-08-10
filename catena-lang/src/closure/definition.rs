@@ -174,7 +174,13 @@ fn define_region(
     // any node in the generated body. Compact them so each generated definition
     // has a minimal, locally numbered type context, while retaining the reverse
     // mapping needed to wire `name.closure.*` at the original use site.
-    let context = ClosureContext::from_term(&body);
+    let context = ClosureContext::from_term_and_inputs(
+        &body,
+        region
+            .context
+            .iter()
+            .filter_map(|node| term.hypergraph.nodes.get(node.0)),
+    );
     let original_context_leaves = context.original_leaf_by_compact_leaf.clone();
     let body = context.relabel_term(body);
 
@@ -477,9 +483,20 @@ impl ClosureContext {
     /// inside the closure may use a type metavariable which is absent from the
     /// runtime boundary. That metavariable must still be part of the generated
     /// `closure.*` and `name.closure.*` context.
+    #[cfg(test)]
     fn from_term(term: &AnnotatedTerm) -> Self {
+        Self::from_term_and_inputs(term, std::iter::empty())
+    }
+
+    fn from_term_and_inputs<'a>(
+        term: &AnnotatedTerm,
+        inputs: impl IntoIterator<Item = &'a Obj>,
+    ) -> Self {
         let mut leaves = BTreeSet::new();
         for object in &term.hypergraph.nodes {
+            collect_leaf_indices(object, &mut leaves);
+        }
+        for object in inputs {
             collect_leaf_indices(object, &mut leaves);
         }
         Self {

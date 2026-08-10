@@ -32,6 +32,7 @@ const CONVERTED_PRIMITIVES: &[(&str, &str)] = &[
     ("bool.if", "bool.ifc"),
     ("reduce", "reducec"),
     ("materialize", "materializec"),
+    ("parallel.materialize", "parallel.materializec"),
 ];
 
 pub(super) struct SelectedReplacement {
@@ -286,19 +287,33 @@ fn build_closure_value(
                 .ok_or(ReplaceClosuresError::NodeOutOfBounds { node: node.0 })
         })
         .collect::<Result<Vec<_>, _>>()?;
+    let context_sources = region
+        .context
+        .iter()
+        .map(|node| {
+            definition
+                .hypergraph
+                .nodes
+                .get(node.0)
+                .cloned()
+                .map(|object| replacement.new_node(object))
+                .ok_or(ReplaceClosuresError::NodeOutOfBounds { node: node.0 })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
 
     let projected = add_context_projection(
         &mut replacement,
         definition_name,
         generated_id,
         &capture_sources,
+        &context_sources,
         &generated_name.source_types,
     );
     let environment = pack_environment(&mut replacement, projected.environment_components);
     let function_pointer =
         add_generated_name(&mut replacement, generated_name, projected.name_sources);
 
-    replacement.sources = capture_sources;
+    replacement.sources = capture_sources.into_iter().chain(context_sources).collect();
     replacement.targets = vec![environment, function_pointer];
     Ok(replacement)
 }
@@ -355,8 +370,14 @@ fn add_context_projection(
     definition_name: &Operation,
     generated_id: usize,
     capture_sources: &[NodeId],
+    context_sources: &[NodeId],
     name_source_types: &[Obj],
 ) -> ProjectedInputs {
+    let projection_sources = capture_sources
+        .iter()
+        .chain(context_sources)
+        .copied()
+        .collect::<Vec<_>>();
     let environment_components = capture_sources
         .iter()
         .map(|source| replacement.new_node(replacement.hypergraph.nodes[source.0].clone()))
@@ -372,7 +393,7 @@ fn add_context_projection(
         .collect::<Vec<_>>();
     replacement.new_edge(
         ClosureForgotten::Operation(context_operation(definition_name, generated_id)),
-        (capture_sources.to_vec(), targets),
+        (projection_sources, targets),
     );
     ProjectedInputs {
         environment_components,
@@ -437,13 +458,14 @@ fn splice_region(
 
     // Append the small graph built by `build_closure_value` and identify its
     // capture inputs with the retained environment nodes of the outer graph.
-    let retained_environment = region
+    let retained_inputs = region
         .environment
         .iter()
+        .chain(&region.context)
         .map(|node| remap_node(&node_map, *node))
         .collect::<Result<Vec<_>, _>>()?;
     let (replacement_sources, replacement_targets) = rewritten.append(replacement.clone());
-    for (outer, inner) in retained_environment.into_iter().zip(replacement_sources) {
+    for (outer, inner) in retained_inputs.into_iter().zip(replacement_sources) {
         rewritten.unify(outer, inner);
     }
 
@@ -493,25 +515,26 @@ fn assert_replacement_boundary(
     );
     assert_eq!(
         replacement.sources.len(),
-        region.environment.len(),
-        "closure replacement source arity must match the captured environment"
+        region.environment.len() + region.context.len(),
+        "closure replacement source arity must match its runtime and context inputs"
     );
     assert_eq!(
         replacement.targets.len(),
         2,
         "closure replacement must produce exactly (Environment, FnPointer)"
     );
-    for (index, (&environment, &replacement_source)) in region
+    for (index, (&input, &replacement_source)) in region
         .environment
         .iter()
+        .chain(&region.context)
         .zip(&replacement.sources)
         .enumerate()
     {
-        let environment_type = &definition.hypergraph.nodes[environment.0];
+        let input_type = &definition.hypergraph.nodes[input.0];
         let replacement_type = &replacement.hypergraph.nodes[replacement_source.0];
         assert_eq!(
-            environment_type, replacement_type,
-            "closure replacement source {index} must have the same type as its captured environment wire"
+            input_type, replacement_type,
+            "closure replacement source {index} must preserve its boundary input type"
         );
     }
 }
@@ -535,6 +558,7 @@ fn plan_region_deletion(
     let environment = region
         .environment
         .iter()
+        .chain(&region.context)
         .map(|node| node.0)
         .collect::<BTreeSet<_>>();
     let mut deleted_nodes = region
@@ -680,17 +704,17 @@ fn declare_context_arrows(
         .zip(&definition.hypergraph.adjacency)
         .filter(|(operation, _)| operation.as_str().starts_with(GENERATED_CONTEXT_PREFIX))
     {
+        let source_types = node_types(definition, &boundary.sources);
+        let target_types = node_types(definition, &boundary.targets);
+        let context = context_leaf_map(
+            source_types.iter().chain(&target_types),
+            ambient_context_arity,
+        );
         let raw = RawTheoryArrow {
             name: operation.clone(),
             type_maps: (
-                boundary_to_hexpr(
-                    &node_types(definition, &boundary.sources),
-                    ambient_context_arity,
-                ),
-                boundary_to_hexpr(
-                    &node_types(definition, &boundary.targets),
-                    ambient_context_arity,
-                ),
+                boundary_to_hexpr(&source_types, &context)?,
+                boundary_to_hexpr(&target_types, &context)?,
             ),
             definition: None,
         };
@@ -708,28 +732,59 @@ fn declare_context_arrows(
     Ok(())
 }
 
-fn boundary_to_hexpr(objects: &[Obj], context_arity: usize) -> Hexpr {
-    if objects.is_empty() {
-        return Hexpr::Frobenius {
-            sources: context_vars(context_arity),
-            targets: vec![],
-        };
+fn context_leaf_map<'a>(
+    objects: impl Iterator<Item = &'a Obj>,
+    ambient_context_arity: usize,
+) -> BTreeMap<usize, usize> {
+    let mut leaves = (0..ambient_context_arity).collect::<BTreeSet<_>>();
+    for object in objects {
+        collect_leaf_indices(object, &mut leaves);
     }
-    let context = context_vars(context_arity);
+    leaves
+        .into_iter()
+        .enumerate()
+        .map(|(compact, original)| (original, compact))
+        .collect()
+}
+
+fn boundary_to_hexpr(
+    objects: &[Obj],
+    compact_by_leaf: &BTreeMap<usize, usize>,
+) -> Result<Hexpr, ReplaceClosuresError> {
+    let context = context_vars(compact_by_leaf.len());
+    if objects.is_empty() {
+        return Ok(Hexpr::Frobenius {
+            sources: context,
+            targets: vec![],
+        });
+    }
     let mut leaves = Vec::new();
     for object in objects {
         collect_leaf_indices(object, &mut leaves);
     }
-    Hexpr::Composition(vec![
+    let compact_objects = objects
+        .iter()
+        .map(|object| compact_type_map_leaves(object, compact_by_leaf))
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(Hexpr::Composition(vec![
         Hexpr::Frobenius {
             sources: context.clone(),
             targets: leaves
                 .into_iter()
-                .map(|leaf| context[leaf].clone())
-                .collect(),
+                .map(|leaf| {
+                    compact_by_leaf
+                        .get(&leaf)
+                        .map(|compact| context[*compact].clone())
+                        .ok_or_else(|| {
+                            ReplaceClosuresError::TypeMapEvaluation(format!(
+                                "context projection depends on missing context leaf {leaf}"
+                            ))
+                        })
+                })
+                .collect::<Result<_, _>>()?,
         },
-        objects_to_hexpr(objects),
-    ])
+        objects_to_hexpr(&compact_objects),
+    ]))
 }
 
 fn interpret_type_maps(
@@ -898,6 +953,7 @@ mod tests {
             codomain,
             closure,
             environment: vec![],
+            context: vec![],
             nodes: vec![domain, internal, codomain],
             edges: vec![first, second],
         };

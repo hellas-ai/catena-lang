@@ -1,0 +1,96 @@
+(def program copied-context-id :
+  ([n.] (bool val))
+  ->
+  ([n.] (bool val))
+= [value])
+
+(def program copied-context-not :
+  ([n.] (bool val))
+  ->
+  ([n.] (bool val))
+= bool.not)
+
+# Copy the typed value and use each result as context for a different name.
+# `copied-name-context-view` constructs the closure `not` by composing an
+# indexed identity with an indexed negation. The two names require separate
+# context wires, so the typed value is copied before they are constructed.
+(def program copied-name-context-view :
+  ([n.] ({[.n] u64} :))
+  ->
+  ([n.] ({(bool val) (bool val)} =>))
+= ([len.]
+  ([.len] u64.copy-param [second-len first-param.])
+  ({
+    ([.first-param] name.copied-context-id lift)
+    (([.second-len] :.param) name.copied-context-not lift)
+  } compose)
+))
+
+# What this program represents:
+#
+#   1. `copied-name-context` creates a closed closure returning true.
+#   2. It captures that closure in `copied-name-context-body`, while leaving
+#      the typed u64 value as the new closure's argument.
+#   3. The body runs and discards the closed closure.
+#   4. It builds the `not` view described above from the typed argument.
+#   5. The inner bool.if selects that view and applies it to false.
+#
+# The concrete result is therefore true. The test is about retaining both
+# copied context paths used to construct the selected closure.
+#
+# Intended shape after inlining copied-name-context-body:
+#
+#   closed ----------------------+
+#                                 +-- outer : typed-u64 => bool --+
+#   typed-u64 -- argument -------+                                |
+#                                                                  v
+#   inside outer(argument):                              outer bool.if
+#
+#     closed -- run -- discard
+#
+#                              +-- first-param -- name.id ----- lift --+
+#     argument -- copy-param --+                                     +-- compose
+#                              +-- second-len -- :.param -- name.not +
+#                                                                       |
+#                                                                       v
+#                                                               inner bool.if
+#
+# The outer closure region must include the copy and both context-dependent
+# name paths, even though they construct a closure for the inner bool.if.
+(def program copied-name-context-body :
+  ([n.] {
+    ({1 (bool val)} =>)
+    ({[.n] u64} :)
+  })
+  ->
+  ([n.] (bool val))
+= ([closed len.]
+  ([.closed] run [_closed-result.])
+  ([.len] copied-name-context-view [branch.])
+  ({[.branch] (name.bool.id lift) bool.t bool.f} bool.if)
+))
+
+(def program copied-name-context :
+  ([n.] ({[.n] u64} :))
+  ->
+  ([n.] (bool val))
+= ([len.]
+  (bool.t defer [closed.])
+  ([.len] u64.copy-params3 [len-copy unit-n identity-n body-n.])
+  ([.len-copy] u64.copy-param [argument-len false-n.])
+
+  # Manual partial application: capture `closed`, leaving len as the argument.
+  ({
+    ({
+      ([.unit-n] name.context-typed-u64-with-unit lift)
+      ({
+        ([.closed] defer)
+        ([.identity-n] name.context-typed-u64-id lift)
+      } tensor)
+    } compose)
+    ([.body-n] name.copied-name-context-body lift)
+  } compose [outer.])
+
+  ({[.outer] ([.false-n] name.context-typed-u64-false lift) bool.t
+    [.argument-len]} bool.if)
+))

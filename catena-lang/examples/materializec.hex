@@ -164,6 +164,56 @@
   ({[.named-rows] [.output]} buf.to-mem)
 ))
 
+(def program materialize-reduce-f32-pair-term :
+  ([n k.] {
+    ({({(cap.ref mem) (u64 val)} *) ({([.n] ix val) ([.k] ix val)} *)} *)
+  })
+  ->
+  ([n k.] ({(f32 val) (f32 val)} *))
+= ([arguments.]
+  ([.arguments] materialize-reduce-f32-term [value.])
+  ({[.value] [.value]} *.intro)
+))
+
+(def program materialize-reduce-f32-pair-epilogue :
+  ([n.] {
+    ({
+      ({(cap.ref mem) (u64 val)} *)
+      ({([.n] ix val) ({(f32 val) (f32 val)} *)} *)
+    } *)
+  })
+  ->
+  ([n.] ({(f32 val) (f32 val)} *))
+= ([arguments.]
+  ([.arguments] *.elim [_inputs index-and-sums.])
+  ([.index-and-sums] *.elim [_index sums.])
+  [.sums]
+))
+
+(def program materialize-reduce-f32-pair-rows :
+  {(cap.ref mem) (u64 val) (u64 val)}
+  ->
+  {(cap.own mem) (cap.own mem)}
+= ([memory rows columns.]
+  ([.rows] u64.name [named-rows.])
+  ([.columns] u64.name [named-columns.])
+  ({[.memory] [.columns]} *.intro [env.])
+  {
+    [.named-rows]
+    [.named-columns]
+    [.env]
+    ({
+      ([.named-rows] :.param)
+      ([.named-columns] :.param)
+    } name.materialize-reduce-f32-pair-term)
+    (([.named-rows] :.param) name.materialize-reduce-f32-pair-epilogue)
+  } materializec.reduce-f32-pair [left right.]
+  {
+    ({[.named-rows] [.left]} buf.to-mem)
+    ({[.named-rows] [.right]} buf.to-mem)
+  }
+))
+
 # A deliberately simple stand-in for exp used to test the softmax primitive:
 # shifted + 2 maps row [0, 1, 2] to numerators [0, 1, 2].
 (def program materialize-softmax-f32-exp : (f32 val) -> (f32 val)
@@ -274,5 +324,88 @@
   {
     ({[.element-count] [.buffer-after]} buf.to-mem)
     ({[.one] [.index]} buf.to-mem)
+  }
+))
+
+(def program materialize-borrow-topk-f32 :
+  (cap.own mem)
+  ->
+  {(cap.own mem) (cap.own mem)}
+= ([memory.]
+  ([.memory] mem.cast.f32 [element-count buffer.])
+  (const.u64.0x0000000000000002 u64.name [rows.])
+  (const.u64.0x0000000000000010 u64.name [output-count.])
+  (const.u64.0x0000000000000008 [columns.])
+  (const.u64.0x0000000000000008 [k.])
+  {
+    [.buffer]
+    [.element-count]
+    [.rows]
+    [.output-count]
+    [.columns]
+    [.k]
+  } materializec.borrow-topk-f32 [buffer-after indices.]
+  {
+    ({[.element-count] [.buffer-after]} buf.to-mem)
+    ({[.output-count] [.indices]} buf.to-mem)
+  }
+))
+
+(def program materialize-borrow-topk-f32-dynamic :
+  {(cap.own mem) (u64 val) (u64 val) (u64 val)}
+  ->
+  {(cap.own mem) (cap.own mem)}
+= ([memory rows columns k.]
+  ([.memory] mem.cast.f32 [element-count buffer.])
+  ([.rows] u64.name [named-rows.])
+  ([.rows k] u64.mul [output-count-value.])
+  ([.output-count-value] u64.name [output-count.])
+  {
+    [.buffer]
+    [.element-count]
+    [.named-rows]
+    [.output-count]
+    [.columns]
+    [.k]
+  } materializec.borrow-topk-f32 [buffer-after indices.]
+  {
+    ({[.element-count] [.buffer-after]} buf.to-mem)
+    ({[.output-count] [.indices]} buf.to-mem)
+  }
+))
+
+(def program materialize-borrow-routed-bf16-gemv-pair :
+  {(cap.own mem) (cap.ref mem) (cap.ref mem) (cap.own mem)}
+  ->
+  {(cap.own mem) (cap.own mem) (cap.own mem) (cap.own mem)}
+= ([input gate-weight up-weight selected.]
+  ([.input] mem.cast.f32 [input-count input-buffer.])
+  ([.gate-weight] mem.cast.bf16 [gate-count gate-buffer.])
+  ([.up-weight] mem.cast.bf16 [up-count up-buffer.])
+  ([.selected] mem.cast.u64 [selected-count selected-buffer.])
+  (const.u64.0x0000000000000004 u64.name [output-count.])
+  (const.u64.0x0000000000000004 u64.name [reduction-count.])
+  (const.u64.0x0000000000000001 [slots.])
+  (const.u64.0x0000000000000002 [output-features.])
+  {
+    [.input-buffer]
+    [.input-count]
+    [.gate-buffer]
+    [.gate-count]
+    [.up-buffer]
+    [.up-count]
+    [.selected-buffer]
+    [.selected-count]
+    [.output-count]
+    [.reduction-count]
+    [.slots]
+    [.output-features]
+  } materializec.borrow-routed-bf16-gemv-pair
+    [input-after selected-after gate-output up-output.]
+  {
+    ({[.input-count] [.input-after]} buf.to-mem)
+    ({[.selected-count] [.selected-after]} buf.to-mem)
+    ({[.output-count] [.gate-output]} buf.to-mem)
+    ({[.output-count] [.up-output]} buf.to-mem)
   }
 ))

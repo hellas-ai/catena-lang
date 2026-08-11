@@ -130,6 +130,34 @@
     ({cap.own [.n] f32} buf val)
   }})
 
+  # Compute paired routed BF16 matrix-vector products while returning the
+  # owned input and expert-index buffers. For each output, both F32 sums use
+  # the exact adjacent-pair tree specified by materializec.reduce-f32. The
+  # weight layout is [expert, output-feature, reduction-feature], selected is
+  # [row, slot], and output is [row, slot, output-feature].
+  (arr materializec.borrow-routed-bf16-gemv-pair :
+    {[input-cap gate-cap up-cap selected-cap n k.]
+      ({cap.own [.input-cap] f32} buf val)
+      ({[.input-cap] u64} :)
+      ({cap.ref [.gate-cap] bf16} buf val)
+      ({[.gate-cap] u64} :)
+      ({cap.ref [.up-cap] bf16} buf val)
+      ({[.up-cap] u64} :)
+      ({cap.own [.selected-cap] u64} buf val)
+      ({[.selected-cap] u64} :)
+      ({[.n] u64} :)
+      ({[.k] u64} :)
+      (u64 val)
+      (u64 val)
+    }
+    ->
+    {[input-cap gate-cap up-cap selected-cap n k.] {
+      ({cap.own [.input-cap] f32} buf val)
+      ({cap.own [.selected-cap] u64} buf val)
+      ({cap.own [.n] f32} buf val)
+      ({cap.own [.n] f32} buf val)
+    }})
+
   # Find the greatest F32 element while returning the source owner. Comparison
   # uses IEEE-bit total order (negative NaNs through positive NaNs); equal bit
   # patterns select the greatest index. The input must be non-empty. The index
@@ -141,6 +169,22 @@
   } -> {[n one.] {
     ({cap.own [.n] f32} buf val)
     ({cap.own [.one] u64} buf val)
+  }})
+
+  # Select stable descending top-k indices independently from contiguous F32
+  # rows while returning the source owner. Equal numeric values keep the lower
+  # column index. The GPU implementation supports 1 <= k <= 8 and emits a
+  # row-major [rows, k] U64 buffer without changing any F32 bits.
+  (arr materializec.borrow-topk-f32 : {[n rows out.]
+    ({cap.own [.n] f32} buf val)
+    ({[.n] u64} :)
+    ({[.rows] u64} :)
+    ({[.out] u64} :)
+    (u64 val)
+    (u64 val)
+  } -> {[n rows out.] {
+    ({cap.own [.n] f32} buf val)
+    ({cap.own [.out] u64} buf val)
   }})
 
   # Materialize F32 outputs by cooperatively reducing one independent domain
@@ -161,6 +205,21 @@
     ({({[.x] ({([.n] ix val) ([.k] ix val)} *)} *) (f32 val)} -> val)
     ({({[.x] ({([.n] ix val) (f32 val)} *)} *) (f32 val)} -> val)
   } -> {[x n k.] ({cap.own [.n] f32} buf val)})
+
+  # Materialize a pair of F32 reductions in one kernel. The shared term and
+  # epilogue functions each return two F32 values. Each result uses the exact
+  # adjacent-pair tree specified by materializec.reduce-f32; only term setup
+  # and synchronization barriers are shared between the two trees.
+  (arr materializec.reduce-f32-pair : {[x n k.]
+    ({[.n] u64} :)
+    ({[.k] u64} :)
+    ([.x])
+    ({({[.x] ({([.n] ix val) ([.k] ix val)} *)} *) ({(f32 val) (f32 val)} *)} -> val)
+    ({({[.x] ({([.n] ix val) ({(f32 val) (f32 val)} *)} *)} *) ({(f32 val) (f32 val)} *)} -> val)
+  } -> {[x n k.] {
+    ({cap.own [.n] f32} buf val)
+    ({cap.own [.n] f32} buf val)
+  }})
 
   # Normalize contiguous F32 rows in place. The operation consumes and
   # returns the owner; `columns` must be non-zero and divide n exactly.

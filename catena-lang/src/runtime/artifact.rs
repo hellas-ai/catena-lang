@@ -120,6 +120,20 @@ pub(super) fn compile(cpp_path: &Path, dialect: GpuDialect) -> Result<SharedObje
     };
     let module_path = build_dir.path().join(module_filename);
     let so_path = build_dir.path().join("module.so");
+
+    // Profilers which instrument a process from startup can interfere with a
+    // nested hipcc invocation. This opt-in hook lets an exploratory runner
+    // compile the exact generated module once outside the profiler and load a
+    // copy on the profiled run. The caller owns cache validity deliberately;
+    // ordinary Runtime construction never consults this path.
+    if let Some(cached_path) = std::env::var_os("CATENA_GPU_MODULE_LOAD") {
+        std::fs::copy(cached_path, &so_path)?;
+        return Ok(SharedObject {
+            _build_dir: build_dir,
+            path: so_path,
+        });
+    }
+
     std::fs::copy(cpp_path, &module_path)?;
 
     let compiler = gpu_compiler(dialect);
@@ -165,6 +179,10 @@ pub(super) fn compile(cpp_path: &Path, dialect: GpuDialect) -> Result<SharedObje
             status: output.status,
             stderr: String::from_utf8_lossy(&output.stderr).trim().to_string(),
         });
+    }
+
+    if let Some(cache_path) = std::env::var_os("CATENA_GPU_MODULE_SAVE") {
+        std::fs::copy(&so_path, cache_path)?;
     }
 
     Ok(SharedObject {

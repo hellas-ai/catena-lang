@@ -179,8 +179,29 @@ fn render_module_body(
                 assignment,
             )?;
             out.push('\n');
+        } else if assignment.op.as_str() == "materializec.borrow-argmax-f32" {
+            materializec::render_borrow_argmax_f32_kernel(
+                out,
+                &materializec::kernel_name(&module.entry.name, assignment)?,
+                assignment,
+            )?;
+            out.push('\n');
+        } else if assignment.op.as_str() == "materializec.borrow-reduce-f32" {
+            materializec::render_borrow_reduce_f32_kernel(
+                out,
+                &materializec::kernel_name(&module.entry.name, assignment)?,
+                assignment,
+            )?;
+            out.push('\n');
         } else if assignment.op.as_str() == "materializec.reduce-f32" {
             materializec::render_reduce_f32_kernel(
+                out,
+                &materializec::kernel_name(&module.entry.name, assignment)?,
+                assignment,
+            )?;
+            out.push('\n');
+        } else if assignment.op.as_str() == "materializec.softmax-f32" {
+            materializec::render_softmax_f32_kernel(
                 out,
                 &materializec::kernel_name(&module.entry.name, assignment)?,
                 assignment,
@@ -329,8 +350,17 @@ fn render_assignment(
         "materializec.borrow" => {
             materializec::render_borrow_call(out, function, assignment, dialect)?
         }
+        "materializec.borrow-argmax-f32" => {
+            materializec::render_borrow_argmax_f32_call(out, function, assignment, dialect)?
+        }
+        "materializec.borrow-reduce-f32" => {
+            materializec::render_borrow_reduce_f32_call(out, function, assignment, dialect)?
+        }
         "materializec.reduce-f32" => {
             materializec::render_reduce_f32_call(out, function, assignment, dialect)?
+        }
+        "materializec.softmax-f32" => {
+            materializec::render_softmax_f32_call(out, function, assignment)?
         }
         op => {
             return Err(GpuRenderError::UnsupportedOp(

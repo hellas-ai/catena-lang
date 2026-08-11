@@ -7,6 +7,20 @@
 })
 
 (theory program type {
+  # Build an execution context from topology-specific metadata and runtime
+  # parameters. The metadata is type-level and erases before codegen.
+  (arr parallel.context : {[
+    level workers groups parameters.
+  ]
+    [.level]
+    [.workers]
+    [.groups]
+    [.parameters]
+  }
+  ->
+  ([level workers groups parameters.]
+    ({[.level workers groups]} context)))
+
   # Expose the context associated with a worker while preserving the worker
   # for indexing and domain-specific scoping.
   (arr parallel.worker-context :

@@ -218,12 +218,14 @@
 })
 
 # Evaluate one logical C cell selected independently of the physical worker.
+# The materialized flat index is converted to a logical row-major C index.
 (def program gpu.f32.tiled-matmul.cell.kernel :
   ([grid-x grid-y n k m tile-size.] {
     [.n]
     [.m]
     [.n]
     [.m]
+    ({[.m] u64} :)
     ({({([.n] ix val) ([.k] ix val)} *) (f32 val)} =>)
     ({({([.k] ix val) ([.m] ix val)} *) (f32 val)} =>)
     ({[.k] u64} :)
@@ -237,14 +239,16 @@
         ({({[.grid-x grid-y]} *) ({[.tile-size tile-size]} *)} *)
         ({[.grid-x grid-y]} *)
       } worker)
-      ({([.n] ix val) ([.m] ix val)} *)
+      (({[.n m]} *) ix val)
     } *)
   })
   ->
   ([grid-x grid-y n k m tile-size.] (f32 val))
-= {[n-param m-param step-n-param step-m-param a b k tile-size
+= {[n-param m-param step-n-param step-m-param indices-m-len a b k tile-size
     tile-element-count _grid-x _grid-y work-item.]
-  ([.work-item] *.elim [grid-worker c-index.])
+  ([.work-item] *.elim [grid-worker flat-c-index.])
+  ({[.indices-m-len] [.flat-c-index]}
+    f32.row-major.indices [c-index.])
   # c-index is the logical 2D index of C. The physical worker index is
   # represented independently by grid-worker.
   ([.grid-worker]
@@ -296,8 +300,7 @@
 })
 
 # Materialize C in row-major order. Row-major layout is handled only by the
-# first producer in the composition; the tiled kernel receives a logical 2D
-# C index and is independent of the output layout.
+# tiled kernel converts the flat materialization index to a logical 2D C index.
 (def program gpu.f32.tiled-matmul.row-major.materialize :
   ([n m k tile-size.] {
     ({[.n] u64} :)
@@ -312,9 +315,9 @@
   ->
   ([n m k tile-size.] ({cap.own ({[.n m]} *) f32} buf val))
 = {[n m k output-len tile-size tile-element-count a b.]
-  ([.n] u64.copy-params2 [n-copies indices-n kernel-n-type.])
+  ([.n] u64.copy-param [n-copies kernel-n-type.])
   ([.n-copies] u64.copy-params2 [grid-n kernel-n-value step-n-value.])
-  ([.m] u64.copy-params2 [m-copies indices-m kernel-m-type.])
+  ([.m] u64.copy-param [m-copies kernel-m-type.])
   ([.m-copies] u64.copy-params2 [m-runtime kernel-m-value step-m-value.])
   ([.m-runtime] u64.copies2 [grid-m indices-m-len.])
   ([.tile-size] u64.copies6
@@ -334,7 +337,15 @@
   ([.kernel-grid-y] :.ty [kernel-grid-y-value grid-y-param.])
 
   ({[.launch-grid-x] [.launch-grid-y] [.block-x] [.block-y]}
-    gpu.root-context.2d [grid-context worker-type.])
+    gpu.grid.2d
+    [grid-level grid-workers grid-groups context-parameters.]
+    ({
+      [.grid-level]
+      [.grid-workers]
+      [.grid-groups]
+      [.context-parameters]
+    } parallel.context [grid-context.])
+  )
   ({[.grid-context] [.output-len]}
     parallel.allocate [allocated-context output.])
 
@@ -342,31 +353,25 @@
     [.allocated-context]
     [.output]
     ({
-      ({
-        ([.worker-type] name.identity lift)
-        ({[.indices-n] [.indices-m] [.indices-m-len]}
-          partial.f32.row-major.indices.1)
-      } tensor)
-      ({
-        [.grid-x-param]
-        [.grid-y-param]
-        [.kernel-n-type]
-        [.k-param]
-        [.kernel-m-type]
-        [.tile-size-param]
-        [.kernel-n-value]
-        [.kernel-m-value]
-        [.step-n-value]
-        [.step-m-value]
-        [.a]
-        [.b]
-        [.kernel-k]
-        [.kernel-tile-size-value]
-        [.tile-element-count]
-        [.kernel-grid-x-value]
-        [.kernel-grid-y-value]
-      } partial.gpu.f32.tiled-matmul.cell.kernel.11)
-    } compose)
+      [.grid-x-param]
+      [.grid-y-param]
+      [.kernel-n-type]
+      [.k-param]
+      [.kernel-m-type]
+      [.tile-size-param]
+      [.kernel-n-value]
+      [.kernel-m-value]
+      [.step-n-value]
+      [.step-m-value]
+      [.indices-m-len]
+      [.a]
+      [.b]
+      [.kernel-k]
+      [.kernel-tile-size-value]
+      [.tile-element-count]
+      [.kernel-grid-x-value]
+      [.kernel-grid-y-value]
+    } partial.gpu.f32.tiled-matmul.cell.kernel.12)
   } parallel.materialize [materialized-context pending-output.])
   ({[.materialized-context] [.pending-output]}
     parallel.await [_grid-context result.])

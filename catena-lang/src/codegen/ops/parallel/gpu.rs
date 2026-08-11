@@ -96,15 +96,38 @@ pub(in crate::codegen) fn context_kind(assignment: &GpuAssign) -> Option<Context
     })
 }
 
-pub(in crate::codegen) fn render_root_context_2d(
+pub(in crate::codegen) fn render_grid_2d(
     out: &mut String,
     assignment: &GpuAssign,
 ) -> Result<(), GpuRenderError> {
-    let [grid_x, grid_y, block_x, block_y] = assignment.inputs.as_slice() else {
+    let inputs = runtime_values(&assignment.inputs).collect::<Vec<_>>();
+    let [_, _, _, _] = inputs.as_slice() else {
         return Err(invalid_inputs(assignment, 4));
     };
-    let [context, worker] = assignment.outputs.as_slice() else {
-        return Err(invalid_outputs(assignment, 2));
+    let outputs = assignment
+        .outputs
+        .iter()
+        .filter(|output| runtime_type(output).is_some())
+        .collect::<Vec<_>>();
+    let [_, _, _, _] = outputs.as_slice() else {
+        return Err(invalid_outputs(assignment, 4));
+    };
+    for (input, output) in inputs.into_iter().zip(outputs) {
+        out.push_str(&format!("    {} = {};\n", output.name, value_expr(input)));
+    }
+    Ok(())
+}
+
+pub(in crate::codegen) fn render_context(
+    out: &mut String,
+    assignment: &GpuAssign,
+) -> Result<(), GpuRenderError> {
+    let inputs = runtime_values(&assignment.inputs).collect::<Vec<_>>();
+    let [grid_x, grid_y, block_x, block_y] = inputs.as_slice() else {
+        return Err(invalid_inputs(assignment, 4));
+    };
+    let [context] = assignment.outputs.as_slice() else {
+        return Err(invalid_outputs(assignment, 1));
     };
     out.push_str(&format!(
         "    {} = {{ {{ {{(uint32_t){}, (uint32_t){}, 1}}, {{(uint32_t){}, (uint32_t){}, 1}} }} }};\n",
@@ -113,10 +136,6 @@ pub(in crate::codegen) fn render_root_context_2d(
         value_expr(grid_y),
         value_expr(block_x),
         value_expr(block_y)
-    ));
-    out.push_str(&format!(
-        "    {} = {{ {}.launch, 0 }};\n",
-        worker.name, context.name
     ));
     Ok(())
 }

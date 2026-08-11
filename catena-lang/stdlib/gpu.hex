@@ -25,10 +25,9 @@
 })
 
 (theory program type {
-  # Construct the root GPU context. The topology-specific constructor fixes
-  # both the total worker space and its grouping into blocks, while the generic
-  # parallel operations consume only the resulting context and worker types.
-  (arr gpu.root-context.2d : {[
+  # Build the type-level description of a two-dimensional GPU grid and thread
+  # the runtime launch dimensions used by parallel.context.
+  (arr gpu.grid.2d : {[
     grid-x grid-y block-x block-y.
   ]
     ({[.grid-x] u64} :)
@@ -39,16 +38,19 @@
   ->
   ([grid-x grid-y block-x block-y.]
     {
+      ({[.grid-x grid-y block-x block-y]} gpu.grid.2d)
+      ({({[.grid-x grid-y]} *) ({[.block-x block-y]} *)} *)
+      ({[.grid-x grid-y]} *)
       ({
-        ({[.grid-x grid-y block-x block-y]} gpu.grid.2d)
-        ({({[.grid-x grid-y]} *) ({[.block-x block-y]} *)} *)
-        ({[.grid-x grid-y]} *)
-      } context)
-      ({
-        ({[.grid-x grid-y block-x block-y]} gpu.grid.2d)
-        ({({[.grid-x grid-y]} *) ({[.block-x block-y]} *)} *)
-        ({[.grid-x grid-y]} *)
-      } worker)
+        ({[.grid-x] u64} :)
+        ({
+          ({[.grid-y] u64} :)
+          ({
+            ({[.block-x] u64} :)
+            ({[.block-y] u64} :)
+          } *)
+        } *)
+      } *)
     }))
 
   # Reinterpret a grid worker relative to its containing block.

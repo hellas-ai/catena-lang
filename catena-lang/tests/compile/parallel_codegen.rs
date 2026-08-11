@@ -25,5 +25,9 @@ fn tiled_matmul_reaches_hip_and_cuda_source() {
         assert!(source.contains(".index %"));
         assert!(source.contains(".launch.block_dim.x +"));
         assert!(source.contains("catena_block_barrier()"));
+        assert!(source.contains("extern __shared__ unsigned char catena_shared[]"));
+        assert!(source.contains(".base +"));
+        assert!(source.contains(".shared_bytes>>>"));
+        assert!(!source.contains("CATENA_BLOCK_BUFFER_CAPACITY"));
     }
 }

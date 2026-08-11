@@ -1,61 +1,110 @@
 # Parallel runners
 (theory type nat {
   # A host submits work to a worker population. A worker runs inside one.
-  # A worker additionally carries the type of its topology-shaped index.
-  (arr host : 3 -> 1)
-  (arr worker : 4 -> 1)
+  # Both carry their block-local storage layout. A worker additionally carries
+  # the type of its topology-shaped index.
+  (arr host : 4 -> 1)
+  (arr worker : 5 -> 1)
+
+  # A statically typed list of shared-memory allocation slots.
+  (arr shared.empty : 0 -> 1)
+  (arr shared.slot : 3 -> 1)
+
+  # Runtime shared-memory layout size and linear remaining-slot capability.
+  (arr shared : 1 -> 1)
+  (arr available : 1 -> 1)
 })
 
 (theory program type {
   # Build a host runner from topology-specific metadata and runtime
   # parameters. The metadata is type-level and erases before codegen.
   (arr parallel.host : {[
-    level workers groups parameters.
+    level workers groups storage parameters.
   ]
     [.level]
     [.workers]
     [.groups]
     [.parameters]
+    ([.storage] shared val)
   }
   ->
-  ([level workers groups parameters.]
-    ({[.level workers groups]} host)))
+  ([level workers groups storage parameters.]
+    ({[.level workers groups storage]} host)))
+
+  # Build an empty shared-memory layout.
+  (arr parallel.shared.empty : [] -> (shared.empty shared val))
 
   # Expose this worker's topology-shaped index while preserving the worker.
   # The index object may be a product, such as Ix n * Ix m for a 2D level.
-  (arr parallel.worker.index : {[level workers groups index.]
-    ({[.level workers groups index]} worker)
+  (arr parallel.worker.index : {[level workers groups index storage.]
+    ({[.level workers groups index storage]} worker)
   }
   ->
-  ([level workers groups index.] {
-    ({[.level workers groups index]} worker)
+  ([level workers groups index storage.] {
+    ({[.level workers groups index storage]} worker)
     [.index]
   }))
 
   # Re-scope a parent worker around a child-topology index. The child topology
   # metadata is explicit, so constructing a worker cannot invent an
   # unconstrained level.
-  (arr parallel.worker : {[parent level workers groups index.]
-    [.parent]
+  (arr parallel.worker : {[
+    parent-level parent-workers parent-groups parent-index storage
+    level workers groups index.
+  ]
+    ({[.parent-level parent-workers parent-groups parent-index storage]} worker)
     [.level]
     [.workers]
     [.groups]
     [.index]
   }
   ->
-  ([parent level workers groups index.]
-    ({[.level workers groups index]} worker)))
+  ([parent-level parent-workers parent-groups parent-index storage
+    level workers groups index.]
+    ({[.level workers groups index storage]} worker)))
 
-  # Allocate an owned f32 buffer through a host or worker runner.
-  (arr parallel.allocate : {[runner n.]
-    [.runner]
+  # Expose this worker's complete shared layout as a fresh linear allocator.
+  (arr parallel.worker.storage : {[level workers groups index storage.]
+    ({[.level workers groups index storage]} worker)
+  }
+  ->
+  ([level workers groups index storage.] {
+    ({[.level workers groups index storage]} worker)
+    ([.storage] available val)
+  }))
+
+  # Allocate the next statically available block-shared f32 slot.
+  (arr parallel.allocate : {[
+    level workers groups index storage n rest.
+  ]
+    ({[.level workers groups index storage]} worker)
+    ({({[.n] f32 [.rest]} shared.slot)} available val)
     ({[.n] u64} :)
   }
   ->
-  ([runner n.] {
-    [.runner]
+  ([level workers groups index storage n rest.] {
+    ({[.level workers groups index storage]} worker)
+    ([.rest] available val)
     ({
-      [.runner]
+      ({[.level workers groups index storage]} worker)
+      ({cap.own [.n] f32} buf)
+    } writable val)
+  }))
+
+  # Consume the exhausted allocator. No allocation accepts shared.empty.
+  (arr parallel.shared.finish : (shared.empty available val) -> [])
+
+  # Allocate global storage through a host without consuming its finite
+  # block-shared layout.
+  (arr parallel.host.allocate : {[level workers groups storage n.]
+    ({[.level workers groups storage]} host)
+    ({[.n] u64} :)
+  }
+  ->
+  ([level workers groups storage n.] {
+    ({[.level workers groups storage]} host)
+    ({
+      ({[.level workers groups storage]} host)
       ({cap.own [.n] f32} buf)
     } writable val)
   }))

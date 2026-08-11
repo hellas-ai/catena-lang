@@ -75,6 +75,11 @@
       ({[.tile-size tile-size]} *)
       1
       ({([.tile-size] ix val) ([.tile-size] ix val)} *)
+      ({
+        ({[.tile-size tile-size]} *)
+        f32
+        ({({[.tile-size tile-size]} *) f32 shared.empty} shared.slot)
+      } shared.slot)
     } worker)
     (({[.tile-size tile-size]} *) ix val)
   })
@@ -101,6 +106,11 @@
       ({[.tile-size tile-size]} *)
       1
       ({([.tile-size] ix val) ([.tile-size] ix val)} *)
+      ({
+        ({[.tile-size tile-size]} *)
+        f32
+        ({({[.tile-size tile-size]} *) f32 shared.empty} shared.slot)
+      } shared.slot)
     } worker)
     (({[.tile-size tile-size]} *) ix val)
   })
@@ -132,6 +142,11 @@
       ({[.tile-size tile-size]} *)
       1
       ({([.tile-size] ix val) ([.tile-size] ix val)} *)
+      ({
+        ({[.tile-size tile-size]} *)
+        f32
+        ({({[.tile-size tile-size]} *) f32 shared.empty} shared.slot)
+      } shared.slot)
     } worker)
     ({
       ({
@@ -139,6 +154,11 @@
         ({[.tile-size tile-size]} *)
         1
         ({([.tile-size] ix val) ([.tile-size] ix val)} *)
+        ({
+          ({[.tile-size tile-size]} *)
+          f32
+          ({({[.tile-size tile-size]} *) f32 shared.empty} shared.slot)
+        } shared.slot)
       } worker)
       ({cap.own ({[.tile-size tile-size]} *) f32} buf)
     } writable val)
@@ -148,6 +168,11 @@
         ({[.tile-size tile-size]} *)
         1
         ({([.tile-size] ix val) ([.tile-size] ix val)} *)
+        ({
+          ({[.tile-size tile-size]} *)
+          f32
+          ({({[.tile-size tile-size]} *) f32 shared.empty} shared.slot)
+        } shared.slot)
       } worker)
       ({cap.own ({[.tile-size tile-size]} *) f32} buf)
     } writable val)
@@ -264,6 +289,11 @@
           (({[.grid-x tile-size]} *) ix val)
           (({[.grid-y tile-size]} *) ix val)
         } *)
+        ({
+          ({[.tile-size tile-size]} *)
+          f32
+          ({({[.tile-size tile-size]} *) f32 shared.empty} shared.slot)
+        } shared.slot)
       } worker)
       (({[.n m]} *) ix val)
     } *)
@@ -280,7 +310,7 @@
   ([.tile-size] u64.copies3
     [block-x block-y tile-size-for-kernel.])
   ({[.grid-worker] [.block-x] [.block-y]}
-    gpu.current-block [block-worker-0.])
+    gpu.current-block [block-worker-0 shared-available-0.])
 
   ([.k] u64.copies2-param [k-value step-inner k-param.])
   ([.tile-size-for-kernel] u64.copies2-param
@@ -290,10 +320,11 @@
   ({([.k-value] :.forget) ([.k-tile-size] :.forget)}
     u64.div u64.name [k-tile-count.])
 
-  ({[.block-worker-0] [.a-tile-element-count]}
-    parallel.allocate [block-worker-1 a-tile.])
-  ({[.block-worker-1] [.b-tile-element-count]}
-    parallel.allocate [block-worker-2 b-tile.])
+  ({[.block-worker-0] [.shared-available-0] [.a-tile-element-count]}
+    parallel.allocate [block-worker-1 shared-available-1 a-tile.])
+  ({[.block-worker-1] [.shared-available-1] [.b-tile-element-count]}
+    parallel.allocate [block-worker-2 shared-available-2 b-tile.])
+  ([.shared-available-2] parallel.shared.finish)
 
   ([.k-tile-count] u64.copies2-param
     [step-count reduce-count k-tiles-param.])
@@ -340,6 +371,15 @@
   ->
   ([n m k tile-size.] ({cap.own ({[.n m]} *) f32} buf val))
 = {[n m k output-len tile-size tile-element-count a b.]
+  ([.tile-element-count] u64.copies3
+    [a-shared-elements b-shared-elements kernel-tile-element-count.])
+  (parallel.shared.empty [empty-shared-layout.])
+  # gpu.shared prepends slots, so describe B before A to allocate A first.
+  ({[.b-shared-elements] [.empty-shared-layout]}
+    gpu.shared [b-shared-layout.])
+  ({[.a-shared-elements] [.b-shared-layout]}
+    gpu.shared [shared-layout.])
+
   ([.n] u64.copy-param [n-copies kernel-n-type.])
   ([.n-copies] u64.copy-params2 [grid-n kernel-n-value step-n-value.])
   ([.m] u64.copy-param [m-copies kernel-m-type.])
@@ -369,10 +409,11 @@
       [.grid-workers]
       [.grid-groups]
       [.host-parameters]
+      [.shared-layout]
     } parallel.host [grid-host.])
   )
   ({[.grid-host] [.output-len]}
-    parallel.allocate [allocated-host output.])
+    parallel.host.allocate [allocated-host output.])
 
   ({
     [.allocated-host]
@@ -393,7 +434,7 @@
       [.b]
       [.kernel-k]
       [.kernel-tile-size-value]
-      [.tile-element-count]
+      [.kernel-tile-element-count]
       [.kernel-grid-x-value]
       [.kernel-grid-y-value]
     } partial.gpu.f32.tiled-matmul.cell.kernel.12)

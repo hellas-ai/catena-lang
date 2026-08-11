@@ -25,6 +25,16 @@
 })
 
 (theory program type {
+  # Add one f32 slot to a GPU shared-memory layout. Repeated applications
+  # describe any number of slots; the most recently added slot is allocated
+  # first by parallel.allocate.
+  (arr gpu.shared : {[n rest.]
+    ({[.n] u64} :)
+    ([.rest] shared val)
+  }
+  ->
+  ([n rest.] ({({[.n] f32 [.rest]} shared.slot)} shared val)))
+
   # Build the type-level description of a two-dimensional GPU block and
   # preserve its runtime dimensions for coordinate calculations.
   (arr gpu.block.2d : {[
@@ -101,7 +111,7 @@
 
 # Re-index the current grid worker relative to its containing block.
 (def program gpu.current-block : {[
-  grid-x grid-y block-x block-y.
+  grid-x grid-y block-x block-y storage.
 ]
   ({
     ({[.grid-x grid-y block-x block-y]} gpu.grid.2d)
@@ -111,18 +121,23 @@
       (({[.grid-x block-x]} *) ix val)
       (({[.grid-y block-y]} *) ix val)
     } *)
+    [.storage]
   } worker)
   ({[.block-x] u64} :)
   ({[.block-y] u64} :)
 }
 ->
-([grid-x grid-y block-x block-y.]
-  ({
-    ({[.block-x block-y]} gpu.block.2d)
-    ({[.block-x block-y]} *)
-    1
-    ({([.block-x] ix val) ([.block-y] ix val)} *)
-  } worker))
+([grid-x grid-y block-x block-y storage.]
+  {
+    ({
+      ({[.block-x block-y]} gpu.block.2d)
+      ({[.block-x block-y]} *)
+      1
+      ({([.block-x] ix val) ([.block-y] ix val)} *)
+      [.storage]
+    } worker)
+    ([.storage] available val)
+  })
 = ([grid-worker block-x block-y.]
   ({[.block-x] [.block-y]} gpu.block.2d
     [block-level block-workers block-groups block-dimensions.]
@@ -138,7 +153,8 @@
                   [.block-workers]
                   [.block-groups]
                   [.local-index]
-                } parallel.worker)
+                } parallel.worker [block-worker.]
+                ([.block-worker] parallel.worker.storage)
               )
             )
           )
@@ -146,4 +162,4 @@
       )
     )
   )
-))
+)))

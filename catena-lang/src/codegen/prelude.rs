@@ -11,8 +11,6 @@ pub fn render_gpu_prelude(dialect: GpuDialect) -> String {
 typedef uint8_t catena_unit_t;
 typedef uint8_t catena_gpu_state_t;
 
-#define CATENA_BLOCK_BUFFER_CAPACITY 4096
-
 typedef struct {{
     uint32_t x;
     uint32_t y;
@@ -30,17 +28,25 @@ typedef struct {{
 
 typedef struct {{
     catena_launch_params_t launch;
+    uint64_t shared_bytes;
 }} catena_gpu_grid_host_t;
 
 typedef struct {{
     catena_launch_params_t launch;
     uint64_t index;
+    unsigned char *shared;
 }} catena_gpu_grid_worker_t;
 
 typedef struct {{
     catena_launch_params_t launch;
     uint64_t index;
+    unsigned char *shared;
 }} catena_gpu_block_worker_t;
+
+typedef struct {{
+    unsigned char *base;
+    uint64_t offset;
+}} catena_gpu_shared_available_t;
 
 typedef struct {{
     void *data;

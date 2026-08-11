@@ -304,7 +304,10 @@ fn render_assignment(
     }
 
     match assignment.op.as_str() {
-        "parallel.allocate" => return parallel_gpu::render_allocate(out, assignment, dialect),
+        "parallel.allocate" => return parallel_gpu::render_allocate(out, assignment),
+        "parallel.host.allocate" => {
+            return parallel_gpu::render_host_allocate(out, assignment, dialect);
+        }
         "parallel.await" | "parallel.await-one" | "parallel.release" | "parallel.barrier" => {
             return parallel_gpu::render_synchronize(out, assignment, dialect);
         }
@@ -462,6 +465,10 @@ fn render_primitive_assignment(
         "parallel.host" => parallel_gpu::render_host(out, assignment)?,
         "parallel.worker.index" => parallel_gpu::render_worker_index(out, assignment)?,
         "parallel.worker" => parallel_gpu::render_worker(out, assignment)?,
+        "parallel.worker.storage" => parallel_gpu::render_worker_storage(out, assignment)?,
+        "parallel.shared.empty" => parallel_gpu::render_shared_empty(out, assignment)?,
+        "gpu.shared" => parallel_gpu::render_shared(out, assignment)?,
+        "parallel.shared.finish" => parallel_gpu::render_shared_finish(out, assignment)?,
         "u64.to-ix" => render_u64_to_ix(out, assignment)?,
         op if op.starts_with(CONST_U64_PREFIX) => {
             render_int_const(out, assignment, CONST_U64_PREFIX, "ULL")?

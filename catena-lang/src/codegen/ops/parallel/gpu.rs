@@ -28,6 +28,7 @@ use super::{materialize_parts, preserved_runtime_values};
 const GRID_HOST: &str = "catena_gpu_grid_host_t";
 const GRID_WORKER: &str = "catena_gpu_grid_worker_t";
 const BLOCK_WORKER: &str = "catena_gpu_block_worker_t";
+const SHARED_AVAILABLE: &str = "catena_gpu_shared_available_t";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::codegen) enum RunnerKind {
@@ -38,7 +39,7 @@ pub(in crate::codegen) enum RunnerKind {
 /// Whether this backend supplies a concrete representation for the parallel
 /// type constructor. Generic parallel decoding does not choose these types.
 pub(in crate::codegen) fn is_runtime_type(name: &str) -> bool {
-    matches!(name, "host" | "worker")
+    matches!(name, "host" | "worker" | "shared" | "available")
 }
 
 /// Choose the CUDA/HIP runtime representation of a parallel type.
@@ -46,9 +47,17 @@ pub(in crate::codegen) fn lower_runtime_type(
     name: &str,
     children: &[Tree<(), Operation>],
 ) -> Result<CType, LowerTypeError> {
-    let (expected, c_name) = match name {
-        "host" => (3, scoped_runtime_name(name, children)?),
-        "worker" => (4, scoped_runtime_name(name, children)?),
+    let (expected, c_type) = match name {
+        "host" => (
+            4,
+            CType::Named(scoped_runtime_name(name, children)?.to_string()),
+        ),
+        "worker" => (
+            5,
+            CType::Named(scoped_runtime_name(name, children)?.to_string()),
+        ),
+        "shared" => (1, CType::U64),
+        "available" => (1, CType::Named(SHARED_AVAILABLE.to_string())),
         _ => unreachable!("checked by is_runtime_type"),
     };
     if children.len() != expected {
@@ -58,7 +67,7 @@ pub(in crate::codegen) fn lower_runtime_type(
             actual: children.len(),
         });
     }
-    Ok(CType::Named(c_name.to_string()))
+    Ok(c_type)
 }
 
 fn scoped_runtime_name<'a>(
@@ -146,19 +155,20 @@ pub(in crate::codegen) fn render_host(
     assignment: &GpuAssign,
 ) -> Result<(), GpuRenderError> {
     let inputs = runtime_values(&assignment.inputs).collect::<Vec<_>>();
-    let [grid_x, grid_y, block_x, block_y] = inputs.as_slice() else {
-        return Err(invalid_inputs(assignment, 4));
+    let [grid_x, grid_y, block_x, block_y, shared_bytes] = inputs.as_slice() else {
+        return Err(invalid_inputs(assignment, 5));
     };
     let [context] = assignment.outputs.as_slice() else {
         return Err(invalid_outputs(assignment, 1));
     };
     out.push_str(&format!(
-        "    {} = {{ {{ {{(uint32_t){}, (uint32_t){}, 1}}, {{(uint32_t){}, (uint32_t){}, 1}} }} }};\n",
+        "    {} = {{ {{ {{(uint32_t){}, (uint32_t){}, 1}}, {{(uint32_t){}, (uint32_t){}, 1}} }}, {} }};\n",
         context.name,
         value_expr(grid_x),
         value_expr(grid_y),
         value_expr(block_x),
-        value_expr(block_y)
+        value_expr(block_y),
+        value_expr(shared_bytes)
     ));
     Ok(())
 }
@@ -206,7 +216,7 @@ pub(in crate::codegen) fn render_worker(
         return Err(invalid_outputs(assignment, 1));
     };
     out.push_str(&format!(
-        "    {0} = {{ {1}.launch, {3} * (uint64_t){1}.launch.block_dim.x + {2} }};\n",
+        "    {0} = {{ {1}.launch, {3} * (uint64_t){1}.launch.block_dim.x + {2}, {1}.shared }};\n",
         child_worker.name,
         value_expr(parent_worker),
         value_expr(child_x),
@@ -215,15 +225,113 @@ pub(in crate::codegen) fn render_worker(
     Ok(())
 }
 
+pub(in crate::codegen) fn render_shared_empty(
+    out: &mut String,
+    assignment: &GpuAssign,
+) -> Result<(), GpuRenderError> {
+    let [] = assignment.inputs.as_slice() else {
+        return Err(invalid_inputs(assignment, 0));
+    };
+    let [shared_bytes] = assignment.outputs.as_slice() else {
+        return Err(invalid_outputs(assignment, 1));
+    };
+    out.push_str(&format!("    {} = 0;\n", shared_bytes.name));
+    Ok(())
+}
+
+pub(in crate::codegen) fn render_shared(
+    out: &mut String,
+    assignment: &GpuAssign,
+) -> Result<(), GpuRenderError> {
+    let [len, tail_bytes] = assignment.inputs.as_slice() else {
+        return Err(invalid_inputs(assignment, 2));
+    };
+    let [shared_bytes] = assignment.outputs.as_slice() else {
+        return Err(invalid_outputs(assignment, 1));
+    };
+    out.push_str(&format!(
+        "    {} = {} + {} * sizeof(float);\n",
+        shared_bytes.name,
+        value_expr(tail_bytes),
+        value_expr(len)
+    ));
+    Ok(())
+}
+
+pub(in crate::codegen) fn render_worker_storage(
+    out: &mut String,
+    assignment: &GpuAssign,
+) -> Result<(), GpuRenderError> {
+    let [worker] = assignment.inputs.as_slice() else {
+        return Err(invalid_inputs(assignment, 1));
+    };
+    let [preserved_worker, available] = assignment.outputs.as_slice() else {
+        return Err(invalid_outputs(assignment, 2));
+    };
+    let worker = value_expr(worker);
+    out.push_str(&format!(
+        "    {} = {};\n    {} = {{ {}.shared, 0 }};\n",
+        preserved_worker.name, worker, available.name, worker
+    ));
+    Ok(())
+}
+
+pub(in crate::codegen) fn render_shared_finish(
+    _out: &mut String,
+    assignment: &GpuAssign,
+) -> Result<(), GpuRenderError> {
+    let [_available] = assignment.inputs.as_slice() else {
+        return Err(invalid_inputs(assignment, 1));
+    };
+    let [] = assignment.outputs.as_slice() else {
+        return Err(invalid_outputs(assignment, 0));
+    };
+    Ok(())
+}
+
 pub(in crate::codegen) fn render_allocate(
+    out: &mut String,
+    assignment: &GpuAssign,
+) -> Result<(), GpuRenderError> {
+    let [worker, available, len] = assignment.inputs.as_slice() else {
+        return Err(invalid_inputs(assignment, 3));
+    };
+    let [next_worker, next_available, buffer] = assignment.outputs.as_slice() else {
+        return Err(invalid_outputs(assignment, 3));
+    };
+    let CType::Pointer(element) =
+        runtime_type(buffer).ok_or_else(|| GpuRenderError::ErasedType(buffer.clone()))?
+    else {
+        return Err(GpuRenderError::UnsupportedType(
+            runtime_type(buffer).unwrap().clone(),
+        ));
+    };
+    out.push_str(&format!(
+        "    {} = {};\n    {} = ({} *)({}.base + {}.offset);\n    {} = {{ {}.base, {}.offset + {} * sizeof({}) }};\n",
+        next_worker.name,
+        value_expr(worker),
+        buffer.name,
+        c_type(element),
+        value_expr(available),
+        value_expr(available),
+        next_available.name,
+        value_expr(available),
+        value_expr(available),
+        value_expr(len),
+        c_type(element)
+    ));
+    Ok(())
+}
+
+pub(in crate::codegen) fn render_host_allocate(
     out: &mut String,
     assignment: &GpuAssign,
     dialect: GpuDialect,
 ) -> Result<(), GpuRenderError> {
-    let [context, len] = assignment.inputs.as_slice() else {
+    let [host, len] = assignment.inputs.as_slice() else {
         return Err(invalid_inputs(assignment, 2));
     };
-    let [next_runner, buffer] = assignment.outputs.as_slice() else {
+    let [next_host, buffer] = assignment.outputs.as_slice() else {
         return Err(invalid_outputs(assignment, 2));
     };
     let CType::Pointer(element) =
@@ -234,44 +342,19 @@ pub(in crate::codegen) fn render_allocate(
         ));
     };
     out.push_str(&format!(
-        "    {} = {};\n",
-        next_runner.name,
-        value_expr(context)
+        "    {} = {};\n    {} = nullptr;\n",
+        next_host.name,
+        value_expr(host),
+        buffer.name
     ));
-
-    match runner_kind(assignment) {
-        Some(RunnerKind::GridHost) => {
-            out.push_str(&format!("    {} = nullptr;\n", buffer.name));
-            out.push_str(&format!(
-                "    if ({} != 0) catena_host_gpu_check({}((void **)&{}, {} * sizeof({})));\n",
-                value_expr(len),
-                dialect.device_alloc_fn(),
-                buffer.name,
-                value_expr(len),
-                c_type(element)
-            ));
-        }
-        Some(RunnerKind::BlockWorker) => {
-            // A static per-allocation shared arena keeps allocation local to
-            // the current block. The bound is checked at runtime until shared
-            // memory sizing becomes part of the launch plan.
-            out.push_str(&format!(
-                "#ifdef {}\n    __shared__ {} {}_storage[CATENA_BLOCK_BUFFER_CAPACITY];\n    catena_assert({} <= CATENA_BLOCK_BUFFER_CAPACITY);\n    {} = {}_storage;\n#else\n    {} = nullptr;\n#endif\n",
-                dialect.device_compile_guard(),
-                c_type(element),
-                buffer.name,
-                value_expr(len),
-                buffer.name,
-                buffer.name,
-                buffer.name,
-            ));
-        }
-        None => {
-            return Err(GpuRenderError::UnsupportedType(
-                runtime_type(next_runner).unwrap().clone(),
-            ));
-        }
-    }
+    out.push_str(&format!(
+        "    if ({} != 0) catena_host_gpu_check({}((void **)&{}, {} * sizeof({})));\n",
+        value_expr(len),
+        dialect.device_alloc_fn(),
+        buffer.name,
+        value_expr(len),
+        c_type(element)
+    ));
     Ok(())
 }
 
@@ -324,12 +407,15 @@ pub(in crate::codegen) fn render_materialize_kernel(
         }
     }
     out.push_str(") {\n");
+    out.push_str("    extern __shared__ unsigned char catena_shared[];\n");
     out.push_str("    uint64_t global_x = (uint64_t)blockIdx.x * blockDim.x + threadIdx.x;\n");
     out.push_str("    uint64_t global_y = (uint64_t)blockIdx.y * blockDim.y + threadIdx.y;\n");
     out.push_str(
         "    uint64_t index = global_y * ((uint64_t)gridDim.x * blockDim.x) + global_x;\n",
     );
-    out.push_str("    catena_gpu_grid_worker_t worker = { context.launch, index };\n");
+    out.push_str(
+        "    catena_gpu_grid_worker_t worker = { context.launch, index, catena_shared };\n",
+    );
     out.push_str(&format!("    {} value;\n", c_type(element)));
     let mut producer_inputs = parts.environment.to_vec();
     producer_inputs.push(GpuValue::Var(GpuVar {
@@ -372,7 +458,7 @@ pub(in crate::codegen) fn render_materialize(
             let kernel_name = materialize_kernel_name(&function.name, assignment)?;
             let context = value_expr(parts.runner);
             out.push_str(&format!(
-                "    {kernel_name}<<<dim3({context}.launch.grid_dim.x, {context}.launch.grid_dim.y, {context}.launch.grid_dim.z), dim3({context}.launch.block_dim.x, {context}.launch.block_dim.y, {context}.launch.block_dim.z)>>>
+                "    {kernel_name}<<<dim3({context}.launch.grid_dim.x, {context}.launch.grid_dim.y, {context}.launch.grid_dim.z), dim3({context}.launch.block_dim.x, {context}.launch.block_dim.y, {context}.launch.block_dim.z), {context}.shared_bytes>>>
                     ({}, {}",
                 value_expr(parts.buffer),
                 context,

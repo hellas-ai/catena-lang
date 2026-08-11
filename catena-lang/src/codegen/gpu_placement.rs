@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashSet};
 
 use crate::codegen::{
     GpuFunction, GpuModuleMap,
-    ops::parallel::gpu::{self as parallel_gpu, ContextKind},
+    ops::parallel::gpu::{self as parallel_gpu, RunnerKind},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -77,7 +77,7 @@ fn function_directly_requires_host(function: &GpuFunction) -> bool {
         ) || matches!(
             assignment.op.as_str(),
             "parallel.allocate" | "parallel.materializec"
-        ) && parallel_gpu::context_kind(assignment) == Some(ContextKind::Grid)
+        ) && parallel_gpu::runner_kind(assignment) == Some(RunnerKind::GridHost)
     })
 }
 

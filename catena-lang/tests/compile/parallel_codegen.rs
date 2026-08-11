@@ -20,7 +20,10 @@ fn tiled_matmul_reaches_hip_and_cuda_source() {
         let source = render_modules(modules, dialect)
             .unwrap_or_else(|error| panic!("{dialect:?} rendering failed: {error}"));
         assert!(source.contains("__global__ void parallel_materialize_"));
+        assert!(source.contains("catena_gpu_grid_host_t"));
         assert!(source.contains("catena_gpu_block_worker_t"));
+        assert!(source.contains(".index %"));
+        assert!(source.contains(".launch.block_dim.x +"));
         assert!(source.contains("catena_block_barrier()"));
     }
 }

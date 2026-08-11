@@ -332,7 +332,7 @@ mod tests {
 
     #[test]
     fn buffer_state_modifiers_lower_to_the_wrapped_buffer() {
-        let context = node("context", vec![leaf(0), leaf(1), leaf(2)]);
+        let context = node("host", vec![leaf(0), leaf(1), leaf(2)]);
         let buffer = node(
             "buf",
             vec![node("cap.own", vec![]), leaf(3), node("f32", vec![])],
@@ -354,16 +354,13 @@ mod tests {
     fn parallel_values_have_concrete_runtime_representations() {
         let cases = [
             (
-                node(
-                    "context",
-                    vec![node("gpu.grid.2d", vec![]), leaf(1), leaf(2)],
-                ),
-                "catena_gpu_grid_context_t",
+                node("host", vec![node("gpu.grid.2d", vec![]), leaf(1), leaf(2)]),
+                "catena_gpu_grid_host_t",
             ),
             (
                 node(
                     "worker",
-                    vec![node("gpu.block.2d", vec![]), leaf(1), leaf(2)],
+                    vec![node("gpu.block.2d", vec![]), leaf(1), leaf(2), leaf(3)],
                 ),
                 "catena_gpu_block_worker_t",
             ),

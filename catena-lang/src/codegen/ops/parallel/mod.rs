@@ -14,7 +14,7 @@ use crate::codegen::{
 };
 
 pub(super) struct MaterializeParts<'a> {
-    pub(super) context: &'a GpuValue,
+    pub(super) runner: &'a GpuValue,
     pub(super) buffer: &'a GpuValue,
     pub(super) buffer_var: &'a GpuVar,
     pub(super) environment: &'a [GpuValue],
@@ -24,22 +24,22 @@ pub(super) struct MaterializeParts<'a> {
 /// Decode the generic `parallel.materializec` ABI:
 ///
 /// ```text
-/// context, writable buffer, environment, producer
-///     -> context, pending buffer
+/// runner, writable buffer, environment, producer
+///     -> runner, pending buffer
 /// ```
 pub(super) fn materialize_parts(
     assignment: &GpuAssign,
 ) -> Result<MaterializeParts<'_>, GpuRenderError> {
     let components = input_components(assignment)?;
-    let [context, buffer, environment, function] = components.as_slice() else {
+    let [runner, buffer, environment, function] = components.as_slice() else {
         return Err(GpuRenderError::InvalidInputComponentCount {
             op: assignment.op.clone(),
             expected: 4,
             actual: components.len(),
         });
     };
-    let context = single_value(context)
-        .map_err(|error| component_error(assignment, "context", error.actual))?;
+    let runner = single_value(runner)
+        .map_err(|error| component_error(assignment, "runner", error.actual))?;
     let buffer = single_value(buffer)
         .map_err(|error| component_error(assignment, "buffer", error.actual))?;
     let GpuValue::Var(buffer_var) = buffer else {
@@ -48,7 +48,7 @@ pub(super) fn materialize_parts(
     let function = single_function(function)
         .map_err(|error| component_error(assignment, "producer", error.actual))?;
     Ok(MaterializeParts {
-        context,
+        runner,
         buffer,
         buffer_var,
         environment,

@@ -166,7 +166,7 @@ fn render_module_body(
             )?;
             out.push('\n');
         } else if assignment.op.as_str() == "parallel.materializec"
-            && parallel_gpu::context_kind(assignment) == Some(parallel_gpu::ContextKind::Grid)
+            && parallel_gpu::runner_kind(assignment) == Some(parallel_gpu::RunnerKind::GridHost)
         {
             parallel_gpu::render_materialize_kernel(
                 out,
@@ -458,10 +458,10 @@ fn render_primitive_assignment(
         "row-major-row" => row_major::render_row(out, assignment)?,
         "row-major-col" => row_major::render_col(out, assignment)?,
         "gpu.grid.2d" => parallel_gpu::render_grid_2d(out, assignment)?,
-        "parallel.context" => parallel_gpu::render_context(out, assignment)?,
-        "gpu.scope-worker-to-block" => parallel_gpu::render_scope_worker_to_block(out, assignment)?,
-        "parallel.worker-context" => parallel_gpu::render_worker_context(out, assignment)?,
-        "parallel.worker-index" => parallel_gpu::render_worker_index(out, assignment)?,
+        "gpu.block.2d" => parallel_gpu::render_block_2d(out, assignment)?,
+        "parallel.host" => parallel_gpu::render_host(out, assignment)?,
+        "parallel.worker.index" => parallel_gpu::render_worker_index(out, assignment)?,
+        "parallel.worker" => parallel_gpu::render_worker(out, assignment)?,
         "u64.to-ix" => render_u64_to_ix(out, assignment)?,
         op if op.starts_with(CONST_U64_PREFIX) => {
             render_int_const(out, assignment, CONST_U64_PREFIX, "ULL")?

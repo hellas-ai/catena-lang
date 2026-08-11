@@ -1,15 +1,15 @@
-# Execution contexts and workers
+# Parallel runners
 (theory type nat {
-  # A context describes one execution level, its total worker count, and the
-  # number of groups at the next scope. Lowering interprets the nominal level.
-  (arr context : 3 -> 1)
-  (arr worker : 3 -> 1)
+  # A host submits work to a worker population. A worker runs inside one.
+  # A worker additionally carries the type of its topology-shaped index.
+  (arr host : 3 -> 1)
+  (arr worker : 4 -> 1)
 })
 
 (theory program type {
-  # Build an execution context from topology-specific metadata and runtime
+  # Build a host runner from topology-specific metadata and runtime
   # parameters. The metadata is type-level and erases before codegen.
-  (arr parallel.context : {[
+  (arr parallel.host : {[
     level workers groups parameters.
   ]
     [.level]
@@ -19,53 +19,59 @@
   }
   ->
   ([level workers groups parameters.]
-    ({[.level workers groups]} context)))
+    ({[.level workers groups]} host)))
 
-  # Expose the context associated with a worker while preserving the worker
-  # for indexing and domain-specific scoping.
-  (arr parallel.worker-context :
-    ({[level workers groups.] [.level workers groups]} worker)
-    ->
-    ([level workers groups.] {
-      ({[.level workers groups]} context)
-      ({[.level workers groups]} worker)
-    }))
-
-  # Return the current worker's flat physical index in this context.
-  (arr parallel.worker-index : {[level workers groups.]
-    ({[.level workers groups]} context)
-    ({[.level workers groups]} worker)
+  # Expose this worker's topology-shaped index while preserving the worker.
+  # The index object may be a product, such as Ix n * Ix m for a 2D level.
+  (arr parallel.worker.index : {[level workers groups index.]
+    ({[.level workers groups index]} worker)
   }
   ->
-  ([level workers groups.] ([.workers] ix val)))
+  ([level workers groups index.] {
+    ({[.level workers groups index]} worker)
+    [.index]
+  }))
 
-  # Allocate an owned f32 buffer in an execution context. Its size is
-  # independent of the context's worker and group counts.
-  (arr parallel.allocate : {[level workers groups n.]
-    ({[.level workers groups]} context)
+  # Re-scope a parent worker around a child-topology index. The child topology
+  # metadata is explicit, so constructing a worker cannot invent an
+  # unconstrained level.
+  (arr parallel.worker : {[parent level workers groups index.]
+    [.parent]
+    [.level]
+    [.workers]
+    [.groups]
+    [.index]
+  }
+  ->
+  ([parent level workers groups index.]
+    ({[.level workers groups index]} worker)))
+
+  # Allocate an owned f32 buffer through a host or worker runner.
+  (arr parallel.allocate : {[runner n.]
+    [.runner]
     ({[.n] u64} :)
   }
   ->
-  ([level workers groups n.] {
-    ({[.level workers groups]} context)
+  ([runner n.] {
+    [.runner]
     ({
-      ({[.level workers groups]} context)
+      [.runner]
       ({cap.own [.n] f32} buf)
     } writable val)
   }))
 
   # Synchronize after writes, making a pending buffer visible to this
-  # context's workers. The bare buffer loses its context association.
-  (arr parallel.await : {[level workers groups m n.]
-    ({[.level workers groups]} context)
+  # runner's workers. The bare buffer loses its runner association.
+  (arr parallel.await : {[runner m n.]
+    [.runner]
     ({
-      ({[.level workers groups]} context)
+      [.runner]
       ({[.m n] f32} buf)
     } pending val)
   }
   ->
-  ([level workers groups m n.] {
-    ({[.level workers groups]} context)
+  ([runner m n.] {
+    [.runner]
     ({[.m n] f32} buf val)
   }))
 
@@ -73,40 +79,37 @@
   # iteration writes into shared storage. TODO: track the released buffers in
   # the type once buffer ownership is threaded back out of reader closures.
   (arr parallel.release :
-    ({[level workers groups.] [.level workers groups]} context)
-    ->
-    ({[level workers groups.] [.level workers groups]} context))
+    ([runner.] [.runner]) -> ([runner.] [.runner]))
 
-  # Synchronize workers in one context without changing buffer state.
+  # Synchronize workers through one runner without changing buffer state.
   (arr parallel.barrier :
-    ({[level workers groups.] [.level workers groups]} context)
-    ->
-    ({[level workers groups.] [.level workers groups]} context))
+    ([runner.] [.runner]) -> ([runner.] [.runner]))
 
-  # Materialize a logical output space on a physical context. The worker count
+  # Materialize a logical output space through a runner. The worker count
   # and output count are intentionally independent; the scheduling policy maps
-  # logical work items to physical workers.
+  # logical work items to physical workers. task-worker makes the worker passed
+  # to the producer explicit for both host launches and worker cooperation.
   (arr parallel.materialize : {[
-    level workers groups output-count.
+    runner task-worker output-count.
   ]
-    ({[.level workers groups]} context)
+    [.runner]
     ({
-      ({[.level workers groups]} context)
+      [.runner]
       ({cap.own [.output-count] f32} buf)
     } writable val)
     ({
       ({
-        ({[.level workers groups]} worker)
+        [.task-worker]
         ([.output-count] ix val)
       } *)
       (f32 val)
     } =>)
   }
   ->
-  ([level workers groups output-count.] {
-    ({[.level workers groups]} context)
+  ([runner task-worker output-count.] {
+    [.runner]
     ({
-      ({[.level workers groups]} context)
+      [.runner]
       ({cap.own [.output-count] f32} buf)
     } pending val)
   }))
@@ -114,11 +117,11 @@
   # Closure-converted form of parallel.materialize. The producer's captured
   # environment and function pointer replace its source-level closure value.
   (arr parallel.materializec : {[
-    environment level workers groups output-count.
+    environment runner task-worker output-count.
   ]
-    ({[.level workers groups]} context)
+    [.runner]
     ({
-      ({[.level workers groups]} context)
+      [.runner]
       ({cap.own [.output-count] f32} buf)
     } writable val)
     ([.environment])
@@ -126,7 +129,7 @@
       ({
         ([.environment])
         ({
-          ({[.level workers groups]} worker)
+          [.task-worker]
           ([.output-count] ix val)
         } *)
       } *)
@@ -134,10 +137,10 @@
     } -> val)
   }
   ->
-  ([environment level workers groups output-count.] {
-    ({[.level workers groups]} context)
+  ([environment runner task-worker output-count.] {
+    [.runner]
     ({
-      ({[.level workers groups]} context)
+      [.runner]
       ({cap.own [.output-count] f32} buf)
     } pending val)
   }))

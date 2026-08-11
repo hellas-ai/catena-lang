@@ -146,11 +146,11 @@ impl SafeRuntime {
     }
 
     /// Run a source-level program in the child process.
-    pub fn exec<const M: usize, const N: usize>(
+    pub fn exec<'a, const M: usize, const N: usize>(
         &self,
         name: &str,
-        args: [Value; M],
-    ) -> Result<[Value; N], SafeExecError> {
+        args: [Value<'a>; M],
+    ) -> Result<[Value<'static>; N], SafeExecError> {
         let args = args
             .into_iter()
             .map(WireValue::try_from)

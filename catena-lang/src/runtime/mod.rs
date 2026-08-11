@@ -27,7 +27,7 @@
 //!
 //! - [`Runtime::new`] and [`Runtime::from_sources`] load programs from paths or source strings.
 //! - [`Runtime::exec`] calls a program with [`Value`] inputs and const-sized outputs.
-//! - [`Runtime::mem_u64`] and [`Runtime::mem_f32`] copy host slices into owned device memory.
+//! - [`Runtime::mem_u16`], [`Runtime::mem_u64`], and [`Runtime::mem_f32`] copy host slices into owned device memory.
 //! ### [`Value`] and Memory
 //!
 //! Values are input to a catena program by supplying [`Value`]s to [`Runtime::exec`].

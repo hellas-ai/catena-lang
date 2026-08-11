@@ -62,15 +62,17 @@ impl From<WireGpuDialect> for GpuDialect {
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) enum WireValue {
     Bool(u8),
+    U16(u16),
     U32(u32),
     U64(u64),
     F32(f32),
 }
 
-impl From<WireValue> for Value {
+impl From<WireValue> for Value<'static> {
     fn from(value: WireValue) -> Self {
         match value {
             WireValue::Bool(value) => Value::Bool(value),
+            WireValue::U16(value) => Value::U16(value),
             WireValue::U32(value) => Value::U32(value),
             WireValue::U64(value) => Value::U64(value),
             WireValue::F32(value) => Value::F32(value),
@@ -78,16 +80,18 @@ impl From<WireValue> for Value {
     }
 }
 
-impl TryFrom<Value> for WireValue {
+impl TryFrom<Value<'_>> for WireValue {
     type Error = ValueKind;
 
     fn try_from(value: Value) -> Result<Self, Self::Error> {
         match value {
             Value::Bool(value) => Ok(Self::Bool(value)),
+            Value::U16(value) => Ok(Self::U16(value)),
             Value::U32(value) => Ok(Self::U32(value)),
             Value::U64(value) => Ok(Self::U64(value)),
             Value::F32(value) => Ok(Self::F32(value)),
-            Value::Mem(_) => Err(ValueKind::Mem),
+            Value::MemOwn(_) => Err(ValueKind::MemOwn),
+            Value::MemRef(_) => Err(ValueKind::MemRef),
         }
     }
 }
@@ -180,6 +184,17 @@ mod tests {
                 args,
             } if name == "f" && matches!(args.as_slice(), [WireValue::U64(7)])
         ));
+    }
+
+    #[test]
+    fn u16_values_round_trip() {
+        let wire = WireValue::try_from(Value::U16(0x3f80)).unwrap();
+        assert!(matches!(wire, WireValue::U16(0x3f80)));
+
+        let Value::U16(decoded) = Value::from(wire) else {
+            panic!("decoded u16 wire value had the wrong kind");
+        };
+        assert_eq!(decoded, 0x3f80);
     }
 
     #[test]

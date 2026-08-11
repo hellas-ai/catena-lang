@@ -16,9 +16,11 @@ pub(in crate::codegen) fn c_type(ty: &CType) -> String {
     match ty {
         CType::Unit => "catena_unit_t".to_string(),
         CType::Bool => "uint8_t".to_string(),
+        CType::U16 => "uint16_t".to_string(),
         CType::U32 => "uint32_t".to_string(),
         CType::U64 => "uint64_t".to_string(),
         CType::F32 => "float".to_string(),
+        CType::BF16 => "catena_bf16_t".to_string(),
         CType::Pointer(inner) => format!("{} *", c_type(inner)),
         CType::Named(name) => name.clone(),
     }

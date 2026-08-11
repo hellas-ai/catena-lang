@@ -10,7 +10,9 @@
 
   (arr u64 : 0 -> 1)
   (arr u32 : 0 -> 1)
+  (arr u16 : 0 -> 1)
   (arr f32 : 0 -> 1)
+  (arr bf16 : 0 -> 1)
 })
 
 (theory program type {
@@ -88,6 +90,28 @@
   (arr f32.select : {(bool val) (f32 val) (f32 val)} -> (f32 val))
   (arr f32.round-to-u32 : (f32 val) -> (u32 val))
   (arr f32.bitcast-u32 : (f32 val) -> (u32 val))
+  ##############################################################################
+  # bf16 methods
+  #
+  (arr bf16.zero : [] -> ({0 bf16} :))
+  (arr bf16.one  : [] -> (bf16 val))
+  (arr bf16.add  : {(bf16 val) (bf16 val)} -> (bf16 val))
+  (arr bf16.sub  : {(bf16 val) (bf16 val)} -> (bf16 val))
+  (arr bf16.neg  : (bf16 val) -> (bf16 val))
+  (arr bf16.mul  : {(bf16 val) (bf16 val)} -> (bf16 val))
+  (arr bf16.fma  : {(bf16 val) (bf16 val) (bf16 val)} -> (bf16 val))
+  (arr bf16.div  : {(bf16 val) (bf16 val)} -> (bf16 val))
+  (arr bf16.lt   : {(bf16 val) (bf16 val)} -> (bool val))
+  (arr bf16.eq   : {(bf16 val) (bf16 val)} -> (bool val))
+  (arr bf16.ne   : {(bf16 val) (bf16 val)} -> (bool val))
+  (arr bf16.gt   : {(bf16 val) (bf16 val)} -> (bool val))
+  (arr bf16.lte  : {(bf16 val) (bf16 val)} -> (bool val))
+  (arr bf16.gte  : {(bf16 val) (bf16 val)} -> (bool val))
+  (arr bf16.select : {(bool val) (bf16 val) (bf16 val)} -> (bf16 val))
+  (arr bf16.to-f32 : (bf16 val) -> (f32 val))
+  (arr f32.to-bf16 : (f32 val) -> (bf16 val))
+  (arr bf16.bitcast-u16 : (bf16 val) -> (u16 val))
+  (arr u16.bitcast-bf16 : (u16 val) -> (bf16 val))
   ##############################################################################
   # u64 methods
   #

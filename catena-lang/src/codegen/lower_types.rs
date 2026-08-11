@@ -15,9 +15,11 @@ pub enum LoweredType {
 pub enum CType {
     Unit,
     Bool,
+    U16,
     U32,
     U64,
     F32,
+    BF16,
     Pointer(Box<CType>),
     Named(String),
 }
@@ -107,6 +109,9 @@ pub fn lower_runtime_type(ty: &Tree<(), Operation>) -> Result<CType, LowerTypeEr
         Tree::Node(op, 0, children) if op.as_str() == "bool" && children.is_empty() => {
             Ok(CType::Bool)
         }
+        Tree::Node(op, 0, children) if op.as_str() == "u16" && children.is_empty() => {
+            Ok(CType::U16)
+        }
         Tree::Node(op, 0, children) if op.as_str() == "u64" && children.is_empty() => {
             Ok(CType::U64)
         }
@@ -115,6 +120,9 @@ pub fn lower_runtime_type(ty: &Tree<(), Operation>) -> Result<CType, LowerTypeEr
         }
         Tree::Node(op, 0, children) if op.as_str() == "f32" && children.is_empty() => {
             Ok(CType::F32)
+        }
+        Tree::Node(op, 0, children) if op.as_str() == "bf16" && children.is_empty() => {
+            Ok(CType::BF16)
         }
         Tree::Node(op, 0, _children) if op.as_str() == FN_REF_TYPE => {
             Err(LowerTypeError::FunctionPointerRuntime)
@@ -303,6 +311,14 @@ mod tests {
         assert_eq!(
             lower_type(&node("val", vec![node("f32", vec![])])).unwrap(),
             LoweredType::Runtime(CType::F32)
+        );
+        assert_eq!(
+            lower_type(&node("val", vec![node("u16", vec![])])).unwrap(),
+            LoweredType::Runtime(CType::U16)
+        );
+        assert_eq!(
+            lower_type(&node("val", vec![node("bf16", vec![])])).unwrap(),
+            LoweredType::Runtime(CType::BF16)
         );
     }
 

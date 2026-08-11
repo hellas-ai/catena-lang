@@ -880,14 +880,6 @@ fn exp2_approx_test() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[path = "cases/materializec.rs"]
-mod materializec;
-
-#[path = "cases/materialize.rs"]
-mod materialize;
-#[path = "cases/matrix.rs"]
-mod matrix;
-
 #[test]
 fn sigmoid_test() -> anyhow::Result<()> {
     let runtime = runtime_with("")?;
@@ -1310,11 +1302,4 @@ fn argmax_f32_test() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[path = "cases/reducec.rs"]
-mod reducec;
-
-#[path = "cases/reduce.rs"]
-mod reduce;
-
-#[path = "cases/closures.rs"]
-mod closures;
+mod cases;

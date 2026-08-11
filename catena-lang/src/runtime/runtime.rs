@@ -176,6 +176,10 @@ impl Runtime {
         self.mem_from_bytes(slice_as_bytes(values))
     }
 
+    pub fn mem_u16(&self, values: &[u16]) -> Result<MemOwn, MemError> {
+        self.mem_from_bytes(slice_as_bytes(values))
+    }
+
     pub fn mem_f32(&self, values: &[f32]) -> Result<MemOwn, MemError> {
         self.mem_from_bytes(slice_as_bytes(values))
     }
@@ -279,6 +283,7 @@ impl Runtime {
             .into_iter()
             .map(|value| match value {
                 Value::Bool(value) => AbiValue::Bool(value),
+                Value::U16(value) => AbiValue::U16(value),
                 Value::U32(value) => AbiValue::U32(value),
                 Value::U64(value) => AbiValue::U64(value),
                 Value::F32(value) => AbiValue::F32(value),
@@ -299,6 +304,7 @@ impl Runtime {
     fn resolve_output(&self, output: AbiValue) -> Result<Value<'static>, ExecError> {
         match output {
             AbiValue::Bool(value) => Ok(Value::Bool(value)),
+            AbiValue::U16(value) => Ok(Value::U16(value)),
             AbiValue::U32(value) => Ok(Value::U32(value)),
             AbiValue::U64(value) => Ok(Value::U64(value)),
             AbiValue::F32(value) => Ok(Value::F32(value)),

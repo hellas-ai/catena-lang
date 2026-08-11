@@ -118,3 +118,65 @@ fn materialize_reduce_f32_empty_reduction_is_positive_zero() -> anyhow::Result<(
     assert_eq!(output.to_f32_vec()[0].to_bits(), 0.0_f32.to_bits());
     Ok(())
 }
+
+#[test]
+fn materialize_softmax_f32_normalizes_rows_in_place() -> anyhow::Result<()> {
+    let runtime = runtime_with(SOURCE)?;
+    let input = runtime.mem_f32(&[0.0, 1.0, 2.0, f32::NEG_INFINITY, 3.0, 3.0])?;
+    let input_ptr = input.as_ptr();
+
+    let [output] = runtime.exec("materialize-softmax-f32-rows", [input.into(), 3_u64.into()])?;
+    let Value::MemOwn(output) = output else {
+        anyhow::bail!("materialize-softmax-f32-rows returned non-memory: {output:?}");
+    };
+
+    assert_eq!(output.as_ptr(), input_ptr);
+    assert_eq!(
+        output.to_f32_vec(),
+        vec![0.0, 1.0 / 3.0, 2.0 / 3.0, 0.0, 0.5, 0.5]
+    );
+    Ok(())
+}
+
+#[test]
+fn materialize_borrow_reduce_f32_returns_source_and_reductions() -> anyhow::Result<()> {
+    let runtime = runtime_with(SOURCE)?;
+    let input = runtime.mem_f32(&[1.0, 2.0, 3.0, 5.0, 8.0, 13.0])?;
+    let input_ptr = input.as_ptr();
+
+    let [source, output] = runtime.exec(
+        "materialize-borrow-reduce-f32-rows",
+        [input.into(), 2_u64.into(), 3_u64.into()],
+    )?;
+    let Value::MemOwn(source) = source else {
+        anyhow::bail!("borrow-reduce returned non-memory source: {source:?}");
+    };
+    let Value::MemOwn(output) = output else {
+        anyhow::bail!("borrow-reduce returned non-memory output: {output:?}");
+    };
+
+    assert_eq!(source.as_ptr(), input_ptr);
+    assert_eq!(source.to_f32_vec(), vec![1.0, 2.0, 3.0, 5.0, 8.0, 13.0]);
+    assert_eq!(output.to_f32_vec(), vec![6.0, 26.0]);
+    Ok(())
+}
+
+#[test]
+fn materialize_borrow_argmax_f32_returns_source_and_last_maximum() -> anyhow::Result<()> {
+    let runtime = runtime_with(SOURCE)?;
+    let input = runtime.mem_f32(&[3.0, 7.0, -1.0, 7.0])?;
+    let input_ptr = input.as_ptr();
+
+    let [source, output] = runtime.exec("materialize-borrow-argmax-f32", [input.into()])?;
+    let Value::MemOwn(source) = source else {
+        anyhow::bail!("borrow-argmax returned non-memory source: {source:?}");
+    };
+    let Value::MemOwn(output) = output else {
+        anyhow::bail!("borrow-argmax returned non-memory output: {output:?}");
+    };
+
+    assert_eq!(source.as_ptr(), input_ptr);
+    assert_eq!(source.to_f32_vec(), vec![3.0, 7.0, -1.0, 7.0]);
+    assert_eq!(output.to_u64_vec(), vec![3]);
+    Ok(())
+}

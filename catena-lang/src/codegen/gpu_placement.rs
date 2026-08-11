@@ -74,7 +74,10 @@ fn function_directly_requires_host(function: &GpuFunction) -> bool {
                 | "materializec"
                 | "materializec.into"
                 | "materializec.borrow"
+                | "materializec.borrow-argmax-f32"
+                | "materializec.borrow-reduce-f32"
                 | "materializec.reduce-f32"
+                | "materializec.softmax-f32"
                 | "buf.free"
         )
     })

@@ -114,6 +114,35 @@
     ({cap.own [.n b]} buf val)
   }})
 
+  # Scope a read-only borrow while cooperatively reducing one independent F32
+  # domain per output. Reduction and epilogue semantics match
+  # materializec.reduce-f32; the source owner is returned with the result.
+  (arr materializec.borrow-reduce-f32 : {[x capacity n k a.]
+    ({cap.own [.capacity a]} buf val)
+    ({[.capacity] u64} :)
+    ({[.n] u64} :)
+    ({[.k] u64} :)
+    ([.x])
+    ({({({cap.ref [.capacity a]} buf val) ({[.x] ({([.n] ix val) ([.k] ix val)} *)} *)} *) (f32 val)} -> val)
+    ({({({cap.ref [.capacity a]} buf val) ({[.x] ({([.n] ix val) (f32 val)} *)} *)} *) (f32 val)} -> val)
+  } -> {[x capacity n k a.] {
+    ({cap.own [.capacity a]} buf val)
+    ({cap.own [.n] f32} buf val)
+  }})
+
+  # Find the greatest F32 element while returning the source owner. Comparison
+  # uses IEEE-bit total order (negative NaNs through positive NaNs); equal bit
+  # patterns select the greatest index. The input must be non-empty. The index
+  # is returned as a one-element owned U64 buffer.
+  (arr materializec.borrow-argmax-f32 : {[n one.]
+    ({cap.own [.n] f32} buf val)
+    ({[.n] u64} :)
+    ({[.one] u64} :)
+  } -> {[n one.] {
+    ({cap.own [.n] f32} buf val)
+    ({cap.own [.one] u64} buf val)
+  }})
+
   # Materialize F32 outputs by cooperatively reducing one independent domain
   # per output. The reduction order is part of this operation's semantics:
   # first materialize term(0)..term(k-1) as F32, then add adjacent logical
@@ -132,6 +161,23 @@
     ({({[.x] ({([.n] ix val) ([.k] ix val)} *)} *) (f32 val)} -> val)
     ({({[.x] ({([.n] ix val) (f32 val)} *)} *) (f32 val)} -> val)
   } -> {[x n k.] ({cap.own [.n] f32} buf val)})
+
+  # Normalize contiguous F32 rows in place. The operation consumes and
+  # returns the owner; `columns` must be non-zero and divide n exactly.
+  #
+  # For each row, maximum and denominator reductions use the same adjacent-
+  # pair tree specified by materializec.reduce-f32. Maximum selection keeps
+  # the left operand unless the right operand is strictly greater. A
+  # 0xFF800000 (-infinity) input maps directly to a +0 numerator; all other
+  # numerators are exponential(value - maximum). If the denominator is zero,
+  # the entire row is +0. The current GPU implementation supports columns <=
+  # 8192.
+  (arr materializec.softmax-f32 : {[n.]
+    ({cap.own [.n] f32} buf val)
+    ({[.n] u64} :)
+    (u64 val)
+    ({(f32 val) (f32 val)} -> val)
+  } -> {[n.] ({cap.own [.n] f32} buf val)})
 
   # TODO: make all mem.cast.* into definitions, using the below:
   #   mem.cast : mem ● (s : u64) ● sizeof(t, s) -> (n : u64) ● val(buf n t)

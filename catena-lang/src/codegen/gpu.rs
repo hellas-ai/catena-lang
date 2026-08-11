@@ -305,7 +305,7 @@ fn render_assignment(
 
     match assignment.op.as_str() {
         "parallel.allocate" => return parallel_gpu::render_allocate(out, assignment, dialect),
-        "parallel.await" | "parallel.release" | "parallel.barrier" => {
+        "parallel.await" | "parallel.await-one" | "parallel.release" | "parallel.barrier" => {
             return parallel_gpu::render_synchronize(out, assignment, dialect);
         }
         "parallel.materializec" => {

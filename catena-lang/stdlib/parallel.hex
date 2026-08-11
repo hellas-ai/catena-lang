@@ -60,19 +60,39 @@
     } writable val)
   }))
 
-  # Synchronize after writes, making a pending buffer visible to this
-  # runner's workers. The bare buffer loses its runner association.
-  (arr parallel.await : {[runner m n.]
+  # Synchronize after writes to two buffers, making both visible to this
+  # runner's workers with one synchronization event. The bare buffers lose
+  # their runner associations together.
+  (arr parallel.await : {[runner a-cap a-n b-cap b-n.]
     [.runner]
     ({
       [.runner]
-      ({[.m n] f32} buf)
+      ({[.a-cap a-n] f32} buf)
+    } pending val)
+    ({
+      [.runner]
+      ({[.b-cap b-n] f32} buf)
     } pending val)
   }
   ->
-  ([runner m n.] {
+  ([runner a-cap a-n b-cap b-n.] {
     [.runner]
-    ({[.m n] f32} buf val)
+    ({[.a-cap a-n] f32} buf val)
+    ({[.b-cap b-n] f32} buf val)
+  }))
+
+  # Single-buffer form used when only one pending result must become visible.
+  (arr parallel.await-one : {[runner cap n.]
+    [.runner]
+    ({
+      [.runner]
+      ({[.cap n] f32} buf)
+    } pending val)
+  }
+  ->
+  ([runner cap n.] {
+    [.runner]
+    ({[.cap n] f32} buf val)
   }))
 
   # Synchronize after reads. This must wait for slower readers before another

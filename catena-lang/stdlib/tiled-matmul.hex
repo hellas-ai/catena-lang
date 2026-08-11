@@ -212,10 +212,8 @@
     } partial.f32.tiled-matmul.inner-col-tile-load.5)
   } parallel.materialize [block-worker-2 pending-b.])
 
-  ({[.block-worker-2] [.pending-a]}
-    parallel.await [block-worker-3 a-ready.])
-  ({[.block-worker-3] [.pending-b]}
-    parallel.await [block-worker-4 b-ready.])
+  ({[.block-worker-2] [.pending-a] [.pending-b]}
+    parallel.await [block-worker-4 a-ready b-ready.])
 
   ({cap.own.type [.a-flat-length] [.a-ready]}
     f32.row-major.buffer-view [a-flat-view.])
@@ -401,6 +399,6 @@
     } partial.gpu.f32.tiled-matmul.cell.kernel.12)
   } parallel.materialize [materialized-host pending-output.])
   ({[.materialized-host] [.pending-output]}
-    parallel.await [_grid-host result.])
+    parallel.await-one [_grid-host result.])
   [.result]
 })

@@ -163,3 +163,116 @@
   } materializec.reduce-f32 [output.]
   ({[.named-rows] [.output]} buf.to-mem)
 ))
+
+# A deliberately simple stand-in for exp used to test the softmax primitive:
+# shifted + 2 maps row [0, 1, 2] to numerators [0, 1, 2].
+(def program materialize-softmax-f32-exp : (f32 val) -> (f32 val)
+= ([shifted.]
+  (const.u32.0x40000000 u32.bitcast-f32 [two.])
+  ([.shifted two] f32.add)
+))
+
+(def program materialize-softmax-f32-rows :
+  {(cap.own mem) (u64 val)}
+  ->
+  (cap.own mem)
+= ([memory columns.]
+  ([.memory] mem.cast.f32 [element-count buffer.])
+  {
+    [.buffer]
+    [.element-count]
+    [.columns]
+    name.materialize-softmax-f32-exp
+  } materializec.softmax-f32 [output.]
+  ({[.element-count] [.output]} buf.to-mem)
+))
+
+(def program materialize-borrow-reduce-f32-term :
+  ([capacity n k.] {
+    ({cap.ref [.capacity] f32} buf val)
+    ({
+      ({({[.capacity] u64} :) (u64 val)} *)
+      ({([.n] ix val) ([.k] ix val)} *)
+    } *)
+  })
+  ->
+  ([capacity n k.] (f32 val))
+= ([input env.]
+  ([.env] *.elim [inputs indices.])
+  ([.inputs] *.elim [capacity-value columns.])
+  ([.indices] *.elim [row-index column-index.])
+  ([.row-index] ix.to-u64 [row.])
+  ([.column-index] ix.to-u64 [column.])
+  ([.row columns] u64.mul [row-offset.])
+  ([.row-offset column] u64.add [flat-index.])
+  ([.flat-index] u64.name [named-index.])
+  ([.capacity-value named-index] u64.gt [in-bounds if-in-bounds _if-out-of-bounds.])
+  ([.in-bounds if-in-bounds] assert-then [proof.])
+  ([.named-index capacity-value proof] u64.to-ix [index.])
+  ({[.index input]} ix)
+))
+
+(def program materialize-borrow-reduce-f32-epilogue :
+  ([capacity n.] {
+    ({cap.ref [.capacity] f32} buf val)
+    ({
+      ({({[.capacity] u64} :) (u64 val)} *)
+      ({([.n] ix val) (f32 val)} *)
+    } *)
+  })
+  ->
+  ([capacity n.] (f32 val))
+= ([_input env.]
+  ([.env] *.elim [_inputs index-and-sum.])
+  ([.index-and-sum] *.elim [_index sum.])
+  [.sum]
+))
+
+(def program materialize-borrow-reduce-f32-rows :
+  {(cap.own mem) (u64 val) (u64 val)}
+  ->
+  {(cap.own mem) (cap.own mem)}
+= ([memory rows columns.]
+  ([.memory] mem.cast.f32 [capacity buffer.])
+  ([.rows] u64.name [named-rows.])
+  ([.columns] u64.name [named-columns.])
+  ({[.capacity] [.columns]} *.intro [env.])
+  {
+    [.buffer]
+    [.capacity]
+    [.named-rows]
+    [.named-columns]
+    [.env]
+    ({
+      ([.capacity] :.param)
+      ([.named-rows] :.param)
+      ([.named-columns] :.param)
+    } name.materialize-borrow-reduce-f32-term)
+    ({
+      ([.capacity] :.param)
+      ([.named-rows] :.param)
+    } name.materialize-borrow-reduce-f32-epilogue)
+  } materializec.borrow-reduce-f32 [buffer-after output.]
+  {
+    ({[.capacity] [.buffer-after]} buf.to-mem)
+    ({[.named-rows] [.output]} buf.to-mem)
+  }
+))
+
+(def program materialize-borrow-argmax-f32 :
+  (cap.own mem)
+  ->
+  {(cap.own mem) (cap.own mem)}
+= ([memory.]
+  ([.memory] mem.cast.f32 [element-count buffer.])
+  (const.u64.0x0000000000000001 u64.name [one.])
+  {
+    [.buffer]
+    [.element-count]
+    [.one]
+  } materializec.borrow-argmax-f32 [buffer-after index.]
+  {
+    ({[.element-count] [.buffer-after]} buf.to-mem)
+    ({[.one] [.index]} buf.to-mem)
+  }
+))

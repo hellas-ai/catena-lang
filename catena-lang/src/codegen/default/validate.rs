@@ -18,7 +18,10 @@ pub(super) fn assignment(
         "materializec"
         | "materializec.into"
         | "materializec.borrow"
-        | "materializec.reduce-f32" => materializec_producer(definitions, caller, inputs),
+        | "materializec.borrow-argmax-f32"
+        | "materializec.borrow-reduce-f32"
+        | "materializec.reduce-f32"
+        | "materializec.softmax-f32" => materializec_producer(definitions, caller, inputs),
         _ => Ok(()),
     }
 }
@@ -76,7 +79,10 @@ fn is_materialize_op(op: &Operation) -> bool {
             | "materializec"
             | "materializec.into"
             | "materializec.borrow"
+            | "materializec.borrow-argmax-f32"
+            | "materializec.borrow-reduce-f32"
             | "materializec.reduce-f32"
+            | "materializec.softmax-f32"
             | "gpu.materialize"
     )
 }

@@ -89,6 +89,66 @@ fn f32_tiled_matmul_rectangular_perfect_tiles() -> anyhow::Result<()> {
 }
 
 #[test]
+fn f32_tiled_matmul_right_identity_view() -> anyhow::Result<()> {
+    let runtime = runtime_with(TILED_MATMUL_SOURCE)?;
+
+    // A 4 x 4 matrix with 2 x 2 tiles exercises two blocks in each output
+    // dimension and two iterations over K.
+    let input_values = [
+        1.0_f32, 2.0, 3.0, 4.0, //
+        5.0, 6.0, 7.0, 8.0, //
+        9.0, 10.0, 11.0, 12.0, //
+        13.0, 14.0, 15.0, 16.0,
+    ];
+    let input = runtime.mem_f32(&input_values)?;
+    let [result] = runtime.exec(
+        "tiled-matmul-right-identity-via-mem",
+        [
+            input.as_ref().into(),
+            4_u64.into(),
+            2_u64.into(),
+            16_u64.into(),
+            4_u64.into(),
+        ],
+    )?;
+    let Value::MemOwn(result) = result else {
+        anyhow::bail!("tiled right-identity matmul returned non-mem value: {result:?}");
+    };
+
+    assert_eq!(result.to_f32_vec(), input_values);
+    Ok(())
+}
+
+#[test]
+fn f32_tiled_matmul_left_identity_view() -> anyhow::Result<()> {
+    let runtime = runtime_with(TILED_MATMUL_SOURCE)?;
+
+    let input_values = [
+        1.0_f32, 2.0, 3.0, 4.0, //
+        5.0, 6.0, 7.0, 8.0, //
+        9.0, 10.0, 11.0, 12.0, //
+        13.0, 14.0, 15.0, 16.0,
+    ];
+    let input = runtime.mem_f32(&input_values)?;
+    let [result] = runtime.exec(
+        "tiled-matmul-left-identity-via-mem",
+        [
+            input.as_ref().into(),
+            4_u64.into(),
+            2_u64.into(),
+            16_u64.into(),
+            4_u64.into(),
+        ],
+    )?;
+    let Value::MemOwn(result) = result else {
+        anyhow::bail!("tiled left-identity matmul returned non-mem value: {result:?}");
+    };
+
+    assert_eq!(result.to_f32_vec(), input_values);
+    Ok(())
+}
+
+#[test]
 fn f32_matmul_row_major_bufs_from_mems() -> anyhow::Result<()> {
     let runtime = runtime_with(MATMUL_SOURCE)?;
 

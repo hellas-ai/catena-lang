@@ -66,3 +66,85 @@
   } gpu.f32.tiled-matmul.row-major.materialize [result.])
   ({[.mem-len] [.result]} buf.to-mem)
 })
+
+# mem -> typed buffer -> matrix view, multiplied by the shared identity view
+# using perfectly tiled GPU execution.
+(def program tiled-matmul-right-identity-via-mem :
+  ([n tile-size.] {
+    (cap.ref mem)
+    ({[.n] u64} :)
+    ({[.tile-size] u64} :)
+    ({({[.n n]} *) u64} :)
+    ({({[.tile-size tile-size]} *) u64} :)
+  })
+  ->
+  ([n tile-size.] (cap.own mem))
+= {[a-mem n-len tile-size nn-len tile-element-count.]
+  ([.a-mem] mem.cast.f32 [actual-nn-len a-raw.])
+  ({[.nn-len] [.actual-nn-len]} u64.eq
+    [a-len-eq if-a-len-eq _if-a-len-ne.])
+  ({[.a-len-eq] [.if-a-len-eq]} assert-then [a-same-length.])
+  ({[.a-raw] [.a-same-length]} buf.f32.cast-same-length [a.])
+
+  ([.n-len] u64.copies6
+    [view-rows view-cols identity-n materialize-n materialize-k materialize-m.])
+  ([.nn-len] u64.copies3 [flat-view-len output-len mem-len.])
+  ({cap.ref.type [.flat-view-len] [.a]}
+    f32.row-major.buffer-view [flat-view.])
+  ({[.view-rows] [.view-cols] [.flat-view]}
+    f32.row-major.matrix-view [a-view.])
+  (([.identity-n] :.param) name.f32.matrix.identity-at lift [identity-view.])
+
+  ({
+    [.materialize-n]
+    [.materialize-m]
+    [.materialize-k]
+    [.output-len]
+    [.tile-size]
+    [.tile-element-count]
+    [.a-view]
+    [.identity-view]
+  } gpu.f32.tiled-matmul.row-major.materialize [result.])
+  ({[.mem-len] [.result]} buf.to-mem)
+})
+
+# The shared identity view multiplied by the matrix view derived from the
+# input mem, using perfectly tiled GPU execution.
+(def program tiled-matmul-left-identity-via-mem :
+  ([n tile-size.] {
+    (cap.ref mem)
+    ({[.n] u64} :)
+    ({[.tile-size] u64} :)
+    ({({[.n n]} *) u64} :)
+    ({({[.tile-size tile-size]} *) u64} :)
+  })
+  ->
+  ([n tile-size.] (cap.own mem))
+= {[a-mem n-len tile-size nn-len tile-element-count.]
+  ([.a-mem] mem.cast.f32 [actual-nn-len a-raw.])
+  ({[.nn-len] [.actual-nn-len]} u64.eq
+    [a-len-eq if-a-len-eq _if-a-len-ne.])
+  ({[.a-len-eq] [.if-a-len-eq]} assert-then [a-same-length.])
+  ({[.a-raw] [.a-same-length]} buf.f32.cast-same-length [a.])
+
+  ([.n-len] u64.copies6
+    [view-rows view-cols identity-n materialize-n materialize-k materialize-m.])
+  ([.nn-len] u64.copies3 [flat-view-len output-len mem-len.])
+  ({cap.ref.type [.flat-view-len] [.a]}
+    f32.row-major.buffer-view [flat-view.])
+  ({[.view-rows] [.view-cols] [.flat-view]}
+    f32.row-major.matrix-view [a-view.])
+  (([.identity-n] :.param) name.f32.matrix.identity-at lift [identity-view.])
+
+  ({
+    [.materialize-n]
+    [.materialize-m]
+    [.materialize-k]
+    [.output-len]
+    [.tile-size]
+    [.tile-element-count]
+    [.identity-view]
+    [.a-view]
+  } gpu.f32.tiled-matmul.row-major.materialize [result.])
+  ({[.mem-len] [.result]} buf.to-mem)
+})

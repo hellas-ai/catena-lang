@@ -143,11 +143,12 @@ parallel.worker.index(worker)
     -> (worker, index)
 
 parallel.worker(parent, child-level, child-workers, child-groups, child-index)
-    -> child-worker
+    -> (child-worker, available-storage)
 ```
 
-`parallel.worker` preserves the parent's storage layout. It is the generic
-operation used after a backend has calculated the index at a child level.
+`parallel.worker` preserves the parent's storage layout and creates its unique
+initial storage capability. It is the generic operation used after a backend
+has calculated the index at a child level.
 
 ## GPU topology
 
@@ -195,7 +196,9 @@ local-y = global-y % block-y
 local-index = (local-x, local-y)
 ```
 
-The coordinate calculation is GPU-specific, but the resulting child worker is built with the generic `parallel.worker` operation. Its storage allocator is obtained with `parallel.worker.storage`.
+The coordinate calculation is GPU-specific, but the resulting child worker
+and its initial storage capability are built together with the generic
+`parallel.worker` operation.
 
 ## Shared storage
 
@@ -231,7 +234,8 @@ layout   = gpu.shared(a-count, b-layout)
 
 The runtime value of the layout is its required byte count. CUDA/HIP lowering adds `length * sizeof(float)` for every call to `gpu.shared` and passes the total as the dynamic shared-memory size of the kernel launch.
 
-Within the kernel, `parallel.worker.storage` produces a linear capability for the complete layout. `parallel.allocate` consumes its next slot:
+Within the kernel, constructing the block worker produces a linear capability
+for the complete layout. `parallel.allocate` consumes its next slot:
 
 ```text
 (worker, available<slot<n, f32, Rest>>, n)
@@ -262,14 +266,14 @@ CUDA/HIP lowers this operation to device allocation. Block-worker allocation ins
 `parallel.materialize` fills an existing writable buffer:
 
 ```text
-parallel.materialize(runner, writable-buffer,
+parallel.materialize(context, writable-buffer,
     task : (task-worker, Ix output-count) => f32)
-  -> (runner, pending-buffer)
+  -> (context, pending-buffer)
 ```
 
-The runner determines how the task executes:
+The context determines how the task executes:
 
-| Runner       | CUDA/HIP lowering                                            |
+| Context      | CUDA/HIP lowering                                            |
 | ------------ | ------------------------------------------------------------ |
 | grid host    | launch a kernel                                              |
 | block worker | let the current GPU thread produce one shared-buffer element |
@@ -281,11 +285,11 @@ A writable buffer becomes `pending` after materialization. Synchronization
 makes its contents available:
 
 ```text
-parallel.await(runner, pending-a, pending-b)
-    -> (runner, ready-a, ready-b)
+parallel.await(context, pending-a, pending-b)
+    -> (context, ready-a, ready-b)
 
-parallel.await-one(runner, pending)
-    -> (runner, ready)
+parallel.await-one(context, pending)
+    -> (context, ready)
 ```
 
 For a block worker, `parallel.await` emits one block barrier for both buffers.
@@ -311,10 +315,10 @@ before the K-tile loop. The same pointers are then reused on every iteration.
 Each generation of a shared slot should follow this state cycle:
 
 ```text
-             materialize              await
-writable -----------------> pending -------------> readable
-    ^                                                |
-    +---------------- collective release -----------+
+             materialize              await (sync)
+writable -----------------> pending -----------------> readable
+    ^                                                      |
+    +---------------- collective release (sync) -----------+
 ```
 
 `await` supplies the producer-to-consumer barrier: every cooperative write is
@@ -555,7 +559,7 @@ indexed closure and materializes it into a flat, dependently sized buffer. The
 parallel operations retain that model:
 
 - the task closure still describes how to compute one indexed value;
-- the host or worker runner says who evaluates it;
+- the host or worker context says who evaluates it;
 - the writable and pending states say when the destination may be observed;
 - shaped views remain separate from the underlying linear buffer.
 

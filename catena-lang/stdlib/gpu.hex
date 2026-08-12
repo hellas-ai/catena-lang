@@ -153,8 +153,7 @@
                   [.block-workers]
                   [.block-groups]
                   [.local-index]
-                } parallel.worker [block-worker.]
-                ([.block-worker] parallel.worker.storage)
+                } parallel.worker)
               )
             )
           )
@@ -162,4 +161,4 @@
       )
     )
   )
-)))
+))

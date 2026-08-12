@@ -31,7 +31,7 @@ const BLOCK_WORKER: &str = "catena_gpu_block_worker_t";
 const SHARED_AVAILABLE: &str = "catena_gpu_shared_available_t";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::codegen) enum RunnerKind {
+pub(in crate::codegen) enum ContextKind {
     GridHost,
     BlockWorker,
 }
@@ -93,14 +93,14 @@ fn no_runtime_representation(type_name: &str, children: &[Tree<(), Operation>]) 
     ))
 }
 
-pub(in crate::codegen) fn runner_kind(assignment: &GpuAssign) -> Option<RunnerKind> {
+pub(in crate::codegen) fn context_kind(assignment: &GpuAssign) -> Option<ContextKind> {
     assignment.inputs.iter().find_map(|input| {
         let GpuValue::Var(var) = input else {
             return None;
         };
         match runtime_type(var) {
-            Some(CType::Named(name)) if name == GRID_HOST => Some(RunnerKind::GridHost),
-            Some(CType::Named(name)) if name == BLOCK_WORKER => Some(RunnerKind::BlockWorker),
+            Some(CType::Named(name)) if name == GRID_HOST => Some(ContextKind::GridHost),
+            Some(CType::Named(name)) if name == BLOCK_WORKER => Some(ContextKind::BlockWorker),
             _ => None,
         }
     })
@@ -212,15 +212,16 @@ pub(in crate::codegen) fn render_worker(
     let [parent_worker, child_x, child_y] = inputs.as_slice() else {
         return Err(invalid_inputs(assignment, 3));
     };
-    let [child_worker] = assignment.outputs.as_slice() else {
-        return Err(invalid_outputs(assignment, 1));
+    let [child_worker, available] = assignment.outputs.as_slice() else {
+        return Err(invalid_outputs(assignment, 2));
     };
     out.push_str(&format!(
-        "    {0} = {{ {1}.launch, {3} * (uint64_t){1}.launch.block_dim.x + {2}, {1}.shared }};\n",
+        "    {0} = {{ {1}.launch, {3} * (uint64_t){1}.launch.block_dim.x + {2}, {1}.shared }};\n    {4} = {{ {0}.shared, 0 }};\n",
         child_worker.name,
         value_expr(parent_worker),
         value_expr(child_x),
-        value_expr(child_y)
+        value_expr(child_y),
+        available.name
     ));
     Ok(())
 }
@@ -254,24 +255,6 @@ pub(in crate::codegen) fn render_shared(
         shared_bytes.name,
         value_expr(tail_bytes),
         value_expr(len)
-    ));
-    Ok(())
-}
-
-pub(in crate::codegen) fn render_worker_storage(
-    out: &mut String,
-    assignment: &GpuAssign,
-) -> Result<(), GpuRenderError> {
-    let [worker] = assignment.inputs.as_slice() else {
-        return Err(invalid_inputs(assignment, 1));
-    };
-    let [preserved_worker, available] = assignment.outputs.as_slice() else {
-        return Err(invalid_outputs(assignment, 2));
-    };
-    let worker = value_expr(worker);
-    out.push_str(&format!(
-        "    {} = {};\n    {} = {{ {}.shared, 0 }};\n",
-        preserved_worker.name, worker, available.name, worker
     ));
     Ok(())
 }
@@ -365,12 +348,12 @@ pub(in crate::codegen) fn render_synchronize(
 ) -> Result<(), GpuRenderError> {
     let preserved = preserved_runtime_values(assignment)?;
 
-    match runner_kind(assignment) {
-        Some(RunnerKind::GridHost) => out.push_str(&format!(
+    match context_kind(assignment) {
+        Some(ContextKind::GridHost) => out.push_str(&format!(
             "    catena_host_gpu_check({}());\n",
             dialect.synchronize_fn()
         )),
-        Some(RunnerKind::BlockWorker) => out.push_str("    catena_block_barrier();\n"),
+        Some(ContextKind::BlockWorker) => out.push_str("    catena_block_barrier();\n"),
         None => {}
     }
     for (input, output) in preserved.inputs.into_iter().zip(preserved.outputs) {
@@ -384,7 +367,7 @@ pub(in crate::codegen) fn render_materialize_kernel(
     kernel_name: &str,
     assignment: &GpuAssign,
 ) -> Result<(), GpuRenderError> {
-    if runner_kind(assignment) != Some(RunnerKind::GridHost) {
+    if context_kind(assignment) != Some(ContextKind::GridHost) {
         return Ok(());
     }
     let parts = materialize_parts(assignment)?;
@@ -450,13 +433,13 @@ pub(in crate::codegen) fn render_materialize(
     assignment: &GpuAssign,
 ) -> Result<(), GpuRenderError> {
     let parts = materialize_parts(assignment)?;
-    let [next_runner, pending_buffer] = assignment.outputs.as_slice() else {
+    let [next_context, pending_buffer] = assignment.outputs.as_slice() else {
         return Err(invalid_outputs(assignment, 2));
     };
-    match runner_kind(assignment) {
-        Some(RunnerKind::GridHost) => {
+    match context_kind(assignment) {
+        Some(ContextKind::GridHost) => {
             let kernel_name = materialize_kernel_name(&function.name, assignment)?;
-            let context = value_expr(parts.runner);
+            let context = value_expr(parts.context);
             out.push_str(&format!(
                 "    {kernel_name}<<<dim3({context}.launch.grid_dim.x, {context}.launch.grid_dim.y, {context}.launch.grid_dim.z), dim3({context}.launch.block_dim.x, {context}.launch.block_dim.y, {context}.launch.block_dim.z), {context}.shared_bytes>>>
                     ({}, {}",
@@ -469,10 +452,10 @@ pub(in crate::codegen) fn render_materialize(
             }
             out.push_str(");\n");
         }
-        Some(RunnerKind::BlockWorker) => {
+        Some(ContextKind::BlockWorker) => {
             let suffix = &parts.buffer_var.name;
             let index = format!("parallel_index_{suffix}");
-            let worker = value_expr(parts.runner);
+            let worker = value_expr(parts.context);
             let value = format!("parallel_value_{suffix}");
             out.push_str(&format!("    uint64_t {index} = {worker}.index;\n"));
             let CType::Pointer(element) = runtime_type(parts.buffer_var)
@@ -514,14 +497,14 @@ pub(in crate::codegen) fn render_materialize(
         }
         None => {
             return Err(GpuRenderError::UnsupportedType(
-                runtime_type(next_runner).unwrap().clone(),
+                runtime_type(next_context).unwrap().clone(),
             ));
         }
     }
     out.push_str(&format!(
         "    {} = {};\n    {} = {};\n",
-        next_runner.name,
-        value_expr(parts.runner),
+        next_context.name,
+        value_expr(parts.context),
         pending_buffer.name,
         value_expr(parts.buffer)
     ));
@@ -574,26 +557,26 @@ mod tests {
         render_materialize(&mut call, &function, &assignment).unwrap();
 
         assert!(kernel.is_empty());
-        assert!(call.contains("parallel_index_buffer = runner.index"));
+        assert!(call.contains("parallel_index_buffer = context.index"));
         assert!(call.contains("buffer[parallel_index_buffer] = parallel_value_buffer"));
         assert!(!call.contains("<<<"));
     }
 
-    fn materialize_assignment(runner_type: &str) -> GpuAssign {
+    fn materialize_assignment(context_type: &str) -> GpuAssign {
         GpuAssign {
             op: op("parallel.materializec"),
             input_sizes: vec![1, 1, 0, 1],
             output_sizes: vec![1, 1],
             call_symbol: None,
             inputs: vec![
-                value(0, "runner", CType::Named(runner_type.to_string())),
+                value(0, "context", CType::Named(context_type.to_string())),
                 value(1, "buffer", CType::Pointer(Box::new(CType::F32))),
                 GpuValue::FnSymbol(FnPtrSymbol {
                     target: op("producer"),
                 }),
             ],
             outputs: vec![
-                var(2, "next_runner", CType::Named(runner_type.to_string())),
+                var(2, "next_context", CType::Named(context_type.to_string())),
                 var(3, "out", CType::Pointer(Box::new(CType::F32))),
             ],
         }

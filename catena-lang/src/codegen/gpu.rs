@@ -166,7 +166,7 @@ fn render_module_body(
             )?;
             out.push('\n');
         } else if assignment.op.as_str() == "parallel.materializec"
-            && parallel_gpu::runner_kind(assignment) == Some(parallel_gpu::RunnerKind::GridHost)
+            && parallel_gpu::context_kind(assignment) == Some(parallel_gpu::ContextKind::GridHost)
         {
             parallel_gpu::render_materialize_kernel(
                 out,
@@ -485,7 +485,6 @@ fn render_primitive_assignment(
         "parallel.host" => parallel_gpu::render_host(out, assignment)?,
         "parallel.worker.index" => parallel_gpu::render_worker_index(out, assignment)?,
         "parallel.worker" => parallel_gpu::render_worker(out, assignment)?,
-        "parallel.worker.storage" => parallel_gpu::render_worker_storage(out, assignment)?,
         "parallel.shared.empty" => parallel_gpu::render_shared_empty(out, assignment)?,
         "gpu.shared" => parallel_gpu::render_shared(out, assignment)?,
         "parallel.shared.finish" => parallel_gpu::render_shared_finish(out, assignment)?,

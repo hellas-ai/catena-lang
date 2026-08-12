@@ -125,6 +125,21 @@ A `host` submits work to a population of workers. A `worker` represents one runn
 A worker additionally carries its topology-shaped `index`. For a two
 dimensional level this can be a product such as `Ix n * Ix m`.
 
+Contexts are written as bare types because they are linear execution
+resources, like `mem`, rather than anonymous data values. They still have a
+backend runtime representation. In contrast, shared-layout values, allocator
+cursors, and buffers use `val`; their static parameters and state refinements
+erase during lowering.
+
+| Type | Runtime representation | Rationale |
+| --- | --- | --- |
+| `level`, `workers`, `groups`, `storage` | Erased | Topology metadata |
+| `host<...>` | Host-context struct | Linear submission resource |
+| `worker<...>` | Worker-context struct | Linear execution resource |
+| `shared<layout> val` | Shared byte count | Computed layout value |
+| `available<layout> val` | Arena cursor | Linear allocator state |
+| `writable/pending/readable<context, buf<...>> val` | Buffer pointer | Type-state refinement |
+
 The parallel dialect does not prescribe a particular shape language or a fixed set of topology levels. A backend dialect constructs suitable values for them.
 
 `parallel.host` builds only the host context:

@@ -25,8 +25,8 @@ fn f32_tiled_matmul_row_major_bufs_from_mems() -> anyhow::Result<()> {
     let [result] = runtime.exec(
         "tiled-matmul-via-mem",
         [
-            a,
-            b,
+            a.as_ref().into(),
+            b.as_ref().into(),
             4_u64.into(),
             4_u64.into(),
             4_u64.into(),
@@ -37,7 +37,7 @@ fn f32_tiled_matmul_row_major_bufs_from_mems() -> anyhow::Result<()> {
             4_u64.into(),
         ],
     )?;
-    let Value::Mem(result) = result else {
+    let Value::MemOwn(result) = result else {
         anyhow::bail!("tiled-matmul-via-mem returned non-mem value: {result:?}");
     };
 
@@ -65,8 +65,8 @@ fn f32_tiled_matmul_rectangular_perfect_tiles() -> anyhow::Result<()> {
     let [result] = runtime.exec(
         "tiled-matmul-via-mem",
         [
-            a,
-            b,
+            a.as_ref().into(),
+            b.as_ref().into(),
             2_u64.into(),
             4_u64.into(),
             6_u64.into(),
@@ -77,7 +77,7 @@ fn f32_tiled_matmul_rectangular_perfect_tiles() -> anyhow::Result<()> {
             4_u64.into(),
         ],
     )?;
-    let Value::Mem(result) = result else {
+    let Value::MemOwn(result) = result else {
         anyhow::bail!("tiled-matmul-via-mem returned non-mem value: {result:?}");
     };
 

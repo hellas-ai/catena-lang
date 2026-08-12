@@ -12,7 +12,6 @@ pub fn render_gpu_prelude(dialect: GpuDialect) -> String {
 {bf16_support}
 
 typedef uint8_t catena_unit_t;
-typedef uint8_t catena_gpu_state_t;
 
 typedef struct {{
     uint32_t x;
@@ -21,27 +20,23 @@ typedef struct {{
 }} catena_dim3_t;
 
 typedef struct {{
-    uint64_t thread_id;
-}} catena_gpu_env_t;
-
-typedef struct {{
     catena_dim3_t grid_dim;
     catena_dim3_t block_dim;
-}} catena_launch_params_t;
+}} catena_gpu_launch_t;
 
 typedef struct {{
-    catena_launch_params_t launch;
+    catena_gpu_launch_t launch;
     uint64_t shared_bytes;
 }} catena_gpu_grid_host_t;
 
 typedef struct {{
-    catena_launch_params_t launch;
+    catena_gpu_launch_t launch;
     uint64_t index;
     unsigned char *shared;
 }} catena_gpu_grid_worker_t;
 
 typedef struct {{
-    catena_launch_params_t launch;
+    catena_gpu_launch_t launch;
     uint64_t index;
     unsigned char *shared;
 }} catena_gpu_block_worker_t;
@@ -60,11 +55,6 @@ typedef struct {{
     void *data;
     uint64_t len;
 }} catena_mem_ref_t;
-
-typedef struct {{
-    void *data;
-    uint64_t len;
-}} catena_gpu_buf_t;
 
 __host__ __device__ static inline void catena_assert(uint8_t condition) {{
     if (!condition) {{
@@ -92,11 +82,6 @@ __host__ static inline void catena_host_buffer_free(void *data) {{
 }}
 
 #endif
-
-__host__ __device__ static inline uint64_t catena_launch_len(catena_launch_params_t params) {{
-    return (uint64_t)params.grid_dim.x * params.grid_dim.y * params.grid_dim.z
-        * params.block_dim.x * params.block_dim.y * params.block_dim.z;
-}}
 
 __host__ __device__ static inline void catena_block_barrier() {{
 #ifdef {device_compile_guard}

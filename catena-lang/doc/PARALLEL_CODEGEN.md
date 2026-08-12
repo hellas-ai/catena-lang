@@ -109,7 +109,7 @@ Each `gpu.shared` adds `length * sizeof(float)` to the runtime byte count.
 
 ```cpp
 typedef struct {
-    catena_launch_params_t launch;
+    catena_gpu_launch_t launch;
     uint64_t shared_bytes;
 } catena_gpu_grid_host_t;
 ```

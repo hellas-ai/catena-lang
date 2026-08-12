@@ -122,14 +122,14 @@ operands that affect generated code, such as direct function symbols.
 Entrypoints keep predictable symbol names; internal specialisations use
 deterministic mangled names.
 
-For now, function symbols do not propagate through arbitrary dataflow.
-`gpu.materialize` only accepts an immediate direct function symbol; if a function
-symbol flows through `if`, product construction, `eval`, etc., codegen rejects it
-until symbolic propagation is implemented.
+For now, function symbols do not propagate through arbitrary dataflow. GPU
+materialization accepts the direct function symbol produced by closure
+conversion; if a function symbol flows through `if`, product construction,
+`eval`, etc., codegen rejects it until symbolic propagation is implemented.
 
 ## Host/Device Distinction
 
-Now suppose we want to use `gpu.materialize` to perform a simple copy.
+Now suppose we want to use `parallel.materialize` to perform a simple copy.
 Thus, the kernel to launch is (more or less) the identity function.
 
 Originally, we passed a function pointer (`->` type).
@@ -144,12 +144,13 @@ The initial version of this is to simply mark the output node of any `->`
 constant without further propagating.
 
 Moreover, ordinary synthesized functions are emitted as `__host__ __device__`.
-Generated `gpu.materialize` kernels are emitted as `__global__`. Entrypoint
-wrapper functions are host-callable and launch kernels where needed.
+Generated grid-context `parallel.materializec` kernels are emitted as
+`__global__`. Entrypoint wrapper functions are host-callable and launch
+kernels where needed.
 
 ## Kernel Launches
 
-The motivating example here is `gpu.materialize`.
+The motivating example here is grid-context `parallel.materializec`.
 When concretized with a specific function symbol, the actual definition must be
 a `__global__` (i.e., a kernel).
 But this is not just another C program to call: it must be launched as a kernel.

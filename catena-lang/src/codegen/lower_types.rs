@@ -57,12 +57,6 @@ pub fn lower_type(ty: &Tree<(), Operation>) -> Result<LoweredType, LowerTypeErro
         Tree::Node(op, 0, _children) if op.as_str() == FN_REF_TYPE => {
             Err(LowerTypeError::FunctionPointerRuntime)
         }
-        Tree::Node(op, 0, children) if op.as_str() == "gpu.buf" => {
-            let [element] = expect_unary(op.as_str(), children)?;
-            Ok(LoweredType::Runtime(CType::Pointer(Box::new(
-                lower_runtime_type(element)?,
-            ))))
-        }
         Tree::Node(op, 0, children) if op.as_str() == "buf" => {
             let [_cap, _len, element] = expect_ternary(op.as_str(), children)?;
             Ok(LoweredType::Runtime(CType::Pointer(Box::new(
@@ -79,11 +73,6 @@ pub fn lower_type(ty: &Tree<(), Operation>) -> Result<LoweredType, LowerTypeErro
         Tree::Node(op, 0, children) if op.as_str() == "mem" => {
             let [cap] = expect_unary(op.as_str(), children)?;
             memory_c_type(cap).map(LoweredType::Runtime)
-        }
-        Tree::Node(op, 0, children) if is_gpu_control_type(op.as_str()) && children.is_empty() => {
-            Ok(LoweredType::Runtime(CType::Named(c_name_for_gpu_control(
-                op.as_str(),
-            ))))
         }
         _ => Ok(LoweredType::Erased),
     }
@@ -127,10 +116,6 @@ pub fn lower_runtime_type(ty: &Tree<(), Operation>) -> Result<CType, LowerTypeEr
         Tree::Node(op, 0, _children) if op.as_str() == FN_REF_TYPE => {
             Err(LowerTypeError::FunctionPointerRuntime)
         }
-        Tree::Node(op, 0, children) if op.as_str() == "gpu.buf" => {
-            let [element] = expect_unary(op.as_str(), children)?;
-            Ok(CType::Pointer(Box::new(lower_runtime_type(element)?)))
-        }
         Tree::Node(op, 0, children) if op.as_str() == "buf" => {
             let [_cap, _len, element] = expect_ternary(op.as_str(), children)?;
             Ok(CType::Pointer(Box::new(lower_runtime_type(element)?)))
@@ -149,9 +134,6 @@ pub fn lower_runtime_type(ty: &Tree<(), Operation>) -> Result<CType, LowerTypeEr
         Tree::Node(op, 0, children) if op.as_str() == "ix" => {
             let [_extent] = expect_unary(op.as_str(), children)?;
             Ok(CType::U64)
-        }
-        Tree::Node(op, 0, children) if is_gpu_control_type(op.as_str()) && children.is_empty() => {
-            Ok(CType::Named(c_name_for_gpu_control(op.as_str())))
         }
         _ => Err(LowerTypeError::NoRuntimeRepresentation(ty.clone())),
     }
@@ -256,29 +238,11 @@ fn expect_ternary<'a>(
     }
 }
 
-fn is_gpu_control_type(name: &str) -> bool {
-    matches!(
-        name,
-        "gpu.3d" | "gpu.env" | "gpu.launch_params" | "gpu.state"
-    )
-}
-
 /// Buffer-state modifiers describe access and synchronization obligations.
 /// They do not change the runtime representation of the wrapped buffer; the
 /// context argument is a type-level witness and therefore erases.
 fn is_buffer_state_modifier(name: &str) -> bool {
     matches!(name, "writable" | "readable" | "pending")
-}
-
-fn c_name_for_gpu_control(name: &str) -> String {
-    match name {
-        "gpu.3d" => "catena_dim3_t",
-        "gpu.env" => "catena_gpu_env_t",
-        "gpu.launch_params" => "catena_launch_params_t",
-        "gpu.state" => "catena_gpu_state_t",
-        _ => unreachable!("checked by is_gpu_control_type"),
-    }
-    .to_string()
 }
 
 #[cfg(test)]
@@ -335,15 +299,12 @@ mod tests {
         let ty = node(
             "*",
             vec![
-                node("gpu.env", vec![]),
+                node("val", vec![node("u64", vec![])]),
                 leaf(0),
                 node("val", vec![node("bool", vec![])]),
             ],
         );
-        assert_eq!(
-            lower_interface(&ty).unwrap(),
-            vec![CType::Named("catena_gpu_env_t".to_string()), CType::Bool]
-        );
+        assert_eq!(lower_interface(&ty).unwrap(), vec![CType::U64, CType::Bool]);
     }
 
     #[test]

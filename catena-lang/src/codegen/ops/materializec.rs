@@ -136,6 +136,10 @@ pub(in crate::codegen) fn render_call(
     }
     out.push_str(");\n");
     out.push_str(&format!(
+        "        catena_host_gpu_launch_check({last_error_fn}());\n",
+        last_error_fn = dialect.last_error_fn()
+    ));
+    out.push_str(&format!(
         "        catena_host_gpu_check({synchronize_fn}());\n",
         synchronize_fn = dialect.synchronize_fn()
     ));

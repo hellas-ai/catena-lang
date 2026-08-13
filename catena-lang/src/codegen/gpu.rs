@@ -301,7 +301,7 @@ fn render_assignment(
             return parallel_gpu::render_synchronize(out, assignment, dialect);
         }
         "parallel.materializec" => {
-            return parallel_gpu::render_materialize(out, function, assignment);
+            return parallel_gpu::render_materialize(out, function, assignment, dialect);
         }
         _ => {}
     }

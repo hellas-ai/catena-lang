@@ -431,6 +431,7 @@ pub(in crate::codegen) fn render_materialize(
     out: &mut String,
     function: &GpuFunction,
     assignment: &GpuAssign,
+    dialect: GpuDialect,
 ) -> Result<(), GpuRenderError> {
     let parts = materialize_parts(assignment)?;
     let [next_context, pending_buffer] = assignment.outputs.as_slice() else {
@@ -451,6 +452,10 @@ pub(in crate::codegen) fn render_materialize(
                 out.push_str(&value_expr(value));
             }
             out.push_str(");\n");
+            out.push_str(&format!(
+                "    catena_host_gpu_launch_check({}());\n",
+                dialect.last_error_fn()
+            ));
         }
         Some(ContextKind::BlockWorker) => {
             let suffix = &parts.buffer_var.name;
@@ -539,11 +544,12 @@ mod tests {
         let mut call = String::new();
 
         render_materialize_kernel(&mut kernel, "parallel_kernel", &assignment).unwrap();
-        render_materialize(&mut call, &function, &assignment).unwrap();
+        render_materialize(&mut call, &function, &assignment, GpuDialect::Cuda).unwrap();
 
         assert!(kernel.contains("__global__ void parallel_kernel"));
         assert!(kernel.contains("catena_gpu_grid_worker_t worker"));
         assert!(call.contains("parallel_materialize_test_out<<<"));
+        assert!(call.contains("catena_host_gpu_launch_check(cudaGetLastError())"));
     }
 
     #[test]
@@ -554,7 +560,7 @@ mod tests {
         let mut call = String::new();
 
         render_materialize_kernel(&mut kernel, "unused", &assignment).unwrap();
-        render_materialize(&mut call, &function, &assignment).unwrap();
+        render_materialize(&mut call, &function, &assignment, GpuDialect::Cuda).unwrap();
 
         assert!(kernel.is_empty());
         assert!(call.contains("parallel_index_buffer = context.index"));

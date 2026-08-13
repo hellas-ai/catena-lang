@@ -8,6 +8,7 @@ pub fn render_gpu_prelude(dialect: GpuDialect) -> String {
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 {bf16_support}
 
@@ -72,6 +73,14 @@ __host__ static inline void catena_host_gpu_check({error_type} err) {{
         fprintf(stderr, "catena GPU error: %s\n", {error_string_fn}(err));
         fflush(stderr);
         __builtin_trap();
+    }}
+}}
+
+__host__ static inline void catena_host_gpu_launch_check({error_type} err) {{
+    if (err != {success_value}) {{
+        fprintf(stderr, "catena GPU launch error: %s\n", {error_string_fn}(err));
+        fflush(stderr);
+        abort();
     }}
 }}
 
@@ -207,6 +216,20 @@ mod tests {
         );
         assert!(!prelude.contains("catena_gpu_check"));
         assert!(!prelude.contains("__device__ static inline void catena_host_gpu_check"));
+        assert!(prelude.contains("fflush(stderr);\n        __builtin_trap();"));
+    }
+
+    #[test]
+    fn host_gpu_launch_check_aborts_without_changing_existing_gpu_checks() {
+        let prelude = render_gpu_prelude(GpuDialect::Cuda);
+
+        assert!(
+            prelude.contains(
+                "__host__ static inline void catena_host_gpu_launch_check(cudaError_t err)"
+            )
+        );
+        assert!(prelude.contains("catena GPU launch error: %s"));
+        assert!(prelude.contains("fflush(stderr);\n        abort();"));
     }
 
     #[test]

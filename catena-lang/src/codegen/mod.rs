@@ -103,6 +103,13 @@ impl GpuDialect {
         }
     }
 
+    pub(crate) fn last_error_fn(self) -> &'static str {
+        match self {
+            Self::Hip => "hipGetLastError",
+            Self::Cuda => "cudaGetLastError",
+        }
+    }
+
     pub(crate) fn memcpy_fn(self) -> &'static str {
         match self {
             Self::Hip => "hipMemcpy",

@@ -3,10 +3,7 @@ use std::io::{self, Read, Write};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use thiserror::Error;
 
-use crate::{
-    codegen::GpuDialect,
-    runtime::{ExecError, Value, ValueKind},
-};
+use crate::{codegen::GpuDialect, runtime::ExecError};
 
 const MAX_FRAME_LEN: usize = 64 * 1024 * 1024;
 
@@ -14,49 +11,33 @@ const MAX_FRAME_LEN: usize = 64 * 1024 * 1024;
 pub(crate) enum Request {
     Initialize {
         sources: Vec<String>,
-        dialect: WireGpuDialect,
+        dialect: GpuDialect,
     },
     Execute {
         name: String,
+        buffers: Vec<WireIpcBuffer>,
         args: Vec<WireValue>,
     },
+    ReleaseOutputs,
     Shutdown,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) enum Response {
     Initialized(Result<(), String>),
-    Executed(Result<Vec<WireValue>, RemoteExecError>),
+    Executed(Result<WireExecution, RemoteExecError>),
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub(crate) struct WireExecution {
+    pub(crate) buffers: Vec<WireIpcBuffer>,
+    pub(crate) values: Vec<WireValue>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) enum RemoteExecError {
     Runtime(ExecError),
-    UnsupportedValueKind(ValueKind),
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub(crate) enum WireGpuDialect {
-    Hip,
-    Cuda,
-}
-
-impl From<GpuDialect> for WireGpuDialect {
-    fn from(value: GpuDialect) -> Self {
-        match value {
-            GpuDialect::Hip => Self::Hip,
-            GpuDialect::Cuda => Self::Cuda,
-        }
-    }
-}
-
-impl From<WireGpuDialect> for GpuDialect {
-    fn from(value: WireGpuDialect) -> Self {
-        match value {
-            WireGpuDialect::Hip => Self::Hip,
-            WireGpuDialect::Cuda => Self::Cuda,
-        }
-    }
+    Memory(String),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -66,34 +47,22 @@ pub(crate) enum WireValue {
     U32(u32),
     U64(u64),
     F32(f32),
+    MemRef {
+        buffer: usize,
+        view_offset: u64,
+        byte_len: u64,
+    },
+    MemOwn {
+        buffer: usize,
+        view_offset: u64,
+        byte_len: u64,
+    },
 }
 
-impl From<WireValue> for Value<'static> {
-    fn from(value: WireValue) -> Self {
-        match value {
-            WireValue::Bool(value) => Value::Bool(value),
-            WireValue::U16(value) => Value::U16(value),
-            WireValue::U32(value) => Value::U32(value),
-            WireValue::U64(value) => Value::U64(value),
-            WireValue::F32(value) => Value::F32(value),
-        }
-    }
-}
-
-impl TryFrom<Value<'_>> for WireValue {
-    type Error = ValueKind;
-
-    fn try_from(value: Value) -> Result<Self, Self::Error> {
-        match value {
-            Value::Bool(value) => Ok(Self::Bool(value)),
-            Value::U16(value) => Ok(Self::U16(value)),
-            Value::U32(value) => Ok(Self::U32(value)),
-            Value::U64(value) => Ok(Self::U64(value)),
-            Value::F32(value) => Ok(Self::F32(value)),
-            Value::MemOwn(_) => Err(ValueKind::MemOwn),
-            Value::MemRef(_) => Err(ValueKind::MemRef),
-        }
-    }
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct WireIpcBuffer {
+    pub(crate) handle: Option<Vec<u8>>,
+    pub(crate) allocation_byte_len: u64,
 }
 
 #[derive(Debug, Error)]
@@ -171,6 +140,7 @@ mod tests {
             &mut bytes,
             &Request::Execute {
                 name: "f".to_string(),
+                buffers: Vec::new(),
                 args: vec![WireValue::U64(7)],
             },
         )
@@ -181,20 +151,83 @@ mod tests {
             decoded,
             Request::Execute {
                 name,
+                buffers,
                 args,
-            } if name == "f" && matches!(args.as_slice(), [WireValue::U64(7)])
+            } if name == "f" && buffers.is_empty()
+                && matches!(args.as_slice(), [WireValue::U64(7)])
         ));
     }
 
     #[test]
-    fn u16_values_round_trip() {
-        let wire = WireValue::try_from(Value::U16(0x3f80)).unwrap();
-        assert!(matches!(wire, WireValue::U16(0x3f80)));
+    fn memory_request_uses_a_buffer_table_index() {
+        let mut bytes = Vec::new();
+        write_frame(
+            &mut bytes,
+            &Request::Execute {
+                name: "head".to_string(),
+                buffers: vec![WireIpcBuffer {
+                    handle: Some(vec![7; 64]),
+                    allocation_byte_len: 1024,
+                }],
+                args: vec![WireValue::MemRef {
+                    buffer: 0,
+                    view_offset: 16,
+                    byte_len: 32,
+                }],
+            },
+        )
+        .unwrap();
 
-        let Value::U16(decoded) = Value::from(wire) else {
-            panic!("decoded u16 wire value had the wrong kind");
+        let Request::Execute { buffers, args, .. } = read_frame::<Request>(&mut bytes.as_slice())
+            .unwrap()
+            .unwrap()
+        else {
+            panic!("decoded the wrong request kind");
         };
-        assert_eq!(decoded, 0x3f80);
+        assert_eq!(buffers[0].handle.as_deref(), Some(&[7; 64][..]));
+        assert!(matches!(
+            args.as_slice(),
+            [WireValue::MemRef {
+                buffer: 0,
+                view_offset: 16,
+                byte_len: 32,
+            }]
+        ));
+    }
+
+    #[test]
+    fn owned_output_and_release_round_trip() {
+        let execution = Response::Executed(Ok(WireExecution {
+            buffers: vec![WireIpcBuffer {
+                handle: Some(vec![9; 64]),
+                allocation_byte_len: 256,
+            }],
+            values: vec![WireValue::MemOwn {
+                buffer: 0,
+                view_offset: 0,
+                byte_len: 256,
+            }],
+        }));
+        let mut bytes = Vec::new();
+        write_frame(&mut bytes, &execution).unwrap();
+        write_frame(&mut bytes, &Request::ReleaseOutputs).unwrap();
+
+        let mut bytes = bytes.as_slice();
+        let Some(Response::Executed(Ok(execution))) = read_frame(&mut bytes).unwrap() else {
+            panic!("decoded the wrong response kind");
+        };
+        assert!(matches!(
+            execution.values.as_slice(),
+            [WireValue::MemOwn {
+                buffer: 0,
+                view_offset: 0,
+                byte_len: 256,
+            }]
+        ));
+        assert!(matches!(
+            read_frame(&mut bytes).unwrap(),
+            Some(Request::ReleaseOutputs)
+        ));
     }
 
     #[test]

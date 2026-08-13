@@ -53,7 +53,7 @@ pub mod mem;
 pub mod runtime;
 
 /// Low-level GPU operations needed to manage Runtime-owned allocations.
-mod gpu_api;
+pub(crate) mod gpu_api;
 
 /// Compile generated GPU C++ to a shared object.
 mod artifact;

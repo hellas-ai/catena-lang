@@ -9,4 +9,5 @@ pub mod pass;
 pub(crate) mod prefixes;
 pub mod report;
 pub mod runtime;
+pub mod safe_runtime;
 pub mod stdlib;

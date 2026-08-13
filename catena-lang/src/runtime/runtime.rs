@@ -108,6 +108,10 @@ pub enum ExecError {
 }
 
 impl Runtime {
+    pub(crate) fn gpu_api(&self) -> Arc<GpuApi> {
+        self.gpu.clone()
+    }
+
     /// Construct a new runtime from a list of paths, interpreted as catena programs (&stdlib)
     pub fn new<I>(paths: I, dialect: GpuDialect) -> Result<Runtime, InitError>
     where
@@ -162,7 +166,7 @@ impl Runtime {
                 InitError::LoadSymbol { symbol, source }
             }
         })?;
-        let gpu = Arc::new(GpuApi::load(dialect)?);
+        let gpu = GpuApi::load(dialect)?;
 
         Ok(Self {
             _artifact: artifact,
@@ -173,25 +177,15 @@ impl Runtime {
     }
 
     pub fn mem_u64(&self, values: &[u64]) -> Result<MemOwn, MemError> {
-        self.mem_from_bytes(slice_as_bytes(values))
+        MemOwn::from_u64_slice(values, self.gpu.dialect())
     }
 
     pub fn mem_u16(&self, values: &[u16]) -> Result<MemOwn, MemError> {
-        self.mem_from_bytes(slice_as_bytes(values))
+        MemOwn::from_u16_slice(values, self.gpu.dialect())
     }
 
     pub fn mem_f32(&self, values: &[f32]) -> Result<MemOwn, MemError> {
-        self.mem_from_bytes(slice_as_bytes(values))
-    }
-
-    fn mem_from_bytes(&self, bytes: &[u8]) -> Result<MemOwn, MemError> {
-        let data = self.gpu.allocate(bytes.len())?;
-        // SAFETY: `data` is the unique allocation returned immediately above
-        // by this same GPU API, and ownership is transferred into `MemOwn`.
-        let mut memory =
-            unsafe { MemOwn::from_raw_parts_with_gpu(data, bytes.len() as u64, self.gpu.clone()) };
-        memory.write_from_host(bytes)?;
-        Ok(memory)
+        MemOwn::from_f32_slice(values, self.gpu.dialect())
     }
 
     /// Run a source-level `program` definition, which must have M arguments, and return its N arguments.
@@ -328,11 +322,6 @@ fn ref_output(signatures: &SignatureTable) -> Option<(String, usize)> {
             .position(|kind| *kind == ValueKind::MemRef)
             .map(|index| (name.clone(), index))
     })
-}
-
-fn slice_as_bytes<T>(values: &[T]) -> &[u8] {
-    let byte_len = std::mem::size_of_val(values);
-    unsafe { std::slice::from_raw_parts(values.as_ptr().cast::<u8>(), byte_len) }
 }
 
 fn load_generated_library(path: &Path) -> Result<Library, InitError> {

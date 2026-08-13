@@ -40,6 +40,10 @@ path = "examples/runtime.rs"
 name = "mem"
 path = "examples/mem.rs"
 
+[[example]]
+name = "safe_runtime"
+path = "examples/safe_runtime.rs"
+
 [[test]]
 name = "runtime"
 path = "tests/runtime.rs"

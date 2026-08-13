@@ -108,55 +108,48 @@ __host__ __device__ static inline uint32_t catena_f32_bitcast_u32(float value) {
     )
 }
 
-fn render_bf16_support(dialect: GpuDialect) -> &'static str {
-    match dialect {
-        GpuDialect::Hip => {
-            r#"#include <hip/hip_bfloat16.h>
-typedef hip_bfloat16 catena_bf16_t;
+fn render_bf16_support(dialect: GpuDialect) -> String {
+    let (header, native_type, from_f32, host_fma) = match dialect {
+        GpuDialect::Hip => (
+            "hip/hip_bf16.h",
+            "__hip_bfloat16",
+            "__float2bfloat16(value)",
+            "catena_bf16_t(__builtin_elementwise_fma((__bf16)a, (__bf16)b, (__bf16)c))",
+        ),
+        GpuDialect::Cuda => (
+            "cuda_bf16.h",
+            "__nv_bfloat16",
+            "__float2bfloat16_rn(value)",
+            "__float2bfloat16_rn(fmaf(__bfloat162float(a), __bfloat162float(b), __bfloat162float(c)))",
+        ),
+    };
+    format!(
+        r#"#include <{header}>
+typedef {native_type} catena_bf16_t;
 static_assert(sizeof(catena_bf16_t) == 2, "BF16 must occupy two bytes");
 static_assert(alignof(catena_bf16_t) == 2, "BF16 must have two-byte alignment");
 
-__host__ __device__ static inline catena_bf16_t catena_bf16_from_f32(float value) {
-    return catena_bf16_t(value);
-}
-
-__host__ __device__ static inline float catena_bf16_to_f32(catena_bf16_t value) {
-    return (float)value;
-}
-
-__host__ __device__ static inline catena_bf16_t catena_u16_bitcast_bf16(uint16_t bits) {
-    catena_bf16_t value;
-    value.data = bits;
-    return value;
-}
-
-__host__ __device__ static inline uint16_t catena_bf16_bitcast_u16(catena_bf16_t value) {
-    return value.data;
-}"#
-        }
-        GpuDialect::Cuda => {
-            r#"#include <cuda_bf16.h>
-typedef __nv_bfloat16 catena_bf16_t;
-static_assert(sizeof(catena_bf16_t) == 2, "BF16 must occupy two bytes");
-static_assert(alignof(catena_bf16_t) == 2, "BF16 must have two-byte alignment");
-
-__host__ __device__ static inline catena_bf16_t catena_bf16_from_f32(float value) {
-    return __float2bfloat16_rn(value);
-}
-
-__host__ __device__ static inline float catena_bf16_to_f32(catena_bf16_t value) {
+__host__ __device__ static inline catena_bf16_t catena_bf16_from_f32(float value) {{
+    return {from_f32};
+}}
+__host__ __device__ static inline float catena_bf16_to_f32(catena_bf16_t value) {{
     return __bfloat162float(value);
-}
-
-__host__ __device__ static inline catena_bf16_t catena_u16_bitcast_bf16(uint16_t bits) {
+}}
+__host__ __device__ static inline catena_bf16_t catena_u16_bitcast_bf16(uint16_t bits) {{
     return __ushort_as_bfloat16(bits);
-}
-
-__host__ __device__ static inline uint16_t catena_bf16_bitcast_u16(catena_bf16_t value) {
+}}
+__host__ __device__ static inline uint16_t catena_bf16_bitcast_u16(catena_bf16_t value) {{
     return __bfloat16_as_ushort(value);
-}"#
-        }
-    }
+}}
+__host__ __device__ static inline catena_bf16_t catena_bf16_fma(catena_bf16_t a, catena_bf16_t b, catena_bf16_t c) {{
+#ifdef {device_compile_guard}
+    return __hfma(a, b, c);
+#else
+    return {host_fma};
+#endif
+}}"#,
+        device_compile_guard = dialect.device_compile_guard(),
+    )
 }
 
 fn render_buffer_load(dialect: GpuDialect) -> String {
@@ -228,15 +221,16 @@ mod tests {
     #[test]
     fn bf16_support_uses_each_dialects_native_type() {
         let hip = render_gpu_prelude(GpuDialect::Hip);
-        assert!(hip.contains("#include <hip/hip_bfloat16.h>"));
-        assert!(hip.contains("typedef hip_bfloat16 catena_bf16_t;"));
-        assert!(hip.contains("return catena_bf16_t(value);"));
-        assert!(hip.contains("value.data = bits;"));
+        assert!(hip.contains("#include <hip/hip_bf16.h>"));
+        assert!(hip.contains("typedef __hip_bfloat16 catena_bf16_t;"));
+        assert!(hip.contains("return __hfma(a, b, c);"));
+        assert!(hip.contains("return __ushort_as_bfloat16(bits);"));
+        assert!(!hip.contains("catena_bf16_add"));
 
         let cuda = render_gpu_prelude(GpuDialect::Cuda);
         assert!(cuda.contains("#include <cuda_bf16.h>"));
         assert!(cuda.contains("typedef __nv_bfloat16 catena_bf16_t;"));
         assert!(cuda.contains("return __float2bfloat16_rn(value);"));
-        assert!(cuda.contains("return __ushort_as_bfloat16(bits);"));
+        assert!(!cuda.contains("catena_bf16_mul"));
     }
 }

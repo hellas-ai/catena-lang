@@ -43,32 +43,30 @@ def tiledScheduleCertificate
     { blockIdx := { x := blockCol, y := blockRow, z := ⟨0, gridZPositive⟩ }
       threadIdx := { x := threadCol, y := threadRow, z := ⟨0, blockZPositive⟩ } }
 
-def tileLaneIndex
-    (blockX : Dim3.x block = tile)
-    (blockY : Dim3.y block = tile) :
-    Lane (Dim3.y block) (Dim3.x block) → Fin (tile * tile) :=
-  fun lane => Layout.offset Layout.rowMajor2D
-    ⟨Fin.cast blockY (Lane.row lane), Fin.cast blockX (Lane.col lane)⟩
+def tileRow (tilePositive : 0 < tile) (index : Fin (tile * tile)) : Fin tile :=
+  ⟨Fin.val index / tile, (Nat.div_lt_iff_lt_mul tilePositive).2 (Fin.isLt index)⟩
 
-theorem tileLaneIndex_injective
-    (blockX : Dim3.x block = tile)
-    (blockY : Dim3.y block = tile) :
-    Injective (tileLaneIndex blockX blockY) := by
-  intro left right equalIndices
-  have equalMapped := Layout.rowMajor2D_injective equalIndices
-  have equalRowsCast := congrArg Index2.row equalMapped
-  have equalColsCast := congrArg Index2.col equalMapped
-  have equalRows : Lane.row left = Lane.row right := by
-    apply Fin.ext
-    simpa using congrArg Fin.val equalRowsCast
-  have equalCols : Lane.col left = Lane.col right := by
-    apply Fin.ext
-    simpa using congrArg Fin.val equalColsCast
-  cases left
-  cases right
-  cases equalRows
-  cases equalCols
-  rfl
+def tileCol (tilePositive : 0 < tile) (index : Fin (tile * tile)) : Fin tile :=
+  ⟨Fin.val index % tile, Nat.mod_lt _ tilePositive⟩
+
+/-- Each shared cell names its unique writing lane; a lane may own many cells. -/
+def tileWriteOwnership
+    (blockX : Dim3.x (LaunchConfig.block cfg) = tile)
+    (blockY : Dim3.y (LaunchConfig.block cfg) = tile)
+    (tilePositive : 0 < tile) : WriteOwnership cfg (tile * tile) where
+  owner index :=
+    ⟨Fin.cast blockY.symm (tileRow tilePositive index),
+      Fin.cast blockX.symm (tileCol tilePositive index)⟩
+
+def tiledMatmulStep (trace : SyncTrace) : SyncTrace :=
+  (trace ++ [.tileLoaded]) ++ [.tileConsumed]
+
+def foldValueFin (n : Nat) (initial : Value α)
+    (body : Fin n → Value α → Value α) : Value α :=
+  let rec go (i : Nat) (acc : Value α) : Value α :=
+    if hi : i < n then go (i + 1) (body ⟨i, hi⟩ acc) else acc
+  termination_by n - i
+  go 0 initial
 
 /--
 One tiled matmul kernel for both perfect and predicated launches.
@@ -84,60 +82,60 @@ def tiledMatmulKernel
     [Add α]
     [Mul α]
     (tile : Nat)
+    (tilePositive : 0 < tile)
     (a : Matrix rows inner (Value α))
     (b : Matrix inner cols (Value α)) :
     Kernel (.d2 rows cols) α where
   shared := .buffer "tileA" (tile * tile) (.buffer "tileB" (tile * tile) .empty)
+  trace := iterateTrace tiledMatmulStep (ceilDiv inner tile) []
   body := fun {cfg} {_State} {_certificate} thread scheduled =>
     KernelM.require
       (Dim3.x (LaunchConfig.block cfg) = tile ∧
         Dim3.y (LaunchConfig.block cfg) = tile ∧
         Dim3.z (LaunchConfig.block cfg) = 1)
-      fun blockShape => do
+      fun ⟨blockXEq, blockYEq, _blockZEq⟩ =>
       let threadIndex := Thread.index thread
       let block := Thread.block thread
       let blockIndex := Block.index block
-      let threadCol : Fin tile := Fin.cast blockShape.1 (Coord.x threadIndex)
-      let threadRow : Fin tile := Fin.cast blockShape.2.1 (Coord.y threadIndex)
-      let row := Fin.val (Coord.y blockIndex) * tile + Fin.val threadRow
-      let col := Fin.val (Coord.x blockIndex) * tile + Fin.val threadCol
+      let threadCol : Fin tile := Fin.cast blockXEq (Coord.x threadIndex)
+      let threadRow : Fin tile := Fin.cast blockYEq (Coord.y threadIndex)
       let sharedA := SharedState.get block SharedRef.here
       let sharedB := SharedState.get block (SharedRef.there SharedRef.here)
-      let writer := tileLaneIndex blockShape.1 blockShape.2.1
-      let localIndex := writer ⟨Coord.y threadIndex, Coord.x threadIndex⟩
-      let ownership : ExclusiveWrite thread localIndex :=
-        { blockZ := blockShape.2.2
-          owner := writer
-          owns := rfl
-          unique := tileLaneIndex_injective blockShape.1 blockShape.2.1 }
+      let ownership := tileWriteOwnership blockXEq blockYEq tilePositive
 
-      let result ← KernelM.foldFin (ceilDiv inner tile) Value.zero fun kTile acc => do
-        let kA := Fin.val kTile * tile + Fin.val threadCol
-        let kB := Fin.val kTile * tile + Fin.val threadRow
-
-        let aValue ← if hr : row < rows then
-          if hk : kA < inner then pure (a ⟨⟨row, hr⟩, ⟨kA, hk⟩⟩)
-          else pure Value.zero
-        else pure Value.zero
-        let bValue ← if hk : kB < inner then
-          if hc : col < cols then pure (b ⟨⟨kB, hk⟩, ⟨col, hc⟩⟩)
-          else pure Value.zero
-        else pure Value.zero
-
-        KernelM.storeShared sharedA localIndex ownership aValue
-        KernelM.storeShared sharedB localIndex ownership bValue
-        KernelM.barrier
-
-        let acc ← KernelM.foldFin tile acc fun k acc => do
-          let av := BlockBuffer.read sharedA (Layout.offset Layout.rowMajor2D ⟨threadRow, k⟩)
-          let bv := BlockBuffer.read sharedB (Layout.offset Layout.rowMajor2D ⟨k, threadCol⟩)
-          pure (Value.add acc (Value.mul av bv))
-
-        KernelM.barrier
-        pure acc
-
-      match scheduled with
-      | ⟨some _outputIndex, _ownership⟩ => pure result
-      | ⟨none, _unassigned⟩ => pure ()
+      KernelM.bind
+        (KernelM.foldFin (ceilDiv inner tile) Value.zero fun _trace kTile acc =>
+          let valueA := fun index (_owned : Owns ownership thread index) =>
+            let row := Fin.val (Coord.y blockIndex) * tile + Fin.val threadRow
+            let kA := Fin.val kTile * tile + Fin.val threadCol
+            -- A dependent guard supplies the bounds proofs used to build the safe index.
+            if rowInBounds : row < rows then
+              if kAInBounds : kA < inner then
+                a ⟨⟨row, rowInBounds⟩, ⟨kA, kAInBounds⟩⟩
+              else Value.zero
+            else Value.zero
+          let valueB := fun index (_owned : Owns ownership thread index) =>
+            let kB := Fin.val kTile * tile + Fin.val threadRow
+            let col := Fin.val (Coord.x blockIndex) * tile + Fin.val threadCol
+            -- The successful branch carries both proofs; the other branch is padding.
+            if kBInBounds : kB < inner then
+              if colInBounds : col < cols then
+                b ⟨⟨kB, kBInBounds⟩, ⟨col, colInBounds⟩⟩
+              else Value.zero
+            else Value.zero
+          KernelM.bind (KernelM.initializeShared sharedA ownership valueA) fun writesA =>
+          KernelM.bind (KernelM.initializeShared sharedB ownership valueB) fun writesB =>
+          KernelM.bind (KernelM.syncBlock .tileLoaded) fun loaded =>
+          let nextAcc := foldValueFin tile acc fun k partialSum =>
+            let indexA := Layout.offset Layout.rowMajor2D ⟨threadRow, k⟩
+            let indexB := Layout.offset Layout.rowMajor2D ⟨k, threadCol⟩
+            let av := BlockBuffer.readAfter sharedA indexA writesA loaded
+            let bv := BlockBuffer.readAfter sharedB indexB writesB loaded
+            Value.add partialSum (Value.mul av bv)
+          KernelM.bind (KernelM.syncBlock .tileConsumed) fun _consumed =>
+          KernelM.pure nextAcc) fun result =>
+        match scheduled with
+        | ⟨some _outputIndex, _ownership⟩ => KernelM.pure result
+        | ⟨none, _unassigned⟩ => KernelM.pure ()
 
 end GpuDsl

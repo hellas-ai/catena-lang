@@ -65,12 +65,15 @@ The core design makes several future proof obligations natural:
 - `Tensor space a` represents data as a composable pure closure, independently
   of launch configuration and physical layout.
 - Buffer reads accept only `Fin n`, so out-of-bounds access cannot be expressed.
-- `KernelM.storeShared` additionally requires an `ExclusiveWrite` certificate:
-  an injective block-lane assignment proving that the current thread owns the
-  destination index. Shared handles retain their originating block identity.
+- `WriteOwnership` maps every shared index to exactly one block lane. One lane
+  may own any number of indices.
+- `KernelM.initializeShared` executes the ownership plan collectively and
+  returns `BlockWritesAt buffer ownership trace`, proving every cell was filled
+  after the same preceding synchronization sequence.
 - `Thread config blockState state` is a reference supplied by `launch`; its
   dependent type carries the current block and launch-created state types.
-- `KernelM thread a` ties statements to the thread executing them.
+- `KernelM thread before after a` ties statements to a thread and records their
+  exact synchronization-trace transition.
 - A `ScheduleCertificate` assigns every logical output index to exactly one
   `ThreadId`. A thread may own zero, one, or many output cells.
 - `Scheduled` gives one kernel invocation an optional work item and proves
@@ -81,14 +84,17 @@ The core design makes several future proof obligations natural:
 - `Kernel.shared` declares block-scoped allocations. `launch` creates the
   matching `SharedState`, and kernels retrieve buffers through total
   `SharedState.get` calls carrying `SharedRef` membership proofs.
-- Barriers are currently explicit operations. A future indexed effect can add
-  phase/uniformity information to `KernelM` and prove barrier convergence.
+- `KernelM.syncBlock` appends a named barrier to the trace. `Kernel.body`
+  declares one final trace for every thread, so divergent barrier sequences do
+  not type-check.
+- `BlockBuffer.readAfter` requires both a complete `BlockWritesAt` proof and a
+  `BlockSync` beginning at that exact trace.
 
 The launch surface is intentionally close to CUDA/HIP:
 
 ```lean
 launch config outputBuffer outputLayout certificate
-  (tiledMatmulKernel tile a b)
+  (tiledMatmulKernel tile tilePositive a b)
 ```
 
 `launch` is an axiom here: this project specifies its dependent interface but

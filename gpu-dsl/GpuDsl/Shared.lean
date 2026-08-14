@@ -40,7 +40,12 @@ def SharedState.get (block : Block cfg (SharedState α spec))
     (reference : SharedRef length spec) : BlockBuffer block length α :=
   ⟨SharedState.lookup (Block.state block) reference⟩
 
-def BlockBuffer.read (buffer : BlockBuffer block length α) (index : Fin length) : Value α :=
+/-- A complete write followed by a synchronization makes every cell readable. -/
+def BlockBuffer.readAfter
+    (buffer : BlockBuffer block length α)
+    (index : Fin length)
+    (_writes : BlockWritesAt buffer ownership trace)
+    (_sync : BlockSync block trace barrier) : Value α :=
   Value.load (BlockBuffer.buffer buffer) index
 
 end GpuDsl

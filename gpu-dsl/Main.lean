@@ -14,7 +14,7 @@ noncomputable def perfect64 : Launch (64 * 64) Float :=
   let certificate := tiledScheduleCertificate config 64 64 16
     (by decide) (by decide) (by decide) (by decide) (by decide) (by decide) (by decide)
   launch config out Layout.rowMajor2D certificate
-    (tiledMatmulKernel 16 a b)
+    (tiledMatmulKernel 16 (by decide) a b)
 
 noncomputable def predicatedEdges : Launch (65 * 33) Float :=
   let config := predicatedConfig 65 33 16
@@ -26,7 +26,7 @@ noncomputable def predicatedEdges : Launch (65 * 33) Float :=
   let certificate := tiledScheduleCertificate config 65 33 16
     (by decide) (by decide) (by decide) (by decide) (by decide) (by decide) (by decide)
   launch config out Layout.rowMajor2D certificate
-    (tiledMatmulKernel 16 a b)
+    (tiledMatmulKernel 16 (by decide) a b)
 
 def main : IO Unit := do
   IO.println "type-checked perfect and predicated tiled-matmul launches"

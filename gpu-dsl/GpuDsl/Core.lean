@@ -80,17 +80,41 @@ structure BlockBuffer
     (block : Block cfg BlockState) (length : Nat) (α : Type) where
   buffer : Buffer .shared length α
 
-/--
-Proof that the current thread is the unique writer of `index` in its block.
-`blockZ = 1` rules out duplicate x/y lanes in the third dimension.
--/
-structure ExclusiveWrite
-    (thread : Thread cfg BlockState State) (index : Fin length) where
-  blockZ : Dim3.z (LaunchConfig.block cfg) = 1
-  owner : Lane (Dim3.y (LaunchConfig.block cfg)) (Dim3.x (LaunchConfig.block cfg)) →
-    Fin length
-  owns : owner ⟨Coord.y (Thread.index thread), Coord.x (Thread.index thread)⟩ = index
-  unique : Injective owner
+/-- Every shared-memory cell is assigned to exactly one block lane. -/
+structure WriteOwnership (cfg : LaunchConfig) (length : Nat) where
+  owner : Fin length →
+    Lane (Dim3.y (LaunchConfig.block cfg)) (Dim3.x (LaunchConfig.block cfg))
+
+def Owns (ownership : WriteOwnership cfg length)
+    (thread : Thread cfg BlockState State) (index : Fin length) : Prop :=
+  WriteOwnership.owner ownership index =
+    ⟨Coord.y (Thread.index thread), Coord.x (Thread.index thread)⟩
+
+/-- Static names distinguish synchronization sites in a trace. -/
+inductive BarrierId where
+  | tileLoaded
+  | tileConsumed
+  deriving Repr, DecidableEq
+
+abbrev SyncTrace := List BarrierId
+
+def iterateTrace (step : SyncTrace → SyncTrace) : Nat → SyncTrace → SyncTrace
+  | 0, trace => trace
+  | n + 1, trace => iterateTrace step n (step trace)
+
+/-- Ghost evidence that every cell was written after exactly `trace`. -/
+structure BlockWritesAt
+    (buffer : BlockBuffer block length α)
+    (ownership : WriteOwnership cfg length)
+    (trace : SyncTrace) where
+  private token : Unit
+
+/-- Ghost evidence for one block synchronization transition. -/
+structure BlockSync
+    (block : Block cfg BlockState)
+    (before : SyncTrace)
+    (barrier : BarrierId) where
+  private token : Unit
 
 /-- A pure staged value used by kernel statements. -/
 inductive Value (α : Type) : Type where
@@ -119,33 +143,28 @@ The higher-order constructors make this a compact typed operational IR. A
 backend/interpreter supplies the values passed to the continuations.
 -/
 inductive KernelM {cfg : LaunchConfig} {BlockState State : Type}
-    (thread : Thread cfg BlockState State) : Type → Type 1 where
-  | pure {α : Type} (value : α) : KernelM thread α
-  | bind {α β : Type} (first : KernelM thread α)
-      (next : α → KernelM thread β) : KernelM thread β
-  | storeShared {n : Nat} {α : Type}
+    (thread : Thread cfg BlockState State) : SyncTrace → SyncTrace → Type → Type 1 where
+  | pure {α : Type} (value : α) : KernelM thread trace trace α
+  | bind {α β : Type}
+      (first : KernelM thread before middle α)
+      (next : α → KernelM thread middle after β) :
+      KernelM thread before after β
+  /-- Collectively write every cell assigned to the current lane. -/
+  | initializeShared {n : Nat} {α : Type}
       (buffer : BlockBuffer (Thread.block thread) n α)
-      (index : Fin n)
-      (ownership : ExclusiveWrite thread index)
-      (value : Value α) : KernelM thread Unit
-  | barrier : KernelM thread Unit
+      (ownership : WriteOwnership cfg n)
+      (value : (index : Fin n) → Owns ownership thread index → Value α) :
+      KernelM thread trace trace (BlockWritesAt buffer ownership trace)
+  | syncBlock (barrier : BarrierId) :
+      KernelM thread trace (trace ++ [barrier])
+        (BlockSync (Thread.block thread) trace barrier)
   /-- A uniform launch-time assumption to be discharged by a backend. -/
   | require (condition : Prop) [Decidable condition]
-      (body : condition → KernelM thread α) : KernelM thread α
-
-instance : Monad (KernelM thread) where
-  pure := KernelM.pure
-  bind := KernelM.bind
-
-/-- Build a statically bounded loop in the kernel IR. -/
-def KernelM.foldFin (n : Nat) (initial : α)
-    (body : Fin n → α → KernelM thread α) : KernelM thread α :=
-  let rec go (i : Nat) (acc : α) : KernelM thread α :=
-    if hi : i < n then
-      body ⟨i, hi⟩ acc >>= go (i + 1)
-    else
-      pure acc
-  termination_by n - i
-  go 0 initial
+      (body : condition → KernelM thread before after α) :
+      KernelM thread before after α
+  /-- A statically bounded loop whose every iteration has the same trace transition. -/
+  | foldFin (n : Nat) (initial : α)
+      (body : ∀ trace, Fin n → α → KernelM thread trace (step trace) α) :
+      KernelM thread trace (iterateTrace step n trace) α
 
 end GpuDsl

@@ -38,12 +38,14 @@ block state, thread state, and the schedule certificate are supplied by the
 structure Kernel (outputSpace : Space) (α : Type) where
   /-- Shared buffers allocated once per block by `launch`. -/
   shared : SharedSpec
+  /-- Every thread must finish after this exact synchronization trace. -/
+  trace : SyncTrace
   body :
     ∀ {cfg : LaunchConfig} {State : Type}
       {certificate : ScheduleCertificate cfg outputSpace},
       (thread : Thread cfg (SharedState α shared) State) →
       (scheduled : Scheduled certificate (Thread.id thread)) →
-      KernelM thread (Scheduled.Result scheduled α)
+      KernelM thread [] trace (Scheduled.Result scheduled α)
 
 /-- An opaque launch token. Execution belongs to the eventual backend. -/
 structure Launch (outputLength : Nat) (α : Type) where

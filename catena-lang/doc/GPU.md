@@ -32,8 +32,67 @@ worker-index
     : Worker g
    -> Ix (worker-layout g)
 
+Block
+    : Grid block-layout thread-layout
+   -> Type
+
+block-context
+    : Worker g
+   -> Block g
+
+BlockWorker
+    : (block : Block g)
+   -> Type
+
+block-worker
+    : (worker : Worker g)
+   -> BlockWorker (block-context worker)
+
+block-index
+    : Block g
+   -> Ix block-layout
+
+block-worker-index
+    : BlockWorker block
+   -> Ix thread-layout
+
+block-worker-index-is-injective
+    : Injective (block-worker-index : BlockWorker block -> Ix thread-layout)
+
 Buffer  : (dims : Shape d) -> Type -> Type
 Pending : Grid block-layout thread-layout -> Type -> Type
+
+SharedBuffer
+    : (block : Block g)
+   -> (dims : Shape d)
+   -> Type
+   -> Type
+
+shared
+    : (block : Block g)
+   -> (dims : Shape d)
+   -> (a : Type)
+   -> SharedBuffer block dims a
+
+SharedOwnership
+    : (worker : BlockWorker block)
+   -> (buffer : SharedBuffer block dims a)
+   -> (index : Ix dims)
+   -> Type
+
+owns-shared-cell
+    : (cell : BlockWorker block -> Ix dims)
+   -> Injective cell
+   -> (worker : BlockWorker block)
+   -> (buffer : SharedBuffer block dims a)
+   -> SharedOwnership worker buffer (cell worker)
+
+write-shared
+    : (buffer : SharedBuffer block dims a)
+   -> (index : Ix dims)
+   -> a
+   -> SharedOwnership worker buffer index
+   -> Unit
 
 record Scheduling
     (g             : Grid block-layout thread-layout)
@@ -276,19 +335,34 @@ tiled-matmul-kernel
 
 tiled-matmul-kernel worker C scheduled =
     let block                           = block-context worker
-    let (block-row, block-col)          = block-index worker
-    let worker-index-in-block           = thread-index worker
-    let tile-index : Ix (Tile, Tile)     =
-        cast-index
+    let worker-in-block                 = block-worker worker
+    let (block-row, block-col)          = block-index block
+    let worker-index-in-block           = block-worker-index worker-in-block
+    let tile-cell                       =
+        \block-worker ->
+            cast-index
+                (block-y-is-tile, block-x-is-tile)
+                (block-worker-index block-worker)
+    let tile-cell-is-injective          =
+        cast-index-is-injective
             (block-y-is-tile, block-x-is-tile)
-            worker-index-in-block
+            block-worker-index-is-injective
+    let tile-index : Ix (Tile, Tile)    = tile-cell worker-in-block
     let (tile-row, tile-col)            = tile-index
     let worker-row                      = block-row * BlockY
                                         + worker-index-in-block.row
     let worker-col                      = block-col * BlockX
                                         + worker-index-in-block.col
-    let A-tile                          = shared block (Tile, Tile) f32
-    let B-tile                          = shared block (Tile, Tile) f32
+    let A-tile : SharedBuffer block (Tile, Tile) f32 =
+        shared block (Tile, Tile) f32
+    let B-tile : SharedBuffer block (Tile, Tile) f32 =
+        shared block (Tile, Tile) f32
+    let owns-A-tile-cell                =
+        owns-shared-cell
+            tile-cell tile-cell-is-injective worker-in-block A-tile
+    let owns-B-tile-cell                =
+        owns-shared-cell
+            tile-cell tile-cell-is-injective worker-in-block B-tile
     let acc                             = 0.0
 
     for k-tile-start in 0 .. K step Tile
@@ -298,15 +372,17 @@ tiled-matmul-kernel worker C scheduled =
         let B-index : Option (Ix (K, N)) =
             checked-index (K, N) (k-tile-start + tile-row, worker-col)
 
-        A-tile[tile-index] =
-            case A-index of
+        write-shared A-tile tile-index
+            (case A-index of
                 some index -> A[index]
-                none       -> 0.0
+                none       -> 0.0)
+            owns-A-tile-cell
 
-        B-tile[tile-index] =
-            case B-index of
+        write-shared B-tile tile-index
+            (case B-index of
                 some index -> B[index]
-                none       -> 0.0
+                none       -> 0.0)
+            owns-B-tile-cell
 
         sync block
 

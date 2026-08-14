@@ -1,0 +1,10 @@
+name = "gpu-dsl"
+version = "0.1.0"
+defaultTargets = ["gpu-dsl-demo"]
+
+[[lean_lib]]
+name = "GpuDsl"
+
+[[lean_exe]]
+name = "gpu-dsl-demo"
+root = "Main"

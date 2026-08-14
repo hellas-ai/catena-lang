@@ -64,8 +64,10 @@ The core design makes several future proof obligations natural:
 - `Buffer space n a` records address space and the extent of linear storage.
 - `Tensor space a` represents data as a composable pure closure, independently
   of launch configuration and physical layout.
-- `load` and `store` accept only `Fin n`, so out-of-bounds accesses cannot be
-  expressed without first proving a bound.
+- Buffer reads accept only `Fin n`, so out-of-bounds access cannot be expressed.
+- `KernelM.storeShared` additionally requires an `ExclusiveWrite` certificate:
+  an injective block-lane assignment proving that the current thread owns the
+  destination index. Shared handles retain their originating block identity.
 - `Thread config blockState state` is a reference supplied by `launch`; its
   dependent type carries the current block and launch-created state types.
 - `KernelM thread a` ties statements to the thread executing them.

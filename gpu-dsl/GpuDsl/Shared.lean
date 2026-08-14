@@ -29,10 +29,18 @@ inductive SharedRef (length : Nat) : SharedSpec → Type where
 Total lookup: the `SharedRef` proof makes requesting a missing or incorrectly
 sized allocation unrepresentable.
 -/
-def SharedState.get (state : SharedState α spec) (reference : SharedRef length spec) :
-    Buffer .shared length α :=
+private def SharedState.lookup (state : SharedState α spec)
+    (reference : SharedRef length spec) : Buffer .shared length α :=
   match state, reference with
   | .buffer handle _, .here => handle
-  | .buffer _ rest, .there reference => SharedState.get rest reference
+  | .buffer _ rest, .there reference => SharedState.lookup rest reference
+
+/-- Retrieve a handle that retains the identity of its owning block. -/
+def SharedState.get (block : Block cfg (SharedState α spec))
+    (reference : SharedRef length spec) : BlockBuffer block length α :=
+  ⟨SharedState.lookup (Block.state block) reference⟩
+
+def BlockBuffer.read (buffer : BlockBuffer block length α) (index : Fin length) : Value α :=
+  Value.load (BlockBuffer.buffer buffer) index
 
 end GpuDsl

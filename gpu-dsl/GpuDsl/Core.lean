@@ -1,5 +1,8 @@
 namespace GpuDsl
 
+def Injective (function : α → β) : Prop :=
+  ∀ ⦃left right⦄, function left = function right → left = right
+
 /-- CUDA/HIP's three launch axes. -/
 inductive Axis where
   | x | y | z
@@ -67,6 +70,28 @@ structure Buffer (space : AddressSpace) (length : Nat) (α : Type) where
   name : String
   deriving Repr
 
+/-- A thread's two-dimensional lane within its block. -/
+structure Lane (rows cols : Nat) where
+  row : Fin rows
+  col : Fin cols
+
+/-- A shared-memory handle tied to one particular block instance. -/
+structure BlockBuffer
+    (block : Block cfg BlockState) (length : Nat) (α : Type) where
+  buffer : Buffer .shared length α
+
+/--
+Proof that the current thread is the unique writer of `index` in its block.
+`blockZ = 1` rules out duplicate x/y lanes in the third dimension.
+-/
+structure ExclusiveWrite
+    (thread : Thread cfg BlockState State) (index : Fin length) where
+  blockZ : Dim3.z (LaunchConfig.block cfg) = 1
+  owner : Lane (Dim3.y (LaunchConfig.block cfg)) (Dim3.x (LaunchConfig.block cfg)) →
+    Fin length
+  owns : owner ⟨Coord.y (Thread.index thread), Coord.x (Thread.index thread)⟩ = index
+  unique : Injective owner
+
 /-- A pure staged value used by kernel statements. -/
 inductive Value (α : Type) : Type where
   | literal (value : α) : Value α
@@ -98,8 +123,11 @@ inductive KernelM {cfg : LaunchConfig} {BlockState State : Type}
   | pure {α : Type} (value : α) : KernelM thread α
   | bind {α β : Type} (first : KernelM thread α)
       (next : α → KernelM thread β) : KernelM thread β
-  | store {space : AddressSpace} {n : Nat} {α : Type}
-      (buffer : Buffer space n α) (index : Fin n) (value : Value α) : KernelM thread Unit
+  | storeShared {n : Nat} {α : Type}
+      (buffer : BlockBuffer (Thread.block thread) n α)
+      (index : Fin n)
+      (ownership : ExclusiveWrite thread index)
+      (value : Value α) : KernelM thread Unit
   | barrier : KernelM thread Unit
   /-- A uniform launch-time assumption to be discharged by a backend. -/
   | require (condition : Prop) [Decidable condition]

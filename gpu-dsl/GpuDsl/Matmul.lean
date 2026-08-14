@@ -43,6 +43,33 @@ def tiledScheduleCertificate
     { blockIdx := { x := blockCol, y := blockRow, z := ⟨0, gridZPositive⟩ }
       threadIdx := { x := threadCol, y := threadRow, z := ⟨0, blockZPositive⟩ } }
 
+def tileLaneIndex
+    (blockX : Dim3.x block = tile)
+    (blockY : Dim3.y block = tile) :
+    Lane (Dim3.y block) (Dim3.x block) → Fin (tile * tile) :=
+  fun lane => Layout.offset Layout.rowMajor2D
+    ⟨Fin.cast blockY (Lane.row lane), Fin.cast blockX (Lane.col lane)⟩
+
+theorem tileLaneIndex_injective
+    (blockX : Dim3.x block = tile)
+    (blockY : Dim3.y block = tile) :
+    Injective (tileLaneIndex blockX blockY) := by
+  intro left right equalIndices
+  have equalMapped := Layout.rowMajor2D_injective equalIndices
+  have equalRowsCast := congrArg Index2.row equalMapped
+  have equalColsCast := congrArg Index2.col equalMapped
+  have equalRows : Lane.row left = Lane.row right := by
+    apply Fin.ext
+    simpa using congrArg Fin.val equalRowsCast
+  have equalCols : Lane.col left = Lane.col right := by
+    apply Fin.ext
+    simpa using congrArg Fin.val equalColsCast
+  cases left
+  cases right
+  cases equalRows
+  cases equalCols
+  rfl
+
 /--
 One tiled matmul kernel for both perfect and predicated launches.
 
@@ -63,19 +90,26 @@ def tiledMatmulKernel
   shared := .buffer "tileA" (tile * tile) (.buffer "tileB" (tile * tile) .empty)
   body := fun {cfg} {_State} {_certificate} thread scheduled =>
     KernelM.require
-      (Dim3.x (LaunchConfig.block cfg) = tile ∧ Dim3.y (LaunchConfig.block cfg) = tile)
+      (Dim3.x (LaunchConfig.block cfg) = tile ∧
+        Dim3.y (LaunchConfig.block cfg) = tile ∧
+        Dim3.z (LaunchConfig.block cfg) = 1)
       fun blockShape => do
       let threadIndex := Thread.index thread
       let block := Thread.block thread
       let blockIndex := Block.index block
-      let blockState := Block.state block
       let threadCol : Fin tile := Fin.cast blockShape.1 (Coord.x threadIndex)
-      let threadRow : Fin tile := Fin.cast blockShape.2 (Coord.y threadIndex)
+      let threadRow : Fin tile := Fin.cast blockShape.2.1 (Coord.y threadIndex)
       let row := Fin.val (Coord.y blockIndex) * tile + Fin.val threadRow
       let col := Fin.val (Coord.x blockIndex) * tile + Fin.val threadCol
-      let sharedA := SharedState.get blockState SharedRef.here
-      let sharedB := SharedState.get blockState (SharedRef.there SharedRef.here)
-      let localIndex := Layout.offset Layout.rowMajor2D ⟨threadRow, threadCol⟩
+      let sharedA := SharedState.get block SharedRef.here
+      let sharedB := SharedState.get block (SharedRef.there SharedRef.here)
+      let writer := tileLaneIndex blockShape.1 blockShape.2.1
+      let localIndex := writer ⟨Coord.y threadIndex, Coord.x threadIndex⟩
+      let ownership : ExclusiveWrite thread localIndex :=
+        { blockZ := blockShape.2.2
+          owner := writer
+          owns := rfl
+          unique := tileLaneIndex_injective blockShape.1 blockShape.2.1 }
 
       let result ← KernelM.foldFin (ceilDiv inner tile) Value.zero fun kTile acc => do
         let kA := Fin.val kTile * tile + Fin.val threadCol
@@ -90,13 +124,13 @@ def tiledMatmulKernel
           else pure Value.zero
         else pure Value.zero
 
-        KernelM.store sharedA localIndex aValue
-        KernelM.store sharedB localIndex bValue
+        KernelM.storeShared sharedA localIndex ownership aValue
+        KernelM.storeShared sharedB localIndex ownership bValue
         KernelM.barrier
 
         let acc ← KernelM.foldFin tile acc fun k acc => do
-          let av := Buffer.read sharedA (Layout.offset Layout.rowMajor2D ⟨threadRow, k⟩)
-          let bv := Buffer.read sharedB (Layout.offset Layout.rowMajor2D ⟨k, threadCol⟩)
+          let av := BlockBuffer.read sharedA (Layout.offset Layout.rowMajor2D ⟨threadRow, k⟩)
+          let bv := BlockBuffer.read sharedB (Layout.offset Layout.rowMajor2D ⟨k, threadCol⟩)
           pure (Value.add acc (Value.mul av bv))
 
         KernelM.barrier

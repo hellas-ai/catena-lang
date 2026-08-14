@@ -239,47 +239,42 @@ matmul-scheduling =
 tiled-matmul-kernel
    : (worker : Worker (Grid (GridY, GridX) (BlockY, BlockX)))
    -> (C : Buffer (M, N) f32)
-   -> (output-index : Ix (M, N))
-   -> Ownership worker C output-index
+   -> (c-index : Ix (M, N))
+   -> Ownership worker C c-index
    -> f32
 
-tiled-matmul-kernel worker C (row, col) owns =
-    let block              = block-context worker
-    let (block-r, block-c) = block-index worker
-    let (local-r, local-c) = thread-index worker
-    let threads-per-block  = BlockY * BlockX
-    let thread-rank        = local-r * BlockX + local-c
-    let A-tile             = shared block (BlockY, Tile) f32
-    let B-tile             = shared block (Tile, BlockX) f32
-    let acc                = 0.0
+tiled-matmul-kernel worker C (output-row, output-col) c-index-ownership =
+    let block                               = block-context worker
+    let (block-row, block-col)              = block-index worker
+    let (worker-row-in-block,
+         worker-col-in-block)               = thread-index worker
+    let worker-row                          = block-row * BlockY
+                                            + worker-row-in-block
+    let worker-col                          = block-col * BlockX
+                                            + worker-col-in-block
+    let A-tile                              = shared block (BlockY, Tile) f32
+    let B-tile                              = shared block (Tile, BlockX) f32
+    let acc                                 = 0.0
 
-    for k0 in 0 .. K step Tile
-        for offset in thread-rank .. BlockY * Tile step threads-per-block
-            let (tile-r, tile-k) = unlinearize (BlockY, Tile) offset
-            let source-r         = block-r * BlockY + tile-r
-            let source-k         = k0 + tile-k
+    for k-tile-start in 0 .. K step Tile
+        A-tile[worker-row-in-block, worker-col-in-block] =
+            if worker-row < M
+                && k-tile-start + worker-col-in-block < K
+            then A[worker-row, k-tile-start + worker-col-in-block]
+            else 0.0
 
-            A-tile[tile-r, tile-k] =
-                if source-r < M && source-k < K
-                then A[source-r, source-k]
-                else 0.0
-
-        for offset in thread-rank .. Tile * BlockX step threads-per-block
-            let (tile-k, tile-c) = unlinearize (Tile, BlockX) offset
-            let source-k         = k0 + tile-k
-            let source-c         = block-c * BlockX + tile-c
-
-            B-tile[tile-k, tile-c] =
-                if source-k < K && source-c < N
-                then B[source-k, source-c]
-                else 0.0
+        B-tile[worker-row-in-block, worker-col-in-block] =
+            if k-tile-start + worker-row-in-block < K
+                && worker-col < N
+            then B[k-tile-start + worker-row-in-block, worker-col]
+            else 0.0
 
         sync block
 
-        for k in 0 .. min Tile (K - k0)
+        for k-in-tile in 0 .. min Tile (K - k-tile-start)
             acc = acc
-                + A-tile[local-r, k]
-                * B-tile[k, local-c]
+                + A-tile[worker-row-in-block, k-in-tile]
+                * B-tile[k-in-tile, worker-col-in-block]
 
         sync block
 

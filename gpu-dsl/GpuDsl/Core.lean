@@ -76,7 +76,7 @@ structure Lane (rows cols : Nat) where
   col : Fin cols
 
 /-- A shared-memory handle tied to one particular block instance. -/
-structure BlockBuffer
+structure SharedBuffer
     (block : Block cfg BlockState) (length : Nat) (α : Type) where
   buffer : Buffer .shared length α
 
@@ -104,7 +104,7 @@ def iterateTrace (step : SyncTrace → SyncTrace) : Nat → SyncTrace → SyncTr
 
 /-- Ghost evidence that every cell was written after exactly `trace`. -/
 structure BlockWritesAt
-    (buffer : BlockBuffer block length α)
+    (buffer : SharedBuffer block length α)
     (ownership : WriteOwnership cfg length)
     (trace : SyncTrace) where
   private token : Unit
@@ -115,6 +115,26 @@ structure BlockSync
     (before : SyncTrace)
     (barrier : BarrierId) where
   private token : Unit
+
+/-- Ghost evidence that one particular buffer cell is defined at `trace`. -/
+structure DefinedAt
+    (buffer : SharedBuffer block length α)
+    (index : Fin length)
+    (trace : SyncTrace) where
+  private token : Unit
+
+/-- A collective write makes each individual cell defined after the matching barrier. -/
+def BlockWritesAt.definedAfter
+    {cfg : LaunchConfig} {BlockState α : Type}
+    {block : Block cfg BlockState} {length : Nat}
+    {buffer : SharedBuffer block length α}
+    {ownership : WriteOwnership cfg length}
+    {trace : SyncTrace} {barrier : BarrierId}
+    (_writes : BlockWritesAt buffer ownership trace)
+    (_sync : BlockSync block trace barrier)
+    (index : Fin length) :
+    DefinedAt (length := length) buffer index (trace ++ [barrier]) :=
+  ⟨()⟩
 
 /-- A pure staged value used by kernel statements. -/
 inductive Value (α : Type) : Type where
@@ -151,7 +171,7 @@ inductive KernelM {cfg : LaunchConfig} {BlockState State : Type}
       KernelM thread before after β
   /-- Collectively write every cell assigned to the current lane. -/
   | initializeShared {n : Nat} {α : Type}
-      (buffer : BlockBuffer (Thread.block thread) n α)
+      (buffer : SharedBuffer (Thread.block thread) n α)
       (ownership : WriteOwnership cfg n)
       (value : (index : Fin n) → Owns ownership thread index → Value α) :
       KernelM thread trace trace (BlockWritesAt buffer ownership trace)

@@ -126,12 +126,14 @@ def tiledMatmulKernel
           KernelM.bind (KernelM.initializeShared sharedA ownership valueA) fun writesA =>
           KernelM.bind (KernelM.initializeShared sharedB ownership valueB) fun writesB =>
           KernelM.bind (KernelM.syncBlock .tileLoaded) fun loaded =>
-          let nextAcc := foldValueFin tile acc fun k partialSum =>
-            let indexA := Layout.offset Layout.rowMajor2D ⟨threadRow, k⟩
-            let indexB := Layout.offset Layout.rowMajor2D ⟨k, threadCol⟩
-            let av := BlockBuffer.readAfter sharedA indexA writesA loaded
-            let bv := BlockBuffer.readAfter sharedB indexB writesB loaded
-            Value.add partialSum (Value.mul av bv)
+            let nextAcc := foldValueFin tile acc fun k partialSum =>
+              let indexA := Layout.offset Layout.rowMajor2D ⟨threadRow, k⟩
+              let indexB := Layout.offset Layout.rowMajor2D ⟨k, threadCol⟩
+              let definedA := BlockWritesAt.definedAfter writesA loaded indexA
+              let definedB := BlockWritesAt.definedAfter writesB loaded indexB
+              let av := SharedBuffer.read sharedA indexA definedA
+              let bv := SharedBuffer.read sharedB indexB definedB
+              Value.add partialSum (Value.mul av bv)
           KernelM.bind (KernelM.syncBlock .tileConsumed) fun _consumed =>
           KernelM.pure nextAcc) fun result =>
         match scheduled with

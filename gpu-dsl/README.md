@@ -87,8 +87,8 @@ The core design makes several future proof obligations natural:
 - `KernelM.syncBlock` appends a named barrier to the trace. `Kernel.body`
   declares one final trace for every thread, so divergent barrier sequences do
   not type-check.
-- `BlockBuffer.readAfter` requires both a complete `BlockWritesAt` proof and a
-  `BlockSync` beginning at that exact trace.
+- `SharedBuffer.read` requires a `DefinedAt` proof for the exact shared-memory
+  index and synchronization trace being read.
 
 The launch surface is intentionally close to CUDA/HIP:
 

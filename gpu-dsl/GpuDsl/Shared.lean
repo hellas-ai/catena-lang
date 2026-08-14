@@ -37,15 +37,14 @@ private def SharedState.lookup (state : SharedState α spec)
 
 /-- Retrieve a handle that retains the identity of its owning block. -/
 def SharedState.get (block : Block cfg (SharedState α spec))
-    (reference : SharedRef length spec) : BlockBuffer block length α :=
+    (reference : SharedRef length spec) : SharedBuffer block length α :=
   ⟨SharedState.lookup (Block.state block) reference⟩
 
-/-- A complete write followed by a synchronization makes every cell readable. -/
-def BlockBuffer.readAfter
-    (buffer : BlockBuffer block length α)
+/-- Read one shared cell with evidence that this exact index is defined now. -/
+def SharedBuffer.read
+    (buffer : SharedBuffer block length α)
     (index : Fin length)
-    (_writes : BlockWritesAt buffer ownership trace)
-    (_sync : BlockSync block trace barrier) : Value α :=
-  Value.load (BlockBuffer.buffer buffer) index
+    (_defined : DefinedAt (length := length) buffer index trace) : Value α :=
+  Value.load (SharedBuffer.buffer buffer) index
 
 end GpuDsl

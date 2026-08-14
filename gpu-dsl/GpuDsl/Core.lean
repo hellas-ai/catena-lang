@@ -70,25 +70,18 @@ structure Buffer (space : AddressSpace) (length : Nat) (α : Type) where
   name : String
   deriving Repr
 
-/-- A thread's two-dimensional lane within its block. -/
-structure Lane (rows cols : Nat) where
-  row : Fin rows
-  col : Fin cols
-
 /-- A shared-memory handle tied to one particular block instance. -/
 structure SharedBuffer
     (block : Block cfg BlockState) (length : Nat) (α : Type) where
   buffer : Buffer .shared length α
 
-/-- Every shared-memory cell is assigned to exactly one block lane. -/
+/-- Every shared-memory cell is assigned to exactly one physical block thread. -/
 structure WriteOwnership (cfg : LaunchConfig) (length : Nat) where
-  owner : Fin length →
-    Lane (Dim3.y (LaunchConfig.block cfg)) (Dim3.x (LaunchConfig.block cfg))
+  owner : Fin length → Coord (LaunchConfig.block cfg)
 
 def Owns (ownership : WriteOwnership cfg length)
     (thread : Thread cfg BlockState State) (index : Fin length) : Prop :=
-  WriteOwnership.owner ownership index =
-    ⟨Coord.y (Thread.index thread), Coord.x (Thread.index thread)⟩
+  WriteOwnership.owner ownership index = Thread.index thread
 
 /-- Static names distinguish synchronization sites in a trace. -/
 inductive BarrierId where
@@ -102,19 +95,41 @@ def iterateTrace (step : SyncTrace → SyncTrace) : Nat → SyncTrace → SyncTr
   | 0, trace => trace
   | n + 1, trace => iterateTrace step n (step trace)
 
-/-- Ghost evidence that every cell was written after exactly `trace`. -/
-structure BlockWritesAt
+/-- One physical thread wrote one particular shared cell at `trace`. -/
+structure ThreadWroteAt
     (buffer : SharedBuffer block length α)
-    (ownership : WriteOwnership cfg length)
+    (index : Fin length)
+    (threadIndex : Coord (LaunchConfig.block cfg))
     (trace : SyncTrace) where
   private token : Unit
 
-/-- Ghost evidence for one block synchronization transition. -/
+/--
+Static evidence that every physical thread writes the shared cells assigned to
+it at `trace`, immediately before a synchronization beginning at that trace.
+-/
+structure SharedWritePhase
+    (buffer : SharedBuffer block length α)
+    (ownership : WriteOwnership cfg length)
+    (trace : SyncTrace) where
+  private writesOwned : ∀ threadIndex index,
+    WriteOwnership.owner ownership index = threadIndex →
+    ThreadWroteAt buffer index threadIndex trace
+
+/-- Ghost evidence that one physical thread has crossed a block barrier. -/
+structure ThreadAfterSync
+    (block : Block cfg BlockState)
+    (threadIndex : Coord (LaunchConfig.block cfg))
+    (before : SyncTrace)
+    (barrier : BarrierId) where
+  private token : Unit
+
+/-- A block rendezvous: every physical thread has crossed this barrier. -/
 structure BlockSync
     (block : Block cfg BlockState)
     (before : SyncTrace)
     (barrier : BarrierId) where
-  private token : Unit
+  private allAfter : ∀ threadIndex,
+    ThreadAfterSync block threadIndex before barrier
 
 /-- Ghost evidence that one particular buffer cell is defined at `trace`. -/
 structure DefinedAt
@@ -123,17 +138,25 @@ structure DefinedAt
     (trace : SyncTrace) where
   private token : Unit
 
-/-- A collective write makes each individual cell defined after the matching barrier. -/
-def BlockWritesAt.definedAfter
+/--
+Every cell has an assigned thread; every thread crossed the barrier; and before
+that barrier each thread wrote its assigned cells. Therefore this cell is
+defined after the barrier. Matching `trace` parameters tie the writes to this
+particular synchronization point.
+-/
+def SharedWritePhase.definedAfter
     {cfg : LaunchConfig} {BlockState α : Type}
     {block : Block cfg BlockState} {length : Nat}
     {buffer : SharedBuffer block length α}
     {ownership : WriteOwnership cfg length}
     {trace : SyncTrace} {barrier : BarrierId}
-    (_writes : BlockWritesAt buffer ownership trace)
+    (_writes : SharedWritePhase buffer ownership trace)
     (_sync : BlockSync block trace barrier)
     (index : Fin length) :
     DefinedAt (length := length) buffer index (trace ++ [barrier]) :=
+  let writer := WriteOwnership.owner ownership index
+  let _wroteBefore := SharedWritePhase.writesOwned _writes writer index rfl
+  let _afterSync := BlockSync.allAfter _sync writer
   ⟨()⟩
 
 /-- A pure staged value used by kernel statements. -/
@@ -169,12 +192,13 @@ inductive KernelM {cfg : LaunchConfig} {BlockState State : Type}
       (first : KernelM thread before middle α)
       (next : α → KernelM thread middle after β) :
       KernelM thread before after β
-  /-- Collectively write every cell assigned to the current lane. -/
+  /-- Each physical thread writes every shared cell assigned to it. -/
   | initializeShared {n : Nat} {α : Type}
       (buffer : SharedBuffer (Thread.block thread) n α)
       (ownership : WriteOwnership cfg n)
       (value : (index : Fin n) → Owns ownership thread index → Value α) :
-      KernelM thread trace trace (BlockWritesAt buffer ownership trace)
+      KernelM thread trace trace
+        (SharedWritePhase buffer ownership trace)
   | syncBlock (barrier : BarrierId) :
       KernelM thread trace (trace ++ [barrier])
         (BlockSync (Thread.block thread) trace barrier)

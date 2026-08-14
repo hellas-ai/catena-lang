@@ -65,11 +65,10 @@ The core design makes several future proof obligations natural:
 - `Tensor space a` represents data as a composable pure closure, independently
   of launch configuration and physical layout.
 - Buffer reads accept only `Fin n`, so out-of-bounds access cannot be expressed.
-- `WriteOwnership` maps every shared index to exactly one block lane. One lane
-  may own any number of indices.
-- `KernelM.initializeShared` executes the ownership plan collectively and
-  returns `BlockWritesAt buffer ownership trace`, proving every cell was filled
-  after the same preceding synchronization sequence.
+- `WriteOwnership` maps every shared index to exactly one physical block
+  thread. One thread may own any number of indices.
+- `KernelM.initializeShared` records a `SharedWritePhase`: each physical thread
+  writes the cells assigned to it immediately before the matching barrier.
 - `Thread config blockState state` is a reference supplied by `launch`; its
   dependent type carries the current block and launch-created state types.
 - `KernelM thread before after a` ties statements to a thread and records their
@@ -79,14 +78,16 @@ The core design makes several future proof obligations natural:
 - `Scheduled` gives one kernel invocation an optional work item and proves
   ownership. The launch implementation may supply repeated work items when a
   thread owns multiple cells, or `none` when it owns none.
-- `KernelM.require` records the uniform `block.x = block.y = tile` assumption in
+- `KernelM.require` records the uniform `block = tile × tile × 1` assumption in
   the DSL body rather than constraining the reusable kernel's signature.
 - `Kernel.shared` declares block-scoped allocations. `launch` creates the
   matching `SharedState`, and kernels retrieve buffers through total
   `SharedState.get` calls carrying `SharedRef` membership proofs.
-- `KernelM.syncBlock` appends a named barrier to the trace. `Kernel.body`
-  declares one final trace for every thread, so divergent barrier sequences do
-  not type-check.
+- `KernelM.syncBlock` is independent of shared memory and proves that every
+  physical thread crossed the barrier. Combining total ownership, a write phase
+  at the barrier's exact pre-trace, and this synchronization proves that every
+  shared cell is defined afterward. It also appends the named barrier to the
+  trace, and `Kernel.body` requires one final trace for every thread.
 - `SharedBuffer.read` requires a `DefinedAt` proof for the exact shared-memory
   index and synchronization trace being read.
 

@@ -49,14 +49,16 @@ def tileRow (tilePositive : 0 < tile) (index : Fin (tile * tile)) : Fin tile :=
 def tileCol (tilePositive : 0 < tile) (index : Fin (tile * tile)) : Fin tile :=
   ⟨Fin.val index % tile, Nat.mod_lt _ tilePositive⟩
 
-/-- Each shared cell names its unique writing lane; a lane may own many cells. -/
+/-- Each shared cell names its unique physical writer; a thread may own many cells. -/
 def tileWriteOwnership
     (blockX : Dim3.x (LaunchConfig.block cfg) = tile)
     (blockY : Dim3.y (LaunchConfig.block cfg) = tile)
+    (blockZ : Dim3.z (LaunchConfig.block cfg) = 1)
     (tilePositive : 0 < tile) : WriteOwnership cfg (tile * tile) where
   owner index :=
-    ⟨Fin.cast blockY.symm (tileRow tilePositive index),
-      Fin.cast blockX.symm (tileCol tilePositive index)⟩
+    { x := Fin.cast blockX.symm (tileCol tilePositive index)
+      y := Fin.cast blockY.symm (tileRow tilePositive index)
+      z := Fin.cast blockZ.symm ⟨0, by decide⟩ }
 
 def tiledMatmulStep (trace : SyncTrace) : SyncTrace :=
   (trace ++ [.tileLoaded]) ++ [.tileConsumed]
@@ -93,7 +95,7 @@ def tiledMatmulKernel
       (Dim3.x (LaunchConfig.block cfg) = tile ∧
         Dim3.y (LaunchConfig.block cfg) = tile ∧
         Dim3.z (LaunchConfig.block cfg) = 1)
-      fun ⟨blockXEq, blockYEq, _blockZEq⟩ =>
+      fun ⟨blockXEq, blockYEq, blockZEq⟩ =>
       let threadIndex := Thread.index thread
       let block := Thread.block thread
       let blockIndex := Block.index block
@@ -101,7 +103,7 @@ def tiledMatmulKernel
       let threadRow : Fin tile := Fin.cast blockYEq (Coord.y threadIndex)
       let sharedA := SharedState.get block SharedRef.here
       let sharedB := SharedState.get block (SharedRef.there SharedRef.here)
-      let ownership := tileWriteOwnership blockXEq blockYEq tilePositive
+      let ownership := tileWriteOwnership blockXEq blockYEq blockZEq tilePositive
 
       KernelM.bind
         (KernelM.foldFin (ceilDiv inner tile) Value.zero fun _trace kTile acc =>
@@ -126,14 +128,14 @@ def tiledMatmulKernel
           KernelM.bind (KernelM.initializeShared sharedA ownership valueA) fun writesA =>
           KernelM.bind (KernelM.initializeShared sharedB ownership valueB) fun writesB =>
           KernelM.bind (KernelM.syncBlock .tileLoaded) fun loaded =>
-            let nextAcc := foldValueFin tile acc fun k partialSum =>
-              let indexA := Layout.offset Layout.rowMajor2D ⟨threadRow, k⟩
-              let indexB := Layout.offset Layout.rowMajor2D ⟨k, threadCol⟩
-              let definedA := BlockWritesAt.definedAfter writesA loaded indexA
-              let definedB := BlockWritesAt.definedAfter writesB loaded indexB
-              let av := SharedBuffer.read sharedA indexA definedA
-              let bv := SharedBuffer.read sharedB indexB definedB
-              Value.add partialSum (Value.mul av bv)
+          let nextAcc := foldValueFin tile acc fun k partialSum =>
+            let indexA := Layout.offset Layout.rowMajor2D ⟨threadRow, k⟩
+            let indexB := Layout.offset Layout.rowMajor2D ⟨k, threadCol⟩
+            let definedA := SharedWritePhase.definedAfter writesA loaded indexA
+            let definedB := SharedWritePhase.definedAfter writesB loaded indexB
+            let av := SharedBuffer.read sharedA indexA definedA
+            let bv := SharedBuffer.read sharedB indexB definedB
+            Value.add partialSum (Value.mul av bv)
           KernelM.bind (KernelM.syncBlock .tileConsumed) fun _consumed =>
           KernelM.pure nextAcc) fun result =>
         match scheduled with

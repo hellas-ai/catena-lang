@@ -48,8 +48,8 @@ One tiled matmul kernel for both perfect and predicated launches.
 
 `block.x = block.y = tile` is checked uniformly in the body instead of being a
 constraint in the signature. All threads execute the shared-memory phases and
-barriers, including threads with no scheduled output. Only the final store is
-conditional on the assignment supplied and proved by `launch`.
+barriers, including threads with no scheduled output. Only returning an output
+value is conditional on the assignment supplied and proved by `launch`.
 -/
 def tiledMatmulKernel
     {α : Type}
@@ -59,19 +59,22 @@ def tiledMatmulKernel
     (tile : Nat)
     (a : Matrix rows inner (Value α))
     (b : Matrix inner cols (Value α)) :
-    Kernel (.d2 rows cols) α :=
-  fun {cfg} {_BlockState} {_State} {_certificate} thread scheduled =>
+    Kernel (.d2 rows cols) α where
+  shared := .buffer "tileA" (tile * tile) (.buffer "tileB" (tile * tile) .empty)
+  body := fun {cfg} {_State} {_certificate} thread scheduled =>
     KernelM.require
       (Dim3.x (LaunchConfig.block cfg) = tile ∧ Dim3.y (LaunchConfig.block cfg) = tile)
       fun blockShape => do
       let threadIndex := Thread.index thread
-      let blockIndex := Block.index (Thread.block thread)
+      let block := Thread.block thread
+      let blockIndex := Block.index block
+      let blockState := Block.state block
       let threadCol : Fin tile := Fin.cast blockShape.1 (Coord.x threadIndex)
       let threadRow : Fin tile := Fin.cast blockShape.2 (Coord.y threadIndex)
       let row := Fin.val (Coord.y blockIndex) * tile + Fin.val threadRow
       let col := Fin.val (Coord.x blockIndex) * tile + Fin.val threadCol
-      let sharedA ← KernelM.allocShared "tileA" (tile * tile) α
-      let sharedB ← KernelM.allocShared "tileB" (tile * tile) α
+      let sharedA := SharedState.get blockState SharedRef.here
+      let sharedB := SharedState.get blockState (SharedRef.there SharedRef.here)
       let localIndex := Layout.offset Layout.rowMajor2D ⟨threadRow, threadCol⟩
 
       let result ← KernelM.foldFin (ceilDiv inner tile) Value.zero fun kTile acc => do

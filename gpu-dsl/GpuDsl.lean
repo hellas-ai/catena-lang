@@ -1,4 +1,5 @@
 import GpuDsl.Core
+import GpuDsl.Shared
 import GpuDsl.Matrix
 import GpuDsl.Tiling
 import GpuDsl.Launch

@@ -1,4 +1,5 @@
 import GpuDsl.Matrix
+import GpuDsl.Shared
 
 namespace GpuDsl
 
@@ -34,12 +35,15 @@ A generic kernel depends only on its logical output space. Launch geometry,
 block state, thread state, and the schedule certificate are supplied by the
 `launch` implementation through the thread and scheduled work item.
 -/
-abbrev Kernel (outputSpace : Space) (α : Type) :=
-  ∀ {cfg : LaunchConfig} {BlockState State : Type}
-    {certificate : ScheduleCertificate cfg outputSpace},
-    (thread : Thread cfg BlockState State) →
-    (scheduled : Scheduled certificate (Thread.id thread)) →
-    KernelM thread (Scheduled.Result scheduled α)
+structure Kernel (outputSpace : Space) (α : Type) where
+  /-- Shared buffers allocated once per block by `launch`. -/
+  shared : SharedSpec
+  body :
+    ∀ {cfg : LaunchConfig} {State : Type}
+      {certificate : ScheduleCertificate cfg outputSpace},
+      (thread : Thread cfg (SharedState α shared) State) →
+      (scheduled : Scheduled certificate (Thread.id thread)) →
+      KernelM thread (Scheduled.Result scheduled α)
 
 /-- An opaque launch token. Execution belongs to the eventual backend. -/
 structure Launch (outputLength : Nat) (α : Type) where
@@ -47,8 +51,8 @@ structure Launch (outputLength : Nat) (α : Type) where
 
 /--
 CUDA/HIP-shaped primitive. Its implementation creates block/thread state,
-enumerates work items from the certificate, and invokes the kernel. No
-implementation is given in this DSL prototype.
+allocates `Kernel.shared` once per block, enumerates work items from the
+certificate, and invokes `Kernel.body`. No implementation is given here.
 -/
 axiom launch
     (cfg : LaunchConfig)

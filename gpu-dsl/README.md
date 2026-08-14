@@ -12,6 +12,8 @@ can interpret or compile `KernelM` while keeping its typed interface.
   buffer views.
 - `GpuDsl/Launch.lean` contains scheduling, the dependent kernel-body
   interface, and the opaque `launch` primitive.
+- `GpuDsl/Shared.lean` contains block-scoped shared-memory specifications,
+  allocated states, and proof-indexed lookup.
 - `GpuDsl/Matmul.lean` contains one reusable tiled matmul kernel plus perfect
   and predicated launch configurations.
 
@@ -74,6 +76,9 @@ The core design makes several future proof obligations natural:
   thread owns multiple cells, or `none` when it owns none.
 - `KernelM.require` records the uniform `block.x = block.y = tile` assumption in
   the DSL body rather than constraining the reusable kernel's signature.
+- `Kernel.shared` declares block-scoped allocations. `launch` creates the
+  matching `SharedState`, and kernels retrieve buffers through total
+  `SharedState.get` calls carrying `SharedRef` membership proofs.
 - Barriers are currently explicit operations. A future indexed effect can add
   phase/uniformity information to `KernelM` and prove barrier convergence.
 

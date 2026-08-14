@@ -100,8 +100,6 @@ inductive KernelM {cfg : LaunchConfig} {BlockState State : Type}
       (next : α → KernelM thread β) : KernelM thread β
   | store {space : AddressSpace} {n : Nat} {α : Type}
       (buffer : Buffer space n α) (index : Fin n) (value : Value α) : KernelM thread Unit
-  | allocShared (name : String) (length : Nat) (α : Type) :
-      KernelM thread (Buffer .shared length α)
   | barrier : KernelM thread Unit
   /-- A uniform launch-time assumption to be discharged by a backend. -/
   | require (condition : Prop) [Decidable condition]

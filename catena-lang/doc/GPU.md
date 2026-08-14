@@ -275,37 +275,45 @@ tiled-matmul-kernel
    -> KernelResult scheduled f32
 
 tiled-matmul-kernel worker C scheduled =
-    let block                               = block-context worker
-    let (block-row, block-col)              = block-index worker
-    let (worker-row-in-block,
-         worker-col-in-block)               = thread-index worker
-    let worker-row                          = block-row * BlockY
-                                            + worker-row-in-block
-    let worker-col                          = block-col * BlockX
-                                            + worker-col-in-block
-    let A-tile                              = shared block (BlockY, Tile) f32
-    let B-tile                              = shared block (Tile, BlockX) f32
-    let acc                                 = 0.0
+    let block                           = block-context worker
+    let (block-row, block-col)          = block-index worker
+    let worker-index-in-block           = thread-index worker
+    let tile-index : Ix (Tile, Tile)     =
+        cast-index
+            (block-y-is-tile, block-x-is-tile)
+            worker-index-in-block
+    let (tile-row, tile-col)            = tile-index
+    let worker-row                      = block-row * BlockY
+                                        + worker-index-in-block.row
+    let worker-col                      = block-col * BlockX
+                                        + worker-index-in-block.col
+    let A-tile                          = shared block (Tile, Tile) f32
+    let B-tile                          = shared block (Tile, Tile) f32
+    let acc                             = 0.0
 
     for k-tile-start in 0 .. K step Tile
-        A-tile[worker-row-in-block, worker-col-in-block] =
-            if worker-row < M
-                && k-tile-start + worker-col-in-block < K
-            then A[worker-row, k-tile-start + worker-col-in-block]
-            else 0.0
+        let A-index : Option (Ix (M, K)) =
+            checked-index (M, K) (worker-row, k-tile-start + tile-col)
 
-        B-tile[worker-row-in-block, worker-col-in-block] =
-            if k-tile-start + worker-row-in-block < K
-                && worker-col < N
-            then B[k-tile-start + worker-row-in-block, worker-col]
-            else 0.0
+        let B-index : Option (Ix (K, N)) =
+            checked-index (K, N) (k-tile-start + tile-row, worker-col)
+
+        A-tile[tile-index] =
+            case A-index of
+                some index -> A[index]
+                none       -> 0.0
+
+        B-tile[tile-index] =
+            case B-index of
+                some index -> B[index]
+                none       -> 0.0
 
         sync block
 
         for k-in-tile in 0 .. min Tile (K - k-tile-start)
             acc = acc
-                + A-tile[worker-row-in-block, k-in-tile]
-                * B-tile[k-in-tile, worker-col-in-block]
+                + A-tile[tile-row, k-in-tile]
+                * B-tile[k-in-tile, tile-col]
 
         sync block
 
@@ -316,6 +324,10 @@ tiled-matmul-kernel worker C scheduled =
         no-output proof ->
             let outside = predicated-out-of-bounds worker proof
             ()
+
+    where
+        assume block-x-is-tile : BlockX = Tile
+        assume block-y-is-tile : BlockY = Tile
 
 pending-C
     : Pending (Grid (GridY, GridX) (BlockY, BlockX))

@@ -138,6 +138,31 @@ structure DefinedAt
     (trace : SyncTrace) where
   private token : Unit
 
+/-- No thread can still be reading the previous contents at `trace`. -/
+structure WritableAt
+    (buffer : SharedBuffer block length α)
+    (trace : SyncTrace) where
+  private token : Unit
+
+/-- Fresh launch-created shared memory is undefined and therefore writable. -/
+def WritableAt.initial
+    (buffer : SharedBuffer block length α) : WritableAt buffer [] :=
+  ⟨()⟩
+
+/-- Every physical thread has finished reading this buffer at `trace`. -/
+structure SharedReadPhase
+    (buffer : SharedBuffer block length α)
+    (trace : SyncTrace) where
+  private token : Unit
+
+/-- A completed read phase followed by a block barrier permits reuse. -/
+def SharedReadPhase.writableAfter
+    {buffer : SharedBuffer block length α}
+    (_reads : SharedReadPhase buffer trace)
+    (_sync : BlockSync block trace barrier) :
+    WritableAt buffer (trace ++ [barrier]) :=
+  ⟨()⟩
+
 /--
 Every cell has an assigned thread; every thread crossed the barrier; and before
 that barrier each thread wrote its assigned cells. Therefore this cell is
@@ -196,9 +221,15 @@ inductive KernelM {cfg : LaunchConfig} {BlockState State : Type}
   | initializeShared {n : Nat} {α : Type}
       (buffer : SharedBuffer (Thread.block thread) n α)
       (ownership : WriteOwnership cfg n)
+      (writable : WritableAt buffer trace)
       (value : (index : Fin n) → Owns ownership thread index → Value α) :
       KernelM thread trace trace
         (SharedWritePhase buffer ownership trace)
+  /-- Force a staged expression into a register before continuing. -/
+  | materialize (value : Value α) : KernelM thread trace trace (Value α)
+  /-- Mark the point after this thread's reads; uniform execution covers the block. -/
+  | finishSharedReads (buffer : SharedBuffer (Thread.block thread) n α) :
+      KernelM thread trace trace (SharedReadPhase buffer trace)
   | syncBlock (barrier : BarrierId) :
       KernelM thread trace (trace ++ [barrier])
         (BlockSync (Thread.block thread) trace barrier)
@@ -210,5 +241,12 @@ inductive KernelM {cfg : LaunchConfig} {BlockState State : Type}
   | foldFin (n : Nat) (initial : α)
       (body : ∀ trace, Fin n → α → KernelM thread trace (step trace) α) :
       KernelM thread trace (iterateTrace step n trace) α
+  /-- A bounded loop whose loop-carried state depends on the current trace. -/
+  | foldFinD (n : Nat) (Acc : SyncTrace → Type)
+      (initial : Acc trace)
+      (body : ∀ currentTrace, Fin n → Acc currentTrace →
+        KernelM thread currentTrace (step currentTrace) (Acc (step currentTrace))) :
+      KernelM thread trace (iterateTrace step n trace)
+        (Acc (iterateTrace step n trace))
 
 end GpuDsl

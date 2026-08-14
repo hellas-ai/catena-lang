@@ -90,6 +90,14 @@ The core design makes several future proof obligations natural:
   trace, and `Kernel.body` requires one final trace for every thread.
 - `SharedBuffer.read` requires a `DefinedAt` proof for the exact shared-memory
   index and synchronization trace being read.
+- `TileLoopState trace` carries `WritableAt` proofs at the top of each tile
+  iteration. Fresh undefined shared memory supplies the initial proofs.
+- Reads are materialized before `finishSharedReads`; the `.tileConsumed`
+  barrier turns the completed read phases into `WritableAt` proofs for the next
+  trace. Consequently, the next iteration cannot overwrite either tile without
+  the second barrier.
+- `KernelM.foldFinD` supports this invariant by allowing its loop-carried state
+  type to depend on the synchronization trace.
 
 The launch surface is intentionally close to CUDA/HIP:
 

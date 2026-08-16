@@ -125,7 +125,6 @@ def tiledMatmulKernel
           let valueA := fun index (_owned : Owns ownership thread index) =>
             let row := Fin.val (Coord.y blockIndex) * tile + Fin.val threadRow
             let kA := Fin.val kTile * tile + Fin.val threadCol
-            -- A dependent guard supplies the bounds proofs used to build the safe index.
             if rowInBounds : row < rows then
               if kAInBounds : kA < inner then
                 a ⟨⟨row, rowInBounds⟩, ⟨kA, kAInBounds⟩⟩
@@ -134,7 +133,6 @@ def tiledMatmulKernel
           let valueB := fun index (_owned : Owns ownership thread index) =>
             let kB := Fin.val kTile * tile + Fin.val threadRow
             let col := Fin.val (Coord.x blockIndex) * tile + Fin.val threadCol
-            -- The successful branch carries both proofs; the other branch is padding.
             if kBInBounds : kB < inner then
               if colInBounds : col < cols then
                 b ⟨⟨kB, kBInBounds⟩, ⟨col, colInBounds⟩⟩

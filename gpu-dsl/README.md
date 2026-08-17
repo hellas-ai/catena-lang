@@ -82,7 +82,10 @@ The core design makes several future proof obligations natural:
   executes.
 - `Kernel.shared` declares block-scoped allocations. `launch` creates the
   matching `SharedState`, and kernels retrieve buffers through total
-  `SharedState.get` calls carrying `SharedRef` membership proofs.
+  `SharedState.get block "name"` calls whose `SharedRef` membership proofs are
+  synthesized. The declared name is retained in the handle's type,
+  distinguishing allocations such as `SharedBuffer block "tileA" ...` and
+  `SharedBuffer block "tileB" ...`.
 - `KernelM.writeShared` and `KernelM.readShared` are ordinary single-thread
   commands with statically bounded indices. They expose the accesses needed by
   a future block/grid race analysis.

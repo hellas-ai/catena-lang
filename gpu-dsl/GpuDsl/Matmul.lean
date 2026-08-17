@@ -96,8 +96,8 @@ def tiledMatmulKernel
       let blockIndex := Block.index block
       let threadCol : Fin tile := Fin.cast blockXEq (Coord.x threadIndex)
       let threadRow : Fin tile := Fin.cast blockYEq (Coord.y threadIndex)
-      let sharedA := SharedState.get block SharedRef.here
-      let sharedB := SharedState.get block (SharedRef.there SharedRef.here)
+      let sharedA := SharedState.get block "tileA"
+      let sharedB := SharedState.get block "tileB"
       let tileIndex : Fin (tile * tile) :=
         Layout.offset Layout.rowMajor2D ⟨threadRow, threadCol⟩
 

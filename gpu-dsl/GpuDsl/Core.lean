@@ -72,7 +72,8 @@ structure Buffer (space : AddressSpace) (length : Nat) (α : Type) where
 
 /-- A shared-memory handle tied to one particular block instance. -/
 structure SharedBuffer
-    (block : Block cfg BlockState) (length : Nat) (α : Type) where
+    (block : Block cfg BlockState) (name : String)
+    (length : Nat) (α : Type) where
   buffer : Buffer .shared length α
 
 /-- Static names distinguish synchronization sites in a trace. -/
@@ -121,14 +122,14 @@ inductive KernelM {cfg : LaunchConfig} {BlockState State : Type}
       (next : α → KernelM thread middle after β) :
       KernelM thread before after β
   /-- Write one shared-memory cell from the current physical thread. -/
-  | writeShared {n : Nat} {α : Type}
-      (buffer : SharedBuffer (Thread.block thread) n α)
+  | writeShared {name : String} {n : Nat} {α : Type}
+      (buffer : SharedBuffer (Thread.block thread) name n α)
       (index : Fin n)
       (value : Value α) :
       KernelM thread trace trace Unit
   /-- Read one shared-memory cell from the current physical thread. -/
-  | readShared {n : Nat} {α : Type}
-      (buffer : SharedBuffer (Thread.block thread) n α)
+  | readShared {name : String} {n : Nat} {α : Type}
+      (buffer : SharedBuffer (Thread.block thread) name n α)
       (index : Fin n) :
       KernelM thread trace trace (Value α)
   | syncBlock (barrier : BarrierId) :

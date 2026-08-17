@@ -91,7 +91,9 @@ The core design makes several future proof obligations natural:
   a future block/grid race analysis.
 - `KernelM.syncBlock` appends a named barrier to the synchronization trace.
   `Kernel.body` requires one final trace for every thread and owned-output
-  list, so all thread invocations describe the same barrier sequence.
+  list, so all thread invocations describe the same barrier sequence. Because
+  `launch` invokes the body exactly once per physical thread, barrier safety is
+  enforced by the kernel type itself.
 - The trace partitions kernel commands into generic phases. A future analyzer
   will collect each thread's reads and writes per phase, then prove that every
   read is defined and that conflicting accesses cannot occur.

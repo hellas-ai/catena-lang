@@ -138,29 +138,21 @@ structure DefinedAt
     (trace : SyncTrace) where
   private token : Unit
 
-/-- No thread can still be reading the previous contents at `trace`. -/
-structure WritableAt
-    (buffer : SharedBuffer block length α)
+/-- The block may start a new shared-memory write phase at `trace`. -/
+structure SharedWritableAt
+    (block : Block cfg BlockState)
     (trace : SyncTrace) where
   private token : Unit
 
 /-- Fresh launch-created shared memory is undefined and therefore writable. -/
-def WritableAt.initial
-    (buffer : SharedBuffer block length α) : WritableAt buffer [] :=
+def SharedWritableAt.initial
+    (block : Block cfg BlockState) : SharedWritableAt block [] :=
   ⟨()⟩
 
-/-- Every physical thread has finished reading this buffer at `trace`. -/
-structure SharedReadPhase
-    (buffer : SharedBuffer block length α)
-    (trace : SyncTrace) where
-  private token : Unit
-
-/-- A completed read phase followed by a block barrier permits reuse. -/
-def SharedReadPhase.writableAfter
-    {buffer : SharedBuffer block length α}
-    (_reads : SharedReadPhase buffer trace)
-    (_sync : BlockSync block trace barrier) :
-    WritableAt buffer (trace ++ [barrier]) :=
+/-- A consumed barrier ends every preceding read in the block. -/
+def BlockSync.writableAfterConsumed
+    (_sync : BlockSync block trace .tileConsumed) :
+    SharedWritableAt block (trace ++ [.tileConsumed]) :=
   ⟨()⟩
 
 /--
@@ -169,16 +161,16 @@ that barrier each thread wrote its assigned cells. Therefore this cell is
 defined after the barrier. Matching `trace` parameters tie the writes to this
 particular synchronization point.
 -/
-def SharedWritePhase.definedAfter
+def SharedWritePhase.definedAfterLoaded
     {cfg : LaunchConfig} {BlockState α : Type}
     {block : Block cfg BlockState} {length : Nat}
     {buffer : SharedBuffer block length α}
     {ownership : WriteOwnership cfg length}
-    {trace : SyncTrace} {barrier : BarrierId}
+    {trace : SyncTrace}
     (_writes : SharedWritePhase buffer ownership trace)
-    (_sync : BlockSync block trace barrier)
+    (_sync : BlockSync block trace .tileLoaded)
     (index : Fin length) :
-    DefinedAt (length := length) buffer index (trace ++ [barrier]) :=
+    DefinedAt (length := length) buffer index (trace ++ [.tileLoaded]) :=
   let writer := WriteOwnership.owner ownership index
   let _wroteBefore := SharedWritePhase.writesOwned _writes writer index rfl
   let _afterSync := BlockSync.allAfter _sync writer
@@ -187,8 +179,8 @@ def SharedWritePhase.definedAfter
 /-- A pure staged value used by kernel statements. -/
 inductive Value (α : Type) : Type where
   | literal (value : α) : Value α
-  | load {space : AddressSpace} {length : Nat}
-      (buffer : Buffer space length α) (index : Fin length) : Value α
+  | load {length : Nat}
+      (buffer : Buffer .global length α) (index : Fin length) : Value α
   | binary (operation : α → α → α) (left right : Value α) : Value α
 
 namespace Value
@@ -221,22 +213,19 @@ inductive KernelM {cfg : LaunchConfig} {BlockState State : Type}
   | initializeShared {n : Nat} {α : Type}
       (buffer : SharedBuffer (Thread.block thread) n α)
       (ownership : WriteOwnership cfg n)
-      (writable : WritableAt buffer trace)
+      (writable : SharedWritableAt (Thread.block thread) trace)
       (value : (index : Fin n) → Owns ownership thread index → Value α) :
       KernelM thread trace trace
         (SharedWritePhase buffer ownership trace)
-  /-- Force a staged expression into a register before continuing. -/
-  | materialize (value : Value α) : KernelM thread trace trace (Value α)
-  /-- Mark the point after this thread's reads; uniform execution covers the block. -/
-  | finishSharedReads (buffer : SharedBuffer (Thread.block thread) n α) :
-      KernelM thread trace trace (SharedReadPhase buffer trace)
+  /-- Read one shared cell which is known to be defined at this trace. -/
+  | readShared {n : Nat} {α : Type}
+      (buffer : SharedBuffer (Thread.block thread) n α)
+      (index : Fin n)
+      (defined : DefinedAt buffer index trace) :
+      KernelM thread trace trace (Value α)
   | syncBlock (barrier : BarrierId) :
       KernelM thread trace (trace ++ [barrier])
         (BlockSync (Thread.block thread) trace barrier)
-  /-- A uniform launch-time assumption to be discharged by a backend. -/
-  | require (condition : Prop) [Decidable condition]
-      (body : condition → KernelM thread before after α) :
-      KernelM thread before after α
   /-- A bounded loop whose loop-carried state depends on the current trace. -/
   | foldFinD (n : Nat) (Acc : SyncTrace → Type)
       (initial : Acc trace)

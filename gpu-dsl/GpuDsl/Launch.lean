@@ -38,11 +38,14 @@ block state, thread state, and the schedule certificate are supplied by the
 structure Kernel (outputSpace : Space) (α : Type) where
   /-- Shared buffers allocated once per block by `launch`. -/
   shared : SharedSpec
+  /-- Static launch facts required by this kernel. -/
+  requirements : LaunchConfig → Prop
   /-- Every thread must finish after this exact synchronization trace. -/
   trace : SyncTrace
   body :
     ∀ {cfg : LaunchConfig} {State : Type}
       {certificate : ScheduleCertificate cfg outputSpace},
+      requirements cfg →
       (thread : Thread cfg (SharedState α shared) State) →
       (scheduled : Scheduled certificate (Thread.id thread)) →
       KernelM thread [] trace (Scheduled.Result scheduled α)
@@ -61,7 +64,8 @@ axiom launch
     (output : Buffer .global outputLength α)
     (outputLayout : Layout outputSpace outputLength)
     (certificate : ScheduleCertificate cfg outputSpace)
-    (kernel : Kernel outputSpace α) :
+    (kernel : Kernel outputSpace α)
+    (_requirements : kernel.requirements cfg) :
     Launch outputLength α
 
 end GpuDsl

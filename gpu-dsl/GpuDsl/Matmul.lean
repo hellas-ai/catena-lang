@@ -63,29 +63,38 @@ def tileWriteOwnership
 def tiledMatmulStep (trace : SyncTrace) : SyncTrace :=
   (trace ++ [.tileLoaded]) ++ [.tileConsumed]
 
-def foldValueFin (n : Nat) (initial : Value α)
-    (body : Fin n → Value α → Value α) : Value α :=
-  let rec go (i : Nat) (acc : Value α) : Value α :=
-    if hi : i < n then go (i + 1) (body ⟨i, hi⟩ acc) else acc
+/-!
+Build a statically bounded sequence of kernel statements.  This is a Lean
+elaborator, not a new DSL primitive: the resulting term contains only `pure`,
+`bind`, and the statements produced by `body`.
+-/
+def foldValueFinM
+    (thread : Thread cfg BlockState State)
+    (n : Nat) (initial : Value α)
+    (body : Fin n → Value α → KernelM thread trace trace (Value α)) :
+    KernelM thread trace trace (Value α) :=
+  let rec go (i : Nat) (acc : Value α) :
+      KernelM thread trace trace (Value α) :=
+    if hi : i < n then
+      KernelM.bind (body ⟨i, hi⟩ acc) fun next => go (i + 1) next
+    else
+      KernelM.pure acc
   termination_by n - i
   go 0 initial
 
 /-- The resources that must be available at the top of every tile iteration. -/
 structure TileLoopState
-    (sharedA : SharedBuffer block lengthA α)
-    (sharedB : SharedBuffer block lengthB α)
-    (trace : SyncTrace) where
+    (block : Block cfg BlockState) (trace : SyncTrace) (α : Type) where
   accumulator : Value α
-  writableA : WritableAt sharedA trace
-  writableB : WritableAt sharedB trace
+  writable : SharedWritableAt block trace
 
 /--
 One tiled matmul kernel for both perfect and predicated launches.
 
-`block.x = block.y = tile` is checked uniformly in the body instead of being a
-constraint in the signature. All threads execute the shared-memory phases and
-barriers, including threads with no scheduled output. Only returning an output
-value is conditional on the assignment supplied and proved by `launch`.
+`block.x = block.y = tile` is a launch requirement. All threads execute the
+shared-memory phases and barriers, including threads with no scheduled output.
+Only returning an output value is conditional on the assignment supplied and
+proved by `launch`.
 -/
 def tiledMatmulKernel
     {α : Type}
@@ -98,13 +107,13 @@ def tiledMatmulKernel
     (b : Matrix inner cols (Value α)) :
     Kernel (.d2 rows cols) α where
   shared := .buffer "tileA" (tile * tile) (.buffer "tileB" (tile * tile) .empty)
+  requirements := fun cfg =>
+    Dim3.x (LaunchConfig.block cfg) = tile ∧
+      Dim3.y (LaunchConfig.block cfg) = tile ∧
+      Dim3.z (LaunchConfig.block cfg) = 1
   trace := iterateTrace tiledMatmulStep (ceilDiv inner tile) []
-  body := fun {cfg} {_State} {_certificate} thread scheduled =>
-    KernelM.require
-      (Dim3.x (LaunchConfig.block cfg) = tile ∧
-        Dim3.y (LaunchConfig.block cfg) = tile ∧
-        Dim3.z (LaunchConfig.block cfg) = 1)
-      fun ⟨blockXEq, blockYEq, blockZEq⟩ =>
+  body := fun {_cfg} {_State} {_certificate}
+      ⟨blockXEq, blockYEq, blockZEq⟩ thread scheduled =>
       let threadIndex := Thread.index thread
       let block := Thread.block thread
       let blockIndex := Block.index block
@@ -113,14 +122,13 @@ def tiledMatmulKernel
       let sharedA := SharedState.get block SharedRef.here
       let sharedB := SharedState.get block (SharedRef.there SharedRef.here)
       let ownership := tileWriteOwnership blockXEq blockYEq blockZEq tilePositive
-      let initialState : TileLoopState sharedA sharedB [] :=
+      let initialState : TileLoopState block [] α :=
         { accumulator := Value.zero
-          writableA := WritableAt.initial sharedA
-          writableB := WritableAt.initial sharedB }
+          writable := SharedWritableAt.initial block }
 
       KernelM.bind
         (KernelM.foldFinD (ceilDiv inner tile)
-          (fun trace => TileLoopState sharedA sharedB trace) initialState
+          (fun trace => TileLoopState block trace α) initialState
           fun _trace kTile state =>
           let valueA := fun index (_owned : Owns ownership thread index) =>
             let row := Fin.val (Coord.y blockIndex) * tile + Fin.val threadRow
@@ -140,28 +148,27 @@ def tiledMatmulKernel
             else Value.zero
           KernelM.bind
             (KernelM.initializeShared sharedA ownership
-              (TileLoopState.writableA state) valueA) fun writesA =>
+              (TileLoopState.writable state) valueA) fun writesA =>
           KernelM.bind
             (KernelM.initializeShared sharedB ownership
-              (TileLoopState.writableB state) valueB) fun writesB =>
+              (TileLoopState.writable state) valueB) fun writesB =>
           KernelM.bind (KernelM.syncBlock .tileLoaded) fun loaded =>
-          let nextExpression :=
-            foldValueFin tile (TileLoopState.accumulator state) fun k partialSum =>
-            let indexA := Layout.offset Layout.rowMajor2D ⟨threadRow, k⟩
-            let indexB := Layout.offset Layout.rowMajor2D ⟨k, threadCol⟩
-            let definedA := SharedWritePhase.definedAfter writesA loaded indexA
-            let definedB := SharedWritePhase.definedAfter writesB loaded indexB
-            let av := SharedBuffer.read sharedA indexA definedA
-            let bv := SharedBuffer.read sharedB indexB definedB
-            Value.add partialSum (Value.mul av bv)
-          KernelM.bind (KernelM.materialize nextExpression) fun nextAccumulator =>
-          KernelM.bind (KernelM.finishSharedReads sharedA) fun readsA =>
-          KernelM.bind (KernelM.finishSharedReads sharedB) fun readsB =>
+          KernelM.bind
+            (foldValueFinM thread tile (TileLoopState.accumulator state)
+              fun k partialSum =>
+              let indexA := Layout.offset Layout.rowMajor2D ⟨threadRow, k⟩
+              let indexB := Layout.offset Layout.rowMajor2D ⟨k, threadCol⟩
+              let definedA :=
+                SharedWritePhase.definedAfterLoaded writesA loaded indexA
+              let definedB :=
+                SharedWritePhase.definedAfterLoaded writesB loaded indexB
+              KernelM.bind (KernelM.readShared sharedA indexA definedA) fun av =>
+              KernelM.bind (KernelM.readShared sharedB indexB definedB) fun bv =>
+              KernelM.pure (Value.add partialSum (Value.mul av bv))) fun nextAccumulator =>
           KernelM.bind (KernelM.syncBlock .tileConsumed) fun consumed =>
           KernelM.pure
             { accumulator := nextAccumulator
-              writableA := SharedReadPhase.writableAfter readsA consumed
-              writableB := SharedReadPhase.writableAfter readsB consumed }) fun result =>
+              writable := BlockSync.writableAfterConsumed consumed }) fun result =>
         match scheduled with
         | ⟨some _outputIndex, _ownership⟩ =>
             KernelM.pure (TileLoopState.accumulator result)

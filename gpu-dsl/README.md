@@ -16,6 +16,8 @@ can interpret or compile `KernelM` while keeping its typed interface.
   allocated states, and proof-indexed lookup.
 - `GpuDsl/Matmul.lean` contains one reusable tiled matmul kernel plus perfect
   and predicated launch configurations.
+- `GpuDsl/Correctness.lean` gives the direct ownership lemmas and structural
+  totality/determinism argument used by the typed DSL.
 
 Concrete launch examples live only in `Main.lean`, keeping launch policy and
 example dimensions out of the DSL library.
@@ -44,9 +46,10 @@ let columnMajor := Tensor.reshape linear Layout.columnMajor2D
 ```
 
 `Tensor.map`, `Tensor.zipWith`, `Tensor.reindex`, and `Matrix.transpose`
-compose closures lazily. A buffer view has element type `Value a`, representing
-a staged load expression; it still carries no launch configuration. Stores
-remain explicit kernel statements on a physical `Buffer`.
+compose closures lazily. A global-buffer view has element type `Value a`,
+representing a staged global load expression; it still carries no launch
+configuration. Shared-memory reads and stores remain explicit kernel
+statements.
 
 `tiledMatmulKernel` is generic over its scalar type. It requires only zero,
 addition, and multiplication; `Float` is chosen by the launch examples rather
@@ -78,8 +81,9 @@ The core design makes several future proof obligations natural:
 - `Scheduled` gives one kernel invocation an optional work item and proves
   ownership. The launch implementation may supply repeated work items when a
   thread owns multiple cells, or `none` when it owns none.
-- `KernelM.require` records the uniform `block = tile × tile × 1` assumption in
-  the DSL body rather than constraining the reusable kernel's signature.
+- `Kernel.requirements` records uniform launch facts such as
+  `block = tile × tile × 1`; `launch` accepts their proof before any thread
+  executes.
 - `Kernel.shared` declares block-scoped allocations. `launch` creates the
   matching `SharedState`, and kernels retrieve buffers through total
   `SharedState.get` calls carrying `SharedRef` membership proofs.
@@ -88,25 +92,27 @@ The core design makes several future proof obligations natural:
   at the barrier's exact pre-trace, and this synchronization proves that every
   shared cell is defined afterward. It also appends the named barrier to the
   trace, and `Kernel.body` requires one final trace for every thread.
-- `SharedBuffer.read` requires a `DefinedAt` proof for the exact shared-memory
-  index and synchronization trace being read.
-- `TileLoopState trace` carries `WritableAt` proofs at the top of each tile
-  iteration. Fresh undefined shared memory supplies the initial proofs.
-- Reads are materialized before `finishSharedReads`; the `.tileConsumed`
-  barrier turns the completed read phases into `WritableAt` proofs for the next
-  trace. Consequently, the next iteration cannot overwrite either tile without
-  the second barrier.
+- `KernelM.readShared` requires a `DefinedAt` proof for the exact shared-memory
+  index and synchronization trace being read. Shared reads cannot be hidden
+  inside a pure `Value`.
+- `TileLoopState trace` carries one block-level `SharedWritableAt` capability at
+  the top of each tile iteration. Fresh shared memory supplies the initial
+  capability, and both tile buffers share it.
+- The `readShared` commands are sequenced before `.tileConsumed`. That barrier
+  proves every block thread completed its preceding reads and restores the
+  block-level writable capability. Consequently, the next iteration cannot
+  start its write phase without the second barrier.
 - `KernelM.foldFinD` supports this invariant by allowing its loop-carried state
   type to depend on the synchronization trace.
 
 The launch surface is intentionally close to CUDA/HIP:
 
 ```lean
-launch config outputBuffer outputLayout certificate
-  (tiledMatmulKernel tile tilePositive a b)
+let kernel := tiledMatmulKernel tile tilePositive a b
+launch config outputBuffer outputLayout certificate kernel requirementsProof
 ```
 
 `launch` is an axiom here: this project specifies its dependent interface but
 does not provide an implementation. A backend creates block/thread state,
 constructs thread references and scheduled work items, stores returned values
-through the output layout, and discharges uniform `KernelM.require` conditions.
+through the output layout, and uses the supplied `Kernel.requirements` proof.

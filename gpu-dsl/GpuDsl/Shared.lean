@@ -40,11 +40,4 @@ def SharedState.get (block : Block cfg (SharedState α spec))
     (reference : SharedRef length spec) : SharedBuffer block length α :=
   ⟨SharedState.lookup (Block.state block) reference⟩
 
-/-- Read one shared cell with evidence that this exact index is defined now. -/
-def SharedBuffer.read
-    (buffer : SharedBuffer block length α)
-    (index : Fin length)
-    (_defined : DefinedAt (length := length) buffer index trace) : Value α :=
-  Value.load (SharedBuffer.buffer buffer) index
-
 end GpuDsl

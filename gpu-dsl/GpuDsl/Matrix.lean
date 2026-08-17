@@ -142,23 +142,23 @@ namespace Buffer
 def named (name : String) : Buffer space length α := ⟨name⟩
 
 /-- Construct a staged read from a statically bounded linear buffer. -/
-def read (buffer : Buffer space length α) (index : Fin length) : Value α :=
+def read (buffer : Buffer .global length α) (index : Fin length) : Value α :=
   Value.load buffer index
 
 /-- A buffer becomes a closure of staged values; no data is copied. -/
-def asVector (buffer : Buffer space length α) : Vector length (Value α) :=
+def asVector (buffer : Buffer .global length α) : Vector length (Value α) :=
   fun index => read buffer index
 
 /-- View a linear buffer through an arbitrary logical layout. -/
-def asTensor (buffer : Buffer memorySpace length α) (layout : Layout space length) :
+def asTensor (buffer : Buffer .global length α) (layout : Layout space length) :
     Tensor space (Value α) :=
   Tensor.reshape (asVector buffer) layout
 
-def asRowMajorMatrix (buffer : Buffer memorySpace (rows * cols) α) :
+def asRowMajorMatrix (buffer : Buffer .global (rows * cols) α) :
     Matrix rows cols (Value α) :=
   asTensor buffer Layout.rowMajor2D
 
-def asColumnMajorMatrix (buffer : Buffer memorySpace (rows * cols) α) :
+def asColumnMajorMatrix (buffer : Buffer .global (rows * cols) α) :
     Matrix rows cols (Value α) :=
   asTensor buffer Layout.columnMajor2D
 

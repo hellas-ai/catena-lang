@@ -166,3 +166,62 @@
     }
     buf.to-mem
 ))
+
+# Read one bf16 element and pair it with its runtime position.
+(def program tensor.argmax-bf16-pair-at :
+  ([n.] {
+    ({cap.ref [.n] bf16} buf val)
+    ([.n] ix val)
+  })
+  ->
+  ([n.] ({(u64 val) (bf16 val)} *))
+= ([input i.]
+  ({[.i input]} ix [x-i.])
+  ([.i] ix.to-u64 [pos.])
+  ({[.pos] [.x-i]} *.intro [pair.])
+  [.pair]
+))
+
+# Choose the better of two (position, value) pairs, keeping the first on ties.
+(def program tensor.argmax-bf16-env :
+  {1 ({({(u64 val) (bf16 val)} *) ({(u64 val) (bf16 val)} *)} *)}
+  ->
+  ({(u64 val) (bf16 val)} *)
+= ([env pair.]
+  ([.pair] *.elim [acc value.])
+  ([.acc] *.elim [acc-pos acc-max.])
+  ([.value] *.elim [value-pos value-max.])
+  {
+    ([.acc-max value-max] bf16.gte [keep-acc.])
+    ([.keep-acc acc-pos value-pos] u64.select [result-pos.])
+    ([.keep-acc acc-max value-max] bf16.select [result-max.])
+    ({[.result-pos] [.result-max]} *.intro [result.])
+    [.result]
+  }
+))
+
+# Argmax over a bf16 buffer. Caller must provide a non-empty input.
+(def program tensor.argmax-bf16 :
+  (cap.ref mem)
+  ->
+  (u64 val)
+= (
+  mem.cast.bf16
+  [len input.]
+    {
+      ([.len] u64.assert-nz [nz-proof.])
+      ([.nz-proof] ix.zero [first-i.])
+      ({[.first-i input]} ix [first-x.])
+      ([.first-i] ix.to-u64 [first-pos.])
+      ({[.first-pos] [.first-x]} *.intro [init.])
+      ({
+        [.init]
+        unit.intro
+        name.tensor.argmax-bf16-env
+        ({[.input] (([.len] :.param) name.tensor.argmax-bf16-pair-at)})
+        [.len]
+      } reducec [result-pair.])
+      ([.result-pair] *.elim [result-pos _result-max.])
+      [.result-pos]
+    }
+))

@@ -586,7 +586,7 @@ fn render_bf16_fma(out: &mut String, assignment: &GpuAssign) -> Result<(), GpuRe
         return Err(invalid_outputs(assignment, 1));
     };
     out.push_str(&format!(
-        "    {} = catena_bf16_from_f32(fmaf(catena_bf16_to_f32({}), catena_bf16_to_f32({}), catena_bf16_to_f32({})));\n",
+        "    {} = catena_bf16_fma({}, {}, {});\n",
         output.name,
         value_expr(multiplicand),
         value_expr(multiplier),

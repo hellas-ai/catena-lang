@@ -408,6 +408,29 @@ fn concat_bf16_test() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[test]
+fn argmax_bf16_test() -> anyhow::Result<()> {
+    let runtime = runtime_with("")?;
+
+    for (input_values, expected) in [
+        (bf16_values(&[5.0]), 0_u64),
+        (bf16_values(&[1.0, 2.0, 4.0]), 2),
+        (bf16_values(&[4.0, 2.0, 1.0]), 0),
+        (bf16_values(&[1.0, 7.0, 3.0, 2.0]), 1),
+        (bf16_values(&[1.0, 7.0, 7.0, 2.0]), 1),
+        (bf16_values(&[3.0, 3.0, 3.0]), 0),
+    ] {
+        let input = runtime.mem_u16(&bf16_bits(&input_values))?;
+        let [result] = runtime.exec("tensor.argmax-bf16", [input.as_ref().into()])?;
+        let Value::U64(result) = result else {
+            anyhow::bail!("tensor.argmax-bf16 returned non-u64 value: {result:?}");
+        };
+        assert_eq!(result, expected, "tensor.argmax-bf16({input_values:?})");
+    }
+
+    Ok(())
+}
+
 const SUM_BF16_ENTRYPOINT: &str = r#"
 (def program sum-bf16-as-u16 : (cap.ref mem) -> (u16 val) =
   (mem.cast.bf16 [len input.]

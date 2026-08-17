@@ -74,6 +74,8 @@ pub(crate) fn compile(cpp_path: &Path, dialect: GpuDialect) -> Result<Artifact, 
                 .arg("-Xcompiler")
                 .arg("-fPIC")
                 .arg("--std=c++17")
+                // Default to SM_80 (Ampere and later)
+                .arg("-arch=sm_80")
                 // Match the no-FMA intent for generated arithmetic.
                 .arg("--fmad=false");
         }

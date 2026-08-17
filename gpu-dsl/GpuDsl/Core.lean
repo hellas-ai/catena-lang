@@ -237,10 +237,6 @@ inductive KernelM {cfg : LaunchConfig} {BlockState State : Type}
   | require (condition : Prop) [Decidable condition]
       (body : condition → KernelM thread before after α) :
       KernelM thread before after α
-  /-- A statically bounded loop whose every iteration has the same trace transition. -/
-  | foldFin (n : Nat) (initial : α)
-      (body : ∀ trace, Fin n → α → KernelM thread trace (step trace) α) :
-      KernelM thread trace (iterateTrace step n trace) α
   /-- A bounded loop whose loop-carried state depends on the current trace. -/
   | foldFinD (n : Nat) (Acc : SyncTrace → Type)
       (initial : Acc trace)

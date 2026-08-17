@@ -90,7 +90,7 @@ def tiledMatmulKernel
       Dim3.z (LaunchConfig.block cfg) = 1
   trace := iterateTrace tiledMatmulStep (ceilDiv inner tile) []
   body := fun {_cfg} {_State} {_certificate}
-      ⟨blockXEq, blockYEq, _blockZEq⟩ thread _work =>
+      ⟨blockXEq, blockYEq, _blockZEq⟩ _launchFacts thread _work =>
       let threadIndex := Thread.index thread
       let block := Thread.block thread
       let blockIndex := Block.index block

@@ -94,6 +94,10 @@ The core design makes several future proof obligations natural:
   list, so all thread invocations describe the same barrier sequence. Because
   `launch` invokes the body exactly once per physical thread, barrier safety is
   enforced by the kernel type itself.
+- `LaunchFacts` exposes those launch guarantees to kernel proofs: every
+  physical thread is invoked exactly once and completes the kernel's exact
+  common synchronization trace. These facts are supplied by `launch` and must
+  hold for any fair GPU implementation; the matmul body does not use them yet.
 - The trace partitions kernel commands into generic phases. A future analyzer
   will collect each thread's reads and writes per phase, then prove that every
   read is defined and that conflicting accesses cannot occur.

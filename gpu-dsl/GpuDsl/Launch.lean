@@ -29,6 +29,21 @@ def OwnedOutputs.Result
   ∀ index, List.Mem index (OwnedOutputs.items work) → Value α
 
 /--
+Facts supplied by the implementation of `launch` to the kernel proof context.
+
+They express the fairness guarantees expected of any correct GPU
+implementation: every physical thread is invoked exactly once, and every
+invocation executes the kernel's exact common synchronization trace.  The
+functions record the implementation's observations; the two proofs state the
+contract that those observations must satisfy.
+-/
+structure LaunchFacts (cfg : LaunchConfig) (trace : SyncTrace) where
+  invocationCount : ThreadId cfg → Nat
+  completedTrace : ThreadId cfg → SyncTrace
+  everyThreadRunsExactlyOnce : ∀ threadId, invocationCount threadId = 1
+  everyThreadHasExactTrace : ∀ threadId, completedTrace threadId = trace
+
+/--
 A generic kernel depends only on its logical output space. Launch geometry,
 block state, thread state, and the schedule certificate are supplied by the
 `launch` implementation through the thread and its complete owned-output list.
@@ -44,6 +59,7 @@ structure Kernel (outputSpace : Space) (α : Type) where
     ∀ {cfg : LaunchConfig} {State : Type}
       {certificate : ScheduleCertificate cfg outputSpace},
       requirements cfg →
+      LaunchFacts cfg trace →
       (thread : Thread cfg (SharedState α shared) State) →
       (work : OwnedOutputs certificate (Thread.id thread)) →
       KernelM thread [] trace (OwnedOutputs.Result work α)
@@ -56,8 +72,8 @@ structure Launch (outputLength : Nat) (α : Type) where
 CUDA/HIP-shaped primitive. Its implementation creates block/thread state,
 allocates `Kernel.shared` once per block, constructs each thread's complete
 `OwnedOutputs`, and invokes `Kernel.body` exactly once per physical thread. It
-stores every returned work-item result through `outputLayout`. No implementation
-is given here.
+supplies the corresponding `LaunchFacts` to the body and stores every returned
+work-item result through `outputLayout`. No implementation is given here.
 -/
 axiom launch
     (cfg : LaunchConfig)

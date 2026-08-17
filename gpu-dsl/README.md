@@ -74,9 +74,9 @@ The core design makes several future proof obligations natural:
   exact synchronization-trace transition.
 - A `ScheduleCertificate` assigns every logical output index to exactly one
   `ThreadId`. A thread may own zero, one, or many output cells.
-- `Scheduled` gives one kernel invocation an optional work item and proves
-  ownership. The launch implementation may supply repeated work items when a
-  thread owns multiple cells, or `none` when it owns none.
+- `OwnedOutputs` gives each physical thread the complete, duplicate-free list
+  of logical outputs assigned to it. `launch` invokes the body exactly once per
+  thread, and the body returns one value for every item in that list.
 - `Kernel.requirements` records uniform launch facts such as
   `block = tile × tile × 1`; `launch` accepts their proof before any thread
   executes.
@@ -90,8 +90,8 @@ The core design makes several future proof obligations natural:
   commands with statically bounded indices. They expose the accesses needed by
   a future block/grid race analysis.
 - `KernelM.syncBlock` appends a named barrier to the synchronization trace.
-  `Kernel.body` requires one final trace for every thread and scheduled work
-  item, so all invocations describe the same barrier sequence.
+  `Kernel.body` requires one final trace for every thread and owned-output
+  list, so all thread invocations describe the same barrier sequence.
 - The trace partitions kernel commands into generic phases. A future analyzer
   will collect each thread's reads and writes per phase, then prove that every
   read is defined and that conflicting accesses cannot occur.
@@ -107,5 +107,6 @@ launch config outputBuffer outputLayout certificate kernel requirementsProof
 
 `launch` is an axiom here: this project specifies its dependent interface but
 does not provide an implementation. A backend creates block/thread state,
-constructs thread references and scheduled work items, stores returned values
-through the output layout, and uses the supplied `Kernel.requirements` proof.
+constructs thread references and complete owned-output lists, stores returned
+values through the output layout, and uses the supplied `Kernel.requirements`
+proof.

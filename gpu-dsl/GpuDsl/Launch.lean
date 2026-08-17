@@ -12,28 +12,26 @@ structure ScheduleCertificate (cfg : LaunchConfig) (outputSpace : Space) where
   owner : Index outputSpace → ThreadId cfg
 
 /--
-One invocation assigned by `launch` to a thread. `none` certifies that this
-thread owns no output; `some index` proves ownership of that work item. A
-backend may invoke the kernel repeatedly for a thread that owns several cells.
+The complete, duplicate-free list of logical outputs owned by one physical
+thread. `launch` constructs one such value for every thread.
 -/
-structure Scheduled
+structure OwnedOutputs
     (certificate : ScheduleCertificate cfg outputSpace)
     (threadId : ThreadId cfg) where
-  output : Option (Index outputSpace)
-  valid : match output with
-    | some index => ScheduleCertificate.owner certificate index = threadId
-    | none => ∀ index, ScheduleCertificate.owner certificate index ≠ threadId
+  items : List (Index outputSpace)
+  nodup : List.Nodup items
+  complete : ∀ index,
+    List.Mem index items ↔ ScheduleCertificate.owner certificate index = threadId
 
-/-- The result required from a kernel for one scheduled invocation. -/
-def Scheduled.Result (scheduled : Scheduled certificate threadId) (α : Type) : Type :=
-  match Scheduled.output scheduled with
-  | some _ => Value α
-  | none => Unit
+/-- One result for every logical output in a thread's complete work list. -/
+def OwnedOutputs.Result
+    (work : OwnedOutputs certificate threadId) (α : Type) : Type :=
+  ∀ index, List.Mem index (OwnedOutputs.items work) → Value α
 
 /--
 A generic kernel depends only on its logical output space. Launch geometry,
 block state, thread state, and the schedule certificate are supplied by the
-`launch` implementation through the thread and scheduled work item.
+`launch` implementation through the thread and its complete owned-output list.
 -/
 structure Kernel (outputSpace : Space) (α : Type) where
   /-- Shared buffers allocated once per block by `launch`. -/
@@ -47,8 +45,8 @@ structure Kernel (outputSpace : Space) (α : Type) where
       {certificate : ScheduleCertificate cfg outputSpace},
       requirements cfg →
       (thread : Thread cfg (SharedState α shared) State) →
-      (scheduled : Scheduled certificate (Thread.id thread)) →
-      KernelM thread [] trace (Scheduled.Result scheduled α)
+      (work : OwnedOutputs certificate (Thread.id thread)) →
+      KernelM thread [] trace (OwnedOutputs.Result work α)
 
 /-- An opaque launch token. Execution belongs to the eventual backend. -/
 structure Launch (outputLength : Nat) (α : Type) where
@@ -56,8 +54,10 @@ structure Launch (outputLength : Nat) (α : Type) where
 
 /--
 CUDA/HIP-shaped primitive. Its implementation creates block/thread state,
-allocates `Kernel.shared` once per block, enumerates work items from the
-certificate, and invokes `Kernel.body`. No implementation is given here.
+allocates `Kernel.shared` once per block, constructs each thread's complete
+`OwnedOutputs`, and invokes `Kernel.body` exactly once per physical thread. It
+stores every returned work-item result through `outputLayout`. No implementation
+is given here.
 -/
 axiom launch
     (cfg : LaunchConfig)

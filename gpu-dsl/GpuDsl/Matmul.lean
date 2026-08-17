@@ -69,9 +69,9 @@ def foldValueFinM
 One tiled matmul kernel for both perfect and predicated launches.
 
 `block.x = block.y = tile` is a launch requirement. All threads execute the
-shared-memory phases and barriers, including threads with no scheduled output.
-Only returning an output value is conditional on the assignment supplied and
-proved by `launch`.
+shared-memory phases and barriers, including threads with no owned outputs.
+The returned function supplies the accumulator for every output owned by the
+current thread; edge threads may own no outputs.
 -/
 def tiledMatmulKernel
     {α : Type}
@@ -90,7 +90,7 @@ def tiledMatmulKernel
       Dim3.z (LaunchConfig.block cfg) = 1
   trace := iterateTrace tiledMatmulStep (ceilDiv inner tile) []
   body := fun {_cfg} {_State} {_certificate}
-      ⟨blockXEq, blockYEq, _blockZEq⟩ thread scheduled =>
+      ⟨blockXEq, blockYEq, _blockZEq⟩ thread _work =>
       let threadIndex := Thread.index thread
       let block := Thread.block thread
       let blockIndex := Block.index block
@@ -136,9 +136,6 @@ def tiledMatmulKernel
               KernelM.pure (Value.add partialSum (Value.mul av bv))) fun nextAccumulator =>
           KernelM.bind (KernelM.syncBlock .tileConsumed) fun _ =>
           KernelM.pure nextAccumulator) fun result =>
-        match scheduled with
-        | ⟨some _outputIndex, _ownership⟩ =>
-            KernelM.pure result
-        | ⟨none, _unassigned⟩ => KernelM.pure ()
+        KernelM.pure (fun _index _member => result)
 
 end GpuDsl

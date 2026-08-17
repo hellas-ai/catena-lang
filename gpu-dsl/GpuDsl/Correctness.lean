@@ -53,40 +53,89 @@ unique ownership and a writable-phase capability, and loops carry a finite
 bound. Composition is the only recursive reasoning.
 -/
 
-inductive KernelM.StructurallySafe
+inductive KernelM.StructurallyTotal
     {cfg : LaunchConfig} {BlockState State : Type}
     {thread : Thread cfg BlockState State} :
     {before after : SyncTrace} → {α : Type} →
     KernelM thread before after α → Prop where
-  | pure : KernelM.StructurallySafe (.pure value)
+  | pure : KernelM.StructurallyTotal (.pure value)
   | bind
-      (firstSafe : KernelM.StructurallySafe first)
-      (nextSafe : ∀ value, KernelM.StructurallySafe (next value)) :
-      KernelM.StructurallySafe (.bind first next)
+      (firstTotal : KernelM.StructurallyTotal first)
+      (nextTotal : ∀ value, KernelM.StructurallyTotal (next value)) :
+      KernelM.StructurallyTotal (.bind first next)
   | initializeShared :
-      KernelM.StructurallySafe
+      KernelM.StructurallyTotal
         (.initializeShared buffer ownership writable value)
   | readShared :
-      KernelM.StructurallySafe (.readShared buffer index defined)
-  | syncBlock : KernelM.StructurallySafe (.syncBlock barrier)
+      KernelM.StructurallyTotal (.readShared buffer index defined)
+  | syncBlock : KernelM.StructurallyTotal (.syncBlock barrier)
   | foldFinD
       (n : Nat) (step : SyncTrace → SyncTrace)
       (Acc : SyncTrace → Type) {trace : SyncTrace}
       (initial : Acc trace)
       (body : ∀ currentTrace, Fin n → Acc currentTrace →
         KernelM thread currentTrace (step currentTrace) (Acc (step currentTrace)))
-      (bodySafe : ∀ currentTrace index accumulator,
-        KernelM.StructurallySafe (body currentTrace index accumulator)) :
-      KernelM.StructurallySafe
+      (bodyTotal : ∀ currentTrace index accumulator,
+        KernelM.StructurallyTotal (body currentTrace index accumulator)) :
+      KernelM.StructurallyTotal
         (.foldFinD (step := step) n Acc initial body)
 
-abbrev KernelM.StructurallyTotal
-    (kernel : KernelM thread before after α) : Prop :=
-  KernelM.StructurallySafe kernel
+inductive KernelM.StructurallyDeterministic
+    {cfg : LaunchConfig} {BlockState State : Type}
+    {thread : Thread cfg BlockState State} :
+    {before after : SyncTrace} → {α : Type} →
+    KernelM thread before after α → Prop where
+  | pure : KernelM.StructurallyDeterministic (.pure value)
+  | bind
+      (firstDeterministic : KernelM.StructurallyDeterministic first)
+      (nextDeterministic :
+        ∀ value, KernelM.StructurallyDeterministic (next value)) :
+      KernelM.StructurallyDeterministic (.bind first next)
+  | initializeShared :
+      KernelM.StructurallyDeterministic
+        (.initializeShared buffer ownership writable value)
+  | readShared :
+      KernelM.StructurallyDeterministic (.readShared buffer index defined)
+  | syncBlock : KernelM.StructurallyDeterministic (.syncBlock barrier)
+  | foldFinD
+      (n : Nat) (step : SyncTrace → SyncTrace)
+      (Acc : SyncTrace → Type) {trace : SyncTrace}
+      (initial : Acc trace)
+      (body : ∀ currentTrace, Fin n → Acc currentTrace →
+        KernelM thread currentTrace (step currentTrace) (Acc (step currentTrace)))
+      (bodyDeterministic : ∀ currentTrace index accumulator,
+        KernelM.StructurallyDeterministic
+          (body currentTrace index accumulator)) :
+      KernelM.StructurallyDeterministic
+        (.foldFinD (step := step) n Acc initial body)
 
-abbrev KernelM.StructurallyDeterministic
-    (kernel : KernelM thread before after α) : Prop :=
-  KernelM.StructurallySafe kernel
+/-- Totality follows independently by induction on the kernel syntax. -/
+theorem KernelM.proveStructurallyTotal
+    (kernel : KernelM thread before after α) :
+    KernelM.StructurallyTotal kernel := by
+  induction kernel with
+  | pure => exact .pure
+  | bind first next firstTotal nextTotal =>
+      exact .bind firstTotal nextTotal
+  | initializeShared => exact .initializeShared
+  | readShared => exact .readShared
+  | syncBlock => exact .syncBlock
+  | foldFinD n Acc initial body bodyTotal =>
+      exact .foldFinD n _ Acc initial body bodyTotal
+
+/-- Determinism follows independently by induction on the kernel syntax. -/
+theorem KernelM.proveStructurallyDeterministic
+    (kernel : KernelM thread before after α) :
+    KernelM.StructurallyDeterministic kernel := by
+  induction kernel with
+  | pure => exact .pure
+  | bind first next firstDeterministic nextDeterministic =>
+      exact .bind firstDeterministic nextDeterministic
+  | initializeShared => exact .initializeShared
+  | readShared => exact .readShared
+  | syncBlock => exact .syncBlock
+  | foldFinD n Acc initial body bodyDeterministic =>
+      exact .foldFinD n _ Acc initial body bodyDeterministic
 
 /--
 Every well-typed kernel term is structurally total and deterministic under the
@@ -95,23 +144,9 @@ fixed primitive assumptions above. The proof is induction on `KernelM`.
 theorem KernelM.total_and_deterministic
     (kernel : KernelM thread before after α) :
     KernelM.StructurallyTotal kernel ∧
-      KernelM.StructurallyDeterministic kernel := by
-  /-
-  Each atomic case follows from its typed evidence. `bind` applies both
-  induction hypotheses, and `foldFinD` applies the body hypothesis for each
-  member of its finite `Fin n` domain.
-  -/
-  have safe : KernelM.StructurallySafe kernel := by
-    induction kernel with
-    | pure => exact .pure
-    | bind first next firstSafe nextSafe =>
-        exact .bind firstSafe nextSafe
-    | initializeShared => exact .initializeShared
-    | readShared => exact .readShared
-    | syncBlock => exact .syncBlock
-    | foldFinD n Acc initial body bodySafe =>
-        exact .foldFinD n _ Acc initial body bodySafe
-  exact ⟨safe, safe⟩
+      KernelM.StructurallyDeterministic kernel :=
+  ⟨KernelM.proveStructurallyTotal kernel,
+    KernelM.proveStructurallyDeterministic kernel⟩
 
 /-!
 The remaining launch-level argument is intentionally separate and small:

@@ -16,8 +16,8 @@ can interpret or compile `KernelM` while keeping its typed interface.
   allocated states, and proof-indexed lookup.
 - `GpuDsl/Matmul.lean` contains one reusable tiled matmul kernel plus perfect
   and predicated launch configurations.
-- `GpuDsl/Correctness.lean` gives the direct ownership lemmas and structural
-  totality/determinism argument used by the typed DSL.
+- `PRIMITIVES.md` extracts a language-independent, global-memory-only
+  `Kernel`/`launch` specification sufficient for untiled matrix multiplication.
 
 Concrete launch examples live only in `Main.lean`, keeping launch policy and
 example dimensions out of the DSL library.
@@ -68,10 +68,6 @@ The core design makes several future proof obligations natural:
 - `Tensor space a` represents data as a composable pure closure, independently
   of launch configuration and physical layout.
 - Buffer reads accept only `Fin n`, so out-of-bounds access cannot be expressed.
-- `WriteOwnership` maps every shared index to exactly one physical block
-  thread. One thread may own any number of indices.
-- `KernelM.initializeShared` records a `SharedWritePhase`: each physical thread
-  writes the cells assigned to it immediately before the matching barrier.
 - `Thread config blockState state` is a reference supplied by `launch`; its
   dependent type carries the current block and launch-created state types.
 - `KernelM thread before after a` ties statements to a thread and records their
@@ -87,23 +83,17 @@ The core design makes several future proof obligations natural:
 - `Kernel.shared` declares block-scoped allocations. `launch` creates the
   matching `SharedState`, and kernels retrieve buffers through total
   `SharedState.get` calls carrying `SharedRef` membership proofs.
-- `KernelM.syncBlock` is independent of shared memory and proves that every
-  physical thread crossed the barrier. Combining total ownership, a write phase
-  at the barrier's exact pre-trace, and this synchronization proves that every
-  shared cell is defined afterward. It also appends the named barrier to the
-  trace, and `Kernel.body` requires one final trace for every thread.
-- `KernelM.readShared` requires a `DefinedAt` proof for the exact shared-memory
-  index and synchronization trace being read. Shared reads cannot be hidden
-  inside a pure `Value`.
-- `TileLoopState trace` carries one block-level `SharedWritableAt` capability at
-  the top of each tile iteration. Fresh shared memory supplies the initial
-  capability, and both tile buffers share it.
-- The `readShared` commands are sequenced before `.tileConsumed`. That barrier
-  proves every block thread completed its preceding reads and restores the
-  block-level writable capability. Consequently, the next iteration cannot
-  start its write phase without the second barrier.
-- `KernelM.foldFinD` supports this invariant by allowing its loop-carried state
-  type to depend on the synchronization trace.
+- `KernelM.writeShared` and `KernelM.readShared` are ordinary single-thread
+  commands with statically bounded indices. They expose the accesses needed by
+  a future block/grid race analysis.
+- `KernelM.syncBlock` appends a named barrier to the synchronization trace.
+  `Kernel.body` requires one final trace for every thread and scheduled work
+  item, so all invocations describe the same barrier sequence.
+- The trace partitions kernel commands into generic phases. A future analyzer
+  will collect each thread's reads and writes per phase, then prove that every
+  read is defined and that conflicting accesses cannot occur.
+- `KernelM.foldFinD` represents a statically bounded loop while tracking its
+  exact synchronization-trace transition.
 
 The launch surface is intentionally close to CUDA/HIP:
 

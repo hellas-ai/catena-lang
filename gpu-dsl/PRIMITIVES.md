@@ -2,7 +2,8 @@
 
 This is a small, language-independent interface for global-memory GPU kernels. The notation follows Catena: `●` is a product, `->` is a function, `=>` is a closure, `|-` is for proofs, and `val(t)` is a runtime value.
 
-Shared memory, barriers, and tiling are deliberately left out.
+Shared memory and barriers are deliberately left out. Tiling is described only
+as a launch and scheduling policy.
 
 ## Supporting types
 
@@ -84,6 +85,61 @@ owner(i) = thread {
 ```
 
 With this schedule, an active thread owns one logical index. Threads introduced by rounding the grid size up own no indices and receive an empty vector.
+
+## Perfect and predicated tiling
+
+For a two-dimensional output `d2(rows, cols)`, let `tile-rows` and
+`tile-cols` be positive. CUDA's X axis follows columns and its Y axis follows
+rows:
+
+```text
+block = (tile-cols, tile-rows, 1)
+```
+
+Perfect tiling applies when the tile dimensions divide the output dimensions:
+
+```text
+perfect-config(rows, cols, tile-rows, tile-cols) = {
+  grid  = (cols / tile-cols, rows / tile-rows, 1),
+  block = (tile-cols, tile-rows, 1)
+}
+```
+
+The physical grid then covers the logical output exactly. Every physical
+thread owns one output.
+
+Predicated tiling rounds the grid up instead:
+
+```text
+predicated-config(rows, cols, tile-rows, tile-cols) = {
+  grid = (
+    max(1, ceil-div(cols, tile-cols)),
+    max(1, ceil-div(rows, tile-rows)),
+    1
+  ),
+  block = (tile-cols, tile-rows, 1)
+}
+```
+
+Both configurations use the same schedule. For a logical output `(row, col)`:
+
+```text
+owner(row, col) = thread {
+  block-index  = (col / tile-cols, row / tile-rows, 0),
+  thread-index = (col % tile-cols, row % tile-rows, 0)
+}
+```
+
+In a predicated launch, threads in a partial edge tile whose physical
+coordinates are outside `(rows, cols)` own no logical outputs and receive an empty vector. They still run the kernel. This matters for a future
+shared-memory kernel: even a thread with no output must participate in every block-wide load and barrier, using guarded loads and padding out-of-bounds values when necessary.
+
+Physical coordinates are ordinary integers, not safe buffer indices. After a bounds check, the kernel refines an in-bounds coordinate to `ix size` before reading a buffer. If the check fails, no index is constructed and the predicated load returns a padding value such as zero.
+
+The construction applies independently along each axis, so it extends to 1D, 3D, and rectangular tiles. For tiled matrix multiplication, the inner
+dimension uses the same choice: exact division for perfect tiling, or
+`ceil-div(inner, tile-inner)` iterations with out-of-bounds input loads
+replaced by zero for predicated tiling.
 
 ## Kernel
 

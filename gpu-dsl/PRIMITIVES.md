@@ -1,157 +1,163 @@
-# Language-independent GPU launch specification
+# GPU kernel primitives
 
-This note extracts the launch model from `GpuDsl` without depending on Lean,
-Catena, CUDA, HIP, or another implementation language. It specifies only the
-types and contracts needed to launch a simple matrix-multiplication kernel.
+This is a small, language-independent interface for global-memory GPU kernels. The notation follows Catena: `●` is a product, `->` is a function, `=>` is a closure, `|-` is for proofs, and `val(t)` is a runtime value.
 
-Shared memory, barriers, synchronization traces, and tiling are intentionally
-out of scope. Values, global-buffer reads, arithmetic, and layouts are assumed
-to be supplied by the surrounding language.
+Shared memory, barriers, and tiling are deliberately left out.
 
-The signatures use `⊗` for product and `⊸` for a linear map, following the
-notation used by the exploratory Catena feature notes.
+## Supporting types
 
-## Launch geometry
+Here, I use shapes to represent index spaces. We might want them or not. Here, they are just usuful to help understand what values are intended to be.
+
+Finite logical spaces and their indices are:
 
 ```text
-Dim3 := {
-  x : U64,
-  y : U64,
-  z : U64
+space ::= d1(n) | d2(rows, cols) | d3(depth, rows, cols)
+
+ix(d1(n))                 = ix n
+ix(d2(rows, cols))        = ix rows ● ix cols
+ix(d3(depth, rows, cols)) = ix depth ● ix rows ● ix cols
+```
+
+An `ix n` is an integer in `[0, n)`, so indexing is safe by construction.
+`vec n t` is a vector containing exactly `n` values of type `t`.
+
+Launch geometry is CUDA/HIP-shaped:
+
+```text
+dim3 := { x : u64, y : u64, z : u64 }
+
+launch-config := {
+  grid  : dim3,
+  block : dim3
 }
 
-LaunchConfig := {
-  grid  : Dim3,
-  block : Dim3
+coord(d : dim3) := {
+  x : ix d.x,
+  y : ix d.y,
+  z : ix d.z
 }
 
-Coord(D : Dim3) := {
-  x : Ix(D.x),
-  y : Ix(D.y),
-  z : Ix(D.z)
-}
-
-ThreadId(C : LaunchConfig) := {
-  block-index  : Coord(C.grid),
-  thread-index : Coord(C.block)
+thread(config : launch-config) := {
+  block-index  : coord(config.grid),
+  thread-index : coord(config.block)
 }
 ```
 
-`Coord(D)` is bounded by construction. A `ThreadId(C)` therefore always names
-a physical thread that exists in launch configuration `C`.
-
-## Output schedule
+A layout maps logical indices to cells of a flat buffer:
 
 ```text
-Schedule(C : LaunchConfig, S : Space) := {
-  owner : Ix(S) ⊸ ThreadId(C)
+layout(s : space, n : u64) := {
+  offset : val(ix s) -> val(ix n)
 }
 ```
 
-`S` is the logical output space. For matmul with an `M × N` result,
-`S = Mat(M, N)`.
+## Schedule
 
-Because `owner` is a total function, every logical output has exactly one
-physical owner. A physical thread may own zero, one, or several outputs.
+A schedule assigns every logical output to one physical thread:
+
+```text
+schedule(config : launch-config, s : space) := {
+  owner : val(ix s) -> val(thread config)
+}
+```
+
+Since `owner` is a total function, every output has exactly one owner. A thread may own zero, one, or several outputs.
+
+The schedule is only a mapping; it does not run the kernel. `gpu.launch` uses it to collect, for every physical thread, the ordered vector of indices owned by that thread.
+
+For example, given a positive `block-size`, a linear schedule uses this
+one-dimensional configuration:
+
+```text
+grid.x  = max(1, ceil-div(size, block-size))
+block.x = block-size
+grid.y = grid.z = block.y = block.z = 1
+```
+
+It assigns logical index `i` to:
+
+```text
+owner(i) = thread {
+  block-index  = (i / block-size, 0, 0),
+  thread-index = (i % block-size, 0, 0)
+}
+```
+
+With this schedule, an active thread owns one logical index. Threads introduced by rounding the grid size up own no indices and receive an empty vector.
 
 ## Kernel
 
 ```text
-Kernel(S : Space, T : Type) := {
-  Requirements : LaunchConfig ⊸ Proposition,
-
-  body : ∀ C : LaunchConfig.
-    (|- Requirements(C))
-    ⊗ (thread : ThreadId(C))
-    ⊗ Ix(S)
-    ⊸ Val(T)
-}
+kernel(config : launch-config, s : space, t : type) :=
+  forall count.
+  val(thread config) ● val(vec count (ix s))
+  => val(vec count t)
 ```
 
-The body receives the current physical thread and the logical output assigned
-to that invocation. It returns one staged value for that output; it does not
-choose the destination index.
+A kernel is a closure from the current physical thread and all logical outputs owned by that thread to one value for each output. A thread may receive an empty vector (i.e. inactive threads). The kernel may capture read-only input buffers.
 
-`Requirements` contains uniform facts required by every invocation, such as a
-particular block shape. A kernel is polymorphic over launch configurations and
-may only use a configuration after receiving proof that its requirements hold.
-
-`Kernel` does not contain a schedule. The same kernel can be launched with any
-schedule satisfying the launch contract.
-
-## Launch primitive
+For example, global input reads use the ordinary Catena buffer operation:
 
 ```text
-gpu.launch[S, N, T] :
-  (config : LaunchConfig)
-  ⊗ Bufferᵍˡᵒᵇᵃˡ(N, T)
-  ⊗ Layout(S, N)
-  ⊗ (schedule : Schedule(config, S))
-  ⊗ (kernel : Kernel(S, T))
-  ⊗ (|- kernel.Requirements(config))
-  ⊸ Launch(N, T)
+ref.get[n, t] : ref n t ● val(ix n) -> val(t)
 ```
 
-`Bufferᵍˡᵒᵇᵃˡ(N, T)` is an opaque global output buffer, and
-`Layout(S, N)` maps logical output indices to distinct physical buffer cells.
-Their allocation and ownership model belongs to the surrounding language.
-`Launch(N, T)` is an opaque handle or effect witnessing that the launch was
-submitted.
+There is no output-store primitive in a kernel body. The launch primitive owns that operation.
 
-The implementation of `gpu.launch` must:
-
-1. Enumerate every logical index `i` in `S` exactly once.
-2. Set the current physical thread to `schedule.owner(i)`.
-3. Invoke `kernel.body(requirements-proof, thread, i)`.
-4. Store the result at `layout(i)`.
-5. Respect the surrounding language's buffer lifetime and execution-ordering
-   rules.
-
-A backend may invoke a thread's body repeatedly when that thread owns several
-outputs; threads with no outputs need not be invoked. The order of different
-logical outputs is unspecified. Since each output has one owner and the output
-layout is injective, scheduling cannot create write races.
-
-## Untiled matmul instance
-
-Let the inputs be `A : M × K` and `B : K × N`, and let the logical output
-space be `S = Mat(M, N)`. Choose a positive block shape, for example:
+## Launch
 
 ```text
-config.grid  = (ceil-div(N, tile), ceil-div(M, tile), 1)
-config.block = (tile, tile, 1)
+gpu.launch[s, n, t] :
+  (config : launch-config) ●
+  buf n t ●
+  layout(s, n) ●
+  schedule(config, s) ●
+  kernel(config, s, t)
+  -> buf n t
 ```
 
-The schedule maps output `(row, column)` to:
+`gpu.launch` collects the logical indices assigned to each physical thread and runs the kernel once per thread. It stores each returned value at the layout offset of the corresponding logical index. The updated owned output buffer is returned. Execution order between different threads is unspecified.
+
+Here, we specify the layout for the output buffer. Alternatively, we can follow the approach we used in previous implementations where `launch` takes a linear buffer and we build a helper function that compute the layout before calling `launch`.
+
+## Defining `materialize`
+
+`materialize` evaluates an indexed producer and stores its values in a new
+linear buffer:
 
 ```text
-block-index  = (column / tile, row / tile, 0)
-thread-index = (column % tile, row % tile, 0)
+materialize[n, t] :
+  (n : u64) ● (val(ix n) => val(t))
+  -> buf n t
 ```
 
-The kernel requirement is:
+It uses ordinary buffer allocation and vector mapping:
 
 ```text
-Requirements(config) :=
-  config.block.x = tile
-  ∧ config.block.y = tile
-  ∧ config.block.z = 1
+buf.alloc[n, t] : (n : u64) -> buf n t
+
+vec.map[n, a, b] :
+  (val(a) => val(b)) ● val(vec n a)
+  -> val(vec n b)
 ```
 
-For output `(row, column)`, the body returns the staged scalar expression:
+We can define `materialize` entirely in terms of these operations:
 
 ```text
-A[row, 0] × B[0, column]
-  + A[row, 1] × B[1, column]
-  + ...
-  + A[row, K - 1] × B[K - 1, column]
+def materialize[n, t](
+  n        : u64,
+  producer : val(ix n) => val(t)
+) -> buf n t =
+  let config   = linear-config(n)
+  let output   = buf.alloc[n, t](n)
+  let layout   = linear-layout(n)
+  let schedule = linear-schedule(config, n)
+
+  let kernel = \_thread indices ->
+    vec.map(producer, indices)
+
+  gpu.launch(config, output, layout, schedule, kernel)
 ```
 
-Terms are accumulated in ascending `k` order; the empty sum is zero. Input
-access and construction of the scalar expression use facilities from the
-surrounding language rather than additional launch primitives.
-
-This is sufficient to run a global-memory-only matmul. Shared-memory tiling can
-later extend `Kernel` with per-block state, no-work invocations, and
-synchronization while leaving `Schedule` and the external `gpu.launch` shape
-largely intact.
+Thus `materialize` needs no additional GPU primitive beyond `gpu.launch`;
+allocation and `vec.map` come from the surrounding language.

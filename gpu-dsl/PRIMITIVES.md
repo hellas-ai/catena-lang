@@ -25,20 +25,24 @@ An `ix n` is an integer in `[0, n)`, so indexing is safe by construction.
 Launch geometry is CUDA/HIP-shaped:
 
 ```text
-dim3 := { x : u64, y : u64, z : u64 }
+dim3 : {
+  x : u64,
+  y : u64,
+  z : u64
+}
 
-launch-config := {
+launch-config : {
   grid  : dim3,
   block : dim3
 }
 
-coord(d : dim3) := {
+coord[d : dim3] : {
   x : ix d.x,
   y : ix d.y,
   z : ix d.z
 }
 
-thread(config : launch-config) := {
+thread[config : launch-config] : {
   block-index  : coord(config.grid),
   thread-index : coord(config.block)
 }
@@ -47,7 +51,7 @@ thread(config : launch-config) := {
 A layout maps logical indices to cells of a flat buffer:
 
 ```text
-layout(s : space, n : u64) := {
+layout[s : space, n : u64] : {
   offset : val(ix s) -> val(ix n)
 }
 ```
@@ -57,7 +61,7 @@ layout(s : space, n : u64) := {
 A schedule assigns every logical output to one physical thread:
 
 ```text
-schedule(config : launch-config, s : space) := {
+schedule[config : launch-config, s : space] : {
   owner : val(ix s) -> val(thread config)
 }
 ```
@@ -99,10 +103,16 @@ block = (tile-cols, tile-rows, 1)
 Perfect tiling applies when the tile dimensions divide the output dimensions:
 
 ```text
-perfect-config(rows, cols, tile-rows, tile-cols) = {
-  grid  = (cols / tile-cols, rows / tile-rows, 1),
-  block = (tile-cols, tile-rows, 1)
-}
+perfect-config :
+  (rows : u64) ● (cols : u64) ●
+  (tile-rows : u64) ● (tile-cols : u64)
+  -> launch-config
+
+perfect-config = \rows cols tile-rows tile-cols ->
+  {
+    grid  = (cols / tile-cols, rows / tile-rows, 1),
+    block = (tile-cols, tile-rows, 1)
+  }
 ```
 
 The physical grid then covers the logical output exactly. Every physical
@@ -111,14 +121,20 @@ thread owns one output.
 Predicated tiling rounds the grid up instead:
 
 ```text
-predicated-config(rows, cols, tile-rows, tile-cols) = {
-  grid = (
-    max(1, ceil-div(cols, tile-cols)),
-    max(1, ceil-div(rows, tile-rows)),
-    1
-  ),
-  block = (tile-cols, tile-rows, 1)
-}
+predicated-config :
+  (rows : u64) ● (cols : u64) ●
+  (tile-rows : u64) ● (tile-cols : u64)
+  -> launch-config
+
+predicated-config = \rows cols tile-rows tile-cols ->
+  {
+    grid = (
+      max(1, ceil-div(cols, tile-cols)),
+      max(1, ceil-div(rows, tile-rows)),
+      1
+    ),
+    block = (tile-cols, tile-rows, 1)
+  }
 ```
 
 Both configurations use the same schedule. For a logical output `(row, col)`:
@@ -144,7 +160,7 @@ replaced by zero for predicated tiling.
 ## Kernel
 
 ```text
-kernel(config : launch-config, s : space, t : type) :=
+kernel[config : launch-config, s : space, t : type] :
   forall count.
   val(thread config) ● val(vec count (ix s))
   => val(vec count t)
@@ -200,10 +216,7 @@ vec.map[n, a, b] :
 We can define `materialize` entirely in terms of these operations:
 
 ```text
-def materialize[n, t](
-  n        : u64,
-  producer : val(ix n) => val(t)
-) -> buf n t =
+materialize = \n producer ->
   let config   = linear-config(n)
   let output   = buf.alloc[n, t](n)
   let layout   = linear-layout(n)

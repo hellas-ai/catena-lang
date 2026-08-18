@@ -2,6 +2,7 @@ use hexpr::Operation;
 use metacat::tree::Tree;
 use thiserror::Error;
 
+use crate::codegen::ops::parallel::gpu as parallel_gpu;
 use crate::stdlib::constants::{FN_HOM_TYPE, FN_REF_TYPE, PRODUCT_TYPE, UNIT_TYPE, VALUE_TYPE};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -56,26 +57,22 @@ pub fn lower_type(ty: &Tree<(), Operation>) -> Result<LoweredType, LowerTypeErro
         Tree::Node(op, 0, _children) if op.as_str() == FN_REF_TYPE => {
             Err(LowerTypeError::FunctionPointerRuntime)
         }
-        Tree::Node(op, 0, children) if op.as_str() == "gpu.buf" => {
-            let [element] = expect_unary(op.as_str(), children)?;
-            Ok(LoweredType::Runtime(CType::Pointer(Box::new(
-                lower_runtime_type(element)?,
-            ))))
-        }
         Tree::Node(op, 0, children) if op.as_str() == "buf" => {
             let [_cap, _len, element] = expect_ternary(op.as_str(), children)?;
             Ok(LoweredType::Runtime(CType::Pointer(Box::new(
                 lower_runtime_type(element)?,
             ))))
         }
+        Tree::Node(op, 0, children) if is_buffer_state_modifier(op.as_str()) => {
+            let [_context, buffer] = expect_binary(op.as_str(), children)?;
+            lower_runtime_type(buffer).map(LoweredType::Runtime)
+        }
+        Tree::Node(op, 0, children) if parallel_gpu::is_runtime_type(op.as_str()) => {
+            parallel_gpu::lower_runtime_type(op.as_str(), children).map(LoweredType::Runtime)
+        }
         Tree::Node(op, 0, children) if op.as_str() == "mem" => {
             let [cap] = expect_unary(op.as_str(), children)?;
             memory_c_type(cap).map(LoweredType::Runtime)
-        }
-        Tree::Node(op, 0, children) if is_gpu_control_type(op.as_str()) && children.is_empty() => {
-            Ok(LoweredType::Runtime(CType::Named(c_name_for_gpu_control(
-                op.as_str(),
-            ))))
         }
         _ => Ok(LoweredType::Erased),
     }
@@ -119,13 +116,16 @@ pub fn lower_runtime_type(ty: &Tree<(), Operation>) -> Result<CType, LowerTypeEr
         Tree::Node(op, 0, _children) if op.as_str() == FN_REF_TYPE => {
             Err(LowerTypeError::FunctionPointerRuntime)
         }
-        Tree::Node(op, 0, children) if op.as_str() == "gpu.buf" => {
-            let [element] = expect_unary(op.as_str(), children)?;
-            Ok(CType::Pointer(Box::new(lower_runtime_type(element)?)))
-        }
         Tree::Node(op, 0, children) if op.as_str() == "buf" => {
             let [_cap, _len, element] = expect_ternary(op.as_str(), children)?;
             Ok(CType::Pointer(Box::new(lower_runtime_type(element)?)))
+        }
+        Tree::Node(op, 0, children) if is_buffer_state_modifier(op.as_str()) => {
+            let [_context, buffer] = expect_binary(op.as_str(), children)?;
+            lower_runtime_type(buffer)
+        }
+        Tree::Node(op, 0, children) if parallel_gpu::is_runtime_type(op.as_str()) => {
+            parallel_gpu::lower_runtime_type(op.as_str(), children)
         }
         Tree::Node(op, 0, children) if op.as_str() == "mem" => {
             let [cap] = expect_unary(op.as_str(), children)?;
@@ -134,9 +134,6 @@ pub fn lower_runtime_type(ty: &Tree<(), Operation>) -> Result<CType, LowerTypeEr
         Tree::Node(op, 0, children) if op.as_str() == "ix" => {
             let [_extent] = expect_unary(op.as_str(), children)?;
             Ok(CType::U64)
-        }
-        Tree::Node(op, 0, children) if is_gpu_control_type(op.as_str()) && children.is_empty() => {
-            Ok(CType::Named(c_name_for_gpu_control(op.as_str())))
         }
         _ => Err(LowerTypeError::NoRuntimeRepresentation(ty.clone())),
     }
@@ -241,22 +238,11 @@ fn expect_ternary<'a>(
     }
 }
 
-fn is_gpu_control_type(name: &str) -> bool {
-    matches!(
-        name,
-        "gpu.3d" | "gpu.env" | "gpu.launch_params" | "gpu.state"
-    )
-}
-
-fn c_name_for_gpu_control(name: &str) -> String {
-    match name {
-        "gpu.3d" => "catena_dim3_t",
-        "gpu.env" => "catena_gpu_env_t",
-        "gpu.launch_params" => "catena_launch_params_t",
-        "gpu.state" => "catena_gpu_state_t",
-        _ => unreachable!("checked by is_gpu_control_type"),
-    }
-    .to_string()
+/// Buffer-state modifiers describe access and synchronization obligations.
+/// They do not change the runtime representation of the wrapped buffer; the
+/// context argument is a type-level witness and therefore erases.
+fn is_buffer_state_modifier(name: &str) -> bool {
+    matches!(name, "writable" | "readable" | "pending")
 }
 
 #[cfg(test)]
@@ -313,15 +299,65 @@ mod tests {
         let ty = node(
             "*",
             vec![
-                node("gpu.env", vec![]),
+                node("val", vec![node("u64", vec![])]),
                 leaf(0),
                 node("val", vec![node("bool", vec![])]),
             ],
         );
-        assert_eq!(
-            lower_interface(&ty).unwrap(),
-            vec![CType::Named("catena_gpu_env_t".to_string()), CType::Bool]
+        assert_eq!(lower_interface(&ty).unwrap(), vec![CType::U64, CType::Bool]);
+    }
+
+    #[test]
+    fn buffer_state_modifiers_lower_to_the_wrapped_buffer() {
+        let context = node("host", vec![leaf(0), leaf(1), leaf(2), leaf(3)]);
+        let buffer = node(
+            "buf",
+            vec![node("cap.own", vec![]), leaf(3), node("f32", vec![])],
         );
+
+        for modifier in ["writable", "readable", "pending"] {
+            let ty = node(
+                "val",
+                vec![node(modifier, vec![context.clone(), buffer.clone()])],
+            );
+            assert_eq!(
+                lower_type(&ty).unwrap(),
+                LoweredType::Runtime(CType::Pointer(Box::new(CType::F32)))
+            );
+        }
+    }
+
+    #[test]
+    fn parallel_values_have_concrete_runtime_representations() {
+        let cases = [
+            (
+                node(
+                    "host",
+                    vec![node("gpu.grid.2d", vec![]), leaf(1), leaf(2), leaf(3)],
+                ),
+                "catena_gpu_grid_host_t",
+            ),
+            (
+                node(
+                    "worker",
+                    vec![
+                        node("gpu.block.2d", vec![]),
+                        leaf(1),
+                        leaf(2),
+                        leaf(3),
+                        leaf(4),
+                    ],
+                ),
+                "catena_gpu_block_worker_t",
+            ),
+        ];
+
+        for (ty, c_name) in cases {
+            assert_eq!(
+                lower_type(&ty).unwrap(),
+                LoweredType::Runtime(CType::Named(c_name.to_string()))
+            );
+        }
     }
 
     #[test]

@@ -9,8 +9,8 @@ use crate::codegen::{
     gpu_placement::{
         GpuFunctionPlacement, direct_function_placement, function_placement, function_placements,
     },
-    lower_types::{CType, LoweredType},
-    ops::{ifc, materializec, reducec, row_major},
+    lower_types::CType,
+    ops::{ifc, materializec, parallel::gpu as parallel_gpu, reducec, row_major},
     prelude::render_gpu_prelude,
     render_utils::{c_type, invalid_inputs, invalid_outputs, param_decl},
     runtime_type,
@@ -81,10 +81,6 @@ pub enum GpuRenderError {
         component: &'static str,
         description: &'static str,
     },
-    #[error("gpu.materialize is missing launch params")]
-    MissingMaterializeLaunchParams,
-    #[error("gpu.materialize is missing function input")]
-    MissingMaterializeFunction,
     #[error("invalid integer constant operation `{op}`")]
     InvalidIntegerConstant { op: Operation },
 }
@@ -151,17 +147,19 @@ fn render_module_body(
     // Materialization is represented in the dataflow body as one assignment, but GPU codegen needs an
     // auxiliary `__global__` kernel in addition to the host wrapper function.
     for assignment in &module.entry.assignments {
-        if assignment.op.as_str() == "gpu.materialize" {
-            render_materialize_kernel(
-                out,
-                &materialize_kernel_name(&module.entry.name, assignment)?,
-                assignment,
-            )?;
-            out.push('\n');
-        } else if assignment.op.as_str() == "materializec" {
+        if assignment.op.as_str() == "materializec" {
             materializec::render_kernel(
                 out,
                 &materializec::kernel_name(&module.entry.name, assignment)?,
+                assignment,
+            )?;
+            out.push('\n');
+        } else if assignment.op.as_str() == "parallel.materializec"
+            && parallel_gpu::context_kind(assignment) == Some(parallel_gpu::ContextKind::GridHost)
+        {
+            parallel_gpu::render_materialize_kernel(
+                out,
+                &parallel_gpu::materialize_kernel_name(&module.entry.name, assignment)?,
                 assignment,
             )?;
             out.push('\n');
@@ -294,6 +292,20 @@ fn render_assignment(
         return render_call(out, symbol, assignment);
     }
 
+    match assignment.op.as_str() {
+        "parallel.allocate" => return parallel_gpu::render_allocate(out, assignment),
+        "parallel.host.allocate" => {
+            return parallel_gpu::render_host_allocate(out, assignment, dialect);
+        }
+        "parallel.await" | "parallel.await-one" | "parallel.release" | "parallel.barrier" => {
+            return parallel_gpu::render_synchronize(out, assignment, dialect);
+        }
+        "parallel.materializec" => {
+            return parallel_gpu::render_materialize(out, function, assignment, dialect);
+        }
+        _ => {}
+    }
+
     if render_primitive_assignment(out, assignment)? {
         return Ok(());
     }
@@ -302,7 +314,6 @@ fn render_assignment(
         "bool.ifc" => ifc::render(out, assignment)?,
         "eval" => render_eval(out, assignment)?,
         "reducec" => reducec::render(out, assignment)?,
-        "gpu.materialize" => render_materialize_call(out, function, assignment, dialect)?,
         "materializec" => materializec::render_call(out, function, assignment, dialect)?,
         op => {
             return Err(GpuRenderError::UnsupportedOp(
@@ -457,6 +468,14 @@ fn render_primitive_assignment(
         "row-major-index" => row_major::render_index(out, assignment)?,
         "row-major-row" => row_major::render_row(out, assignment)?,
         "row-major-col" => row_major::render_col(out, assignment)?,
+        "gpu.grid.2d" => parallel_gpu::render_grid_2d(out, assignment)?,
+        "gpu.block.2d" => parallel_gpu::render_block_2d(out, assignment)?,
+        "parallel.host" => parallel_gpu::render_host(out, assignment)?,
+        "parallel.worker.index" => parallel_gpu::render_worker_index(out, assignment)?,
+        "parallel.worker" => parallel_gpu::render_worker(out, assignment)?,
+        "parallel.shared.empty" => parallel_gpu::render_shared_empty(out, assignment)?,
+        "gpu.shared" => parallel_gpu::render_shared(out, assignment)?,
+        "parallel.shared.finish" => parallel_gpu::render_shared_finish(out, assignment)?,
         "u64.to-ix" => render_u64_to_ix(out, assignment)?,
         op if op.starts_with(CONST_U64_PREFIX) => {
             render_int_const(out, assignment, CONST_U64_PREFIX, "ULL")?
@@ -1148,176 +1167,6 @@ fn render_eval(out: &mut String, assignment: &GpuAssign) -> Result<(), GpuRender
         return Err(invalid_inputs(assignment, 1));
     };
     render_function_application(out, "    ", func, args, &assignment.outputs)
-}
-
-fn render_materialize_kernel(
-    out: &mut String,
-    kernel_name: &str,
-    assignment: &GpuAssign,
-) -> Result<(), GpuRenderError> {
-    let [output] = assignment.outputs.as_slice() else {
-        return Err(invalid_outputs(assignment, 1));
-    };
-    let CType::Pointer(element) =
-        runtime_type(output).ok_or_else(|| GpuRenderError::ErasedType(output.clone()))?
-    else {
-        return Err(GpuRenderError::UnsupportedType(
-            runtime_type(output).unwrap().clone(),
-        ));
-    };
-    let (_, func, args) = materialize_parts(assignment)?;
-
-    out.push_str(&format!(
-        "__global__ void {kernel_name}({} *out, uint64_t len",
-        c_type(element)
-    ));
-    for arg in &args {
-        if let GpuValue::Var(var) = arg {
-            if runtime_type(var).is_some() {
-                out.push_str(", ");
-                out.push_str(&param_decl(var, false)?);
-            }
-        }
-    }
-    out.push_str(") {\n");
-    out.push_str("    uint64_t thread_id = (uint64_t)blockIdx.x * blockDim.x + threadIdx.x;\n");
-    out.push_str("    if (thread_id >= len) { return; }\n");
-    out.push_str("    catena_gpu_env_t env = { thread_id };\n");
-    out.push_str("    catena_gpu_state_t state = 0;\n");
-    out.push_str("    catena_gpu_state_t next_state = 0;\n");
-    out.push_str(&format!("    {} value;\n", c_type(element)));
-    let mut kernel_inputs = vec![
-        GpuValue::Var(GpuVar {
-            node: output.node,
-            name: "env".to_string(),
-            lowered: LoweredType::Runtime(CType::Named("catena_gpu_env_t".to_string())),
-        }),
-        GpuValue::Var(GpuVar {
-            node: output.node,
-            name: "state".to_string(),
-            lowered: LoweredType::Runtime(CType::Named("catena_gpu_state_t".to_string())),
-        }),
-    ];
-    for arg in args {
-        kernel_inputs.push(arg.clone());
-    }
-    let kernel_outputs = [
-        GpuVar {
-            node: output.node,
-            name: "next_state".to_string(),
-            lowered: LoweredType::Runtime(CType::Named("catena_gpu_state_t".to_string())),
-        },
-        GpuVar {
-            node: output.node,
-            name: "value".to_string(),
-            lowered: LoweredType::Runtime(element.as_ref().clone()),
-        },
-    ];
-    render_function_application(out, "    ", func, &kernel_inputs, &kernel_outputs)?;
-    out.push_str("    out[thread_id] = value;\n");
-    out.push_str("}\n");
-    Ok(())
-}
-
-fn render_materialize_call(
-    out: &mut String,
-    function: &GpuFunction,
-    assignment: &GpuAssign,
-    dialect: GpuDialect,
-) -> Result<(), GpuRenderError> {
-    let [output] = assignment.outputs.as_slice() else {
-        return Err(invalid_outputs(assignment, 1));
-    };
-    let CType::Pointer(element) =
-        runtime_type(output).ok_or_else(|| GpuRenderError::ErasedType(output.clone()))?
-    else {
-        return Err(GpuRenderError::UnsupportedType(
-            runtime_type(output).unwrap().clone(),
-        ));
-    };
-    let (launch, _func, args) = materialize_parts(assignment)?;
-    let launch = value_expr(launch);
-    let kernel_name = materialize_kernel_name(&function.name, assignment)?;
-
-    out.push_str(&format!(
-        "    uint64_t {name}_len = catena_launch_len({launch});\n",
-        name = output.name
-    ));
-    out.push_str(&format!(
-        "    {} *{name}_data = nullptr;\n",
-        c_type(element),
-        name = output.name
-    ));
-    out.push_str(&format!(
-        "    if ({name}_len != 0) {{\n",
-        name = output.name
-    ));
-    out.push_str(&format!(
-        "        catena_host_gpu_check({device_alloc_fn}((void **)&{name}_data, {name}_len * sizeof({element})));\n",
-        name = output.name,
-        element = c_type(element),
-        device_alloc_fn = dialect.device_alloc_fn(),
-    ));
-    out.push_str(&format!(
-        "        {kernel_name}<<<dim3({launch}.grid_dim.x, {launch}.grid_dim.y, {launch}.grid_dim.z), dim3({launch}.block_dim.x, {launch}.block_dim.y, {launch}.block_dim.z)>>>\n"
-    ));
-    out.push_str(&format!(
-        "            ({name}_data, {name}_len",
-        name = output.name
-    ));
-    for arg in args {
-        if let GpuValue::Var(var) = arg
-            && runtime_type(var).is_some()
-        {
-            out.push_str(", ");
-            out.push_str(&var.name);
-        }
-    }
-    out.push_str(");\n");
-    out.push_str(&format!(
-        "        catena_host_gpu_check({synchronize_fn}());\n",
-        synchronize_fn = dialect.synchronize_fn()
-    ));
-    out.push_str("    }\n");
-    out.push_str(&format!("    {} = {}_data;\n", output.name, output.name));
-    Ok(())
-}
-
-fn materialize_parts(
-    assignment: &GpuAssign,
-) -> Result<(&GpuValue, &GpuValue, Vec<&GpuValue>), GpuRenderError> {
-    let launch = assignment
-        .inputs
-        .iter()
-        .find(|input| {
-            matches!(
-                input,
-                GpuValue::Var(var)
-                    if matches!(runtime_type(var), Some(CType::Named(name)) if name == "catena_launch_params_t")
-            )
-        })
-        .ok_or(GpuRenderError::MissingMaterializeLaunchParams)?;
-    let func = assignment
-        .inputs
-        .iter()
-        .find(|input| matches!(input, GpuValue::FnSymbol(_)))
-        .ok_or(GpuRenderError::MissingMaterializeFunction)?;
-    let args = assignment
-        .inputs
-        .iter()
-        .filter(|input| !std::ptr::eq(*input, launch) && !std::ptr::eq(*input, func))
-        .collect();
-    Ok((launch, func, args))
-}
-
-fn materialize_kernel_name(
-    function_name: &str,
-    assignment: &GpuAssign,
-) -> Result<String, GpuRenderError> {
-    let [output] = assignment.outputs.as_slice() else {
-        return Err(invalid_outputs(assignment, 1));
-    };
-    Ok(format!("materialize_{}_{}", function_name, output.name))
 }
 
 fn local_decl(var: &GpuVar) -> Result<String, GpuRenderError> {

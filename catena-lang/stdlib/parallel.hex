@@ -1,0 +1,209 @@
+# Parallel contexts
+(theory type nat {
+  # A host submits work to a worker population. A worker runs inside one.
+  # Both carry their block-local storage layout. A worker additionally carries
+  # the type of its topology-shaped index.
+  (arr host : 4 -> 1)
+  (arr worker : 5 -> 1)
+
+  # A statically typed list of shared-memory allocation slots.
+  (arr shared.empty : 0 -> 1)
+  (arr shared.slot : 3 -> 1)
+
+  # Runtime shared-memory layout size and linear remaining-slot capability.
+  (arr shared : 1 -> 1)
+  (arr available : 1 -> 1)
+})
+
+(theory program type {
+  # Build a host context from topology-specific metadata and runtime
+  # parameters. The metadata is type-level and erases before codegen.
+  (arr parallel.host : {[
+    level workers groups storage parameters.
+  ]
+    [.level]
+    [.workers]
+    [.groups]
+    [.parameters]
+    ([.storage] shared val)
+  }
+  ->
+  ([level workers groups storage parameters.]
+    ({[.level workers groups storage]} host)))
+
+  # Build an empty shared-memory layout.
+  (arr parallel.shared.empty : [] -> (shared.empty shared val))
+
+  # Expose this worker's topology-shaped index while preserving the worker.
+  # The index object may be a product, such as Ix n * Ix m for a 2D level.
+  (arr parallel.worker.index : {[level workers groups index storage.]
+    ({[.level workers groups index storage]} worker)
+  }
+  ->
+  ([level workers groups index storage.] {
+    ({[.level workers groups index storage]} worker)
+    [.index]
+  }))
+
+  # Construct a worker at a child topology level and its unique initial
+  # storage capability. The child-local index and topology metadata are
+  # explicit; runtime execution state and storage are inherited from the
+  # parent worker.
+  (arr parallel.worker : {[
+    parent-level parent-workers parent-groups parent-index storage
+    level workers groups index.
+  ]
+    ({[.parent-level parent-workers parent-groups parent-index storage]} worker)
+    [.level]
+    [.workers]
+    [.groups]
+    [.index]
+  }
+  ->
+  ([parent-level parent-workers parent-groups parent-index storage
+    level workers groups index.] {
+    ({[.level workers groups index storage]} worker)
+    ([.storage] available val)
+  }))
+
+  # Allocate the next statically available block-shared f32 slot.
+  (arr parallel.allocate : {[
+    level workers groups index storage n rest.
+  ]
+    ({[.level workers groups index storage]} worker)
+    ({({[.n] f32 [.rest]} shared.slot)} available val)
+    ({[.n] u64} :)
+  }
+  ->
+  ([level workers groups index storage n rest.] {
+    ({[.level workers groups index storage]} worker)
+    ([.rest] available val)
+    ({
+      ({[.level workers groups index storage]} worker)
+      ({cap.own [.n] f32} buf)
+    } writable val)
+  }))
+
+  # Consume the exhausted allocator. No allocation accepts shared.empty.
+  (arr parallel.shared.finish : (shared.empty available val) -> [])
+
+  # Allocate global storage through a host without consuming its finite
+  # block-shared layout.
+  (arr parallel.host.allocate : {[level workers groups storage n.]
+    ({[.level workers groups storage]} host)
+    ({[.n] u64} :)
+  }
+  ->
+  ([level workers groups storage n.] {
+    ({[.level workers groups storage]} host)
+    ({
+      ({[.level workers groups storage]} host)
+      ({cap.own [.n] f32} buf)
+    } writable val)
+  }))
+
+  # Synchronize after writes to two buffers, making both visible to this
+  # context's workers with one synchronization event. The bare buffers lose
+  # their context associations together.
+  (arr parallel.await : {[context a-cap a-n b-cap b-n.]
+    [.context]
+    ({
+      [.context]
+      ({[.a-cap a-n] f32} buf)
+    } pending val)
+    ({
+      [.context]
+      ({[.b-cap b-n] f32} buf)
+    } pending val)
+  }
+  ->
+  ([context a-cap a-n b-cap b-n.] {
+    [.context]
+    ({[.a-cap a-n] f32} buf val)
+    ({[.b-cap b-n] f32} buf val)
+  }))
+
+  # Single-buffer form used when only one pending result must become visible.
+  (arr parallel.await-one : {[context cap n.]
+    [.context]
+    ({
+      [.context]
+      ({[.cap n] f32} buf)
+    } pending val)
+  }
+  ->
+  ([context cap n.] {
+    [.context]
+    ({[.cap n] f32} buf val)
+  }))
+
+  # Synchronize after reads. This must wait for slower readers before another
+  # iteration writes into shared storage. TODO: track the released buffers in
+  # the type once buffer ownership is threaded back out of reader closures.
+  (arr parallel.release :
+    ([context.] [.context]) -> ([context.] [.context]))
+
+  # Synchronize workers through one context without changing buffer state.
+  (arr parallel.barrier :
+    ([context.] [.context]) -> ([context.] [.context]))
+
+  # Materialize a logical output space through a context. The worker count
+  # and output count are intentionally independent; the scheduling policy maps
+  # logical work items to physical workers. task-worker makes the worker passed
+  # to the producer explicit for both host launches and worker cooperation.
+  (arr parallel.materialize : {[
+    context task-worker output-count.
+  ]
+    [.context]
+    ({
+      [.context]
+      ({cap.own [.output-count] f32} buf)
+    } writable val)
+    ({
+      ({
+        [.task-worker]
+        ([.output-count] ix val)
+      } *)
+      (f32 val)
+    } =>)
+  }
+  ->
+  ([context task-worker output-count.] {
+    [.context]
+    ({
+      [.context]
+      ({cap.own [.output-count] f32} buf)
+    } pending val)
+  }))
+
+  # Closure-converted form of parallel.materialize. The producer's captured
+  # environment and function pointer replace its source-level closure value.
+  (arr parallel.materializec : {[
+    environment context task-worker output-count.
+  ]
+    [.context]
+    ({
+      [.context]
+      ({cap.own [.output-count] f32} buf)
+    } writable val)
+    ([.environment])
+    ({
+      ({
+        ([.environment])
+        ({
+          [.task-worker]
+          ([.output-count] ix val)
+        } *)
+      } *)
+      (f32 val)
+    } -> val)
+  }
+  ->
+  ([environment context task-worker output-count.] {
+    [.context]
+    ({
+      [.context]
+      ({cap.own [.output-count] f32} buf)
+    } pending val)
+  }))
+})

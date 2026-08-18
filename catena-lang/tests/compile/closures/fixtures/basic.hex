@@ -9,7 +9,7 @@
 
 # A closure-free baseline.  The compile pipeline must leave it alone and must
 # not manufacture generated closure arrows.
-(def program identity : (bool val) -> (bool val) = [value])
+(def program closure-fixture-identity : (bool val) -> (bool val) = [value])
 
 # CMC-only construction and elimination.  The closure is built by composing a
 # deferred argument with a named identity, then consumed directly by run.

@@ -1,50 +1,119 @@
 # Cooperative thread execution primitives
 
 (theory type nat {
-  # the read-only *environment* available to a GPU kernel.
-  # Consists of:
-  #   - Thread ID
-  #   - Block sizes
-  (arr gpu.env : 0 -> 1)
-
-  # A unique type which allows us to force ordering.
-  # This of this as a resource which may not ever be consumed or copied.
-  (arr gpu.state : 0 -> 1)
-
-  # TODO: add lengths!
-  (arr gpu.buf : 1 -> 1)
-
-  # Kernel launch parameters: grid dim and block dim (for now)
-  (arr gpu.3d : 0 -> 1)
-  (arr gpu.launch_params : 0 -> 1)
+  # Nominal GPU levels. Their dimensions let lowering distinguish kernel
+  # launch from block-local cooperative execution.
+  (arr gpu.grid.2d : 4 -> 1)
+  (arr gpu.block.2d : 2 -> 1)
 })
 
 (theory program type {
-  # Launch parameter construction
-  (arr gpu.3d.intro : (u64 val [x . x x x]) -> gpu.3d)
-  (arr gpu.launch_params.intro : (gpu.3d val [x . x x]) -> (gpu.launch_params val))
-
-  # store a value to global memory
-  #(arr gpu.global.store : gpu.state -> gpu.state)
-
-  # Materialize a buffer by cooperative execution of a kernel `k`,
-  # where k is a function pointer of the following type
-  #
-  #   k : gpu.env × gpu.state × X → gpu.state × B
-  #
-  # Where `X` is the explicitly-passed *environment* of the kernel (common to
-  # all threads).
-  #
-  # gpu.materialize : gpu.launch_params × (gpu.env × gpu.state × X -> gpu.state × B) -> gpu.buf B
-  (arr gpu.materialize : {[x b.]
-    ({gpu.state [.x]} * [args_tail.])
-    ({gpu.env [.args_tail]} * [args.])
-
-    ({gpu.state [.b]} * [coargs.])
-
-    (gpu.launch_params val)
-    ([.args coargs] ->)
+  # Add one f32 slot to a GPU shared-memory layout. Repeated applications
+  # describe any number of slots; the most recently added slot is allocated
+  # first by parallel.allocate.
+  (arr gpu.shared : {[n rest.]
+    ({[.n] u64} :)
+    ([.rest] shared val)
   }
   ->
-  ([x b.b] gpu.buf val))
+  ([n rest.] ({({[.n] f32 [.rest]} shared.slot)} shared val)))
+
+  # Build the type-level description of a two-dimensional GPU block and
+  # preserve its runtime dimensions for coordinate calculations.
+  (arr gpu.block.2d : {[
+    block-x block-y.
+  ]
+    ({[.block-x] u64} :)
+    ({[.block-y] u64} :)
+  }
+  ->
+  ([block-x block-y.]
+    {
+      ({[.block-x block-y]} gpu.block.2d)
+      ({[.block-x block-y]} *)
+      1
+      ({({[.block-x] u64} :) ({[.block-y] u64} :)} *)
+    }))
+
+  # Build the type-level description of a two-dimensional GPU grid and thread
+  # the runtime launch dimensions used by parallel.host.
+  (arr gpu.grid.2d : {[
+    grid-x grid-y block-x block-y.
+  ]
+    ({[.grid-x] u64} :)
+    ({[.grid-y] u64} :)
+    ({[.block-x] u64} :)
+    ({[.block-y] u64} :)
+  }
+  ->
+  ([grid-x grid-y block-x block-y.]
+    {
+      ({[.grid-x grid-y block-x block-y]} gpu.grid.2d)
+      ({({[.grid-x grid-y]} *) ({[.block-x block-y]} *)} *)
+      ({[.grid-x grid-y]} *)
+      ({
+        ({[.grid-x] u64} :)
+        ({
+          ({[.grid-y] u64} :)
+          ({
+            ({[.block-x] u64} :)
+            ({[.block-y] u64} :)
+          } *)
+        } *)
+      } *)
+    }))
 })
+
+# Re-index the current grid worker relative to its containing block.
+(def program gpu.current-block : {[
+  grid-x grid-y block-x block-y storage.
+]
+  ({
+    ({[.grid-x grid-y block-x block-y]} gpu.grid.2d)
+    ({({[.grid-x grid-y]} *) ({[.block-x block-y]} *)} *)
+    ({[.grid-x grid-y]} *)
+    ({
+      (({[.grid-x block-x]} *) ix val)
+      (({[.grid-y block-y]} *) ix val)
+    } *)
+    [.storage]
+  } worker)
+  ({[.block-x] u64} :)
+  ({[.block-y] u64} :)
+}
+->
+([grid-x grid-y block-x block-y storage.]
+  {
+    ({
+      ({[.block-x block-y]} gpu.block.2d)
+      ({[.block-x block-y]} *)
+      1
+      ({([.block-x] ix val) ([.block-y] ix val)} *)
+      [.storage]
+    } worker)
+    ([.storage] available val)
+  })
+= ([grid-worker block-x block-y.]
+  ({[.block-x] [.block-y]} gpu.block.2d
+    [block-level block-workers block-groups block-dimensions.]
+    ([.block-dimensions] *.elim [block-x-value block-y-value.]
+      ([.grid-worker] parallel.worker.index [preserved-worker grid-index.]
+        ([.grid-index] *.elim [global-x global-y.]
+          ({[.block-x-value] [.global-x]} ix.rem [local-x.]
+            ({[.block-y-value] [.global-y]} ix.rem [local-y.]
+              ({[.local-x] [.local-y]} *.intro [local-index.]
+                ({
+                  [.preserved-worker]
+                  [.block-level]
+                  [.block-workers]
+                  [.block-groups]
+                  [.local-index]
+                } parallel.worker)
+              )
+            )
+          )
+        )
+      )
+    )
+  )
+))

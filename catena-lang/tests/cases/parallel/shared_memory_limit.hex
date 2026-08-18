@@ -1,0 +1,110 @@
+# Minimal grid launch that actually writes to a dynamically sized shared slot.
+# The runtime test supplies an intentionally excessive slot size so CUDA/HIP
+# rejects the launch.
+
+# Produce the value cooperatively written into the shared slot.
+(def program shared-memory-limit.block-zero :
+  ([shared-elements one.] {
+    ({
+      ({[.one one]} gpu.block.2d)
+      ({[.one one]} *)
+      1
+      ({([.one] ix val) ([.one] ix val)} *)
+      ({[.shared-elements] f32 shared.empty} shared.slot)
+    } worker)
+    ([.shared-elements] ix val)
+  })
+  ->
+  ([shared-elements one.] (f32 val))
+= ([worker index.]
+  const.u32.0x00000000 u32.bitcast-f32))
+
+# Scope the grid worker to its block, allocate the declared slot, and write its
+# first element. This use prevents the backend from treating dynamic shared
+# memory as unused launch metadata.
+(def program shared-memory-limit.grid-zero :
+  ([shared-elements one.] {
+    ({[.shared-elements] u64} :)
+    ({[.one] u64} :)
+    ({
+      ({
+        ({[.one one one one]} gpu.grid.2d)
+        ({({[.one one]} *) ({[.one one]} *)} *)
+        ({[.one one]} *)
+        ({
+          (({[.one one]} *) ix val)
+          (({[.one one]} *) ix val)
+        } *)
+        ({[.shared-elements] f32 shared.empty} shared.slot)
+      } worker)
+      ([.one] ix val)
+    } *)
+  })
+  ->
+  ([shared-elements one.] (f32 val))
+= ([shared-elements one work-item.]
+  ([.shared-elements] u64.copy-param [slot-elements slot-elements-param.])
+  ([.one] u64.copies3 [block-x block-y one-for-param.])
+  ([.one-for-param] :.param [one-param.])
+  ([.work-item] *.elim [grid-worker output-index.])
+
+  ({[.grid-worker] [.block-x] [.block-y]}
+    gpu.current-block [block-worker available.])
+  ({[.block-worker] [.available] [.slot-elements]}
+    parallel.allocate [allocated-worker exhausted shared-buffer.])
+  ([.exhausted] parallel.shared.finish)
+
+  ({
+    [.allocated-worker]
+    [.shared-buffer]
+    ({[.slot-elements-param] [.one-param]}
+      name.shared-memory-limit.block-zero lift)
+  } parallel.materialize [pending-worker pending-buffer.])
+  ({[.pending-worker] [.pending-buffer]}
+    parallel.await-one [ready-worker ready-buffer.])
+
+  const.u32.0x00000000 u32.bitcast-f32
+))
+
+(def program launch-with-shared-elements :
+  ([shared-elements one.] {
+    ({[.shared-elements] u64} :)
+    ({[.one] u64} :)
+  })
+  ->
+  ([shared-elements one.] (cap.own mem))
+= ([shared-elements one.]
+  ([.shared-elements] u64.copy-param
+    [shared-elements-value shared-elements-param.])
+  ([.shared-elements-value] u64.copies2
+    [layout-elements kernel-shared-elements.])
+  ([.one] u64.copy-param [one-value one-param.])
+  ([.one-value] u64.copies2 [launch-one kernel-one.])
+  ([.launch-one] u64.copies6
+    [grid-x grid-y block-x block-y output-count output-bytes.])
+
+  (parallel.shared.empty [empty-layout.])
+  ({[.layout-elements] [.empty-layout]} gpu.shared [shared-layout.])
+
+  ({[.grid-x] [.grid-y] [.block-x] [.block-y]}
+    gpu.grid.2d [level workers groups parameters.])
+  ({[.level] [.workers] [.groups] [.parameters] [.shared-layout]}
+    parallel.host [host.])
+  ({[.host] [.output-count]}
+    parallel.host.allocate [allocated-host output.])
+
+  ({
+    [.allocated-host]
+    [.output]
+    ({
+      [.shared-elements-param]
+      [.one-param]
+      [.kernel-shared-elements]
+      [.kernel-one]
+    }
+      partial.shared-memory-limit.grid-zero.2)
+  } parallel.materialize [pending-host pending-output.])
+  ({[.pending-host] [.pending-output]}
+    parallel.await-one [_host result.])
+  ({[.output-bytes] [.result]} buf.to-mem)
+))

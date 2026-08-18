@@ -68,8 +68,5 @@ fn first_materialize_op_in_call_chain(
 }
 
 fn is_materialize_op(op: &Operation) -> bool {
-    matches!(
-        op.as_str(),
-        "materialize" | "materializec" | "gpu.materialize"
-    )
+    matches!(op.as_str(), "materialize" | "materializec")
 }

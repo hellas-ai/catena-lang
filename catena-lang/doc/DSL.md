@@ -1,5 +1,0 @@
-- DSL is vanilla GPU plus proofs
-- Kernels are defined in the DSL
-- We want to prove that kernels are deterministic and total. This is done by induction on the Kernel DSL assuming some required properties.
-- A kernel implementation must provide proof that the properties hold for the particular implementation.
-- Here, correctness is about determinisism and totality, we don't prove correctness of tiled matmul or specific kernels.

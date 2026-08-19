@@ -91,12 +91,11 @@ The core design makes several future proof obligations natural:
   `WriterFor`, which identifies the unique writer. `KernelM.writeShared`
   requires `Owns` and returns a `Wrote` token carrying the trace, thread,
   cell, and staged value. `KernelM.readShared` requires both `Defined` and a
-  shared `ReadShare`, and returns the read share for further reads in the same
-  phase.
+  shared `ReadShare`; the share remains valid for every read at that trace.
 - `KernelM.syncBlock` is the collective barrier rule. It lifts a fact supplied
   by the current thread to the same fact for every thread in the block and
-  applies its `PermissionTransition`, releasing the pre-barrier permissions
-  and granting permissions indexed by the new trace.
+  applies its `SyncSpec`. Advancing the trace resets every old permission;
+  `SyncSpec.grants` states which permissions exist at the new trace.
 - `LaunchFacts` exposes those launch guarantees to kernel proofs: every
   physical thread is invoked exactly once and completes the kernel's exact
   common synchronization trace. These facts are supplied by `launch` and must

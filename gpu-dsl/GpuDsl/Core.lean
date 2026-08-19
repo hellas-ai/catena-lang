@@ -188,12 +188,12 @@ structure ReadShare {cfg : LaunchConfig} {BlockState State α : Type}
     (buffer : SharedBuffer block name length α) : Type where
   private intro ::
 
-/-- The access permissions released and granted by one barrier. -/
-structure PermissionTransition
+/-- The permissions granted after one barrier. Every permission from the
+pre-barrier trace is reset by the trace transition itself. -/
+structure SyncSpec
     (cfg : LaunchConfig) (BlockState State : Type)
     (block : Block cfg BlockState) where
   barrier : BarrierId
-  releases : SyncTrace → Thread cfg BlockState State → Type
   grants : SyncTrace → Thread cfg BlockState State → Type
 
 /--
@@ -226,19 +226,17 @@ inductive KernelM {cfg : LaunchConfig} {BlockState State SharedScalar : Type}
       (index : Fin n)
       (defined : Defined trace buffer index)
       (readShare : ReadShare trace thread buffer) :
-      KernelM writerRelation thread trace trace
-        (Value SharedScalar × ReadShare trace thread buffer)
+      KernelM writerRelation thread trace trace (Value SharedScalar)
   /-- A block barrier lifts a fact proved by the current thread to the same
   fact for every thread in the block. -/
   | syncBlock (block : Block cfg BlockState)
       (belongsToBlock : Thread.block thread = block)
-      (transition : PermissionTransition cfg BlockState State block)
-      (currentPermissions : transition.releases trace thread)
+      (spec : SyncSpec cfg BlockState State block)
       {facts : SyncTrace → Thread cfg BlockState State → Type}
       (currentFact : facts trace thread) :
-      KernelM writerRelation thread trace (trace ++ [transition.barrier])
+      KernelM writerRelation thread trace (trace ++ [spec.barrier])
         ((∀ other, Thread.block other = block → facts trace other) ×
-          transition.grants (trace ++ [transition.barrier]) thread)
+          spec.grants (trace ++ [spec.barrier]) thread)
   /-- A bounded loop with a trace-independent accumulator and a separate,
   trace-indexed resource passed from one round to the next. -/
   | foldFinD (n : Nat) (step : SyncTrace → SyncTrace)

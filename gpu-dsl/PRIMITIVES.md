@@ -335,12 +335,19 @@ Consequently, a synchronized write establishes that its cell is defined after th
 -> |- defined(trace + barrier, buffer, index)
 ```
 
-For tiled matrix multiplication, one loop iteration has the following shape:
+The matmul tile loop carries its proof invariant separately from its partial
+sum. The invariant type and its initial value can be written directly on the
+loop. `initial-own-a` and `initial-own-b` are supplied by `gpu.launch`:
 
 ```text
-own-a ● own-b = initial ownership supplied by launch
+for each tile
+  maintaining invariant :
+    (|- owns(trace, thread, tile-a, thread-cell)) ●
+    (|- owns(trace, thread, tile-b, thread-cell))
+  initially initial-own-a ● initial-own-b:
 
-for each tile:
+  own-a ● own-b = invariant
+
   wrote-a = shared.write(tile-a, thread-cell, value-a, own-a)
   wrote-b = shared.write(tile-b, thread-cell, value-b, own-b)
 
@@ -354,9 +361,17 @@ for each tile:
     a = shared.read(tile-a, (thread-row, k), defined-a, read-a)
     b = shared.read(tile-b, (k, thread-col), defined-b, read-b)
 
-  _ ● (own-a ● own-b) =
+  _ ● next-invariant =
     shared.sync(block, tile-consumed, unit,
                 owns(tile-a, tile-b, plan))
+
+  continue with next-invariant
 ```
+
+`maintaining` means that the loop may start only with the two ownership tokens
+given by `initially`, and that its body must re-establish the same two `owns`
+facts at `trace + tile-loaded + tile-consumed` before continuing. Temporary
+`wrote`, `defined`, and `read-share` facts are used inside one iteration but
+are not part of `next-invariant`.
 
 The first barrier publishes initialization and changes the block from exclusive writing to shared reading. The second barrier waits until all reads are finished, resets the read permissions, and grants exclusive ownership for the next tile. Thus a shared cell is never writable while another thread has permission to read it.

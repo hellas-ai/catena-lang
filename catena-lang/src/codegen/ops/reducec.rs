@@ -98,7 +98,7 @@ pub(in crate::codegen) fn render(
     let mut get_inputs = get_env.to_vec();
     get_inputs.push(GpuValue::Var(GpuVar {
         node: outputs[0].node,
-        name: i.clone(),
+        name: i,
         lowered: LoweredType::Runtime(CType::U64),
     }));
     let get_outputs = values
@@ -162,7 +162,7 @@ fn parts(assignment: &GpuAssign) -> Result<ReducecParts<'_>, GpuRenderError> {
             0,
         ));
     }
-    if !zero.iter().all(|value| is_runtime_value(value)) {
+    if !zero.iter().all(is_runtime_value) {
         return Err(GpuRenderError::ErasedInputComponentValue {
             op: assignment.op.clone(),
             component: "zero",

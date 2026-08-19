@@ -390,10 +390,7 @@ mod tests {
         let bc = product(b.clone(), c.clone());
         let packed = product(a.clone(), bc.clone());
 
-        assert_eq!(
-            unpack_packed_object(&packed, 2),
-            vec![a.clone(), bc.clone()]
-        );
+        assert_eq!(unpack_packed_object(&packed, 2), vec![a.clone(), bc]);
         assert_eq!(unpack_packed_object(&packed, 3), vec![a, b, c]);
     }
 

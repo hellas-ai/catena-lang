@@ -399,12 +399,13 @@ fn reachable_context_prerequisites<'a>(
     let mut found: Vec<(&ClosureRegion, NodeId)> = Vec::new();
     while let Some(node) = pending.pop_front() {
         for region in regions {
-            if region.marker != dependent.marker && region.context.contains(&node) {
-                if !found.iter().any(|(found_region, found_node)| {
+            if region.marker != dependent.marker
+                && region.context.contains(&node)
+                && !found.iter().any(|(found_region, found_node)| {
                     found_region.marker == region.marker && *found_node == node
-                }) {
-                    found.push((region, node));
-                }
+                })
+            {
+                found.push((region, node));
             }
         }
 

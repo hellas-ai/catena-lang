@@ -260,7 +260,7 @@ fn map_name_operation(
         duplicate_outputs(&mapped_source)
     };
 
-    let id = OpenHypergraph::identity(domain.clone());
+    let id = OpenHypergraph::identity(domain);
     let f = map_non_cmc_operation(&operation, &operation_source, &operation_target);
     cup.compose(&id.tensor(&f))
         .expect("name.* expansion should compose")
@@ -352,11 +352,11 @@ fn map_lift(source: &[Obj], target: &[Obj]) -> ClosureForgottenTerm {
     let domain = closure_forgotten_boundary(fn_domain);
     let function_pointer = vec![function_type.clone()];
 
-    let prepare = cup(&domain).tensor(&OpenHypergraph::identity(function_pointer.clone()));
+    let prepare = cup(&domain).tensor(&OpenHypergraph::identity(function_pointer));
     let eval = map_non_cmc_operation(
         &op(EVAL),
         &[fn_domain.clone(), function_type.clone()],
-        &[fn_codomain.clone()],
+        std::slice::from_ref(fn_codomain),
     );
     let finish = OpenHypergraph::identity(domain).tensor(&eval);
 
@@ -733,14 +733,8 @@ mod tests {
             .expect("adapter should contain the original operation");
         let operation = &mapped.hypergraph.adjacency[operation_index];
 
-        assert_eq!(
-            source_types(&mapped),
-            vec![a.clone(), b.clone(), c.clone(), d.clone(), e.clone()]
-        );
-        assert_eq!(
-            target_types(&mapped),
-            vec![f.clone(), g.clone(), h.clone(), i.clone()]
-        );
+        assert_eq!(source_types(&mapped), vec![a, b, c, d, e]);
+        assert_eq!(target_types(&mapped), vec![f, g, h, i]);
         assert_eq!(
             operation
                 .sources
@@ -851,7 +845,7 @@ mod tests {
                 .iter()
                 .map(|node| mapped.hypergraph.nodes[node.0].clone())
                 .collect::<Vec<_>>(),
-            vec![closure.clone()],
+            vec![closure],
             "the operation should see the bracketed closure input"
         );
         assert_eq!(
@@ -860,7 +854,7 @@ mod tests {
                 .iter()
                 .map(|node| mapped.hypergraph.nodes[node.0].clone())
                 .collect::<Vec<_>>(),
-            vec![domain.clone(), c],
+            vec![domain, c],
             "the bracket should receive the erased closure domain and codomain"
         );
         assert_eq!(
@@ -945,10 +939,10 @@ mod tests {
             &map_non_cmc_operation(
                 &op("f"),
                 &[product(closure0.clone(), d.clone())],
-                &[c.clone()],
+                std::slice::from_ref(&c),
             ),
             &[product(closure0.clone(), d.clone())],
-            &[c.clone()],
+            std::slice::from_ref(&c),
         );
 
         let context = Tree::Leaf(0, ());
@@ -969,11 +963,11 @@ mod tests {
 
         assert_closure_forgotten_boundaries(
             &map_tensor(&[closure0.clone(), closure_2.clone()]),
-            &[closure0.clone(), closure_2],
+            &[closure0, closure_2],
             &[Tree::Node(
                 op(FN_HOM_TYPE),
                 0,
-                vec![product(a0.clone(), a1), product(b0, b1)],
+                vec![product(a0, a1), product(b0, b1)],
             )],
         );
 
@@ -989,7 +983,10 @@ mod tests {
         let lifted = Tree::Node(op(FN_HOM_TYPE), 0, vec![product(closure1, d), c]);
 
         assert_closure_forgotten_boundaries(
-            &map_lift(&[function.clone()], std::slice::from_ref(&lifted)),
+            &map_lift(
+                std::slice::from_ref(&function),
+                std::slice::from_ref(&lifted),
+            ),
             &[function],
             &[lifted],
         );

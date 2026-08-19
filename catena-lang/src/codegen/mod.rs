@@ -313,7 +313,7 @@ impl CodegenState<'_> {
                 continue;
             }
 
-            validate::assignment(&self.definitions, &instance.op, &op, &inputs)?;
+            validate::assignment(self.definitions, &instance.op, &op, &inputs)?;
 
             let call_symbol = if self.definitions.contains_key(&op) {
                 Some(self.ensure_specialization(&op, &inputs, &outputs)?)
@@ -367,8 +367,7 @@ impl CodegenState<'_> {
             inputs,
             outputs,
         );
-        self.instances
-            .insert((op.clone(), key.clone()), name.clone());
+        self.instances.insert((op.clone(), key), name.clone());
         self.queue.push_back(PendingInstance {
             op: op.clone(),
             name: name.clone(),

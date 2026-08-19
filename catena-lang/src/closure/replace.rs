@@ -824,11 +824,10 @@ fn interface_types(term: &Term) -> Result<Vec<Obj>, ReplaceClosuresError> {
         .enumerate()
         .map(|(compact, node)| (node.0, compact))
         .collect::<BTreeMap<_, _>>();
-    Ok(term
-        .targets
+    term.targets
         .iter()
         .map(|node| compact_type_map_leaves(&values[node.0], &compact_by_source_node))
-        .collect::<Result<_, _>>()?)
+        .collect::<Result<_, _>>()
 }
 
 fn compact_type_map_leaves(
@@ -840,7 +839,10 @@ fn compact_type_map_leaves(
         Tree::Leaf(node, annotation) => compact_by_source_node
             .get(node)
             .copied()
-            .map(|compact| Tree::Leaf(compact, *annotation))
+            .map(|compact| {
+                let _: () = *annotation;
+                Tree::Leaf(compact, ())
+            })
             .ok_or(ReplaceClosuresError::TypeMapEvaluation(format!(
                 "type-map target depends on non-context node w{node}"
             ))),
@@ -868,7 +870,10 @@ fn instantiate_context(object: &Obj, originals: &[usize]) -> Result<Obj, Replace
         Tree::Leaf(local, annotation) => originals
             .get(*local)
             .copied()
-            .map(|original| Tree::Leaf(original, *annotation))
+            .map(|original| {
+                let _: () = *annotation;
+                Tree::Leaf(original, ())
+            })
             .ok_or(ReplaceClosuresError::MissingOriginalContextLeaf { leaf: *local }),
         Tree::Node(operation, annotation, children) => Ok(Tree::Node(
             operation.clone(),

@@ -25,12 +25,17 @@ use metacat::theory::RawTheorySet;
 /// Run catena programs with the C backend
 #[derive(Debug)]
 pub struct Runtime {
+    /// GPU operations used to validate and release memory crossing the ABI.
+    gpu: Arc<GpuApi>,
+    loaded: Option<LoadedRuntime>,
+}
+
+#[derive(Debug)]
+struct LoadedRuntime {
     // Keep the tempdir-backed shared object alive for as long as the library is loaded.
     _artifact: Artifact,
     /// Prepared entry points in the loaded shared object.
     executor: Executor,
-    /// GPU operations used to validate and release memory crossing the ABI.
-    gpu: Arc<GpuApi>,
     /// Function signatures (runtime Rust ↔ C typechecking)
     signatures: SignatureTable,
 }
@@ -83,6 +88,8 @@ pub enum InitError {
 
 #[derive(Debug, Error, Serialize, Deserialize)]
 pub enum ExecError {
+    #[error("Runtime has no loaded sources")]
+    NoSourcesLoaded,
     #[error("Unknown source function '{0}'")]
     UnknownSourceFunction(String),
     #[error("Argument {index} expected {expected:?}, got {actual:?}")]
@@ -112,28 +119,34 @@ impl Runtime {
         self.gpu.clone()
     }
 
-    /// Construct a new runtime from a list of paths, interpreted as catena programs (&stdlib)
-    pub fn new<I>(paths: I, dialect: GpuDialect) -> Result<Runtime, InitError>
+    /// Construct an empty runtime for the selected GPU dialect.
+    pub fn new(dialect: GpuDialect) -> Result<Runtime, InitError> {
+        Ok(Self {
+            gpu: GpuApi::load(dialect)?,
+            loaded: None,
+        })
+    }
+
+    /// Load Catena programs from a list of paths.
+    pub fn load<I>(&mut self, paths: I) -> Result<(), InitError>
     where
         I: IntoIterator<Item = PathBuf>,
     {
         let raw_theories = metacat::theory::RawTheorySet::from_files(paths)?;
-        Self::from_raw_theories(raw_theories, dialect)
+        self.load_raw_theories(raw_theories)
     }
 
-    /// Construct a new runtime from in-memory Catena source strings.
-    pub fn from_sources<'a, I>(sources: I, dialect: GpuDialect) -> Result<Runtime, InitError>
+    /// Load Catena programs from in-memory source strings.
+    pub fn load_sources<'a, I>(&mut self, sources: I) -> Result<(), InitError>
     where
         I: IntoIterator<Item = &'a str>,
     {
         let raw_theories = RawTheorySet::from_texts(sources)?;
-        Self::from_raw_theories(raw_theories, dialect)
+        self.load_raw_theories(raw_theories)
     }
 
-    fn from_raw_theories(
-        raw_theories: RawTheorySet,
-        dialect: GpuDialect,
-    ) -> Result<Runtime, InitError> {
+    fn load_raw_theories(&mut self, raw_theories: RawTheorySet) -> Result<(), InitError> {
+        let dialect = self.gpu.dialect();
         let report = crate::compile::compile(raw_theories)?;
         let modules = report
             .gpu_modules
@@ -166,14 +179,12 @@ impl Runtime {
                 InitError::LoadSymbol { symbol, source }
             }
         })?;
-        let gpu = GpuApi::load(dialect)?;
-
-        Ok(Self {
+        self.loaded = Some(LoadedRuntime {
             _artifact: artifact,
             executor,
-            gpu,
             signatures: signature_table,
-        })
+        });
+        Ok(())
     }
 
     pub fn mem_u64(&self, values: &[u64]) -> Result<MemOwn, MemError> {
@@ -194,7 +205,8 @@ impl Runtime {
         name: &str,
         args: [Value<'a>; M],
     ) -> Result<[Value<'static>; N], ExecError> {
-        let signature = self
+        let loaded = self.loaded.as_ref().ok_or(ExecError::NoSourcesLoaded)?;
+        let signature = loaded
             .signatures
             .get(name)
             .ok_or_else(|| ExecError::UnknownSourceFunction(name.to_string()))?;
@@ -206,7 +218,7 @@ impl Runtime {
             });
         }
 
-        self.exec_symbol(name, signature, args.into())
+        self.exec_symbol(loaded, name, signature, args.into())
             .map(|values| values.try_into().expect("output arity already validated"))
     }
 
@@ -221,15 +233,17 @@ impl Runtime {
         name: &str,
         args: Vec<Value<'a>>,
     ) -> Result<Vec<Value<'static>>, ExecError> {
-        let signature = self
+        let loaded = self.loaded.as_ref().ok_or(ExecError::NoSourcesLoaded)?;
+        let signature = loaded
             .signatures
             .get(name)
             .ok_or_else(|| ExecError::UnknownSourceFunction(name.to_string()))?;
-        self.exec_symbol(name, signature, args)
+        self.exec_symbol(loaded, name, signature, args)
     }
 
     fn exec_symbol<'a>(
         &self,
+        loaded: &LoadedRuntime,
         name: &str,
         signature: &FunctionSignature,
         args: Vec<Value<'a>>,
@@ -266,10 +280,10 @@ impl Runtime {
                 Value::MemRef(memory) => Some(memory.dialect()),
                 _ => None,
             };
-            if let Some(dialect) = memory_dialect {
-                if self.gpu.dialect() != dialect {
-                    return Err(ExecError::IncompatibleDeviceMemory { index });
-                }
+            if let Some(dialect) = memory_dialect
+                && self.gpu.dialect() != dialect
+            {
+                return Err(ExecError::IncompatibleDeviceMemory { index });
             }
         }
 
@@ -286,7 +300,8 @@ impl Runtime {
             })
             .collect::<Vec<_>>();
 
-        self.executor
+        loaded
+            .executor
             .call(&signature.symbol, &raw_inputs, &mut raw_outputs);
 
         raw_outputs

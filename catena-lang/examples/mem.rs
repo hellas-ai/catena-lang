@@ -40,8 +40,8 @@ const SOURCE: &str = r#"
 "#;
 
 fn main() -> anyhow::Result<()> {
-    let runtime =
-        Runtime::from_sources(stdlib::sources().chain([SOURCE]), configured_gpu_dialect()?)?;
+    let mut runtime = Runtime::new(configured_gpu_dialect()?)?;
+    runtime.load_sources(stdlib::sources().chain([SOURCE]))?;
 
     let owned = runtime.mem_u64(&[3, 5])?;
     let borrowed = runtime.mem_u64(&[8, 13])?;

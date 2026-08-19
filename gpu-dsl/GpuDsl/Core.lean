@@ -88,6 +88,24 @@ def iterateTrace (step : SyncTrace → SyncTrace) : Nat → SyncTrace → SyncTr
   | 0, trace => trace
   | n + 1, trace => iterateTrace step n (step trace)
 
+/-- Internal dependent packaging used only by an ownership relation. -/
+structure SharedLocation where
+  name : String
+  length : Nat
+  index : Fin length
+
+/-- A kernel-specific ownership relation. -/
+abbrev OwnershipRelation (cfg : LaunchConfig) :=
+  SyncTrace → Coord (LaunchConfig.block cfg) → SharedLocation → Prop
+
+abbrev Owns {cfg : LaunchConfig} {BlockState State α : Type}
+    {name : String} {length : Nat}
+    {relation : OwnershipRelation cfg} (trace : SyncTrace)
+    (thread : Thread cfg BlockState State)
+    (_buffer : SharedBuffer (Thread.block thread) name length α)
+    (index : Fin length) : Prop :=
+  relation trace (Thread.index thread) ⟨name, length, index⟩
+
 /-- A pure staged value used by kernel statements. -/
 inductive Value (α : Type) : Type where
   | literal (value : α) : Value α
@@ -107,6 +125,54 @@ def mul [Mul α] (left right : Value α) : Value α :=
 
 end Value
 
+/-- Evidence produced only by a shared-memory write statement. -/
+structure Wrote {cfg : LaunchConfig} {BlockState α : Type}
+    {name : String} {length : Nat} {block : Block cfg BlockState}
+    (trace : SyncTrace)
+    (thread : Coord (LaunchConfig.block cfg))
+    (buffer : SharedBuffer block name length α) (index : Fin length)
+    (value : Value α) : Type where
+  private intro ::
+
+/-- Constructive evidence that a thread wrote some value to a cell. -/
+abbrev WroteSome (alpha : Type) {cfg : LaunchConfig} {BlockState : Type}
+    {name : String} {length : Nat} {block : Block cfg BlockState}
+    (trace : SyncTrace)
+    (thread : Coord (LaunchConfig.block cfg))
+    (buffer : SharedBuffer block name length alpha) (index : Fin length) : Type :=
+  Σ value : Value alpha, Wrote trace thread buffer index value
+
+/-- A cell is defined immediately after a tile-loaded barrier when some block
+thread wrote it before that barrier. -/
+structure Defined {cfg : LaunchConfig} {BlockState α : Type}
+    {name : String} {length : Nat} {block : Block cfg BlockState}
+    (trace : SyncTrace) (buffer : SharedBuffer block name length α)
+    (index : Fin length) : Type where
+  before : SyncTrace
+  writer : Coord (LaunchConfig.block cfg)
+  value : Value α
+  trace_eq : trace = before ++ [.tileLoaded]
+  wrote : Wrote before writer buffer index value
+
+def Defined.ofWrote {cfg : LaunchConfig} {BlockState α : Type}
+    {name : String} {length : Nat} {block : Block cfg BlockState}
+    {before : SyncTrace}
+    {writer : Coord (LaunchConfig.block cfg)} {value : Value α}
+    {buffer : SharedBuffer block name length α} {index : Fin length}
+    (wrote : Wrote before writer buffer index value) :
+    Defined (before ++ [.tileLoaded]) buffer index :=
+  ⟨before, writer, value, rfl, wrote⟩
+
+def WroteSome.defined {cfg : LaunchConfig} {BlockState α : Type}
+    {name : String} {length : Nat} {block : Block cfg BlockState}
+    {before : SyncTrace}
+    {writer : Coord (LaunchConfig.block cfg)}
+    {buffer : SharedBuffer block name length α} {source target : Fin length}
+    (write : WroteSome α before writer buffer source) (equal : source = target) :
+    Defined (before ++ [.tileLoaded]) buffer target := by
+  cases equal
+  exact Defined.ofWrote write.2
+
 /--
 The statement language is indexed by the running `Thread`, whose type carries
 the launch geometry and launch-created state types.
@@ -115,32 +181,39 @@ The higher-order constructors make this a compact typed operational IR. A
 backend/interpreter supplies the values passed to the continuations.
 -/
 inductive KernelM {cfg : LaunchConfig} {BlockState State : Type}
-    (thread : Thread cfg BlockState State) : SyncTrace → SyncTrace → Type → Type 1 where
-  | pure {α : Type} (value : α) : KernelM thread trace trace α
+    (ownershipRelation : OwnershipRelation cfg) (thread : Thread cfg BlockState State) :
+    SyncTrace → SyncTrace → Type → Type 1 where
+  | pure {α : Type} (value : α) : KernelM ownershipRelation thread trace trace α
   | bind {α β : Type}
-      (first : KernelM thread before middle α)
-      (next : α → KernelM thread middle after β) :
-      KernelM thread before after β
+      (first : KernelM ownershipRelation thread before middle α)
+      (next : α → KernelM ownershipRelation thread middle after β) :
+      KernelM ownershipRelation thread before after β
   /-- Write one shared-memory cell from the current physical thread. -/
   | writeShared {name : String} {n : Nat} {α : Type}
       (buffer : SharedBuffer (Thread.block thread) name n α)
       (index : Fin n)
-      (value : Value α) :
-      KernelM thread trace trace Unit
+      (value : Value α)
+      (owned : Owns (relation := ownershipRelation) trace thread buffer index) :
+      KernelM ownershipRelation thread trace trace
+        (Wrote trace (Thread.index thread) buffer index value)
   /-- Read one shared-memory cell from the current physical thread. -/
   | readShared {name : String} {n : Nat} {α : Type}
       (buffer : SharedBuffer (Thread.block thread) name n α)
-      (index : Fin n) :
-      KernelM thread trace trace (Value α)
-  | syncBlock (barrier : BarrierId) :
-      KernelM thread trace (trace ++ [barrier])
-        Unit
-  /-- A bounded loop whose loop-carried state depends on the current trace. -/
-  | foldFinD (n : Nat) (Acc : SyncTrace → Type)
-      (initial : Acc trace)
-      (body : ∀ currentTrace, Fin n → Acc currentTrace →
-        KernelM thread currentTrace (step currentTrace) (Acc (step currentTrace))) :
-      KernelM thread trace (iterateTrace step n trace)
-        (Acc (iterateTrace step n trace))
+      (index : Fin n)
+      (defined : Defined trace buffer index) :
+      KernelM ownershipRelation thread trace trace (Value α)
+  /-- A block barrier lifts a fact proved by the current thread to the same
+  fact for every thread in the block. -/
+  | syncBlock (barrier : BarrierId)
+      (facts : Coord (LaunchConfig.block cfg) → Type)
+      (currentFact : facts (Thread.index thread)) :
+      KernelM ownershipRelation thread trace (trace ++ [barrier]) (∀ other, facts other)
+  /-- A bounded loop with an ordinary, trace-independent accumulator. -/
+  | foldFinD (n : Nat) (step : SyncTrace → SyncTrace)
+      (startTrace : SyncTrace) {α : Type}
+      (initial : α)
+      (body : ∀ currentTrace, Fin n → α →
+        KernelM ownershipRelation thread currentTrace (step currentTrace) α) :
+      KernelM ownershipRelation thread startTrace (iterateTrace step n startTrace) α
 
 end GpuDsl

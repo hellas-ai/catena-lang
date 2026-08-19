@@ -70,8 +70,9 @@ The core design makes several future proof obligations natural:
 - Buffer reads accept only `Fin n`, so out-of-bounds access cannot be expressed.
 - `Thread config blockState state` is a reference supplied by `launch`; its
   dependent type carries the current block and launch-created state types.
-- `KernelM thread before after a` ties statements to a thread and records their
-  exact synchronization-trace transition.
+- `KernelM ownershipRelation thread before after a` records only the synchronization
+  trace transition. Ownership and initialization evidence are explicit proof
+  tokens passed to and returned by individual statements.
 - A `ScheduleCertificate` assigns every logical output index to exactly one
   `ThreadId`. A thread may own zero, one, or many output cells.
 - `OwnedOutputs` gives each physical thread the complete, duplicate-free list
@@ -86,23 +87,24 @@ The core design makes several future proof obligations natural:
   synthesized. The declared name is retained in the handle's type,
   distinguishing allocations such as `SharedBuffer block "tileA" ...` and
   `SharedBuffer block "tileB" ...`.
-- `KernelM.writeShared` and `KernelM.readShared` are ordinary single-thread
-  commands with statically bounded indices. They expose the accesses needed by
-  a future block/grid race analysis.
-- `KernelM.syncBlock` appends a named barrier to the synchronization trace.
-  `Kernel.body` requires one final trace for every thread and owned-output
-  list, so all thread invocations describe the same barrier sequence. Because
-  `launch` invokes the body exactly once per physical thread, barrier safety is
-  enforced by the kernel type itself.
+- `KernelM.writeShared` requires an `Owns` proof and returns a `Wrote` token
+  carrying the trace, thread, cell, and staged value. `KernelM.readShared`
+  requires a `Defined` token at its exact trace, so a stale or uninitialized
+  shared-memory read is not expressible.
+- `KernelM.syncBlock` is the collective barrier rule. It lifts a fact supplied
+  by the current thread to the same fact for every thread in the block. In the
+  tiled kernel this lifts both local `Wrote` tokens to block-wide write facts.
 - `LaunchFacts` exposes those launch guarantees to kernel proofs: every
   physical thread is invoked exactly once and completes the kernel's exact
   common synchronization trace. These facts are supplied by `launch` and must
   hold for any fair GPU implementation; the matmul body does not use them yet.
-- The trace partitions kernel commands into generic phases. A future analyzer
-  will collect each thread's reads and writes per phase, then prove that every
-  read is defined and that conflicting accesses cannot occur.
-- `KernelM.foldFinD` represents a statically bounded loop while tracking its
-  exact synchronization-trace transition.
+- `OwnershipRelation` supplies the common trace-indexed ownership relation used by
+  every thread. The tiled-matmul plan assigns both
+  `(row,column)` tile cells to thread `(column,row)`.
+- Coverage is proved at each matmul read by choosing its writer thread. A write
+  by that thread produces `Defined` evidence immediately after `tileLoaded`.
+- `KernelM.foldFinD` represents a statically bounded loop with an ordinary
+  accumulator and an exact synchronization-trace transition.
 
 The launch surface is intentionally close to CUDA/HIP:
 

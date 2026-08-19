@@ -46,6 +46,28 @@ def tiledScheduleCertificate
 def tiledMatmulStep (trace : SyncTrace) : SyncTrace :=
   (trace ++ [.tileLoaded]) ++ [.tileConsumed]
 
+private def tileThread
+    (blockXEq : Dim3.x (LaunchConfig.block cfg) = tile)
+    (blockYEq : Dim3.y (LaunchConfig.block cfg) = tile)
+    (blockZEq : Dim3.z (LaunchConfig.block cfg) = 1)
+    (row col : Fin tile) : Coord (LaunchConfig.block cfg) :=
+  { x := Fin.cast blockXEq.symm col
+    y := Fin.cast blockYEq.symm row
+    z := Fin.cast blockZEq.symm ⟨0, by decide⟩ }
+
+/-- Thread `(x,y)` owns cell `(y,x)` in both shared tiles. -/
+def tiledOwnershipRelation
+    (blockXEq : Dim3.x (LaunchConfig.block cfg) = tile)
+    (blockYEq : Dim3.y (LaunchConfig.block cfg) = tile)
+    (_blockZEq : Dim3.z (LaunchConfig.block cfg) = 1) :
+    OwnershipRelation cfg :=
+  fun _trace thread location =>
+    let row := Fin.cast blockYEq (Coord.y thread)
+    let col := Fin.cast blockXEq (Coord.x thread)
+    (location.name = "tileA" ∨ location.name = "tileB") ∧
+      ∃ equalLength : location.length = tile * tile,
+        Fin.cast equalLength location.index = Layout.offset Layout.rowMajor2D ⟨row, col⟩
+
 /-!
 Build a statically bounded sequence of kernel statements.  This is a Lean
 elaborator, not a new DSL primitive: the resulting term contains only `pure`,
@@ -53,11 +75,14 @@ elaborator, not a new DSL primitive: the resulting term contains only `pure`,
 -/
 def foldValueFinM
     (thread : Thread cfg BlockState State)
+    (ownershipRelation : OwnershipRelation cfg)
+    (trace : SyncTrace)
     (n : Nat) (initial : Value α)
-    (body : Fin n → Value α → KernelM thread trace trace (Value α)) :
-    KernelM thread trace trace (Value α) :=
+    (body : Fin n → Value α →
+      KernelM ownershipRelation thread trace trace (Value α)) :
+    KernelM ownershipRelation thread trace trace (Value α) :=
   let rec go (i : Nat) (acc : Value α) :
-      KernelM thread trace trace (Value α) :=
+      KernelM ownershipRelation thread trace trace (Value α) :=
     if hi : i < n then
       KernelM.bind (body ⟨i, hi⟩ acc) fun next => go (i + 1) next
     else
@@ -89,22 +114,26 @@ def tiledMatmulKernel
       Dim3.y (LaunchConfig.block cfg) = tile ∧
       Dim3.z (LaunchConfig.block cfg) = 1
   trace := iterateTrace tiledMatmulStep (ceilDiv inner tile) []
+  ownershipRelation := fun _cfg ⟨blockXEq, blockYEq, blockZEq⟩ =>
+    tiledOwnershipRelation blockXEq blockYEq blockZEq
   body := fun {_cfg} {_State} {_certificate}
-      ⟨blockXEq, blockYEq, _blockZEq⟩ _launchFacts thread _work =>
+      ⟨blockXEq, blockYEq, blockZEq⟩ _launchFacts thread _work => by
       let threadIndex := Thread.index thread
       let block := Thread.block thread
       let blockIndex := Block.index block
       let threadCol : Fin tile := Fin.cast blockXEq (Coord.x threadIndex)
       let threadRow : Fin tile := Fin.cast blockYEq (Coord.y threadIndex)
-      let sharedA := SharedState.get block "tileA"
-      let sharedB := SharedState.get block "tileB"
+      let sharedA := SharedState.get (length := tile * tile) block "tileA"
+      let sharedB := SharedState.get (length := tile * tile) block "tileB"
       let tileIndex : Fin (tile * tile) :=
         Layout.offset Layout.rowMajor2D ⟨threadRow, threadCol⟩
+      let ownershipRelation := tiledOwnershipRelation blockXEq blockYEq blockZEq
 
-      KernelM.bind
+      exact KernelM.bind
         (KernelM.foldFinD (ceilDiv inner tile)
-          (fun _trace => Value α) Value.zero
-          fun _trace kTile accumulator =>
+          tiledMatmulStep []
+          Value.zero
+          fun currentTrace kTile partialSum =>
           let valueA :=
             let row := Fin.val (Coord.y blockIndex) * tile + Fin.val threadRow
             let kA := Fin.val kTile * tile + Fin.val threadCol
@@ -121,21 +150,40 @@ def tiledMatmulKernel
                 b ⟨⟨kB, kBInBounds⟩, ⟨col, colInBounds⟩⟩
               else Value.zero
             else Value.zero
+          let indexAt := fun other =>
+            Layout.offset Layout.rowMajor2D
+              ⟨Fin.cast blockYEq (Coord.y other), Fin.cast blockXEq (Coord.x other)⟩
+          let barrierFacts := fun other =>
+            WroteSome α currentTrace other sharedA (indexAt other) ×
+            WroteSome α currentTrace other sharedB (indexAt other)
           KernelM.bind
-            (KernelM.writeShared sharedA tileIndex valueA) fun _ =>
+            (KernelM.writeShared sharedA tileIndex valueA (by
+              exact ⟨Or.inl rfl, rfl, rfl⟩)) fun wroteA =>
           KernelM.bind
-            (KernelM.writeShared sharedB tileIndex valueB) fun _ =>
-          KernelM.bind (KernelM.syncBlock .tileLoaded) fun _ =>
+            (KernelM.writeShared sharedB tileIndex valueB (by
+              exact ⟨Or.inr rfl, rfl, rfl⟩)) fun wroteB =>
           KernelM.bind
-            (foldValueFinM thread tile accumulator
-              fun k partialSum =>
+            (KernelM.syncBlock .tileLoaded barrierFacts (by
+              constructor
+              · exact ⟨valueA, wroteA⟩
+              · exact ⟨valueB, wroteB⟩)) fun allWrites =>
+          KernelM.bind
+            (foldValueFinM thread ownershipRelation (currentTrace ++ [.tileLoaded])
+              tile partialSum
+              fun k sumWithinTile =>
               let indexA := Layout.offset Layout.rowMajor2D ⟨threadRow, k⟩
               let indexB := Layout.offset Layout.rowMajor2D ⟨k, threadCol⟩
-              KernelM.bind (KernelM.readShared sharedA indexA) fun av =>
-              KernelM.bind (KernelM.readShared sharedB indexB) fun bv =>
-              KernelM.pure (Value.add partialSum (Value.mul av bv))) fun nextAccumulator =>
-          KernelM.bind (KernelM.syncBlock .tileConsumed) fun _ =>
-          KernelM.pure nextAccumulator) fun result =>
+              KernelM.bind (KernelM.readShared sharedA indexA (by
+                let writer := tileThread blockXEq blockYEq blockZEq threadRow k
+                apply WroteSome.defined (allWrites writer).1
+                simp [indexAt, writer, indexA, tileThread])) fun av =>
+              KernelM.bind (KernelM.readShared sharedB indexB (by
+                let writer := tileThread blockXEq blockYEq blockZEq k threadCol
+                apply WroteSome.defined (allWrites writer).2
+                simp [indexAt, writer, indexB, tileThread])) fun bv =>
+              KernelM.pure (Value.add sumWithinTile (Value.mul av bv))) fun sumAfterTile =>
+          KernelM.bind (KernelM.syncBlock .tileConsumed (fun _ => Unit) ()) fun _ =>
+          KernelM.pure sumAfterTile) fun result =>
         KernelM.pure (fun _index _member => result)
 
 end GpuDsl

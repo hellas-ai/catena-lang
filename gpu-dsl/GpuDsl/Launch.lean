@@ -53,16 +53,19 @@ structure Kernel (outputSpace : Space) (α : Type) where
   shared : SharedSpec
   /-- Static launch facts required by this kernel. -/
   requirements : LaunchConfig → Prop
-  /-- Every thread must finish after this exact synchronization trace. -/
+  /-- The exact synchronization trace followed by every thread. -/
   trace : SyncTrace
+  /-- The common ownership relation used by every thread in a block. -/
+  ownershipRelation : ∀ cfg, requirements cfg → OwnershipRelation cfg
   body :
     ∀ {cfg : LaunchConfig} {State : Type}
       {certificate : ScheduleCertificate cfg outputSpace},
-      requirements cfg →
+      (requirementsProof : requirements cfg) →
       LaunchFacts cfg trace →
       (thread : Thread cfg (SharedState α shared) State) →
       (work : OwnedOutputs certificate (Thread.id thread)) →
-      KernelM thread [] trace (OwnedOutputs.Result work α)
+      KernelM (ownershipRelation cfg requirementsProof) thread [] trace
+        (OwnedOutputs.Result work α)
 
 /-- An opaque launch token. Execution belongs to the eventual backend. -/
 structure Launch (outputLength : Nat) (α : Type) where

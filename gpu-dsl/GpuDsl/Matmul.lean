@@ -140,7 +140,7 @@ def tiledMatmulKernel
             (Fin.cast blockZEq (tileOwner tileCell).z)
             (Fin.cast blockZEq threadIndex.z)
           exact congrArg (fun z : Fin 1 => z.val) equalCasts
-      let writeOwnership := fun (trace : SyncTrace) (other : Thread _cfg _ _State) =>
+      let tileInvariant := fun (trace : SyncTrace) (other : Thread _cfg _ _State) =>
         Owns trace other sharedA (indexAt (Thread.index other)) ×
         Owns trace other sharedB (indexAt (Thread.index other))
       let publishWrites : SyncSpec (α := α) plan thread :=
@@ -160,14 +160,16 @@ def tiledMatmulKernel
       let initialOwnsB : Owns [] thread sharedB tileIndex :=
         ownership.grantWrite sharedB Layout.rowMajor2D.offset
           Layout.rowMajor2D_injective tileCell currentOwnsCell
+      let initialInvariant : tileInvariant [] thread :=
+        ⟨initialOwnsA, initialOwnsB⟩
 
       exact KernelM.bind
         (KernelM.foldFinD (ceilDiv inner tile)
           tiledMatmulStep []
-          (fun trace => writeOwnership trace thread)
-          ⟨initialOwnsA, initialOwnsB⟩
+          (fun trace => tileInvariant trace thread)
+          initialInvariant
           Value.zero
-          fun currentTrace kTile partialSum owns =>
+          fun currentTrace kTile partialSum invariant =>
           let valueA :=
             let row := Fin.val (Coord.y blockIndex) * tile + Fin.val threadRow
             let kA := Fin.val kTile * tile + Fin.val threadCol
@@ -188,9 +190,9 @@ def tiledMatmulKernel
             WroteSome α factTrace other sharedA (indexAt (Thread.index other)) ×
             WroteSome α factTrace other sharedB (indexAt (Thread.index other))
           KernelM.bind
-            (KernelM.writeShared sharedA tileIndex valueA owns.1) fun wroteA =>
+            (KernelM.writeShared sharedA tileIndex valueA invariant.1) fun wroteA =>
           KernelM.bind
-            (KernelM.writeShared sharedB tileIndex valueB owns.2) fun wroteB =>
+            (KernelM.writeShared sharedB tileIndex valueB invariant.2) fun wroteB =>
           let currentWrites : barrierFacts currentTrace thread :=
             (⟨valueA, wroteA⟩, ⟨valueB, wroteB⟩)
           KernelM.bind
@@ -225,7 +227,10 @@ def tiledMatmulKernel
           KernelM.bind
             (KernelM.syncBlock block rfl finishReads
               (facts := fun _factTrace _other => Unit) ()) fun ⟨_, nextOwnership⟩ =>
-          KernelM.pure (sumAfterTile, nextOwnership)) fun result =>
+          let nextInvariant : tileInvariant (tiledMatmulStep currentTrace) thread := by
+            simpa [tileInvariant, tiledMatmulStep, finishReads,
+              BarrierGrants.Result, OwnGrants.Result] using nextOwnership
+          KernelM.pure (sumAfterTile, nextInvariant)) fun result =>
         KernelM.pure (fun _index _member => result)
 
 end GpuDsl

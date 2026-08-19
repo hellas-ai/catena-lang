@@ -268,15 +268,16 @@ inductive KernelM {cfg : LaunchConfig} {BlockState State : Type}
       KernelM plan SharedScalar thread trace (trace ++ [spec.barrier])
         ((∀ other, Thread.block other = block → facts trace other) ×
           spec.grants.Result (trace ++ [spec.barrier]))
-  /-- A bounded loop with a trace-independent accumulator and a separate,
-  trace-indexed resource passed from one round to the next. -/
+  /-- A bounded loop with a trace-independent accumulator and a separate
+  invariant. The initial value and every callback result have the same
+  invariant shape, indexed by their current synchronization trace. -/
   | foldFinD (n : Nat) (step : SyncTrace → SyncTrace)
-      (startTrace : SyncTrace) {α : Type} (Resource : SyncTrace → Type)
-      (initialResource : Resource startTrace)
+      (startTrace : SyncTrace) {α : Type} (Invariant : SyncTrace → Type)
+      (initialInvariant : Invariant startTrace)
       (initial : α)
-      (body : ∀ currentTrace, Fin n → α → Resource currentTrace →
+      (body : ∀ currentTrace, Fin n → α → Invariant currentTrace →
         KernelM plan SharedScalar thread currentTrace (step currentTrace)
-          (α × Resource (step currentTrace))) :
+          (α × Invariant (step currentTrace))) :
       KernelM plan SharedScalar thread startTrace (iterateTrace step n startTrace) α
 
 end GpuDsl

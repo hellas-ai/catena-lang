@@ -113,8 +113,9 @@ The core design makes several future proof obligations natural:
   `Wrote` as `Defined`; `tileConsumed` resets those read shares and directly
   grants the next round's exclusive `Owns` tokens.
 - `KernelM.foldFinD` represents a statically bounded loop with an ordinary
-  accumulator, a separate trace-indexed resource, and an exact
-  synchronization-trace transition.
+  accumulator and a separate trace-indexed invariant. The initial invariant
+  and every callback result have the same shape; matmul's invariant contains
+  exactly the two `Owns` tokens needed by the next tile iteration.
 
 The launch surface is intentionally close to CUDA/HIP:
 

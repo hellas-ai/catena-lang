@@ -23,6 +23,7 @@ use metacat::{
     theory::TheoryId,
 };
 use open_hypergraphs::lax::NodeId;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{
@@ -47,7 +48,7 @@ type CodegenTermMap = TheoryTermMap<CodegenOperation>;
 
 const PROGRAM_THEORY: &str = "program";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum GpuDialect {
     Hip,
     Cuda,

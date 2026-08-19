@@ -18,15 +18,19 @@ use std::{
 
 use thiserror::Error;
 
+mod ipc;
 mod protocol;
 
-use self::protocol::{
-    ProtocolError, RemoteExecError, Request, Response, WireGpuDialect, WireValue, read_frame,
-    write_frame,
+use self::{
+    ipc::{ImportedIpcAllocation, IpcMemoryHandle, IpcTransport},
+    protocol::{
+        ProtocolError, RemoteExecError, Request, Response, WireExecution, WireIpcBuffer, WireValue,
+        read_frame, write_frame,
+    },
 };
 use crate::{
     codegen::GpuDialect,
-    runtime::{ExecError, Runtime, Value, ValueKind},
+    runtime::{ExecError, MemError, MemOwn, Runtime, Value},
 };
 
 const CHILD_MODE_ENV: &str = "CATENA_SAFE_RUNTIME_CHILD";
@@ -56,6 +60,8 @@ pub enum SafeInitError {
     UnexpectedResponse,
     #[error("SafeRuntime child terminated during initialization with {status}: {stderr}")]
     ChildTerminated { status: ExitStatus, stderr: String },
+    #[error(transparent)]
+    Memory(#[from] MemError),
 }
 
 /// Execution failures reported by [`SafeRuntime`].
@@ -63,8 +69,6 @@ pub enum SafeInitError {
 pub enum SafeExecError {
     #[error(transparent)]
     Runtime(#[from] ExecError),
-    #[error("SafeRuntime does not yet support {0:?} values")]
-    UnsupportedValueKind(ValueKind),
     #[error("SafeRuntime transport failed: {0}")]
     Transport(String),
     #[error("SafeRuntime child returned an unexpected execution response")]
@@ -73,6 +77,8 @@ pub enum SafeExecError {
     ChildTerminated { status: ExitStatus, stderr: String },
     #[error("SafeRuntime is unavailable because its child terminated with {status}: {stderr}")]
     Unavailable { status: ExitStatus, stderr: String },
+    #[error(transparent)]
+    Memory(#[from] MemError),
 }
 
 /// Failure in the worker-mode entrypoint itself.
@@ -94,6 +100,7 @@ pub enum ChildMainError {
 #[derive(Debug)]
 pub struct SafeRuntime {
     worker: Mutex<WorkerProcess>,
+    ipc: IpcTransport,
 }
 
 impl SafeRuntime {
@@ -128,17 +135,16 @@ impl SafeRuntime {
         dialect: GpuDialect,
     ) -> Result<Self, SafeInitError> {
         let executable = env::current_exe().map_err(SafeInitError::CurrentExecutable)?;
+        let ipc = IpcTransport::load(dialect)?;
         let mut worker = WorkerProcess::spawn(&executable)?;
         worker
-            .send(&Request::Initialize {
-                sources,
-                dialect: WireGpuDialect::from(dialect),
-            })
+            .send(&Request::Initialize { sources, dialect })
             .map_err(map_init_worker_error)?;
 
         match worker.receive().map_err(map_init_worker_error)? {
             Response::Initialized(Ok(())) => Ok(Self {
                 worker: Mutex::new(worker),
+                ipc,
             }),
             Response::Initialized(Err(error)) => Err(SafeInitError::RemoteInitialization(error)),
             Response::Executed(_) => Err(SafeInitError::UnexpectedResponse),
@@ -151,11 +157,18 @@ impl SafeRuntime {
         name: &str,
         args: [Value<'a>; M],
     ) -> Result<[Value<'static>; N], SafeExecError> {
-        let args = args
-            .into_iter()
-            .map(WireValue::try_from)
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(SafeExecError::UnsupportedValueKind)?;
+        self.exec_values(name, args.into())?
+            .try_into()
+            .map_err(|_| SafeExecError::UnexpectedResponse)
+    }
+
+    /// Run a source-level program with dynamically sized inputs and outputs.
+    pub fn exec_values<'a>(
+        &self,
+        name: &str,
+        args: Vec<Value<'a>>,
+    ) -> Result<Vec<Value<'static>>, SafeExecError> {
+        let (buffers, wire_args) = self.encode_parent_arguments(&args)?;
         let mut worker = self
             .worker
             .lock()
@@ -170,27 +183,132 @@ impl SafeRuntime {
         worker
             .send(&Request::Execute {
                 name: name.to_string(),
-                args,
+                buffers,
+                args: wire_args,
             })
             .map_err(map_exec_worker_error)?;
 
         let response = worker.receive().map_err(map_exec_worker_error)?;
-        let values = match response {
-            Response::Executed(Ok(values)) => {
-                values.into_iter().map(Value::from).collect::<Vec<_>>()
-            }
+        let execution = match response {
+            Response::Executed(Ok(execution)) => execution,
             Response::Executed(Err(RemoteExecError::Runtime(error))) => {
                 return Err(SafeExecError::Runtime(error));
             }
-            Response::Executed(Err(RemoteExecError::UnsupportedValueKind(kind))) => {
-                return Err(SafeExecError::UnsupportedValueKind(kind));
+            Response::Executed(Err(RemoteExecError::Memory(error))) => {
+                return Err(SafeExecError::Transport(format!(
+                    "child memory IPC failed: {error}"
+                )));
             }
-            Response::Initialized(_) => return Err(SafeExecError::UnexpectedResponse),
+            Response::Initialized(_) => {
+                return Err(SafeExecError::UnexpectedResponse);
+            }
         };
+        let values = self.decode_child_outputs(execution);
+        worker
+            .send(&Request::ReleaseOutputs)
+            .map_err(map_exec_worker_error)?;
         values
-            .try_into()
-            .map_err(|_| SafeExecError::UnexpectedResponse)
     }
+
+    /// Exports parent-owned arguments as views for the child to copy into its own allocations.
+    fn encode_parent_arguments(
+        &self,
+        args: &[Value<'_>],
+    ) -> Result<(Vec<WireIpcBuffer>, Vec<WireValue>), SafeExecError> {
+        let mut buffers = Vec::new();
+        let mut values = Vec::with_capacity(args.len());
+        for (index, value) in args.iter().enumerate() {
+            let wire = match value {
+                Value::Bool(value) => WireValue::Bool(*value),
+                Value::U16(value) => WireValue::U16(*value),
+                Value::U32(value) => WireValue::U32(*value),
+                Value::U64(value) => WireValue::U64(*value),
+                Value::F32(value) => WireValue::F32(*value),
+                Value::MemOwn(memory) => {
+                    if memory.dialect() != self.ipc.dialect() {
+                        return Err(SafeExecError::Runtime(
+                            ExecError::IncompatibleDeviceMemory { index },
+                        ));
+                    }
+                    let exported = self.ipc.export_view(memory.as_ref())?;
+                    let buffer_index = intern_buffer(&mut buffers, encode_ipc_buffer(exported));
+                    WireValue::MemOwn {
+                        buffer: buffer_index,
+                        view_offset: exported.view_offset(),
+                        byte_len: exported.byte_len(),
+                    }
+                }
+                Value::MemRef(memory) => {
+                    if memory.dialect() != self.ipc.dialect() {
+                        return Err(SafeExecError::Runtime(
+                            ExecError::IncompatibleDeviceMemory { index },
+                        ));
+                    }
+                    let exported = self.ipc.export_view(*memory)?;
+                    let buffer_index = intern_buffer(&mut buffers, encode_ipc_buffer(exported));
+                    WireValue::MemRef {
+                        buffer: buffer_index,
+                        view_offset: exported.view_offset(),
+                        byte_len: exported.byte_len(),
+                    }
+                }
+            };
+            values.push(wire);
+        }
+        if !buffers.is_empty() {
+            self.ipc.synchronize()?;
+        }
+        Ok((buffers, values))
+    }
+
+    /// Copies child-owned outputs into parent-owned allocations before releasing them remotely.
+    fn decode_child_outputs(
+        &self,
+        execution: WireExecution,
+    ) -> Result<Vec<Value<'static>>, SafeExecError> {
+        let imported = import_ipc_buffers(&self.ipc, execution.buffers).map_err(|error| {
+            SafeExecError::Transport(format!("child memory IPC failed: {error}"))
+        })?;
+        execution
+            .values
+            .into_iter()
+            .map(|value| match value {
+                WireValue::Bool(value) => Ok(Value::Bool(value)),
+                WireValue::U16(value) => Ok(Value::U16(value)),
+                WireValue::U32(value) => Ok(Value::U32(value)),
+                WireValue::U64(value) => Ok(Value::U64(value)),
+                WireValue::F32(value) => Ok(Value::F32(value)),
+                WireValue::MemOwn {
+                    buffer,
+                    view_offset,
+                    byte_len,
+                } => imported
+                    .get(buffer)
+                    .ok_or_else(|| SafeExecError::Transport("invalid IPC memory view".to_string()))?
+                    .copy_view_into_owned(view_offset, byte_len)?
+                    .map(Value::MemOwn)
+                    .ok_or_else(|| SafeExecError::Transport("invalid IPC memory view".to_string())),
+                WireValue::MemRef { .. } => Err(SafeExecError::UnexpectedResponse),
+            })
+            .collect()
+    }
+}
+
+fn encode_ipc_buffer(exported: ipc::ExportedIpcView) -> WireIpcBuffer {
+    WireIpcBuffer {
+        handle: exported.handle().map(|handle| handle.as_bytes().to_vec()),
+        allocation_byte_len: exported.allocation_byte_len(),
+    }
+}
+
+fn intern_buffer(buffers: &mut Vec<WireIpcBuffer>, buffer: WireIpcBuffer) -> usize {
+    buffers
+        .iter()
+        .position(|existing| existing == &buffer)
+        .unwrap_or_else(|| {
+            buffers.push(buffer);
+            buffers.len() - 1
+        })
 }
 
 /// Run the SafeRuntime child loop when this executable was spawned as a worker.
@@ -215,37 +333,35 @@ fn run_child_loop(mut reader: impl Read, mut writer: impl io::Write) -> Result<(
     };
 
     let source_refs = sources.iter().map(String::as_str);
-    let runtime = match Runtime::from_sources(source_refs, dialect.into()) {
-        Ok(runtime) => {
-            write_response(&mut writer, &Response::Initialized(Ok(())))?;
-            runtime
-        }
+    let runtime = match Runtime::from_sources(source_refs, dialect) {
+        Ok(runtime) => runtime,
         Err(error) => {
             write_response(&mut writer, &Response::Initialized(Err(error.to_string())))?;
             return Ok(());
         }
     };
+    let ipc = IpcTransport::from_runtime(&runtime);
+    write_response(&mut writer, &Response::Initialized(Ok(())))?;
 
+    let mut pending_outputs = Vec::new();
     while let Some(request) = read_request(&mut reader)? {
         match request {
             Request::Initialize { .. } => return Err(ChildMainError::AlreadyInitialized),
             Request::Shutdown => return Ok(()),
-            Request::Execute { name, args } => {
-                let args = args.into_iter().map(Value::from).collect::<Vec<_>>();
-                let response = match runtime.exec_values(&name, args) {
-                    Ok(values) => {
-                        match values
-                            .into_iter()
-                            .map(WireValue::try_from)
-                            .collect::<Result<Vec<_>, _>>()
-                        {
-                            Ok(values) => Response::Executed(Ok(values)),
-                            Err(kind) => {
-                                Response::Executed(Err(RemoteExecError::UnsupportedValueKind(kind)))
-                            }
-                        }
-                    }
-                    Err(error) => Response::Executed(Err(RemoteExecError::Runtime(error))),
+            Request::ReleaseOutputs => {
+                pending_outputs.clear();
+            }
+            Request::Execute {
+                name,
+                buffers,
+                args,
+            } => {
+                let response = if pending_outputs.is_empty() {
+                    execute_in_child(&runtime, &ipc, &name, buffers, args, &mut pending_outputs)
+                } else {
+                    Response::Executed(Err(RemoteExecError::Memory(
+                        "previous owned outputs have not been released".to_string(),
+                    )))
                 };
                 write_response(&mut writer, &response)?;
             }
@@ -253,6 +369,134 @@ fn run_child_loop(mut reader: impl Read, mut writer: impl io::Write) -> Result<(
     }
 
     Ok(())
+}
+
+/// Copies owned arguments into the child, runs the program, and prepares its outputs for export.
+fn execute_in_child(
+    runtime: &Runtime,
+    ipc: &IpcTransport,
+    name: &str,
+    buffers: Vec<WireIpcBuffer>,
+    wire_args: Vec<WireValue>,
+    pending_outputs: &mut Vec<MemOwn>,
+) -> Response {
+    let imported = match import_ipc_buffers(ipc, buffers) {
+        Ok(imported) => imported,
+        Err(error) => return Response::Executed(Err(RemoteExecError::Memory(error))),
+    };
+
+    let args = match wire_args
+        .into_iter()
+        .map(|value| match value {
+            WireValue::Bool(value) => Ok(Value::Bool(value)),
+            WireValue::U16(value) => Ok(Value::U16(value)),
+            WireValue::U32(value) => Ok(Value::U32(value)),
+            WireValue::U64(value) => Ok(Value::U64(value)),
+            WireValue::F32(value) => Ok(Value::F32(value)),
+            WireValue::MemRef {
+                buffer,
+                view_offset,
+                byte_len,
+            } => imported
+                .get(buffer)
+                .and_then(|allocation| allocation.as_mem_ref(view_offset, byte_len))
+                .map(Value::MemRef)
+                .ok_or_else(|| "invalid IPC memory view".to_string()),
+            WireValue::MemOwn {
+                buffer,
+                view_offset,
+                byte_len,
+            } => imported
+                .get(buffer)
+                .ok_or_else(|| "invalid IPC memory view".to_string())?
+                .copy_view_into_owned(view_offset, byte_len)
+                .map_err(|error| error.to_string())?
+                .map(Value::MemOwn)
+                .ok_or_else(|| "invalid IPC memory view".to_string()),
+        })
+        .collect::<Result<Vec<_>, _>>()
+    {
+        Ok(args) => args,
+        Err(error) => return Response::Executed(Err(RemoteExecError::Memory(error))),
+    };
+
+    let values = match runtime.exec_values(name, args) {
+        Ok(values) => values,
+        Err(error) => return Response::Executed(Err(RemoteExecError::Runtime(error))),
+    };
+    if let Err(error) = ipc.synchronize() {
+        return Response::Executed(Err(RemoteExecError::Memory(error.to_string())));
+    }
+    match encode_child_outputs(ipc, values, pending_outputs) {
+        Ok(execution) => Response::Executed(Ok(execution)),
+        Err(error) => {
+            pending_outputs.clear();
+            Response::Executed(Err(error))
+        }
+    }
+}
+
+fn import_ipc_buffers(
+    ipc: &IpcTransport,
+    buffers: Vec<WireIpcBuffer>,
+) -> Result<Vec<ImportedIpcAllocation>, String> {
+    buffers
+        .into_iter()
+        .map(|buffer| {
+            if buffer.handle.is_none() && buffer.allocation_byte_len != 0 {
+                return Err("non-empty IPC allocation has no handle".to_string());
+            }
+            let handle =
+                buffer
+                    .handle
+                    .map(|bytes| {
+                        bytes.try_into().map(IpcMemoryHandle::from_bytes).map_err(
+                            |bytes: Vec<u8>| format!("IPC memory handle has {} bytes", bytes.len()),
+                        )
+                    })
+                    .transpose()?;
+            ipc.import_allocation(handle, buffer.allocation_byte_len)
+                .map_err(|error| error.to_string())
+        })
+        .collect()
+}
+
+/// Exports owned outputs and retains them until the parent confirms it has copied them.
+fn encode_child_outputs(
+    ipc: &IpcTransport,
+    values: Vec<Value<'static>>,
+    pending_outputs: &mut Vec<MemOwn>,
+) -> Result<WireExecution, RemoteExecError> {
+    let mut buffers = Vec::new();
+    let mut wire_values = Vec::with_capacity(values.len());
+    for value in values {
+        let wire = match value {
+            Value::Bool(value) => WireValue::Bool(value),
+            Value::U16(value) => WireValue::U16(value),
+            Value::U32(value) => WireValue::U32(value),
+            Value::U64(value) => WireValue::U64(value),
+            Value::F32(value) => WireValue::F32(value),
+            Value::MemOwn(memory) => {
+                let exported = ipc
+                    .export_view(memory.as_ref())
+                    .map_err(|error| RemoteExecError::Memory(error.to_string()))?;
+                let buffer = intern_buffer(&mut buffers, encode_ipc_buffer(exported));
+                let value = WireValue::MemOwn {
+                    buffer,
+                    view_offset: exported.view_offset(),
+                    byte_len: exported.byte_len(),
+                };
+                pending_outputs.push(memory);
+                value
+            }
+            Value::MemRef(_) => unreachable!("Runtime rejects borrowed memory outputs"),
+        };
+        wire_values.push(wire);
+    }
+    Ok(WireExecution {
+        buffers,
+        values: wire_values,
+    })
 }
 
 fn read_request(reader: &mut impl Read) -> Result<Option<Request>, ChildMainError> {

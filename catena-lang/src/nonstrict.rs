@@ -117,6 +117,7 @@ pub(crate) fn to_flattener(object: &Obj) -> Term {
     dual(to_unflattener(object).map_edges(opposite_operation))
 }
 
+#[allow(dead_code)]
 pub(crate) fn to_unflatteners(objects: &[Obj]) -> Term {
     objects
         .iter()

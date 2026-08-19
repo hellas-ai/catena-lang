@@ -54,9 +54,6 @@ pub mod mem;
 /// manage and run compiled catena programs
 pub mod runtime;
 
-/// Low-level GPU operations needed to manage Runtime-owned allocations.
-pub(crate) mod gpu_api;
-
 /// Compile generated GPU C++ to a shared object.
 mod artifact;
 

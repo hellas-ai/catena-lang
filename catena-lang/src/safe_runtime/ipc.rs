@@ -8,10 +8,8 @@ use std::{ffi::c_void, sync::Arc};
 
 use crate::{
     codegen::GpuDialect,
-    runtime::{
-        MemError, MemOwn, MemRef, Runtime,
-        gpu_api::{GpuApi, IPC_HANDLE_BYTES, RawIpcMemHandle},
-    },
+    gpu::{GpuApi, IPC_HANDLE_BYTES, RawIpcMemHandle},
+    runtime::{MemError, MemOwn, MemRef, Runtime},
 };
 
 /// Opaque identity for one allocation generation.
@@ -20,16 +18,16 @@ use crate::{
 /// address produces a different IPC handle. Device addresses are therefore not
 /// part of this type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct IpcMemoryHandle {
+pub(super) struct IpcMemoryHandle {
     bytes: [u8; IPC_HANDLE_BYTES],
 }
 
 impl IpcMemoryHandle {
-    pub(crate) fn from_bytes(bytes: [u8; IPC_HANDLE_BYTES]) -> Self {
+    pub(super) fn from_bytes(bytes: [u8; IPC_HANDLE_BYTES]) -> Self {
         Self { bytes }
     }
 
-    pub(crate) fn as_bytes(&self) -> &[u8; IPC_HANDLE_BYTES] {
+    pub(super) fn as_bytes(&self) -> &[u8; IPC_HANDLE_BYTES] {
         &self.bytes
     }
 }
@@ -39,7 +37,7 @@ impl IpcMemoryHandle {
 /// A `MemOwn` is exported through its borrowed view; ownership itself never
 /// crosses the process boundary through the handle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct ExportedIpcView {
+pub(super) struct ExportedIpcView {
     handle: Option<IpcMemoryHandle>,
     allocation_byte_len: u64,
     view_offset: u64,
@@ -56,51 +54,51 @@ impl ExportedIpcView {
         }
     }
 
-    pub(crate) fn handle(&self) -> Option<&IpcMemoryHandle> {
+    pub(super) fn handle(&self) -> Option<&IpcMemoryHandle> {
         self.handle.as_ref()
     }
 
-    pub(crate) fn allocation_byte_len(&self) -> u64 {
+    pub(super) fn allocation_byte_len(&self) -> u64 {
         self.allocation_byte_len
     }
 
-    pub(crate) fn view_offset(&self) -> u64 {
+    pub(super) fn view_offset(&self) -> u64 {
         self.view_offset
     }
 
-    pub(crate) fn byte_len(&self) -> u64 {
+    pub(super) fn byte_len(&self) -> u64 {
         self.byte_len
     }
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct IpcTransport {
+pub(super) struct IpcTransport {
     gpu: Arc<GpuApi>,
 }
 
 impl IpcTransport {
-    pub(crate) fn load(dialect: GpuDialect) -> Result<Self, MemError> {
+    pub(super) fn load(dialect: GpuDialect) -> Result<Self, MemError> {
         Ok(Self {
             gpu: GpuApi::load(dialect)?,
         })
     }
 
-    pub(crate) fn from_runtime(runtime: &Runtime) -> Self {
+    pub(super) fn from_runtime(runtime: &Runtime) -> Self {
         Self {
             gpu: runtime.gpu_api(),
         }
     }
 
-    pub(crate) fn dialect(&self) -> GpuDialect {
+    pub(super) fn dialect(&self) -> GpuDialect {
         self.gpu.dialect()
     }
 
-    pub(crate) fn synchronize(&self) -> Result<(), MemError> {
+    pub(super) fn synchronize(&self) -> Result<(), MemError> {
         self.gpu.synchronize()
     }
 
     /// Exports a view while its owning process keeps the allocation alive.
-    pub(crate) fn export_view(&self, memory: MemRef<'_>) -> Result<ExportedIpcView, MemError> {
+    pub(super) fn export_view(&self, memory: MemRef<'_>) -> Result<ExportedIpcView, MemError> {
         debug_assert_eq!(memory.dialect(), self.dialect());
         if memory.byte_len() == 0 {
             return Ok(ExportedIpcView::empty());
@@ -118,7 +116,7 @@ impl IpcTransport {
     }
 
     /// Opens a sender-owned allocation for borrowing or copying in this process.
-    pub(crate) fn import_allocation(
+    pub(super) fn import_allocation(
         &self,
         handle: Option<IpcMemoryHandle>,
         allocation_byte_len: u64,
@@ -142,14 +140,14 @@ impl IpcTransport {
 /// Owned values are copied out before this mapping is closed rather than
 /// turning the imported mapping itself into a `MemOwn`.
 #[derive(Debug)]
-pub(crate) struct ImportedIpcAllocation {
+pub(super) struct ImportedIpcAllocation {
     data: *mut c_void,
     byte_len: u64,
     gpu: Arc<GpuApi>,
 }
 
 impl ImportedIpcAllocation {
-    pub(crate) fn as_mem_ref(&self, view_offset: u64, byte_len: u64) -> Option<MemRef<'_>> {
+    pub(super) fn as_mem_ref(&self, view_offset: u64, byte_len: u64) -> Option<MemRef<'_>> {
         let view_end = view_offset.checked_add(byte_len)?;
         if view_end > self.byte_len || (byte_len != 0 && self.data.is_null()) {
             return None;
@@ -165,7 +163,7 @@ impl ImportedIpcAllocation {
     }
 
     /// Copies an imported view into a new allocation owned by this process.
-    pub(crate) fn copy_view_into_owned(
+    pub(super) fn copy_view_into_owned(
         &self,
         view_offset: u64,
         byte_len: u64,

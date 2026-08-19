@@ -30,18 +30,18 @@ pub enum ArtifactError {
 
 /// A shared object file created by compiling generated Catena GPU C++.
 #[derive(Debug)]
-pub(crate) struct Artifact {
+pub(super) struct Artifact {
     _build_dir: tempfile::TempDir,
     path: PathBuf,
 }
 
 impl Artifact {
-    pub(crate) fn path(&self) -> &Path {
+    pub(super) fn path(&self) -> &Path {
         &self.path
     }
 }
 
-pub(crate) fn compile(cpp_path: &Path, dialect: GpuDialect) -> Result<Artifact, ArtifactError> {
+pub(super) fn compile(cpp_path: &Path, dialect: GpuDialect) -> Result<Artifact, ArtifactError> {
     let build_dir = tempfile::Builder::new()
         .prefix("catena-module-")
         .tempdir()?;

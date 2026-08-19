@@ -3,6 +3,7 @@ pub mod closure;
 pub mod codegen;
 pub mod compile;
 pub mod elaborate;
+mod gpu;
 pub mod hexpr;
 pub mod nonstrict;
 pub mod pass;

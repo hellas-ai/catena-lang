@@ -10,9 +10,9 @@ use super::{signature::SignatureTable, value::ValueKind};
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct CatenaMem {
-    pub(crate) data: *mut c_void,
-    pub(crate) len: u64,
+pub(super) struct CatenaMem {
+    pub(super) data: *mut c_void,
+    pub(super) len: u64,
 }
 
 /// Temporary storage for values crossing the generated C ABI.
@@ -23,7 +23,7 @@ pub(crate) struct CatenaMem {
 /// until generated code has filled its [`CatenaMem`] slot. It must therefore
 /// remain private to the synchronous executor boundary.
 #[derive(Debug)]
-pub(crate) enum AbiValue {
+pub(super) enum AbiValue {
     Bool(u8),
     U16(u16),
     U32(u32),
@@ -33,7 +33,7 @@ pub(crate) enum AbiValue {
 }
 
 impl AbiValue {
-    pub(crate) fn zeroed(kind: ValueKind) -> Self {
+    pub(super) fn zeroed(kind: ValueKind) -> Self {
         match kind {
             ValueKind::Bool => Self::Bool(0),
             ValueKind::U16 => Self::U16(0),
@@ -56,14 +56,14 @@ struct PreparedFunction {
 
 /// Loaded generated code and its prepared dynamic call interfaces.
 #[derive(Debug)]
-pub(crate) struct Executor {
+pub(super) struct Executor {
     // Keep the library loaded for as long as any cached code pointer can be used.
     _library: Library,
     functions: HashMap<String, PreparedFunction>,
 }
 
 #[derive(Debug, Error)]
-pub(crate) enum ExecutorError {
+pub(super) enum ExecutorError {
     #[error("failed to resolve generated symbol `{symbol}`: {source}")]
     LoadSymbol {
         symbol: String,
@@ -74,7 +74,7 @@ pub(crate) enum ExecutorError {
 
 impl Executor {
     /// Resolve generated entry points and prepare their libffi call interfaces once.
-    pub(crate) fn new(
+    pub(super) fn new(
         library: Library,
         signatures: &SignatureTable,
     ) -> Result<Self, ExecutorError> {
@@ -115,7 +115,7 @@ impl Executor {
     }
 
     /// Invoke a prepared symbol. Runtime validation guarantees the value shapes and kinds.
-    pub(crate) fn call(&self, symbol: &str, inputs: &[AbiValue], outputs: &mut [AbiValue]) {
+    pub(super) fn call(&self, symbol: &str, inputs: &[AbiValue], outputs: &mut [AbiValue]) {
         let function = self
             .functions
             .get(symbol)

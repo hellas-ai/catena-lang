@@ -8,7 +8,7 @@ use crate::{codegen::GpuDialect, runtime::ExecError};
 const MAX_FRAME_LEN: usize = 64 * 1024 * 1024;
 
 #[derive(Debug, Serialize, Deserialize)]
-pub(crate) enum Request {
+pub(super) enum Request {
     Initialize {
         sources: Vec<String>,
         dialect: GpuDialect,
@@ -23,25 +23,25 @@ pub(crate) enum Request {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub(crate) enum Response {
+pub(super) enum Response {
     Initialized(Result<(), String>),
     Executed(Result<WireExecution, RemoteExecError>),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub(crate) struct WireExecution {
-    pub(crate) buffers: Vec<WireIpcBuffer>,
-    pub(crate) values: Vec<WireValue>,
+pub(super) struct WireExecution {
+    pub(super) buffers: Vec<WireIpcBuffer>,
+    pub(super) values: Vec<WireValue>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub(crate) enum RemoteExecError {
+pub(super) enum RemoteExecError {
     Runtime(ExecError),
     Memory(String),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub(crate) enum WireValue {
+pub(super) enum WireValue {
     Bool(u8),
     U16(u16),
     U32(u32),
@@ -60,13 +60,13 @@ pub(crate) enum WireValue {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct WireIpcBuffer {
-    pub(crate) handle: Option<Vec<u8>>,
-    pub(crate) allocation_byte_len: u64,
+pub(super) struct WireIpcBuffer {
+    pub(super) handle: Option<Vec<u8>>,
+    pub(super) allocation_byte_len: u64,
 }
 
 #[derive(Debug, Error)]
-pub(crate) enum ProtocolError {
+pub(super) enum ProtocolError {
     #[error("protocol I/O failed: {0}")]
     Io(#[from] io::Error),
     #[error("failed to encode protocol message: {0}")]
@@ -77,7 +77,7 @@ pub(crate) enum ProtocolError {
     FrameTooLarge { actual: usize, maximum: usize },
 }
 
-pub(crate) fn write_frame<T: Serialize>(
+pub(super) fn write_frame<T: Serialize>(
     writer: &mut impl Write,
     message: &T,
 ) -> Result<(), ProtocolError> {
@@ -94,7 +94,7 @@ pub(crate) fn write_frame<T: Serialize>(
     Ok(())
 }
 
-pub(crate) fn read_frame<T: DeserializeOwned>(
+pub(super) fn read_frame<T: DeserializeOwned>(
     reader: &mut impl Read,
 ) -> Result<Option<T>, ProtocolError> {
     let Some(first) = read_first_byte(reader)? else {

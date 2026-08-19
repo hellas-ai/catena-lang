@@ -12,7 +12,6 @@ use serde::{Deserialize, Serialize};
 
 use super::artifact::{Artifact, ArtifactError};
 use super::executor::{AbiValue, Executor, ExecutorError};
-use super::gpu_api::GpuApi;
 use super::mem::{MemError, MemOwn};
 use super::{
     signature::{FunctionSignature, SignatureTable, signatures},
@@ -20,6 +19,7 @@ use super::{
 };
 use crate::codegen::{GpuDialect, gpu::GpuRenderError, gpu::render_modules};
 use crate::compile::CompileFailure;
+use crate::gpu::GpuApi;
 use metacat::theory::RawTheorySet;
 
 /// Run catena programs with the C backend

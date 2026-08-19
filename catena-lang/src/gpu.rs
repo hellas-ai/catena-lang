@@ -7,8 +7,8 @@ use std::{
 
 use libloading::{Library, Symbol};
 
-use super::mem::MemError;
 use crate::codegen::GpuDialect;
+use crate::runtime::MemError;
 
 const MEMCPY_HOST_TO_DEVICE: c_int = 1;
 const MEMCPY_DEVICE_TO_HOST: c_int = 2;
@@ -22,7 +22,7 @@ pub(crate) struct RawIpcMemHandle {
     pub(crate) bytes: [u8; IPC_HANDLE_BYTES],
 }
 
-/// The process-local HIP/CUDA operations needed to manage a [`super::MemOwn`].
+/// The process-local HIP/CUDA operations needed to manage a [`crate::runtime::MemOwn`].
 ///
 /// Transport-specific operations, including IPC and device-to-device copies,
 /// deliberately live outside Runtime.

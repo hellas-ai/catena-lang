@@ -55,19 +55,14 @@ private def tileThread
     y := Fin.cast blockYEq.symm row
     z := Fin.cast blockZEq.symm ⟨0, by decide⟩ }
 
-/-- Thread `(x,y)` owns cell `(y,x)` in both shared tiles. -/
-def tiledWriterRelation
-    {BlockState Scalar : Type}
+private def tiledOwnershipPlan
     (blockXEq : Dim3.x (LaunchConfig.block cfg) = tile)
     (blockYEq : Dim3.y (LaunchConfig.block cfg) = tile)
-    (_blockZEq : Dim3.z (LaunchConfig.block cfg) = 1) :
-    WriterRelation cfg BlockState Scalar where
-  writerFor := fun {name} {length} {_block} _trace thread _buffer index =>
-    let row := Fin.cast blockYEq (Coord.y thread)
-    let col := Fin.cast blockXEq (Coord.x thread)
-    (name = "tileA" ∨ name = "tileB") ∧
-      ∃ equalLength : length = tile * tile,
-        Fin.cast equalLength index = Layout.offset Layout.rowMajor2D ⟨row, col⟩
+    (blockZEq : Dim3.z (LaunchConfig.block cfg) = 1) :
+    OwnershipPlan cfg where
+  Cell := Index (.d2 tile tile)
+  owner := fun cell =>
+    tileThread blockXEq blockYEq blockZEq cell.row cell.col
 
 /-!
 Build a statically bounded sequence of kernel statements.  This is a Lean
@@ -75,15 +70,15 @@ elaborator, not a new DSL primitive: the resulting term contains only `pure`,
 `bind`, and the statements produced by `body`.
 -/
 def foldValueFinM
+    (plan : OwnershipPlan cfg)
     (thread : Thread cfg BlockState State)
-    (writerRelation : WriterRelation cfg BlockState α)
     (trace : SyncTrace)
     (n : Nat) (initial : Value α)
     (body : Fin n → Value α →
-      KernelM writerRelation thread trace trace (Value α)) :
-    KernelM writerRelation thread trace trace (Value α) :=
+      KernelM plan α thread trace trace (Value α)) :
+    KernelM plan α thread trace trace (Value α) :=
   let rec go (i : Nat) (acc : Value α) :
-      KernelM writerRelation thread trace trace (Value α) :=
+      KernelM plan α thread trace trace (Value α) :=
     if hi : i < n then
       KernelM.bind (body ⟨i, hi⟩ acc) fun next => go (i + 1) next
     else
@@ -114,11 +109,11 @@ def tiledMatmulKernel
     Dim3.x (LaunchConfig.block cfg) = tile ∧
       Dim3.y (LaunchConfig.block cfg) = tile ∧
       Dim3.z (LaunchConfig.block cfg) = 1
+  sharedOwner := fun _cfg ⟨blockXEq, blockYEq, blockZEq⟩ =>
+    tiledOwnershipPlan blockXEq blockYEq blockZEq
   trace := iterateTrace tiledMatmulStep (ceilDiv inner tile) []
-  writerRelation := fun _cfg ⟨blockXEq, blockYEq, blockZEq⟩ =>
-    tiledWriterRelation blockXEq blockYEq blockZEq
   body := fun {_cfg} {_State} {_certificate}
-      ⟨blockXEq, blockYEq, blockZEq⟩ _launchFacts thread _work => by
+      ⟨blockXEq, blockYEq, blockZEq⟩ _launchFacts thread ownership _work => by
       let threadIndex := Thread.index thread
       let block := Thread.block thread
       let blockIndex := Block.index block
@@ -126,38 +121,53 @@ def tiledMatmulKernel
       let threadRow : Fin tile := Fin.cast blockYEq (Coord.y threadIndex)
       let sharedA := SharedState.get (length := tile * tile) block "tileA"
       let sharedB := SharedState.get (length := tile * tile) block "tileB"
-      let indexAt := fun other =>
-        Layout.offset Layout.rowMajor2D
-          ⟨Fin.cast blockYEq (Coord.y other), Fin.cast blockXEq (Coord.x other)⟩
+      let cellAt := fun other : Coord _cfg.block =>
+        (⟨Fin.cast blockYEq (Coord.y other),
+          Fin.cast blockXEq (Coord.x other)⟩ : Index (.d2 tile tile))
+      let indexAt := fun other => Layout.offset Layout.rowMajor2D (cellAt other)
+      let tileCell : Index (.d2 tile tile) := cellAt threadIndex
       let tileIndex : Fin (tile * tile) := indexAt threadIndex
-      let writerRelation :
-          WriterRelation _cfg
-            (SharedState α
-              (.buffer "tileA" (tile * tile)
-                (.buffer "tileB" (tile * tile) .empty))) α :=
-        tiledWriterRelation blockXEq blockYEq blockZEq
-      let ownsTiles := fun (trace : SyncTrace) (other : Thread _cfg _ _State) =>
-        Owns (relation := writerRelation) trace other sharedA
-            (indexAt (Thread.index other)) ×
-          Owns (relation := writerRelation) trace other sharedB
-            (indexAt (Thread.index other))
-      let readsTiles := fun (trace : SyncTrace) (other : Thread _cfg _ _State) =>
-        ReadShare trace other sharedA × ReadShare trace other sharedB
-      let publishWrites : SyncSpec _cfg _ _State block :=
+      let plan := tiledOwnershipPlan blockXEq blockYEq blockZEq
+      let tileOwner := plan.owner
+      have currentOwnsCell : tileOwner tileCell = threadIndex := by
+        apply Coord.ext
+        · simp [tileOwner, plan, tiledOwnershipPlan, tileCell, cellAt, tileThread,
+            threadCol, threadIndex]
+        · simp [tileOwner, plan, tiledOwnershipPlan, tileCell, cellAt, tileThread,
+            threadRow, threadIndex]
+        · apply Fin.ext
+          have equalCasts := Subsingleton.elim
+            (Fin.cast blockZEq (tileOwner tileCell).z)
+            (Fin.cast blockZEq threadIndex.z)
+          exact congrArg (fun z : Fin 1 => z.val) equalCasts
+      let writeOwnership := fun (trace : SyncTrace) (other : Thread _cfg _ _State) =>
+        Owns trace other sharedA (indexAt (Thread.index other)) ×
+        Owns trace other sharedB (indexAt (Thread.index other))
+      let publishWrites : SyncSpec (α := α) plan thread :=
         { barrier := .tileLoaded
-          grants := readsTiles }
-      let finishReads : SyncSpec _cfg _ _State block :=
+          grants := .reads (.and (.one sharedA) (.one sharedB)) }
+      let finishReads : SyncSpec (α := α) plan thread :=
         { barrier := .tileConsumed
-          grants := ownsTiles }
+          grants := .owns (.and
+            (.one sharedA Layout.rowMajor2D.offset
+              Layout.rowMajor2D_injective tileCell currentOwnsCell)
+            (.one sharedB Layout.rowMajor2D.offset
+              Layout.rowMajor2D_injective tileCell currentOwnsCell)) }
+
+      let initialOwnsA : Owns [] thread sharedA tileIndex :=
+        ownership.grantWrite sharedA Layout.rowMajor2D.offset
+          Layout.rowMajor2D_injective tileCell currentOwnsCell
+      let initialOwnsB : Owns [] thread sharedB tileIndex :=
+        ownership.grantWrite sharedB Layout.rowMajor2D.offset
+          Layout.rowMajor2D_injective tileCell currentOwnsCell
 
       exact KernelM.bind
         (KernelM.foldFinD (ceilDiv inner tile)
           tiledMatmulStep []
-          (fun trace => ownsTiles trace thread)
-          ⟨Owns.initial (by exact ⟨Or.inl rfl, rfl, rfl⟩),
-            Owns.initial (by exact ⟨Or.inr rfl, rfl, rfl⟩)⟩
+          (fun trace => writeOwnership trace thread)
+          ⟨initialOwnsA, initialOwnsB⟩
           Value.zero
-          fun currentTrace kTile partialSum ownership =>
+          fun currentTrace kTile partialSum owns =>
           let valueA :=
             let row := Fin.val (Coord.y blockIndex) * tile + Fin.val threadRow
             let kA := Fin.val kTile * tile + Fin.val threadCol
@@ -178,16 +188,22 @@ def tiledMatmulKernel
             WroteSome α factTrace other sharedA (indexAt (Thread.index other)) ×
             WroteSome α factTrace other sharedB (indexAt (Thread.index other))
           KernelM.bind
-            (KernelM.writeShared sharedA tileIndex valueA ownership.1) fun wroteA =>
+            (KernelM.writeShared sharedA tileIndex valueA owns.1) fun wroteA =>
           KernelM.bind
-            (KernelM.writeShared sharedB tileIndex valueB ownership.2) fun wroteB =>
+            (KernelM.writeShared sharedB tileIndex valueB owns.2) fun wroteB =>
           let currentWrites : barrierFacts currentTrace thread :=
             (⟨valueA, wroteA⟩, ⟨valueB, wroteB⟩)
           KernelM.bind
             (KernelM.syncBlock block rfl publishWrites
               (facts := barrierFacts) currentWrites) fun ⟨allWrites, readShares⟩ =>
+          let readA : ReadShare (currentTrace ++ [.tileLoaded]) thread sharedA := by
+            simpa [publishWrites, BarrierGrants.Result, ReadGrants.Result] using
+              readShares.1
+          let readB : ReadShare (currentTrace ++ [.tileLoaded]) thread sharedB := by
+            simpa [publishWrites, BarrierGrants.Result, ReadGrants.Result] using
+              readShares.2
           KernelM.bind
-            (foldValueFinM thread writerRelation (currentTrace ++ [.tileLoaded])
+            (foldValueFinM plan thread (currentTrace ++ [.tileLoaded])
               tile partialSum
               fun k sumWithinTile =>
               let indexA := Layout.offset Layout.rowMajor2D ⟨threadRow, k⟩
@@ -196,14 +212,14 @@ def tiledMatmulKernel
                 let writerIndex := tileThread blockXEq blockYEq blockZEq threadRow k
                 let writer := { thread with index := writerIndex }
                 apply WroteSome.defined .tileLoaded (allWrites writer rfl).1
-                simp [indexAt, writer, writerIndex, indexA, tileThread])
-                readShares.1) fun av =>
+                simp [indexAt, cellAt, writer, writerIndex, indexA, tileThread])
+                readA) fun av =>
               KernelM.bind (KernelM.readShared sharedB indexB (by
                 let writerIndex := tileThread blockXEq blockYEq blockZEq k threadCol
                 let writer := { thread with index := writerIndex }
                 apply WroteSome.defined .tileLoaded (allWrites writer rfl).2
-                simp [indexAt, writer, writerIndex, indexB, tileThread])
-                readShares.2) fun bv =>
+                simp [indexAt, cellAt, writer, writerIndex, indexB, tileThread])
+                readB) fun bv =>
               KernelM.pure (Value.add sumWithinTile (Value.mul av bv)))
               fun sumAfterTile =>
           KernelM.bind

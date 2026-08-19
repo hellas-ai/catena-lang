@@ -43,6 +43,19 @@ structure LaunchFacts (cfg : LaunchConfig) (trace : SyncTrace) where
   everyThreadRunsExactlyOnce : ∀ threadId, invocationCount threadId = 1
   everyThreadHasExactTrace : ∀ threadId, completedTrace threadId = trace
 
+/-- The checked ownership service supplied by `launch` to one thread. -/
+structure LaunchOwnership {cfg : LaunchConfig} {BlockState State : Type}
+    (plan : OwnershipPlan cfg) (α : Type)
+    (thread : Thread cfg BlockState State) where
+  grantWrite :
+    ∀ {name : String} {n : Nat}
+      (buffer : SharedBuffer (Thread.block thread) name n α)
+      (layout : plan.Cell → Fin n),
+      Injective layout →
+      (cell : plan.Cell) →
+      plan.owner cell = Thread.index thread →
+      Owns [] thread buffer (layout cell)
+
 /--
 A generic kernel depends only on its logical output space. Launch geometry,
 block state, thread state, and the schedule certificate are supplied by the
@@ -53,19 +66,19 @@ structure Kernel (outputSpace : Space) (α : Type) where
   shared : SharedSpec
   /-- Static launch facts required by this kernel. -/
   requirements : LaunchConfig → Prop
+  /-- The cell-to-thread assignment realized by `launch`. -/
+  sharedOwner : ∀ cfg, requirements cfg → OwnershipPlan cfg
   /-- The exact synchronization trace followed by every thread. -/
   trace : SyncTrace
-  /-- The common unique-writer relation used by every thread in a block. -/
-  writerRelation : ∀ cfg, requirements cfg →
-    WriterRelation cfg (SharedState α shared) α
   body :
     ∀ {cfg : LaunchConfig} {State : Type}
       {certificate : ScheduleCertificate cfg outputSpace},
       (requirementsProof : requirements cfg) →
       LaunchFacts cfg trace →
       (thread : Thread cfg (SharedState α shared) State) →
+      LaunchOwnership (sharedOwner cfg requirementsProof) α thread →
       (work : OwnedOutputs certificate (Thread.id thread)) →
-      KernelM (writerRelation cfg requirementsProof) thread [] trace
+      KernelM (sharedOwner cfg requirementsProof) α thread [] trace
         (OwnedOutputs.Result work α)
 
 /-- An opaque launch token. Execution belongs to the eventual backend. -/
@@ -74,9 +87,9 @@ structure Launch (outputLength : Nat) (α : Type) where
 
 /--
 CUDA/HIP-shaped primitive. Its implementation creates block/thread state,
-allocates `Kernel.shared` once per block, constructs each thread's complete
-`OwnedOutputs`, and invokes `Kernel.body` exactly once per physical thread. It
-supplies the corresponding `LaunchFacts` to the body and stores every returned
+allocates `Kernel.shared` once per block, constructs each thread's ownership
+grants and complete `OwnedOutputs`, and invokes `Kernel.body` exactly once per
+physical thread. It supplies the corresponding `LaunchFacts` to the body and stores every returned
 work-item result through `outputLayout`. No implementation is given here.
 -/
 axiom launch

@@ -32,6 +32,13 @@ structure Coord (bounds : Dim3) where
   y : Fin bounds.y
   z : Fin bounds.z
 
+@[ext] theorem Coord.ext {left right : Coord bounds}
+    (x : left.x = right.x) (y : left.y = right.y) (z : left.z = right.z) :
+    left = right := by
+  cases left
+  cases right
+  simp_all
+
 /-- The identity of a physical GPU thread within one launch. -/
 structure ThreadId (cfg : LaunchConfig) where
   blockIdx : Coord (LaunchConfig.grid cfg)
@@ -88,34 +95,19 @@ def iterateTrace (step : SyncTrace → SyncTrace) : Nat → SyncTrace → SyncTr
   | 0, trace => trace
   | n + 1, trace => iterateTrace step n (step trace)
 
-/-- A kernel-specific unique-writer relation over actual block-scoped buffers. -/
-structure WriterRelation
-    (cfg : LaunchConfig) (BlockState SharedScalar : Type) where
-  writerFor : ∀ {name : String} {length : Nat} {block : Block cfg BlockState},
-    SyncTrace → Coord (LaunchConfig.block cfg) →
-      SharedBuffer block name length SharedScalar → Fin length → Prop
-
-abbrev WriterFor {cfg : LaunchConfig} {BlockState State SharedScalar : Type}
-    {name : String} {length : Nat} {block : Block cfg BlockState}
-    {relation : WriterRelation cfg BlockState SharedScalar} (trace : SyncTrace)
-    (thread : Thread cfg BlockState State)
-    (buffer : SharedBuffer block name length SharedScalar)
-    (index : Fin length) : Prop :=
-  relation.writerFor trace (Thread.index thread) buffer index
+/-- A launch-time assignment of each logical shared cell to one block thread. -/
+structure OwnershipPlan (cfg : LaunchConfig) where
+  Cell : Type
+  owner : Cell → Coord (LaunchConfig.block cfg)
 
 /-- Exclusive access to one cell. -/
 structure Owns {cfg : LaunchConfig} {BlockState State SharedScalar : Type}
     {name : String} {length : Nat} {block : Block cfg BlockState}
-    {relation : WriterRelation cfg BlockState SharedScalar} (trace : SyncTrace)
+    (trace : SyncTrace)
     (thread : Thread cfg BlockState State)
     (buffer : SharedBuffer block name length SharedScalar)
     (index : Fin length) : Type where
   private intro ::
-
-def Owns.initial
-    (_writerFor : WriterFor (relation := relation) [] thread buffer index) :
-    Owns (relation := relation) [] thread buffer index :=
-  ⟨⟩
 
 /-- A pure staged value used by kernel statements. -/
 inductive Value (α : Type) : Type where
@@ -188,13 +180,52 @@ structure ReadShare {cfg : LaunchConfig} {BlockState State α : Type}
     (buffer : SharedBuffer block name length α) : Type where
   private intro ::
 
-/-- The permissions granted after one barrier. Every permission from the
-pre-barrier trace is reset by the trace transition itself. -/
-structure SyncSpec
-    (cfg : LaunchConfig) (BlockState State : Type)
-    (block : Block cfg BlockState) where
+/-- One or more shared read permissions granted by a barrier. -/
+inductive ReadGrants {cfg : LaunchConfig} {BlockState State : Type}
+    (α : Type) (thread : Thread cfg BlockState State) : Type where
+  | one {name : String} {length : Nat}
+      (buffer : SharedBuffer thread.block name length α) : ReadGrants α thread
+  | and (left right : ReadGrants α thread) : ReadGrants α thread
+
+def ReadGrants.Result (trace : SyncTrace) :
+    ReadGrants α thread → Type
+  | .one buffer => ReadShare trace thread buffer
+  | .and left right => left.Result trace × right.Result trace
+
+/-- One or more exclusive permissions, each checked against the launch plan. -/
+inductive OwnGrants {cfg : LaunchConfig} {BlockState State : Type}
+    (plan : OwnershipPlan cfg) (α : Type)
+    (thread : Thread cfg BlockState State) : Type where
+  | one {name : String} {length : Nat}
+      (buffer : SharedBuffer thread.block name length α)
+      (layout : plan.Cell → Fin length)
+      (layoutInjective : Injective layout)
+      (cell : plan.Cell)
+      (isOwner : plan.owner cell = thread.index) : OwnGrants plan α thread
+  | and (left right : OwnGrants plan α thread) : OwnGrants plan α thread
+
+def OwnGrants.Result (trace : SyncTrace) :
+    OwnGrants plan α thread → Type
+  | .one buffer layout _ cell _ => Owns trace thread buffer (layout cell)
+  | .and left right => left.Result trace × right.Result trace
+
+/-- A barrier grants either shared reads or checked exclusive ownership. -/
+inductive BarrierGrants {cfg : LaunchConfig} {BlockState State : Type}
+    (plan : OwnershipPlan cfg) (α : Type)
+    (thread : Thread cfg BlockState State) : Type where
+  | reads (grants : ReadGrants α thread) : BarrierGrants plan α thread
+  | owns (grants : OwnGrants plan α thread) : BarrierGrants plan α thread
+
+def BarrierGrants.Result (trace : SyncTrace) :
+    BarrierGrants plan α thread → Type
+  | .reads grants => grants.Result trace
+  | .owns grants => grants.Result trace
+
+/-- The permission transition performed by one barrier. -/
+structure SyncSpec {cfg : LaunchConfig} {BlockState State α : Type}
+    (plan : OwnershipPlan cfg) (thread : Thread cfg BlockState State) where
   barrier : BarrierId
-  grants : SyncTrace → Thread cfg BlockState State → Type
+  grants : BarrierGrants plan α thread
 
 /--
 The statement language is indexed by the running `Thread`, whose type carries
@@ -203,22 +234,22 @@ the launch geometry and launch-created state types.
 The higher-order constructors make this a compact typed operational IR. A
 backend/interpreter supplies the values passed to the continuations.
 -/
-inductive KernelM {cfg : LaunchConfig} {BlockState State SharedScalar : Type}
-    (writerRelation : WriterRelation cfg BlockState SharedScalar)
+inductive KernelM {cfg : LaunchConfig} {BlockState State : Type}
+    (plan : OwnershipPlan cfg) (SharedScalar : Type)
     (thread : Thread cfg BlockState State) :
     SyncTrace → SyncTrace → Type → Type 1 where
-  | pure {α : Type} (value : α) : KernelM writerRelation thread trace trace α
+  | pure {α : Type} (value : α) : KernelM plan SharedScalar thread trace trace α
   | bind {α β : Type}
-      (first : KernelM writerRelation thread before middle α)
-      (next : α → KernelM writerRelation thread middle after β) :
-      KernelM writerRelation thread before after β
+      (first : KernelM plan SharedScalar thread before middle α)
+      (next : α → KernelM plan SharedScalar thread middle after β) :
+      KernelM plan SharedScalar thread before after β
   /-- Write one shared-memory cell from the current physical thread. -/
   | writeShared {name : String} {n : Nat}
       (buffer : SharedBuffer (Thread.block thread) name n SharedScalar)
       (index : Fin n)
       (value : Value SharedScalar)
-      (owned : Owns (relation := writerRelation) trace thread buffer index) :
-      KernelM writerRelation thread trace trace
+      (owned : Owns trace thread buffer index) :
+      KernelM plan SharedScalar thread trace trace
         (Wrote trace thread buffer index value)
   /-- Read one shared-memory cell from the current physical thread. -/
   | readShared {name : String} {n : Nat}
@@ -226,17 +257,17 @@ inductive KernelM {cfg : LaunchConfig} {BlockState State SharedScalar : Type}
       (index : Fin n)
       (defined : Defined trace buffer index)
       (readShare : ReadShare trace thread buffer) :
-      KernelM writerRelation thread trace trace (Value SharedScalar)
+      KernelM plan SharedScalar thread trace trace (Value SharedScalar)
   /-- A block barrier lifts a fact proved by the current thread to the same
   fact for every thread in the block. -/
   | syncBlock (block : Block cfg BlockState)
       (belongsToBlock : Thread.block thread = block)
-      (spec : SyncSpec cfg BlockState State block)
+      (spec : SyncSpec (α := SharedScalar) plan thread)
       {facts : SyncTrace → Thread cfg BlockState State → Type}
       (currentFact : facts trace thread) :
-      KernelM writerRelation thread trace (trace ++ [spec.barrier])
+      KernelM plan SharedScalar thread trace (trace ++ [spec.barrier])
         ((∀ other, Thread.block other = block → facts trace other) ×
-          spec.grants (trace ++ [spec.barrier]) thread)
+          spec.grants.Result (trace ++ [spec.barrier]))
   /-- A bounded loop with a trace-independent accumulator and a separate,
   trace-indexed resource passed from one round to the next. -/
   | foldFinD (n : Nat) (step : SyncTrace → SyncTrace)
@@ -244,8 +275,8 @@ inductive KernelM {cfg : LaunchConfig} {BlockState State SharedScalar : Type}
       (initialResource : Resource startTrace)
       (initial : α)
       (body : ∀ currentTrace, Fin n → α → Resource currentTrace →
-        KernelM writerRelation thread currentTrace (step currentTrace)
+        KernelM plan SharedScalar thread currentTrace (step currentTrace)
           (α × Resource (step currentTrace))) :
-      KernelM writerRelation thread startTrace (iterateTrace step n startTrace) α
+      KernelM plan SharedScalar thread startTrace (iterateTrace step n startTrace) α
 
 end GpuDsl

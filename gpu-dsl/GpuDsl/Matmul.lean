@@ -57,16 +57,17 @@ private def tileThread
 
 /-- Thread `(x,y)` owns cell `(y,x)` in both shared tiles. -/
 def tiledOwnershipRelation
+    {BlockState Scalar : Type}
     (blockXEq : Dim3.x (LaunchConfig.block cfg) = tile)
     (blockYEq : Dim3.y (LaunchConfig.block cfg) = tile)
     (_blockZEq : Dim3.z (LaunchConfig.block cfg) = 1) :
-    OwnershipRelation cfg :=
-  fun _trace thread location =>
+    OwnershipRelation cfg BlockState Scalar where
+  owns := fun {name} {length} {_block} _trace thread _buffer index =>
     let row := Fin.cast blockYEq (Coord.y thread)
     let col := Fin.cast blockXEq (Coord.x thread)
-    (location.name = "tileA" ∨ location.name = "tileB") ∧
-      ∃ equalLength : location.length = tile * tile,
-        Fin.cast equalLength location.index = Layout.offset Layout.rowMajor2D ⟨row, col⟩
+    (name = "tileA" ∨ name = "tileB") ∧
+      ∃ equalLength : length = tile * tile,
+        Fin.cast equalLength index = Layout.offset Layout.rowMajor2D ⟨row, col⟩
 
 /-!
 Build a statically bounded sequence of kernel statements.  This is a Lean
@@ -75,7 +76,7 @@ elaborator, not a new DSL primitive: the resulting term contains only `pure`,
 -/
 def foldValueFinM
     (thread : Thread cfg BlockState State)
-    (ownershipRelation : OwnershipRelation cfg)
+    (ownershipRelation : OwnershipRelation cfg BlockState α)
     (trace : SyncTrace)
     (n : Nat) (initial : Value α)
     (body : Fin n → Value α →
@@ -127,7 +128,12 @@ def tiledMatmulKernel
       let sharedB := SharedState.get (length := tile * tile) block "tileB"
       let tileIndex : Fin (tile * tile) :=
         Layout.offset Layout.rowMajor2D ⟨threadRow, threadCol⟩
-      let ownershipRelation := tiledOwnershipRelation blockXEq blockYEq blockZEq
+      let ownershipRelation :
+          OwnershipRelation _cfg
+            (SharedState α
+              (.buffer "tileA" (tile * tile)
+                (.buffer "tileB" (tile * tile) .empty))) α :=
+        tiledOwnershipRelation blockXEq blockYEq blockZEq
 
       exact KernelM.bind
         (KernelM.foldFinD (ceilDiv inner tile)

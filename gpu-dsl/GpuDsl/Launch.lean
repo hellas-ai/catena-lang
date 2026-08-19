@@ -56,7 +56,8 @@ structure Kernel (outputSpace : Space) (α : Type) where
   /-- The exact synchronization trace followed by every thread. -/
   trace : SyncTrace
   /-- The common ownership relation used by every thread in a block. -/
-  ownershipRelation : ∀ cfg, requirements cfg → OwnershipRelation cfg
+  ownershipRelation : ∀ cfg, requirements cfg →
+    OwnershipRelation cfg (SharedState α shared) α
   body :
     ∀ {cfg : LaunchConfig} {State : Type}
       {certificate : ScheduleCertificate cfg outputSpace},

@@ -88,23 +88,20 @@ def iterateTrace (step : SyncTrace → SyncTrace) : Nat → SyncTrace → SyncTr
   | 0, trace => trace
   | n + 1, trace => iterateTrace step n (step trace)
 
-/-- Internal dependent packaging used only by an ownership relation. -/
-structure SharedLocation where
-  name : String
-  length : Nat
-  index : Fin length
+/-- A kernel-specific ownership relation over actual block-scoped buffers. -/
+structure OwnershipRelation
+    (cfg : LaunchConfig) (BlockState SharedScalar : Type) where
+  owns : ∀ {name : String} {length : Nat} {block : Block cfg BlockState},
+    SyncTrace → Coord (LaunchConfig.block cfg) →
+      SharedBuffer block name length SharedScalar → Fin length → Prop
 
-/-- A kernel-specific ownership relation. -/
-abbrev OwnershipRelation (cfg : LaunchConfig) :=
-  SyncTrace → Coord (LaunchConfig.block cfg) → SharedLocation → Prop
-
-abbrev Owns {cfg : LaunchConfig} {BlockState State α : Type}
+abbrev Owns {cfg : LaunchConfig} {BlockState State SharedScalar : Type}
     {name : String} {length : Nat}
-    {relation : OwnershipRelation cfg} (trace : SyncTrace)
+    {relation : OwnershipRelation cfg BlockState SharedScalar} (trace : SyncTrace)
     (thread : Thread cfg BlockState State)
-    (_buffer : SharedBuffer (Thread.block thread) name length α)
+    (buffer : SharedBuffer (Thread.block thread) name length SharedScalar)
     (index : Fin length) : Prop :=
-  relation trace (Thread.index thread) ⟨name, length, index⟩
+  relation.owns trace (Thread.index thread) buffer index
 
 /-- A pure staged value used by kernel statements. -/
 inductive Value (α : Type) : Type where
@@ -180,8 +177,9 @@ the launch geometry and launch-created state types.
 The higher-order constructors make this a compact typed operational IR. A
 backend/interpreter supplies the values passed to the continuations.
 -/
-inductive KernelM {cfg : LaunchConfig} {BlockState State : Type}
-    (ownershipRelation : OwnershipRelation cfg) (thread : Thread cfg BlockState State) :
+inductive KernelM {cfg : LaunchConfig} {BlockState State SharedScalar : Type}
+    (ownershipRelation : OwnershipRelation cfg BlockState SharedScalar)
+    (thread : Thread cfg BlockState State) :
     SyncTrace → SyncTrace → Type → Type 1 where
   | pure {α : Type} (value : α) : KernelM ownershipRelation thread trace trace α
   | bind {α β : Type}
@@ -189,19 +187,19 @@ inductive KernelM {cfg : LaunchConfig} {BlockState State : Type}
       (next : α → KernelM ownershipRelation thread middle after β) :
       KernelM ownershipRelation thread before after β
   /-- Write one shared-memory cell from the current physical thread. -/
-  | writeShared {name : String} {n : Nat} {α : Type}
-      (buffer : SharedBuffer (Thread.block thread) name n α)
+  | writeShared {name : String} {n : Nat}
+      (buffer : SharedBuffer (Thread.block thread) name n SharedScalar)
       (index : Fin n)
-      (value : Value α)
+      (value : Value SharedScalar)
       (owned : Owns (relation := ownershipRelation) trace thread buffer index) :
       KernelM ownershipRelation thread trace trace
         (Wrote trace (Thread.index thread) buffer index value)
   /-- Read one shared-memory cell from the current physical thread. -/
-  | readShared {name : String} {n : Nat} {α : Type}
-      (buffer : SharedBuffer (Thread.block thread) name n α)
+  | readShared {name : String} {n : Nat}
+      (buffer : SharedBuffer (Thread.block thread) name n SharedScalar)
       (index : Fin n)
       (defined : Defined trace buffer index) :
-      KernelM ownershipRelation thread trace trace (Value α)
+      KernelM ownershipRelation thread trace trace (Value SharedScalar)
   /-- A block barrier lifts a fact proved by the current thread to the same
   fact for every thread in the block. -/
   | syncBlock (barrier : BarrierId)

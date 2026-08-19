@@ -196,6 +196,9 @@ division, and weight-base calculation occur once per output block. BF16
 conversion and F32 multiplication remain separate for gate and up, and both
 outputs use the exact adjacent-pair tree from `materializec.reduce-f32-pair`.
 
+An annotated CUDA reading copy of the generated kernel is available at
+[`catena-lang/doc/borrow_routed_bf16_gemv_pair.cu`](catena-lang/doc/borrow_routed_bf16_gemv_pair.cu).
+
 ## `materializec.borrow-topk-f32`
 
 ```text

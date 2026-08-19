@@ -143,22 +143,18 @@ abbrev WroteSome (alpha : Type) {cfg : LaunchConfig} {BlockState State : Type}
 thread wrote it before that barrier. -/
 structure Defined {cfg : LaunchConfig} {BlockState α : Type}
     {name : String} {length : Nat} {block : Block cfg BlockState}
-    (State : Type) (trace : SyncTrace) (buffer : SharedBuffer block name length α)
+    (trace : SyncTrace) (buffer : SharedBuffer block name length α)
     (index : Fin length) : Type where
-  before : SyncTrace
-  writer : Thread cfg BlockState State
-  value : Value α
-  trace_eq : trace = before ++ [.tileLoaded]
-  wrote : Wrote before writer buffer index value
+  private intro ::
 
 def Defined.ofWrote {cfg : LaunchConfig} {BlockState State α : Type}
     {name : String} {length : Nat} {block : Block cfg BlockState}
     {before : SyncTrace}
     {writer : Thread cfg BlockState State} {value : Value α}
     {buffer : SharedBuffer block name length α} {index : Fin length}
-    (wrote : Wrote before writer buffer index value) :
-    Defined State (before ++ [.tileLoaded]) buffer index :=
-  ⟨before, writer, value, rfl, wrote⟩
+    (_wrote : Wrote before writer buffer index value) :
+    Defined (before ++ [.tileLoaded]) buffer index :=
+  ⟨⟩
 
 def WroteSome.defined {cfg : LaunchConfig} {BlockState State α : Type}
     {name : String} {length : Nat} {block : Block cfg BlockState}
@@ -166,7 +162,7 @@ def WroteSome.defined {cfg : LaunchConfig} {BlockState State α : Type}
     {writer : Thread cfg BlockState State}
     {buffer : SharedBuffer block name length α} {source target : Fin length}
     (write : WroteSome α before writer buffer source) (equal : source = target) :
-    Defined State (before ++ [.tileLoaded]) buffer target := by
+    Defined (before ++ [.tileLoaded]) buffer target := by
   cases equal
   exact Defined.ofWrote write.2
 
@@ -198,7 +194,7 @@ inductive KernelM {cfg : LaunchConfig} {BlockState State SharedScalar : Type}
   | readShared {name : String} {n : Nat}
       (buffer : SharedBuffer (Thread.block thread) name n SharedScalar)
       (index : Fin n)
-      (defined : Defined State trace buffer index) :
+      (defined : Defined trace buffer index) :
       KernelM ownershipRelation thread trace trace (Value SharedScalar)
   /-- A block barrier lifts a fact proved by the current thread to the same
   fact for every thread in the block. -/

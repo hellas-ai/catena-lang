@@ -55,9 +55,9 @@ structure Kernel (outputSpace : Space) (α : Type) where
   requirements : LaunchConfig → Prop
   /-- The exact synchronization trace followed by every thread. -/
   trace : SyncTrace
-  /-- The common ownership relation used by every thread in a block. -/
-  ownershipRelation : ∀ cfg, requirements cfg →
-    OwnershipRelation cfg (SharedState α shared) α
+  /-- The common unique-writer relation used by every thread in a block. -/
+  writerRelation : ∀ cfg, requirements cfg →
+    WriterRelation cfg (SharedState α shared) α
   body :
     ∀ {cfg : LaunchConfig} {State : Type}
       {certificate : ScheduleCertificate cfg outputSpace},
@@ -65,7 +65,7 @@ structure Kernel (outputSpace : Space) (α : Type) where
       LaunchFacts cfg trace →
       (thread : Thread cfg (SharedState α shared) State) →
       (work : OwnedOutputs certificate (Thread.id thread)) →
-      KernelM (ownershipRelation cfg requirementsProof) thread [] trace
+      KernelM (writerRelation cfg requirementsProof) thread [] trace
         (OwnedOutputs.Result work α)
 
 /-- An opaque launch token. Execution belongs to the eventual backend. -/

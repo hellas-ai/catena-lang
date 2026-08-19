@@ -202,10 +202,13 @@ inductive KernelM {cfg : LaunchConfig} {BlockState State SharedScalar : Type}
       KernelM ownershipRelation thread trace trace (Value SharedScalar)
   /-- A block barrier lifts a fact proved by the current thread to the same
   fact for every thread in the block. -/
-  | syncBlock (barrier : BarrierId)
-      (facts : Coord (LaunchConfig.block cfg) → Type)
-      (currentFact : facts (Thread.index thread)) :
-      KernelM ownershipRelation thread trace (trace ++ [barrier]) (∀ other, facts other)
+  | syncBlock (block : Block cfg BlockState)
+      (belongsToBlock : Thread.block thread = block)
+      (barrier : BarrierId)
+      {facts : SyncTrace → Thread cfg BlockState State → Type}
+      (currentFact : facts trace thread) :
+      KernelM ownershipRelation thread trace (trace ++ [barrier])
+        (∀ other, Thread.block other = block → facts trace other)
   /-- A bounded loop with an ordinary, trace-independent accumulator. -/
   | foldFinD (n : Nat) (step : SyncTrace → SyncTrace)
       (startTrace : SyncTrace) {α : Type}

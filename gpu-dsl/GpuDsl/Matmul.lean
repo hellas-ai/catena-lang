@@ -159,11 +159,9 @@ def tiledMatmulKernel
           let indexAt := fun other =>
             Layout.offset Layout.rowMajor2D
               ⟨Fin.cast blockYEq (Coord.y other), Fin.cast blockXEq (Coord.x other)⟩
-          let threadAt := fun other =>
-            { block := block, index := other, state := Thread.state thread }
-          let barrierFacts := fun other =>
-            WroteSome α currentTrace (threadAt other) sharedA (indexAt other) ×
-            WroteSome α currentTrace (threadAt other) sharedB (indexAt other)
+          let barrierFacts := fun factTrace other =>
+            WroteSome α factTrace other sharedA (indexAt (Thread.index other)) ×
+            WroteSome α factTrace other sharedB (indexAt (Thread.index other))
           KernelM.bind
             (KernelM.writeShared sharedA tileIndex valueA (by
               exact ⟨Or.inl rfl, rfl, rfl⟩)) fun wroteA =>
@@ -171,10 +169,10 @@ def tiledMatmulKernel
             (KernelM.writeShared sharedB tileIndex valueB (by
               exact ⟨Or.inr rfl, rfl, rfl⟩)) fun wroteB =>
           KernelM.bind
-            (KernelM.syncBlock .tileLoaded barrierFacts (by
+            (KernelM.syncBlock block rfl .tileLoaded (facts := barrierFacts) (by
               constructor
-              · exact ⟨valueA, by simpa [threadAt, block] using wroteA⟩
-              · exact ⟨valueB, by simpa [threadAt, block] using wroteB⟩)) fun allWrites =>
+              · exact ⟨valueA, wroteA⟩
+              · exact ⟨valueB, wroteB⟩)) fun allWrites =>
           KernelM.bind
             (foldValueFinM thread ownershipRelation (currentTrace ++ [.tileLoaded])
               tile partialSum
@@ -182,15 +180,19 @@ def tiledMatmulKernel
               let indexA := Layout.offset Layout.rowMajor2D ⟨threadRow, k⟩
               let indexB := Layout.offset Layout.rowMajor2D ⟨k, threadCol⟩
               KernelM.bind (KernelM.readShared sharedA indexA (by
-                let writer := tileThread blockXEq blockYEq blockZEq threadRow k
-                apply WroteSome.defined (allWrites writer).1
-                simp [indexAt, writer, indexA, tileThread])) fun av =>
+                let writerIndex := tileThread blockXEq blockYEq blockZEq threadRow k
+                let writer := { thread with index := writerIndex }
+                apply WroteSome.defined (allWrites writer rfl).1
+                simp [indexAt, writer, writerIndex, indexA, tileThread])) fun av =>
               KernelM.bind (KernelM.readShared sharedB indexB (by
-                let writer := tileThread blockXEq blockYEq blockZEq k threadCol
-                apply WroteSome.defined (allWrites writer).2
-                simp [indexAt, writer, indexB, tileThread])) fun bv =>
+                let writerIndex := tileThread blockXEq blockYEq blockZEq k threadCol
+                let writer := { thread with index := writerIndex }
+                apply WroteSome.defined (allWrites writer rfl).2
+                simp [indexAt, writer, writerIndex, indexB, tileThread])) fun bv =>
               KernelM.pure (Value.add sumWithinTile (Value.mul av bv))) fun sumAfterTile =>
-          KernelM.bind (KernelM.syncBlock .tileConsumed (fun _ => Unit) ()) fun _ =>
+          KernelM.bind
+            (KernelM.syncBlock block rfl .tileConsumed
+              (facts := fun _trace _thread => Unit) ()) fun _ =>
           KernelM.pure sumAfterTile) fun result =>
         KernelM.pure (fun _index _member => result)
 

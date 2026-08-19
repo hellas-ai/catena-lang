@@ -6,16 +6,16 @@ use crate::{
 };
 
 #[derive(Debug, Clone)]
-pub(crate) struct FunctionSignature {
-    pub(crate) symbol: String,
-    pub(crate) inputs: Vec<ValueKind>,
-    pub(crate) outputs: Vec<ValueKind>,
+pub(super) struct FunctionSignature {
+    pub(super) symbol: String,
+    pub(super) inputs: Vec<ValueKind>,
+    pub(super) outputs: Vec<ValueKind>,
 }
 
 /// Source-level program names and their generated C ABI signatures.
-pub(crate) type SignatureTable = HashMap<String, FunctionSignature>;
+pub(super) type SignatureTable = HashMap<String, FunctionSignature>;
 
-pub(crate) fn signatures(modules: &GpuModuleMap) -> SignatureTable {
+pub(super) fn signatures(modules: &GpuModuleMap) -> SignatureTable {
     let mut signatures = HashMap::new();
     for module in modules.values() {
         let Some(source_name) = &module.source_name else {

@@ -332,8 +332,10 @@ fn run_child_loop(mut reader: impl Read, mut writer: impl io::Write) -> Result<(
         return Err(ChildMainError::ExpectedInitialization);
     };
 
-    let source_refs = sources.iter().map(String::as_str);
-    let runtime = match Runtime::from_sources(source_refs, dialect) {
+    let runtime = match Runtime::new(dialect).and_then(|mut runtime| {
+        runtime.load_sources(sources.iter().map(String::as_str))?;
+        Ok(runtime)
+    }) {
         Ok(runtime) => runtime,
         Err(error) => {
             write_response(&mut writer, &Response::Initialized(Err(error.to_string())))?;

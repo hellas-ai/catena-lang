@@ -10,10 +10,8 @@ const GPU_DIALECT_ENV: &str = "CATENA_GPU_DIALECT";
 
 fn main() -> anyhow::Result<()> {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let runtime = Runtime::new(
-        stdlib::paths_from(&root).chain([root.join("examples/example.hex")]),
-        configured_gpu_dialect()?,
-    )?;
+    let mut runtime = Runtime::new(configured_gpu_dialect()?)?;
+    runtime.load(stdlib::paths_from(&root).chain([root.join("examples/example.hex")]))?;
 
     let [result] = runtime.exec("two-times-two", [])?;
     let Value::U64(result) = result else {

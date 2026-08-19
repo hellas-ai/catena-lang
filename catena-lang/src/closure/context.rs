@@ -166,7 +166,7 @@ mod tests {
     #[test]
     fn equal_prefix_is_preserved_positionally() {
         let capture = obj("capture");
-        let source = vec![capture.clone(), capture.clone()];
+        let source = vec![capture.clone(), capture];
 
         let erased = erase_context_projection(&source, &source);
 

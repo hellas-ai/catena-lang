@@ -11,7 +11,8 @@
 //! };
 //!
 //! fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     let runtime = Runtime::from_sources(stdlib::sources().chain([PROGRAM]), GpuDialect::Hip)?;
+//!     let mut runtime = Runtime::new(GpuDialect::Hip)?;
+//!     runtime.load_sources(stdlib::sources().chain([PROGRAM]))?;
 //!     let [result] = runtime.exec("add-one", [41_u64.into()])?;
 //!     let Value::U64(sum) = result else {
 //!         panic!("`add-one` returned an unexpected value: {result:?}");
@@ -25,7 +26,8 @@
 //!
 //! ## Quick reference
 //!
-//! - [`Runtime::new`] and [`Runtime::from_sources`] load programs from paths or source strings.
+//! - [`Runtime::new`] creates an empty runtime.
+//! - [`Runtime::load`] and [`Runtime::load_sources`] load programs from paths or source strings.
 //! - [`Runtime::exec`] calls a program with [`Value`] inputs and const-sized outputs.
 //! - [`Runtime::mem_u16`], [`Runtime::mem_u64`], and [`Runtime::mem_f32`] copy host slices into owned device memory.
 //! ### [`Value`] and Memory
@@ -51,9 +53,6 @@ pub mod mem;
 
 /// manage and run compiled catena programs
 pub mod runtime;
-
-/// Low-level GPU operations needed to manage Runtime-owned allocations.
-pub(crate) mod gpu_api;
 
 /// Compile generated GPU C++ to a shared object.
 mod artifact;

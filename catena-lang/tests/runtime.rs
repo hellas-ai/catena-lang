@@ -8,15 +8,17 @@ const GPU_DIALECT_ENV: &str = "CATENA_GPU_DIALECT";
 
 /// Create a runtime with a provided user source file
 fn runtime_with(source: &'static str) -> anyhow::Result<Runtime> {
-    Runtime::from_sources(stdlib::sources().chain([source]), configured_gpu_dialect()?)
-        .map_err(Into::into)
+    let mut runtime = Runtime::new(configured_gpu_dialect()?)?;
+    runtime.load_sources(stdlib::sources().chain([source]))?;
+    Ok(runtime)
 }
 
 fn runtime_with_sources(
     sources: impl IntoIterator<Item = &'static str>,
 ) -> anyhow::Result<Runtime> {
-    Runtime::from_sources(stdlib::sources().chain(sources), configured_gpu_dialect()?)
-        .map_err(Into::into)
+    let mut runtime = Runtime::new(configured_gpu_dialect()?)?;
+    runtime.load_sources(stdlib::sources().chain(sources))?;
+    Ok(runtime)
 }
 
 fn configured_gpu_dialect() -> anyhow::Result<GpuDialect> {
@@ -31,6 +33,17 @@ fn configured_gpu_dialect() -> anyhow::Result<GpuDialect> {
             value
         ),
     }
+}
+
+#[test]
+fn runtime_can_be_created_without_sources() -> anyhow::Result<()> {
+    let runtime = Runtime::new(configured_gpu_dialect()?)?;
+
+    assert!(matches!(
+        runtime.exec::<0, 0>("missing", []),
+        Err(catena_lang::runtime::ExecError::NoSourcesLoaded)
+    ));
+    Ok(())
 }
 
 #[test]
@@ -823,12 +836,10 @@ fn mem_own_identity_transfers_and_returns_owned_memory_regression() -> anyhow::R
 
 #[test]
 fn cap_ref_outputs_are_rejected_during_initialization() -> anyhow::Result<()> {
-    let result = Runtime::from_sources(
-        stdlib::sources().chain([r#"
+    let mut runtime = Runtime::new(configured_gpu_dialect()?)?;
+    let result = runtime.load_sources(stdlib::sources().chain([r#"
         (def program mem-ref-identity : (cap.ref mem) -> (cap.ref mem) = [memory])
-        "#]),
-        configured_gpu_dialect()?,
-    );
+        "#]));
 
     assert!(matches!(
         result,

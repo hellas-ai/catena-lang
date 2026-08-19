@@ -413,7 +413,7 @@ fn inline_named_call(
     let operation_sources = unpack_packed_object(&domain_type, arrow.type_maps.0.targets.len());
     let operation_targets = unpack_packed_object(&codomain_type, arrow.type_maps.1.targets.len());
 
-    let unpacker = to_unpacker(operation_sources.clone());
+    let unpacker = to_unpacker(operation_sources);
     let (unpacker_sources, operation_inputs) = body.append(unpacker);
     let [unpacker_source] = unpacker_sources.as_slice() else {
         unreachable!("unpacker should have one packed source");

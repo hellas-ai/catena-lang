@@ -7,8 +7,9 @@ use std::{
 
 use thiserror::Error;
 
-use super::{executor::CatenaMem, gpu_api::GpuApi};
+use super::executor::CatenaMem;
 use crate::codegen::GpuDialect;
+use crate::gpu::GpuApi;
 
 #[derive(Debug, Error)]
 pub enum MemError {
@@ -180,7 +181,7 @@ impl MemOwn {
         }
     }
 
-    pub(crate) fn write_from_host(&mut self, bytes: &[u8]) -> Result<(), MemError> {
+    fn write_from_host(&mut self, bytes: &[u8]) -> Result<(), MemError> {
         debug_assert_eq!(self.abi.len, bytes.len() as u64);
         self.gpu.copy_host_to_device(self.abi.data, bytes)
     }

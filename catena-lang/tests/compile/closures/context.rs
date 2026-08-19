@@ -210,12 +210,15 @@ fn compact_type_map_leaves(
 ) -> Tree<(), Operation> {
     match object {
         Tree::Empty => Tree::Empty,
-        Tree::Leaf(node, annotation) => Tree::Leaf(
-            *compact_by_source
-                .get(node)
-                .unwrap_or_else(|| panic!("type-map target depends on non-context node {node}")),
-            *annotation,
-        ),
+        Tree::Leaf(node, annotation) => {
+            let _: () = *annotation;
+            Tree::Leaf(
+                *compact_by_source.get(node).unwrap_or_else(|| {
+                    panic!("type-map target depends on non-context node {node}")
+                }),
+                (),
+            )
+        }
         Tree::Node(operation, annotation, children) => Tree::Node(
             operation.clone(),
             *annotation,

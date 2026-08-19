@@ -1172,11 +1172,11 @@ fn render_materialize_kernel(
         c_type(element)
     ));
     for arg in &args {
-        if let GpuValue::Var(var) = arg {
-            if runtime_type(var).is_some() {
-                out.push_str(", ");
-                out.push_str(&param_decl(var, false)?);
-            }
+        if let GpuValue::Var(var) = arg
+            && runtime_type(var).is_some()
+        {
+            out.push_str(", ");
+            out.push_str(&param_decl(var, false)?);
         }
     }
     out.push_str(") {\n");

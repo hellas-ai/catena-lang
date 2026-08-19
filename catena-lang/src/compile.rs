@@ -83,7 +83,7 @@ fn compile_into(report: &mut CompileReport) -> Result<(), CompileError> {
             return Err(error.into());
         }
     };
-    report.definition_types = Some(definition_types.clone());
+    report.definition_types = Some(definition_types);
 
     let definitions_to_inline = closure_boundary_definitions(&theory_set);
     let theory_set = crate::pass::inline_definitions::run(&theory_set, &definitions_to_inline)?;

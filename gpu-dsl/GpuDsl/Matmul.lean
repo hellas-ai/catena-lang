@@ -159,9 +159,11 @@ def tiledMatmulKernel
           let indexAt := fun other =>
             Layout.offset Layout.rowMajor2D
               ⟨Fin.cast blockYEq (Coord.y other), Fin.cast blockXEq (Coord.x other)⟩
+          let threadAt := fun other =>
+            { block := block, index := other, state := Thread.state thread }
           let barrierFacts := fun other =>
-            WroteSome α currentTrace other sharedA (indexAt other) ×
-            WroteSome α currentTrace other sharedB (indexAt other)
+            WroteSome α currentTrace (threadAt other) sharedA (indexAt other) ×
+            WroteSome α currentTrace (threadAt other) sharedB (indexAt other)
           KernelM.bind
             (KernelM.writeShared sharedA tileIndex valueA (by
               exact ⟨Or.inl rfl, rfl, rfl⟩)) fun wroteA =>
@@ -171,8 +173,8 @@ def tiledMatmulKernel
           KernelM.bind
             (KernelM.syncBlock .tileLoaded barrierFacts (by
               constructor
-              · exact ⟨valueA, wroteA⟩
-              · exact ⟨valueB, wroteB⟩)) fun allWrites =>
+              · exact ⟨valueA, by simpa [threadAt, block] using wroteA⟩
+              · exact ⟨valueB, by simpa [threadAt, block] using wroteB⟩)) fun allWrites =>
           KernelM.bind
             (foldValueFinM thread ownershipRelation (currentTrace ++ [.tileLoaded])
               tile partialSum

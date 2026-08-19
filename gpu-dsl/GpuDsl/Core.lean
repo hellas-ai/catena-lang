@@ -123,19 +123,19 @@ def mul [Mul α] (left right : Value α) : Value α :=
 end Value
 
 /-- Evidence produced only by a shared-memory write statement. -/
-structure Wrote {cfg : LaunchConfig} {BlockState α : Type}
+structure Wrote {cfg : LaunchConfig} {BlockState State α : Type}
     {name : String} {length : Nat} {block : Block cfg BlockState}
     (trace : SyncTrace)
-    (thread : Coord (LaunchConfig.block cfg))
+    (thread : Thread cfg BlockState State)
     (buffer : SharedBuffer block name length α) (index : Fin length)
     (value : Value α) : Type where
   private intro ::
 
 /-- Constructive evidence that a thread wrote some value to a cell. -/
-abbrev WroteSome (alpha : Type) {cfg : LaunchConfig} {BlockState : Type}
+abbrev WroteSome (alpha : Type) {cfg : LaunchConfig} {BlockState State : Type}
     {name : String} {length : Nat} {block : Block cfg BlockState}
     (trace : SyncTrace)
-    (thread : Coord (LaunchConfig.block cfg))
+    (thread : Thread cfg BlockState State)
     (buffer : SharedBuffer block name length alpha) (index : Fin length) : Type :=
   Σ value : Value alpha, Wrote trace thread buffer index value
 
@@ -143,30 +143,30 @@ abbrev WroteSome (alpha : Type) {cfg : LaunchConfig} {BlockState : Type}
 thread wrote it before that barrier. -/
 structure Defined {cfg : LaunchConfig} {BlockState α : Type}
     {name : String} {length : Nat} {block : Block cfg BlockState}
-    (trace : SyncTrace) (buffer : SharedBuffer block name length α)
+    (State : Type) (trace : SyncTrace) (buffer : SharedBuffer block name length α)
     (index : Fin length) : Type where
   before : SyncTrace
-  writer : Coord (LaunchConfig.block cfg)
+  writer : Thread cfg BlockState State
   value : Value α
   trace_eq : trace = before ++ [.tileLoaded]
   wrote : Wrote before writer buffer index value
 
-def Defined.ofWrote {cfg : LaunchConfig} {BlockState α : Type}
+def Defined.ofWrote {cfg : LaunchConfig} {BlockState State α : Type}
     {name : String} {length : Nat} {block : Block cfg BlockState}
     {before : SyncTrace}
-    {writer : Coord (LaunchConfig.block cfg)} {value : Value α}
+    {writer : Thread cfg BlockState State} {value : Value α}
     {buffer : SharedBuffer block name length α} {index : Fin length}
     (wrote : Wrote before writer buffer index value) :
-    Defined (before ++ [.tileLoaded]) buffer index :=
+    Defined State (before ++ [.tileLoaded]) buffer index :=
   ⟨before, writer, value, rfl, wrote⟩
 
-def WroteSome.defined {cfg : LaunchConfig} {BlockState α : Type}
+def WroteSome.defined {cfg : LaunchConfig} {BlockState State α : Type}
     {name : String} {length : Nat} {block : Block cfg BlockState}
     {before : SyncTrace}
-    {writer : Coord (LaunchConfig.block cfg)}
+    {writer : Thread cfg BlockState State}
     {buffer : SharedBuffer block name length α} {source target : Fin length}
     (write : WroteSome α before writer buffer source) (equal : source = target) :
-    Defined (before ++ [.tileLoaded]) buffer target := by
+    Defined State (before ++ [.tileLoaded]) buffer target := by
   cases equal
   exact Defined.ofWrote write.2
 
@@ -193,12 +193,12 @@ inductive KernelM {cfg : LaunchConfig} {BlockState State SharedScalar : Type}
       (value : Value SharedScalar)
       (owned : Owns (relation := ownershipRelation) trace thread buffer index) :
       KernelM ownershipRelation thread trace trace
-        (Wrote trace (Thread.index thread) buffer index value)
+        (Wrote trace thread buffer index value)
   /-- Read one shared-memory cell from the current physical thread. -/
   | readShared {name : String} {n : Nat}
       (buffer : SharedBuffer (Thread.block thread) name n SharedScalar)
       (index : Fin n)
-      (defined : Defined trace buffer index) :
+      (defined : Defined State trace buffer index) :
       KernelM ownershipRelation thread trace trace (Value SharedScalar)
   /-- A block barrier lifts a fact proved by the current thread to the same
   fact for every thread in the block. -/

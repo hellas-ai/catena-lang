@@ -16,13 +16,49 @@ inductive GlobalAccessPlan (cfg : LaunchConfig) : Type 1 where
   | none : GlobalAccessPlan cfg
   | reads {α : Type} {length : Nat}
       (buffer : Buffer .global length α)
-      (region : Fin length → Prop) : GlobalAccessPlan cfg
+      (region : ThreadId cfg → Fin length → Prop) : GlobalAccessPlan cfg
   | owns {α : Type} {length : Nat} {space : Space}
       (buffer : Buffer .global length α)
       (layout : Index space → Fin length)
       (layoutInjective : Injective layout)
       (owner : Index space → ThreadId cfg) : GlobalAccessPlan cfg
   | and (left right : GlobalAccessPlan cfg) : GlobalAccessPlan cfg
+
+/-- Cells read by a physical thread according to a global access plan. -/
+def GlobalAccessPlan.ReadsAt :
+    GlobalAccessPlan cfg → ThreadId cfg → AllocationId → Nat → Prop
+  | .none, _, _, _ => False
+  | .reads buffer region, threadId, allocation, offset =>
+      buffer.allocation = allocation ∧
+        ∃ index, region threadId index ∧ index.val = offset
+  | .owns _ _ _ _, _, _, _ => False
+  | .and left right, threadId, allocation, offset =>
+      left.ReadsAt threadId allocation offset ∨
+        right.ReadsAt threadId allocation offset
+
+/-- Cells written by a physical thread according to a global access plan. -/
+def GlobalAccessPlan.WritesAt :
+    GlobalAccessPlan cfg → ThreadId cfg → AllocationId → Nat → Prop
+  | .none, _, _, _ => False
+  | .reads _ _, _, _, _ => False
+  | .owns buffer layout _ owner, threadId, allocation, offset =>
+      buffer.allocation = allocation ∧
+        ∃ cell, owner cell = threadId ∧ (layout cell).val = offset
+  | .and left right, threadId, allocation, offset =>
+      left.WritesAt threadId allocation offset ∨
+        right.WritesAt threadId allocation offset
+
+/--
+No physical global cell has two different writers, or both a writer and a
+reader. Accesses to different allocations or offsets remain independent.
+-/
+def GlobalAccessPlan.RaceFree (plan : GlobalAccessPlan cfg) : Prop :=
+  (∀ allocation offset first second,
+      plan.WritesAt first allocation offset →
+      plan.WritesAt second allocation offset → first = second) ∧
+  (∀ allocation offset writer reader,
+      plan.WritesAt writer allocation offset →
+      plan.ReadsAt reader allocation offset → False)
 
 /--
 The complete set of cells in one global buffer owned by a physical thread.
@@ -43,7 +79,8 @@ structure OwnedGlobalCells {cfg : LaunchConfig} {α Cell : Type}
 def GlobalAccessPlan.Permissions :
     GlobalAccessPlan cfg → ThreadId cfg → Type
   | .none, _ => Unit
-  | .reads buffer region, threadId => GlobalReadShare threadId buffer region
+  | .reads buffer region, threadId =>
+      GlobalReadShare threadId buffer (region threadId)
   | .owns buffer layout _ owner, threadId =>
       OwnedGlobalCells threadId buffer layout owner
   | .and left right, threadId =>
@@ -89,6 +126,9 @@ structure Kernel (Inputs SharedScalar : Type) where
   requirements : LaunchConfig → Prop
   /-- Global reads and ownership allowed for these particular inputs. -/
   globalAccess : ∀ cfg, requirements cfg → Inputs → GlobalAccessPlan cfg
+  /-- The global plan has no overlapping write/write or write/read regions. -/
+  globalAccessRaceFree : ∀ cfg (proof : requirements cfg) (inputs : Inputs),
+    (globalAccess cfg proof inputs).RaceFree
   /-- The cell-to-thread assignment realized by `launch`. -/
   sharedOwner : ∀ cfg, requirements cfg → OwnershipPlan cfg
   /-- The exact synchronization trace followed by every thread. -/

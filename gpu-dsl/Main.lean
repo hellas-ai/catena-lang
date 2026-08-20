@@ -14,7 +14,9 @@ noncomputable def perfect64 : Launch :=
       aLayout := Layout.rowMajor2D
       b := bBuffer
       bLayout := Layout.columnMajor2D
-      output := out }
+      output := out
+      aOutputDistinct := by decide
+      bOutputDistinct := by decide }
   let kernel := tiledMatmulKernel (rows := 64) (inner := 64) (cols := 64)
     16 (by decide)
   launch config kernel inputs (by
@@ -30,7 +32,9 @@ noncomputable def predicatedEdges : Launch :=
       aLayout := Layout.rowMajor2D
       b := bBuffer
       bLayout := Layout.rowMajor2D
-      output := out }
+      output := out
+      aOutputDistinct := by decide
+      bOutputDistinct := by decide }
   let kernel := tiledMatmulKernel (rows := 65) (inner := 70) (cols := 33)
     16 (by decide)
   launch config kernel inputs (by

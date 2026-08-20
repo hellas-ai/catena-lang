@@ -179,16 +179,27 @@ global buffer that the thread may read. An ownership grant gives the thread
 the complete list of cells assigned to it by an owner function:
 
 ```text
-global-access ::= reads(buffer, region)
+global-access ::= reads(buffer, thread -> region)
                 | owns(buffer, layout, owner)
                 | global-access ● global-access
 ```
+
+The complete plan must satisfy:
+
+```text
+race-free(plan) :=
+  every physical cell has at most one writer
+  and every written physical cell has no readers
+```
+
+The cell identity is `allocation-id ● offset`. Accesses to other allocations
+or other offsets do not conflict, and read regions may overlap one another.
 
 Global operations require the resulting permissions:
 
 ```text
 global.read :
-  buffer ● val(ix n) ● (|- read-share(thread, buffer, region))
+  buffer ● val(ix n) ● (|- read-share(thread, buffer, region(thread)))
   ● (|- index in region)
   -> val(t)
 

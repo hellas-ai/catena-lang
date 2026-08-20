@@ -56,6 +56,8 @@ lake exe gpu-dsl-demo
 The core design makes several future proof obligations natural:
 
 - `Buffer space n a` records address space and the extent of linear storage.
+  Each handle also carries an `AllocationId`, which is used when comparing
+  physical cells across different fields of a kernel's input record.
 - `Tensor space a` represents data as a composable pure closure, independently
   of launch configuration and physical layout.
 - Buffer reads accept only `Fin n`, so out-of-bounds access cannot be expressed.
@@ -71,7 +73,11 @@ The core design makes several future proof obligations natural:
   `launch` interprets it as per-thread `GlobalReadShare` and
   `OwnedGlobalCells` permissions. `KernelM.readGlobal` and
   `KernelM.writeGlobal` require those permissions. Read grants carry a region,
-  and every read must prove that its bounded index belongs to that region.
+  which may depend on the physical thread, and every read must prove that its
+  bounded index belongs to that thread's region.
+- `Kernel.globalAccessRaceFree` proves the whole global plan spatially safe:
+  one physical allocation-and-offset cell has at most one writer, and a written
+  cell has no readers. Reads and writes in other regions remain independent.
 - An owned global resource includes the complete, duplicate-free list of cells
   assigned to the current `ThreadId`. This generalizes the former
   output-specific `OwnedOutputs` mechanism.
@@ -104,6 +110,9 @@ The core design makes several future proof obligations natural:
   hold for any fair GPU implementation; the matmul body does not use them yet.
 - Matmul's launch ownership plan assigns logical cell `(row,column)` to thread
   `(column,row)` for both shared tiles.
+- Matmul's global plan grants each thread only the exact `A` and `B` cells it
+  loads across the tile loop, plus ownership of its scheduled output cells.
+  Its input record proves that the output allocation does not alias `A` or `B`.
 - Coverage is proved at each matmul read by choosing its writer thread. A write
   by that thread produces `Defined` evidence immediately after `tileLoaded`.
 - In matmul, `tileLoaded` resets `Owns` and grants `ReadShare` while publishing

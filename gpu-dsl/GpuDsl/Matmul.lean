@@ -53,6 +53,30 @@ structure MatmulInputs (rows inner cols : Nat) (α : Type) where
   b : Buffer .global (inner * cols) α
   bLayout : Layout (.d2 inner cols) (inner * cols)
   output : Buffer .global (rows * cols) α
+  aOutputDistinct : a.allocation ≠ output.allocation
+  bOutputDistinct : b.allocation ≠ output.allocation
+
+/-- The exact A cells loaded by one physical thread across all tile rounds. -/
+def matmulAReadRegion (tile : Nat)
+    (inputs : MatmulInputs rows inner cols α)
+    (threadId : ThreadId cfg) (index : Fin (rows * inner)) : Prop :=
+  let row := threadId.blockIdx.y.val * tile + threadId.threadIdx.y.val
+  ∃ kTile : Fin (ceilDiv inner tile),
+    let col := kTile.val * tile + threadId.threadIdx.x.val
+    ∃ rowInBounds : row < rows, ∃ colInBounds : col < inner,
+      index = inputs.aLayout.offset
+        ⟨⟨row, rowInBounds⟩, ⟨col, colInBounds⟩⟩
+
+/-- The exact B cells loaded by one physical thread across all tile rounds. -/
+def matmulBReadRegion (tile : Nat)
+    (inputs : MatmulInputs rows inner cols α)
+    (threadId : ThreadId cfg) (index : Fin (inner * cols)) : Prop :=
+  let col := threadId.blockIdx.x.val * tile + threadId.threadIdx.x.val
+  ∃ kTile : Fin (ceilDiv inner tile),
+    let row := kTile.val * tile + threadId.threadIdx.y.val
+    ∃ rowInBounds : row < inner, ∃ colInBounds : col < cols,
+      index = inputs.bLayout.offset
+        ⟨⟨row, rowInBounds⟩, ⟨col, colInBounds⟩⟩
 
 private def tileThread
     (blockXEq : Dim3.x (LaunchConfig.block cfg) = tile)
@@ -123,10 +147,35 @@ def tiledMatmulKernel
       inputs =>
     let certificate := tiledScheduleCertificate cfg rows cols tile tilePositive
       blockXEq blockYEq coversCols coversRows gridZPositive (by simp [blockZEq])
-    .and (.reads inputs.a (fun _ => True))
-      (.and (.reads inputs.b (fun _ => True))
+    .and (.reads inputs.a (matmulAReadRegion tile inputs))
+      (.and (.reads inputs.b (matmulBReadRegion tile inputs))
         (.owns inputs.output Layout.rowMajor2D.offset
           Layout.rowMajor2D_injective certificate.owner))
+  globalAccessRaceFree := fun cfg
+      ⟨blockXEq, blockYEq, blockZEq, coversCols, coversRows, gridZPositive⟩
+      inputs => by
+    dsimp [GlobalAccessPlan.RaceFree]
+    constructor
+    · intro allocation offset first second firstWrites secondWrites
+      simp only [GlobalAccessPlan.WritesAt, false_or] at firstWrites secondWrites
+      rcases firstWrites with ⟨_firstAllocation, firstCell,
+        firstOwner, firstOffset⟩
+      rcases secondWrites with ⟨_secondAllocation, secondCell,
+        secondOwner, secondOffset⟩
+      have equalOffsets :
+          Layout.rowMajor2D.offset firstCell =
+            Layout.rowMajor2D.offset secondCell :=
+        Fin.ext (firstOffset.trans secondOffset.symm)
+      have equalCells := Layout.rowMajor2D_injective equalOffsets
+      cases equalCells
+      exact firstOwner.symm.trans secondOwner
+    · intro allocation offset writer reader writerWrites readerReads
+      simp only [GlobalAccessPlan.WritesAt, false_or] at writerWrites
+      simp only [GlobalAccessPlan.ReadsAt, false_or, or_false] at readerReads
+      rcases writerWrites with ⟨outputAllocation, _cell, _owner, _offset⟩
+      rcases readerReads with readA | readB
+      · exact inputs.aOutputDistinct (readA.1.trans outputAllocation.symm)
+      · exact inputs.bOutputDistinct (readB.1.trans outputAllocation.symm)
   sharedOwner := fun _cfg
       ⟨blockXEq, blockYEq, blockZEq, _coversCols, _coversRows, _gridZPositive⟩ =>
     tiledOwnershipPlan blockXEq blockYEq blockZEq
@@ -201,7 +250,8 @@ def tiledMatmulKernel
                 KernelM.readGlobal inputs.a
                   (Layout.offset inputs.aLayout
                     ⟨⟨row, rowInBounds⟩, ⟨kA, kAInBounds⟩⟩)
-                  readGlobalA trivial
+                  readGlobalA (by
+                    exact ⟨kTile, rowInBounds, kAInBounds, rfl⟩)
               else KernelM.pure Value.zero
             else KernelM.pure Value.zero
           let loadB : KernelM plan α thread currentTrace currentTrace (Value α) :=
@@ -212,7 +262,8 @@ def tiledMatmulKernel
                 KernelM.readGlobal inputs.b
                   (Layout.offset inputs.bLayout
                     ⟨⟨kB, kBInBounds⟩, ⟨col, colInBounds⟩⟩)
-                  readGlobalB trivial
+                  readGlobalB (by
+                    exact ⟨kTile, kBInBounds, colInBounds, rfl⟩)
               else KernelM.pure Value.zero
             else KernelM.pure Value.zero
           let barrierFacts := fun factTrace other =>

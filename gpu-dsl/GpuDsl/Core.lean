@@ -67,6 +67,11 @@ inductive AddressSpace where
   | shared
   deriving Repr, DecidableEq
 
+/-- Stable identity of one physical allocation. -/
+structure AllocationId where
+  name : String
+  deriving Repr, DecidableEq
+
 /--
 A typed buffer handle. The length and address space are part of its type.
 
@@ -74,7 +79,7 @@ This prototype describes kernels; a later backend can replace `name` with a
 real allocation while retaining the same safe indexing API.
 -/
 structure Buffer (space : AddressSpace) (length : Nat) (α : Type) where
-  name : String
+  allocation : AllocationId
   deriving Repr
 
 /-- A shared-memory handle tied to one particular block instance. -/

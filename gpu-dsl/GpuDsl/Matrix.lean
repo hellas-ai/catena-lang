@@ -139,7 +139,7 @@ end Tensor
 
 namespace Buffer
 
-def named (name : String) : Buffer space length α := ⟨name⟩
+def named (name : String) : Buffer space length α := ⟨⟨name⟩⟩
 
 end Buffer
 

@@ -1,417 +1,426 @@
 # GPU kernel primitives
 
-This is a small, language-independent interface for GPU kernels. The notation
-follows Catena: `●` is a product, `->` is a function, `=>` is a closure, `|-`
-is for proofs, and `val(t)` is a runtime value. The last section extends the
-basic global-memory interface with block-scoped shared memory and barriers.
+This note describes a small, language-independent interface for GPU kernels.
+It focuses on memory safety and race freedom rather than execution details or
+Lean encodings.
 
-## Supporting types
-
-Here, I use shapes to represent index spaces. We might want them or not. Here,
-they are just useful for understanding what values are intended to be.
-
-Finite logical spaces and their indices are:
+The examples use Catena-like notation:
 
 ```text
-space ::= d1(n) | d2(rows, cols) | d3(depth, rows, cols)
-
-ix(d1(n))                 = ix n
-ix(d2(rows, cols))        = ix rows ● ix cols
-ix(d3(depth, rows, cols)) = ix depth ● ix rows ● ix cols
+●    product of values or resources
+->   function
+=>   closure
+|- p proof of proposition p
 ```
 
-An `ix n` is an integer in `[0, n)`, so indexing is safe by construction.
-`vec n t` is a vector containing exactly `n` values of type `t`.
+Permission proofs are linear resources: they cannot be copied or silently
+retained after an operation consumes them. Other proofs, such as bounds or
+initialization facts, may be reusable.
 
-Launch geometry is CUDA/HIP-shaped:
+## Indices and buffers
+
+An `ix n` is an integer in `[0, n)`. Buffer operations use bounded indices, so
+out-of-bounds accesses cannot be expressed.
 
 ```text
-dim3 : {
-  x : u64,
-  y : u64,
-  z : u64
+global.buffer[n, t]
+```
+
+A global buffer identifies a global-memory resource. A cell is identified by
+its buffer and offset.
+
+A layout maps logical indices to physical offsets:
+
+```text
+layout[logical, n] : {
+  offset    : logical -> ix n
+  injective : |- offset(i) = offset(j) -> i = j
+}
+```
+
+## Threads
+
+A launch configuration contains a grid size and a block size. A thread carries
+both its block coordinate and its local coordinate:
+
+```text
+block[config] : {
+  index : coord(config.grid)
 }
 
-launch-config : {
-  grid  : dim3,
-  block : dim3
-}
-
-coord[d : dim3] : {
-  x : ix d.x,
-  y : ix d.y,
-  z : ix d.z
-}
-
-thread[config : launch-config] : {
-  block-index  : coord(config.grid),
+thread[config] : {
+  block-index  : coord(config.grid)
   thread-index : coord(config.block)
 }
+
+block : (thread : thread[config]) -> block[config]
 ```
 
-A layout maps logical indices to cells of a flat buffer:
+## Global memory
+
+A kernel takes arbitrary inputs. It separately declares the parts of the
+global buffers in those inputs that each thread may read or write:
 
 ```text
-layout[s : space, n : u64] : {
-  offset : val(ix s) -> val(ix n)
+access {
+  read  A in read-a(thread)
+  read  B in read-b(thread)
+  write C in write-c(thread)
 }
 ```
 
-## Schedule
+The write region directly describes the output cells owned by a thread. A
+thread may own zero, one, or several cells, so predicated launches can contain
+extra threads with an empty write region.
 
-A schedule assigns every logical output to one physical thread:
+Regions belong to the access declaration only. Launch expands them into
+permissions for individual cells:
 
 ```text
-schedule[config : launch-config, s : space] : {
-  owner : val(ix s) -> val(thread config)
-}
+index in read-a(thread)  -> (|- read(thread, A, index))
+index in read-b(thread)  -> (|- read(thread, B, index))
+index in write-c(thread) -> (|- own(thread, C, index))
 ```
 
-Since `owner` is a total function, every output has exactly one owner. A thread may own zero, one, or several outputs.
+This region notation is shorthand. A kernel may state the same contract
+directly with dependent proof parameters, as in the matmul example below.
 
-The schedule is only a mapping; it does not run the kernel. An ownership access
-plan uses it to give every physical thread the complete list of cells that
-thread owns.
-
-For example, given a positive `block-size`, a linear schedule uses this
-one-dimensional configuration:
+The access declaration is valid when, for every physical global-memory cell:
 
 ```text
-grid.x  = max(1, ceil-div(size, block-size))
-block.x = block-size
-grid.y = grid.z = block.y = block.z = 1
+two writers to the same cell are the same thread
+a written cell has no readers
 ```
 
-It assigns logical index `i` to:
+Reads may overlap, and accesses to different buffers or different offsets do
+not conflict. Regions can therefore be as precise as one cell per thread; they
+do not need to cover a whole buffer.
+
+Global operations use those cell permissions directly:
 
 ```text
-owner(i) = thread {
-  block-index  = (i / block-size, 0, 0),
-  thread-index = (i % block-size, 0, 0)
-}
+global.read[n, t] :
+  (buffer : global.buffer[n, t]) ● (index : ix n)
+  ● (|- read(thread, buffer, index))
+  -> value ● (|- read(thread, buffer, index))
+
+global.write[n, t] :
+  (buffer : global.buffer[n, t]) ● (index : ix n) ● value
+  ● (|- own(thread, buffer, index))
+  -> (|- own(thread, buffer, index))
 ```
 
-With this schedule, an active thread owns one logical index. Threads introduced
-by rounding the grid size up own no cells.
+Reading preserves the cell's read permission. Writing preserves its exclusive
+ownership, so the owning thread may update the cell more than once.
 
-## Perfect and predicated tiling
+## Kernels and launch
 
-For a two-dimensional output `d2(rows, cols)`, let `tile-rows` and
-`tile-cols` be positive. CUDA's X axis follows columns and its Y axis follows
-rows:
-
-```text
-block = (tile-cols, tile-rows, 1)
-```
-
-Perfect tiling applies when the tile dimensions divide the output dimensions:
+A kernel is a dependent function. Resource arguments are ordinary values, and
+proof arguments may refer to the exact resources introduced earlier in the
+function type. For example:
 
 ```text
-perfect-config :
-  (rows : u64) ● (cols : u64) ●
-  (tile-rows : u64) ● (tile-cols : u64)
-  -> launch-config
-
-perfect-config = \rows cols tile-rows tile-cols ->
-  {
-    grid  = (cols / tile-cols, rows / tile-rows, 1),
-    block = (tile-cols, tile-rows, 1)
-  }
-```
-
-The physical grid then covers the logical output exactly. Every physical
-thread owns one output.
-
-Predicated tiling rounds the grid up instead:
-
-```text
-predicated-config :
-  (rows : u64) ● (cols : u64) ●
-  (tile-rows : u64) ● (tile-cols : u64)
-  -> launch-config
-
-predicated-config = \rows cols tile-rows tile-cols ->
-  {
-    grid = (
-      max(1, ceil-div(cols, tile-cols)),
-      max(1, ceil-div(rows, tile-rows)),
-      1
-    ),
-    block = (tile-cols, tile-rows, 1)
-  }
-```
-
-Both configurations use the same schedule. For a logical output `(row, col)`:
-
-```text
-owner(row, col) = thread {
-  block-index  = (col / tile-cols, row / tile-rows, 0),
-  thread-index = (col % tile-cols, row % tile-rows, 0)
-}
-```
-
-In a predicated launch, threads in a partial edge tile whose physical
-coordinates are outside `(rows, cols)` own no logical outputs and receive an empty vector. They still run the kernel. This matters for a
-shared-memory kernel: even a thread with no output must participate in every block-wide load and barrier, using guarded loads and padding out-of-bounds values when necessary.
-
-Physical coordinates are ordinary integers, not safe buffer indices. After a bounds check, the kernel refines an in-bounds coordinate to `ix size` before reading a buffer. If the check fails, no index is constructed and the predicated load returns a padding value such as zero.
-
-The construction applies independently along each axis, so it extends to 1D, 3D, and rectangular tiles. For tiled matrix multiplication, the inner
-dimension uses the same choice: exact division for perfect tiling, or
-`ceil-div(inner, tile-inner)` iterations with out-of-bounds input loads
-replaced by zero for predicated tiling.
-
-## Kernel
-
-A kernel accepts arbitrary inputs together with permissions tied to the actual
-resources inside those inputs:
-
-```text
-kernel[config : launch-config, inputs : type] :
-  val(inputs) ●
-  val(thread config) ●
-  permissions(inputs, thread)
+kernel-body[config, n, t, index] :
+  (inputs : inputs)
+  -> (thread : thread[config])
+  -> (tile : shared.buffer[block thread, n, t])
+  -> (permission : |- own(thread, tile, index(thread)))
   => unit
 ```
 
-The kernel also declares a closed access plan. A read grant identifies a
-global buffer that the thread may read. An ownership grant gives the thread
-the complete list of cells assigned to it by an owner function:
+The `tile` binder behaves like any other value binder. Its type tells launch
+to create one buffer per block. The later `permission` binder refers to that
+particular buffer value.
+
+The proof parameters form the kernel's access contract. Launch checks that
+the requirements for all threads are race-free, supplies global buffers from
+the kernel inputs, creates block-local shared buffers, constructs the permitted
+proofs, and applies the function once per physical thread:
 
 ```text
-global-access ::= reads(buffer, thread -> region)
-                | owns(buffer, layout, owner)
-                | global-access ● global-access
+gpu.launch : config ● inputs ● kernel-function(inputs) -> launch
 ```
 
-The complete plan must satisfy:
+## Shared memory
+
+A shared buffer belongs to one block. Launch creates a separate instance for
+every block:
 
 ```text
-race-free(plan) :=
-  every physical cell has at most one writer
-  and every written physical cell has no readers
+shared.buffer[block, n, t]
 ```
 
-The cell identity is `allocation-id ● offset`. Accesses to other allocations
-or other offsets do not conflict, and read regions may overlap one another.
+Shared operations receive the block as a runtime argument. The dependent
+buffer type ensures that the buffer belongs to that same block.
 
-Global operations require the resulting permissions:
-
-```text
-global.read :
-  buffer ● val(ix n) ● (|- read-share(thread, buffer, region(thread)))
-  ● (|- index in region)
-  -> val(t)
-
-global.write :
-  buffer ● val(ix n) ● val(t) ● (|- owns(thread, buffer, index))
-  -> unit
-```
-
-An output buffer is therefore an ordinary field of `inputs`; it is not a
-special kernel result.
-
-## Launch
+The kernel function expresses initial ownership with dependent proof
+parameters. For example:
 
 ```text
-gpu.launch[inputs] :
-  (config : launch-config) ●
-  val(inputs) ●
-  kernel(config, inputs)
-  -> launch
-```
-
-`gpu.launch` interprets the kernel's access plan and runs the kernel once per
-physical thread. Read and ownership permissions refer to the exact buffers in
-`inputs`. One thread may own zero, one, or several cells. Execution order
-between different threads is unspecified.
-
-A kernel may also contain the shared-buffer declarations and ownership plan described below. In that case, `gpu.launch` creates those buffers once per block and supplies the initial ownership grants to each thread.
-
-## Defining `materialize`
-
-`materialize` evaluates an indexed producer and stores its values in a new
-linear buffer:
-
-```text
-materialize[n, t] :
-  (n : u64) ● (val(ix n) => val(t))
-  -> buf n t
-```
-
-It uses ordinary buffer allocation and vector mapping:
-
-```text
-buf.alloc[n, t] : (n : u64) -> buf n t
-
-vec.map[n, a, b] :
-  (val(a) => val(b)) ● val(vec n a)
-  -> val(vec n b)
-```
-
-We can define `materialize` using an output buffer in the kernel inputs and an
-ownership plan over its cells:
-
-```text
-materialize = \n producer ->
-  let config   = linear-config(n)
-  let output   = buf.alloc[n, t](n)
-  let layout   = linear-layout(n)
-  let inputs = { output }
-
-  let kernel =
-    global-access owns(inputs.output, layout, linear-owner(config, n))
-
-    \inputs _thread owned-cells ->
-      for index in owned-cells:
-        global.write(inputs.output, index, producer(index), owned-cells[index])
-
-  gpu.launch(config, inputs, kernel)
-  output
-```
-
-Thus `materialize` needs no output-specific launch primitive. Allocation is
-provided by the surrounding language, and the kernel writes only the cells
-granted by its global access plan.
-
-## Shared memory and barriers
-
-Shared buffers belong to one block and are declared by the kernel. `gpu.launch` allocates a separate instance of each declared buffer for every block. A handle therefore includes the block identity, not just a source-level name:
-
-```text
-shared-ref[block, n, t]
-```
-
-Shared-memory indices have type `ix n`, so an out-of-bounds access cannot be expressed. Race freedom and initialization require additional proof tokens.
-
-### Ownership plan
-
-A shared-memory kernel declares a fixed assignment from logical shared cells to threads in the block:
-
-```text
-ownership-plan[config, cells] : {
-  owner : val(cells) -> val(coord(config.block))
-}
-```
-
-For example, a square matrix tile assigns logical cell `(row, col)` to block thread `(col, row, 0)`. A layout maps those logical cells to physical shared buffer indices and must be injective.
-
-`gpu.launch` realizes this plan and passes the resulting initial ownership to
-the kernel body. Thus a shared-memory kernel has one additional input:
-
-```text
-shared-kernel[config, inputs] :
-  (inputs : val(inputs)) ●
-  (thread : val(thread config)) ●
-  global-permissions(inputs, thread) ●
-  initial-owns(plan, thread)
+kernel-body[config, n, t, index] :
+  (thread : thread[config])
+  -> (tile : shared.buffer[block thread, n, t])
+  -> (initial-own : |- own(thread, tile, index(thread)))
   => unit
 ```
 
-For every shared buffer and logical cell assigned to this thread,
-`initial-owns(plan, thread)` contains:
+Taken across all threads, these requirements are the ownership plan. Launch
+constructs the proofs only after checking that two different threads are not
+given ownership of the same cell. A kernel can use several proof parameters
+when a thread initially owns several cells.
+
+### Shared writes
+
+Exclusive ownership permits one thread to write a cell:
 
 ```text
-|- owns([], thread, buffer, layout(cell))
+shared.write[config, n, t] :
+  (block : block[config])
+  ● (buffer : shared.buffer[block, n, t])
+  ● (index : ix n) ● value
+  ● (|- own(thread, buffer, index))
+  -> (|- wrote(thread, buffer, index))
 ```
 
-`gpu.launch` may include this token only after checking that the layout is injective and `plan.owner(cell) = thread.thread-index`. There is no separate grant operation in the kernel: it receives the checked tokens before entering the loop. The ownership plan is fixed for the whole kernel; a barrier cannot replace it with another plan.
+The write consumes ownership and produces evidence that this thread wrote the
+cell. No other thread can read or write it while the exclusive permission is
+held.
 
-### Reads and writes
+### Shared reads
 
-An exclusive `owns` token permits a write to one cell:
+A shared read needs both permission to read the cell and evidence that it was
+initialized:
 
 ```text
-shared.write :
-  (buffer : shared-ref[block, n, t]) ●
-  (index : val(ix n)) ●
-  val(t) ●
-  (|- owns(trace, thread, buffer, index))
-  -> |- wrote(trace, thread, buffer, index)
+shared.read[config, n, t] :
+  (block : block[config])
+  ● (buffer : shared.buffer[block, n, t])
+  ● (index : ix n)
+  ● (|- read(thread, buffer, index))
+  ● (|- defined(buffer, index))
+  -> value ● (|- read(thread, buffer, index))
 ```
 
-A read needs two independent facts: the cell contains a value established by an earlier synchronized write, and the current phase permits shared reads:
+The cell's read permission is reusable during the current read phase.
+`defined` is a pure fact derived from writes published at a barrier.
 
-```text
-shared.read :
-  (buffer : shared-ref[block, n, t]) ●
-  (index : val(ix n)) ●
-  (|- defined(trace, buffer, index)) ●
-  (|- read-share(trace, thread, buffer))
-  -> val(t)
-```
+## Block synchronization
 
-`read-share` covers the buffer and may be reused for several reads during the same read-only phase. `defined` concerns one cell and prevents reading shared memory before some thread has initialized it.
-
-### Block synchronization
-
-A barrier advances the trace. Since every permission mentions its trace, all old `owns` and `read-share` tokens become unusable. The barrier then grants exactly one of these modes:
-
-```text
-grant ::= reads(buffer, ...)
-        | owns(buffer, layout, cell, owner-proof, ...)
-```
-
-The modes cannot be mixed. An `owns` grant is accepted only when the fixed ownership plan assigns the cell to the current thread and the layout is injective. All threads in the block execute the same barrier and permission transition.
-
-The barrier also makes the current thread's fact available for every thread in the block:
+There is one block synchronization primitive:
 
 ```text
 shared.sync :
-  (block : val(block)) ●
-  (barrier : barrier-id) ●
-  (current : |- fact(trace, thread)) ●
-  grant
-  -> (|- forall other in block. fact(trace, other))
-     ● permissions(trace + barrier, thread, grant)
+  current-shared-context
+  ● block
+  ● barrier
+  ● contribution
+  ● grants
+  -> published-facts ● new-shared-context(grants)
 ```
 
-**Note.** I think we need some sort of admissable condition here, but not sure what it is. We cannot "lift" every fact. See Kuiper paper where they have a similar mechanism.
+`current-shared-context` means all shared permissions currently held by the
+thread, not a caller-selected subset.
 
-Consequently, a synchronized write establishes that its cell is defined after the barrier:
+It has three effects:
+
+1. Every thread in `block` waits at the same barrier.
+2. The barrier publishes its fixed contribution from every thread.
+3. It discards the entire old shared-permission context and replaces it with
+   `grants`.
+
+The third rule is important. A thread cannot preserve an old permission merely
+by omitting it from the arguments to `shared.sync`. After the barrier, only
+the new shared permissions returned by the barrier are usable. Global-memory
+permissions are unaffected.
+
+The new grants are declared at the barrier site:
 
 ```text
-(|- wrote(trace, writer, buffer, index))
--> |- defined(trace + barrier, buffer, index)
+grants ::= reads(buffers)
+         | owns(required cells)
 ```
 
-The matmul tile loop carries its proof invariant separately from its partial
-sum. The invariant type and its initial value can be written directly on the
-loop. `initial-own-a` and `initial-own-b` are supplied by `gpu.launch`:
+A barrier grants exclusive ownership only according to the kernel's checked
+ownership requirements. Read and exclusive-write modes are not mixed for the
+same cell. A `reads` grant produces a cell-level read permission for every
+shared cell covered by that barrier.
+
+The contribution is also fixed by the barrier site; it is not an arbitrary
+proposition chosen by the caller. For example, a tile-loaded barrier may
+publish shared writes:
 
 ```text
-for each tile
-  maintaining invariant :
-    (|- owns(trace, thread, tile-a, thread-cell)) ●
-    (|- owns(trace, thread, tile-b, thread-cell))
-  initially initial-own-a ● initial-own-b:
-
-  own-a ● own-b = invariant
-
-  wrote-a = shared.write(tile-a, thread-cell, value-a, own-a)
-  wrote-b = shared.write(tile-b, thread-cell, value-b, own-b)
-
-  all-writes ● (read-a ● read-b) =
-    shared.sync(block, tile-loaded, wrote-a ● wrote-b,
-                reads(tile-a, tile-b))
-
-  for each k in tile:
-    defined-a = all-writes(writer-of-a(k)).a
-    defined-b = all-writes(writer-of-b(k)).b
-    a = shared.read(tile-a, (thread-row, k), defined-a, read-a)
-    b = shared.read(tile-b, (k, thread-col), defined-b, read-b)
-
-  _ ● next-invariant =
-    shared.sync(block, tile-consumed, unit,
-                owns(tile-a, tile-b, plan))
-
-  continue with next-invariant
+tile-loaded contribution(thread) =
+  (|- wrote(thread, tile-a, cell-a(thread)))
+  ● (|- wrote(thread, tile-b, cell-b(thread)))
 ```
 
-`maintaining` means that the loop may start only with the two ownership tokens
-given by `initially`, and that its body must re-establish the same two `owns`
-facts at `trace + tile-loaded + tile-consumed` before continuing. Temporary
-`wrote`, `defined`, and `read-share` facts are used inside one iteration but
-are not part of `next-invariant`.
+After every thread arrives, each thread receives the corresponding facts for
+all threads, together with read permissions for both tiles. From those
+published writes it can prove that every planned tile cell is defined.
 
-The first barrier publishes initialization and changes the block from exclusive writing to shared reading. The second barrier waits until all reads are finished, resets the read permissions, and grants exclusive ownership for the next tile. Thus a shared cell is never writable while another thread has permission to read it.
+A later tile-consumed barrier need not publish a fact. Its synchronization
+ensures that all threads have finished the read phase; replacing the shared
+context removes all read permissions, and the barrier grants ownership for
+the next write phase.
+
+An implementation can enforce whole-context replacement with a hidden fresh
+phase attached to shared permissions, or with an indexed effect. The phase is
+not part of kernel source syntax. In either case, all threads in a block must
+execute the same barriers in the same order.
+
+## Tiled matrix multiplication
+
+Here is a complete example for square tiles and dimensions divisible by
+`tile-size`. There is one thread for every output cell.
+
+```text
+A : global.buffer[rows * inner, f32]
+B : global.buffer[inner * cols, f32]
+C : global.buffer[rows * cols, f32]
+
+config = {
+  grid  = (cols / tile-size, rows / tile-size, 1)
+  block = (tile-size, tile-size, 1)
+}
+
+row(thread) = (block thread).index.y * tile-size + thread.thread-index.y
+col(thread) = (block thread).index.x * tile-size + thread.thread-index.x
+
+row-major(width, row, col) = row * width + col
+
+a-index(thread, q) =
+  row-major(
+    inner,
+    row(thread),
+    q * tile-size + thread.thread-index.x)
+
+b-index(thread, q) =
+  row-major(
+    cols,
+    q * tile-size + thread.thread-index.y,
+    col(thread))
+
+c-index(thread) =
+  row-major(cols, row(thread), col(thread))
+```
+
+The complete kernel is a function whose proof parameters depend on its buffer
+and thread parameters:
+
+```text
+tile-layout(row, col) = row * tile-size + col
+
+tile-cell(thread) =
+  tile-layout(thread.thread-index.y, thread.thread-index.x)
+
+matmul[rows, inner, cols, tile-size, config] :
+  (A : global.buffer[rows * inner, f32])
+  -> (B : global.buffer[inner * cols, f32])
+  -> (C : global.buffer[rows * cols, f32])
+  -> (thread : thread[config])
+  -> (tile-a :
+        shared.buffer[block thread, tile-size * tile-size, f32])
+  -> (tile-b :
+        shared.buffer[block thread, tile-size * tile-size, f32])
+
+  -> (read-a :
+        (q : ix(inner / tile-size))
+        -> (|- read(thread, A, a-index(thread, q))))
+
+  -> (read-b :
+        (q : ix(inner / tile-size))
+        -> (|- read(thread, B, b-index(thread, q))))
+
+  -> (own-c : |- own(thread, C, c-index(thread)))
+
+  -> (initial-own-a :
+        |- own(thread, tile-a, tile-cell(thread)))
+
+  -> (initial-own-b :
+        |- own(thread, tile-b, tile-cell(thread)))
+
+  => unit
+
+matmul[rows, inner, cols, tile-size, config] =
+  \A B C thread tile-a tile-b
+   read-a read-b own-c initial-own-a initial-own-b =>
+
+  barrier tile-loaded:
+    publish every thread's writes to tile-a and tile-b
+    grant each thread read proofs for every cell in tile-a and tile-b
+
+  barrier tile-consumed:
+    publish nothing
+    grant each thread:
+      (|- own(thread, tile-a, tile-cell(thread)))
+      ● (|- own(thread, tile-b, tile-cell(thread)))
+
+  sum = 0
+
+  for each q in ix(inner / tile-size)
+    maintaining invariant :
+      (|- own(thread, tile-a, tile-cell(thread)))
+      ● (|- own(thread, tile-b, tile-cell(thread)))
+    initially initial-own-a ● initial-own-b:
+
+    own-a ● own-b = invariant
+
+    a-value =
+      global.read(A, a-index(thread, q)) using read-a(q)
+
+    b-value =
+      global.read(B, b-index(thread, q)) using read-b(q)
+
+    wrote-a =
+      shared.write(block thread, tile-a, tile-cell(thread), a-value)
+        using own-a
+
+    wrote-b =
+      shared.write(block thread, tile-b, tile-cell(thread), b-value)
+        using own-b
+
+    all-writes ● reads-a ● reads-b =
+      shared.sync(block thread, tile-loaded)
+        publishing wrote-a ● wrote-b
+
+    for each k in ix(tile-size):
+      index-a = tile-layout(thread.thread-index.y, k)
+      index-b = tile-layout(k, thread.thread-index.x)
+
+      defined-a = defined-from(all-writes, tile-a, index-a)
+      defined-b = defined-from(all-writes, tile-b, index-b)
+
+      a = shared.read(block thread, tile-a, index-a)
+            using reads-a[index-a] ● defined-a
+
+      b = shared.read(block thread, tile-b, index-b)
+            using reads-b[index-b] ● defined-b
+
+      sum = sum + a * b
+
+    next-invariant = shared.sync(block thread, tile-consumed)
+    continue with next-invariant
+
+  global.write(C, c-index(thread), sum) using own-c
+
+gpu.launch(
+  config,
+  A ● B ● C,
+  matmul[rows, inner, cols, tile-size, config])
+```
+
+`rows`, `inner`, `cols`, `tile-size`, and `config` are metavariables in square
+brackets; they are not runtime arguments. `A`, `tile-a`, and the other buffers
+are value arguments, like an argument `x : u64`. Later proof arguments refer
+to those exact buffer values. The block is obtained from `block thread`, so it
+does not need another runtime binder. Launch supplies `A`, `B`, and `C`, creates
+`tile-a` and `tile-b` once per block, and constructs the proof arguments after
+checking the requirements across all threads. The accumulator `sum` remains
+an ordinary value, separate from the loop's proof invariant. Here, `using`
+passes a proof and threads it forward when the primitive preserves it.
+
+The first barrier proves that reads are initialized and changes the block from
+exclusive writing to shared reading. The second waits for all reads, removes
+every read permission, and restores exclusive ownership. Consequently, a
+shared cell is never written while another thread can read or write it.

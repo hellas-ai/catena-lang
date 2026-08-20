@@ -30,7 +30,7 @@ use self::{
 };
 use crate::{
     codegen::GpuDialect,
-    runtime::{ExecError, MemError, MemOwn, Runtime, Value},
+    runtime::{Artifact, ExecError, MemError, MemOwn, Runtime, RuntimeId, Value},
 };
 
 const CHILD_MODE_ENV: &str = "CATENA_SAFE_RUNTIME_CHILD";
@@ -52,13 +52,17 @@ pub enum SafeInitError {
         #[source]
         source: io::Error,
     },
-    #[error("SafeRuntime initialization transport failed: {0}")]
+    #[error("SafeRuntime setup transport failed: {0}")]
     Transport(String),
     #[error("SafeRuntime child initialization failed: {0}")]
     RemoteInitialization(String),
-    #[error("SafeRuntime child returned an unexpected initialization response")]
+    #[error("SafeRuntime child failed to load sources: {0}")]
+    RemoteLoad(String),
+    #[error("SafeRuntime child returned an unexpected setup response")]
     UnexpectedResponse,
-    #[error("SafeRuntime child terminated during initialization with {status}: {stderr}")]
+    #[error(
+        "SafeRuntime child terminated during initialization or loading with {status}: {stderr}"
+    )]
     ChildTerminated { status: ExitStatus, stderr: String },
     #[error(transparent)]
     Memory(#[from] MemError),
@@ -101,11 +105,32 @@ pub enum ChildMainError {
 pub struct SafeRuntime {
     worker: Mutex<WorkerProcess>,
     ipc: IpcTransport,
+    runtime_id: RuntimeId,
 }
 
 impl SafeRuntime {
-    /// Construct a process-isolated runtime from Catena source paths.
-    pub fn new<I>(paths: I, dialect: GpuDialect) -> Result<Self, SafeInitError>
+    /// Construct an empty process-isolated runtime.
+    pub fn new(dialect: GpuDialect) -> Result<Self, SafeInitError> {
+        let executable = env::current_exe().map_err(SafeInitError::CurrentExecutable)?;
+        let ipc = IpcTransport::load(dialect)?;
+        let mut worker = WorkerProcess::spawn(&executable)?;
+        worker
+            .send(&Request::Initialize { dialect })
+            .map_err(map_init_worker_error)?;
+
+        match worker.receive().map_err(map_init_worker_error)? {
+            Response::Initialized(Ok(())) => Ok(Self {
+                worker: Mutex::new(worker),
+                ipc,
+                runtime_id: RuntimeId::new(),
+            }),
+            Response::Initialized(Err(error)) => Err(SafeInitError::RemoteInitialization(error)),
+            Response::Loaded(_) | Response::Executed(_) => Err(SafeInitError::UnexpectedResponse),
+        }
+    }
+
+    /// Load Catena programs from source paths.
+    pub fn load<I>(&mut self, paths: I) -> Result<Artifact, SafeInitError>
     where
         I: IntoIterator<Item = PathBuf>,
     {
@@ -116,48 +141,43 @@ impl SafeRuntime {
                     .map_err(|source| SafeInitError::ReadSource { path, source })
             })
             .collect::<Result<Vec<_>, _>>()?;
-        Self::from_owned_sources(sources, dialect)
+        self.load_owned_sources(sources)
     }
 
-    /// Construct a process-isolated runtime from in-memory Catena sources.
-    pub fn from_sources<'a, I>(sources: I, dialect: GpuDialect) -> Result<Self, SafeInitError>
+    /// Load Catena programs from in-memory source strings.
+    pub fn load_sources<'a, I>(&mut self, sources: I) -> Result<Artifact, SafeInitError>
     where
         I: IntoIterator<Item = &'a str>,
     {
-        Self::from_owned_sources(
-            sources.into_iter().map(ToOwned::to_owned).collect(),
-            dialect,
-        )
+        self.load_owned_sources(sources.into_iter().map(ToOwned::to_owned).collect())
     }
 
-    fn from_owned_sources(
-        sources: Vec<String>,
-        dialect: GpuDialect,
-    ) -> Result<Self, SafeInitError> {
-        let executable = env::current_exe().map_err(SafeInitError::CurrentExecutable)?;
-        let ipc = IpcTransport::load(dialect)?;
-        let mut worker = WorkerProcess::spawn(&executable)?;
+    fn load_owned_sources(&mut self, sources: Vec<String>) -> Result<Artifact, SafeInitError> {
+        let worker = self
+            .worker
+            .get_mut()
+            .map_err(|_| SafeInitError::Transport("worker lock was poisoned".to_string()))?;
         worker
-            .send(&Request::Initialize { sources, dialect })
+            .send(&Request::LoadSources { sources })
             .map_err(map_init_worker_error)?;
 
         match worker.receive().map_err(map_init_worker_error)? {
-            Response::Initialized(Ok(())) => Ok(Self {
-                worker: Mutex::new(worker),
-                ipc,
-            }),
-            Response::Initialized(Err(error)) => Err(SafeInitError::RemoteInitialization(error)),
-            Response::Executed(_) => Err(SafeInitError::UnexpectedResponse),
+            Response::Loaded(Ok(index)) => Ok(Artifact::new(self.runtime_id, index)),
+            Response::Loaded(Err(error)) => Err(SafeInitError::RemoteLoad(error)),
+            Response::Initialized(_) | Response::Executed(_) => {
+                Err(SafeInitError::UnexpectedResponse)
+            }
         }
     }
 
     /// Run a source-level program in the child process.
     pub fn exec<'a, const M: usize, const N: usize>(
         &self,
+        artifact: &Artifact,
         name: &str,
         args: [Value<'a>; M],
     ) -> Result<[Value<'static>; N], SafeExecError> {
-        self.exec_values(name, args.into())?
+        self.exec_values(artifact, name, args.into())?
             .try_into()
             .map_err(|_| SafeExecError::UnexpectedResponse)
     }
@@ -165,9 +185,13 @@ impl SafeRuntime {
     /// Run a source-level program with dynamically sized inputs and outputs.
     pub fn exec_values<'a>(
         &self,
+        artifact: &Artifact,
         name: &str,
         args: Vec<Value<'a>>,
     ) -> Result<Vec<Value<'static>>, SafeExecError> {
+        if !artifact.belongs_to(self.runtime_id) {
+            return Err(SafeExecError::Runtime(ExecError::UnknownArtifact));
+        }
         let (buffers, wire_args) = self.encode_parent_arguments(&args)?;
         let mut worker = self
             .worker
@@ -182,6 +206,7 @@ impl SafeRuntime {
 
         worker
             .send(&Request::Execute {
+                artifact: artifact.index(),
                 name: name.to_string(),
                 buffers,
                 args: wire_args,
@@ -199,7 +224,7 @@ impl SafeRuntime {
                     "child memory IPC failed: {error}"
                 )));
             }
-            Response::Initialized(_) => {
+            Response::Initialized(_) | Response::Loaded(_) => {
                 return Err(SafeExecError::UnexpectedResponse);
             }
         };
@@ -328,14 +353,11 @@ pub fn run_safe_runtime_child_if_requested() -> Result<bool, ChildMainError> {
 
 fn run_child_loop(mut reader: impl Read, mut writer: impl io::Write) -> Result<(), ChildMainError> {
     let request = read_request(&mut reader)?.ok_or(ChildMainError::ExpectedInitialization)?;
-    let Request::Initialize { sources, dialect } = request else {
+    let Request::Initialize { dialect } = request else {
         return Err(ChildMainError::ExpectedInitialization);
     };
 
-    let runtime = match Runtime::new(dialect).and_then(|mut runtime| {
-        runtime.load_sources(sources.iter().map(String::as_str))?;
-        Ok(runtime)
-    }) {
+    let mut runtime = match Runtime::new(dialect) {
         Ok(runtime) => runtime,
         Err(error) => {
             write_response(&mut writer, &Response::Initialized(Err(error.to_string())))?;
@@ -349,17 +371,36 @@ fn run_child_loop(mut reader: impl Read, mut writer: impl io::Write) -> Result<(
     while let Some(request) = read_request(&mut reader)? {
         match request {
             Request::Initialize { .. } => return Err(ChildMainError::AlreadyInitialized),
+            Request::LoadSources { sources } => {
+                let result = runtime
+                    .load_sources(sources.iter().map(String::as_str))
+                    .map(|artifact| artifact.index())
+                    .map_err(|error| error.to_string());
+                write_response(&mut writer, &Response::Loaded(result))?;
+            }
             Request::Shutdown => return Ok(()),
             Request::ReleaseOutputs => {
                 pending_outputs.clear();
             }
             Request::Execute {
+                artifact,
                 name,
                 buffers,
                 args,
             } => {
                 let response = if pending_outputs.is_empty() {
-                    execute_in_child(&runtime, &ipc, &name, buffers, args, &mut pending_outputs)
+                    match runtime.artifact_at(artifact) {
+                        Ok(artifact) => execute_in_child(
+                            &runtime,
+                            &ipc,
+                            &artifact,
+                            &name,
+                            buffers,
+                            args,
+                            &mut pending_outputs,
+                        ),
+                        Err(error) => Response::Executed(Err(RemoteExecError::Runtime(error))),
+                    }
                 } else {
                     Response::Executed(Err(RemoteExecError::Memory(
                         "previous owned outputs have not been released".to_string(),
@@ -377,6 +418,7 @@ fn run_child_loop(mut reader: impl Read, mut writer: impl io::Write) -> Result<(
 fn execute_in_child(
     runtime: &Runtime,
     ipc: &IpcTransport,
+    artifact: &Artifact,
     name: &str,
     buffers: Vec<WireIpcBuffer>,
     wire_args: Vec<WireValue>,
@@ -422,7 +464,7 @@ fn execute_in_child(
         Err(error) => return Response::Executed(Err(RemoteExecError::Memory(error))),
     };
 
-    let values = match runtime.exec_values(name, args) {
+    let values = match runtime.exec_values(artifact, name, args) {
         Ok(values) => values,
         Err(error) => return Response::Executed(Err(RemoteExecError::Runtime(error))),
     };

@@ -10,7 +10,7 @@ use libloading::Library;
 use libloading::os::unix::{Library as UnixLibrary, RTLD_LAZY, RTLD_LOCAL};
 use serde::{Deserialize, Serialize};
 
-use super::artifact::{Artifact, ArtifactError};
+use super::artifact::{Artifact, ArtifactError, RuntimeId, SharedObject};
 use super::executor::{AbiValue, Executor, ExecutorError};
 use super::mem::{MemError, MemOwn};
 use super::{
@@ -27,13 +27,14 @@ use metacat::theory::RawTheorySet;
 pub struct Runtime {
     /// GPU operations used to validate and release memory crossing the ABI.
     gpu: Arc<GpuApi>,
-    loaded: Option<LoadedRuntime>,
+    runtime_id: RuntimeId,
+    artifacts: Vec<LoadedArtifact>,
 }
 
 #[derive(Debug)]
-struct LoadedRuntime {
+struct LoadedArtifact {
     // Keep the tempdir-backed shared object alive for as long as the library is loaded.
-    _artifact: Artifact,
+    _shared_object: SharedObject,
     /// Prepared entry points in the loaded shared object.
     executor: Executor,
     /// Function signatures (runtime Rust ↔ C typechecking)
@@ -88,8 +89,8 @@ pub enum InitError {
 
 #[derive(Debug, Error, Serialize, Deserialize)]
 pub enum ExecError {
-    #[error("Runtime has no loaded sources")]
-    NoSourcesLoaded,
+    #[error("Artifact does not belong to this runtime")]
+    UnknownArtifact,
     #[error("Unknown source function '{0}'")]
     UnknownSourceFunction(String),
     #[error("Argument {index} expected {expected:?}, got {actual:?}")]
@@ -123,12 +124,13 @@ impl Runtime {
     pub fn new(dialect: GpuDialect) -> Result<Runtime, InitError> {
         Ok(Self {
             gpu: GpuApi::load(dialect)?,
-            loaded: None,
+            runtime_id: RuntimeId::new(),
+            artifacts: Vec::new(),
         })
     }
 
-    /// Load Catena programs from a list of paths.
-    pub fn load<I>(&mut self, paths: I) -> Result<(), InitError>
+    /// Compile Catena programs from paths into a new artifact.
+    pub fn load<I>(&mut self, paths: I) -> Result<Artifact, InitError>
     where
         I: IntoIterator<Item = PathBuf>,
     {
@@ -136,8 +138,8 @@ impl Runtime {
         self.load_raw_theories(raw_theories)
     }
 
-    /// Load Catena programs from in-memory source strings.
-    pub fn load_sources<'a, I>(&mut self, sources: I) -> Result<(), InitError>
+    /// Compile in-memory Catena source strings into a new artifact.
+    pub fn load_sources<'a, I>(&mut self, sources: I) -> Result<Artifact, InitError>
     where
         I: IntoIterator<Item = &'a str>,
     {
@@ -145,7 +147,7 @@ impl Runtime {
         self.load_raw_theories(raw_theories)
     }
 
-    fn load_raw_theories(&mut self, raw_theories: RawTheorySet) -> Result<(), InitError> {
+    fn load_raw_theories(&mut self, raw_theories: RawTheorySet) -> Result<Artifact, InitError> {
         let dialect = self.gpu.dialect();
         let report = crate::compile::compile(raw_theories)?;
         let modules = report
@@ -171,20 +173,21 @@ impl Runtime {
             path: cpp_path.clone(),
             source,
         })?;
-        let artifact = super::artifact::compile(&cpp_path, dialect)?;
+        let shared_object = super::artifact::compile(&cpp_path, dialect)?;
 
-        let library = load_generated_library(artifact.path())?;
+        let library = load_generated_library(shared_object.path())?;
         let executor = Executor::new(library, &signature_table).map_err(|error| match error {
             ExecutorError::LoadSymbol { symbol, source } => {
                 InitError::LoadSymbol { symbol, source }
             }
         })?;
-        self.loaded = Some(LoadedRuntime {
-            _artifact: artifact,
+        let artifact = Artifact::new(self.runtime_id, self.artifacts.len());
+        self.artifacts.push(LoadedArtifact {
+            _shared_object: shared_object,
             executor,
             signatures: signature_table,
         });
-        Ok(())
+        Ok(artifact)
     }
 
     pub fn mem_u64(&self, values: &[u64]) -> Result<MemOwn, MemError> {
@@ -199,13 +202,14 @@ impl Runtime {
         MemOwn::from_f32_slice(values, self.gpu.dialect())
     }
 
-    /// Run a source-level `program` definition, which must have M arguments, and return its N arguments.
+    /// Run a source-level `program` definition from `artifact`.
     pub fn exec<'a, const M: usize, const N: usize>(
         &self,
+        artifact: &Artifact,
         name: &str,
         args: [Value<'a>; M],
     ) -> Result<[Value<'static>; N], ExecError> {
-        let loaded = self.loaded.as_ref().ok_or(ExecError::NoSourcesLoaded)?;
+        let loaded = self.loaded_artifact(artifact)?;
         let signature = loaded
             .signatures
             .get(name)
@@ -222,18 +226,19 @@ impl Runtime {
             .map(|values| values.try_into().expect("output arity already validated"))
     }
 
-    /// Run a source-level `program` with dynamically sized input and output
-    /// collections.
+    /// Run a source-level `program` from `artifact` with dynamically sized
+    /// input and output collections.
     ///
     /// This is the public execution boundary for adapters such as SafeRuntime,
     /// whose arities are known from a runtime protocol rather than const
     /// generics.
     pub fn exec_values<'a>(
         &self,
+        artifact: &Artifact,
         name: &str,
         args: Vec<Value<'a>>,
     ) -> Result<Vec<Value<'static>>, ExecError> {
-        let loaded = self.loaded.as_ref().ok_or(ExecError::NoSourcesLoaded)?;
+        let loaded = self.loaded_artifact(artifact)?;
         let signature = loaded
             .signatures
             .get(name)
@@ -243,7 +248,7 @@ impl Runtime {
 
     fn exec_symbol<'a>(
         &self,
-        loaded: &LoadedRuntime,
+        loaded: &LoadedArtifact,
         name: &str,
         signature: &FunctionSignature,
         args: Vec<Value<'a>>,
@@ -326,6 +331,22 @@ impl Runtime {
                 Ok(Value::from(memory))
             }
         }
+    }
+
+    fn loaded_artifact(&self, artifact: &Artifact) -> Result<&LoadedArtifact, ExecError> {
+        if !artifact.belongs_to(self.runtime_id) {
+            return Err(ExecError::UnknownArtifact);
+        }
+        self.artifacts
+            .get(artifact.index())
+            .ok_or(ExecError::UnknownArtifact)
+    }
+
+    pub(crate) fn artifact_at(&self, index: usize) -> Result<Artifact, ExecError> {
+        self.artifacts
+            .get(index)
+            .ok_or(ExecError::UnknownArtifact)?;
+        Ok(Artifact::new(self.runtime_id, index))
     }
 }
 

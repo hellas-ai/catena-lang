@@ -10,10 +10,13 @@ const MAX_FRAME_LEN: usize = 64 * 1024 * 1024;
 #[derive(Debug, Serialize, Deserialize)]
 pub(super) enum Request {
     Initialize {
-        sources: Vec<String>,
         dialect: GpuDialect,
     },
+    LoadSources {
+        sources: Vec<String>,
+    },
     Execute {
+        artifact: usize,
         name: String,
         buffers: Vec<WireIpcBuffer>,
         args: Vec<WireValue>,
@@ -25,6 +28,7 @@ pub(super) enum Request {
 #[derive(Debug, Serialize, Deserialize)]
 pub(super) enum Response {
     Initialized(Result<(), String>),
+    Loaded(Result<usize, String>),
     Executed(Result<WireExecution, RemoteExecError>),
 }
 
@@ -133,12 +137,18 @@ fn read_first_byte(reader: &mut impl Read) -> Result<Option<u8>, io::Error> {
 mod tests {
     use super::*;
 
+    fn artifact() -> usize {
+        7
+    }
+
     #[test]
     fn frames_round_trip() {
+        let expected_artifact = artifact();
         let mut bytes = Vec::new();
         write_frame(
             &mut bytes,
             &Request::Execute {
+                artifact: expected_artifact,
                 name: "f".to_string(),
                 buffers: Vec::new(),
                 args: vec![WireValue::U64(7)],
@@ -150,11 +160,24 @@ mod tests {
         assert!(matches!(
             decoded,
             Request::Execute {
+                artifact,
                 name,
                 buffers,
                 args,
-            } if name == "f" && buffers.is_empty()
+            } if artifact == expected_artifact && name == "f" && buffers.is_empty()
                 && matches!(args.as_slice(), [WireValue::U64(7)])
+        ));
+    }
+
+    #[test]
+    fn loaded_artifact_round_trips() {
+        let expected = artifact();
+        let mut bytes = Vec::new();
+        write_frame(&mut bytes, &Response::Loaded(Ok(expected))).unwrap();
+
+        assert!(matches!(
+            read_frame(&mut bytes.as_slice()).unwrap(),
+            Some(Response::Loaded(Ok(actual))) if actual == expected
         ));
     }
 
@@ -164,6 +187,7 @@ mod tests {
         write_frame(
             &mut bytes,
             &Request::Execute {
+                artifact: artifact(),
                 name: "head".to_string(),
                 buffers: vec![WireIpcBuffer {
                     handle: Some(vec![7; 64]),

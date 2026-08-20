@@ -12,8 +12,8 @@
 //!
 //! fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     let mut runtime = Runtime::new(GpuDialect::Hip)?;
-//!     runtime.load_sources(stdlib::sources().chain([PROGRAM]))?;
-//!     let [result] = runtime.exec("add-one", [41_u64.into()])?;
+//!     let artifact = runtime.load_sources(stdlib::sources().chain([PROGRAM]))?;
+//!     let [result] = runtime.exec(&artifact, "add-one", [41_u64.into()])?;
 //!     let Value::U64(sum) = result else {
 //!         panic!("`add-one` returned an unexpected value: {result:?}");
 //!     };
@@ -27,8 +27,8 @@
 //! ## Quick reference
 //!
 //! - [`Runtime::new`] creates an empty runtime.
-//! - [`Runtime::load`] and [`Runtime::load_sources`] load programs from paths or source strings.
-//! - [`Runtime::exec`] calls a program with [`Value`] inputs and const-sized outputs.
+//! - [`Runtime::load`] and [`Runtime::load_sources`] compile programs into an [`Artifact`].
+//! - [`Runtime::exec`] calls a program from a selected artifact with [`Value`] inputs.
 //! - [`Runtime::mem_u16`], [`Runtime::mem_u64`], and [`Runtime::mem_f32`] copy host slices into owned device memory.
 //! ### [`Value`] and Memory
 //!
@@ -66,7 +66,8 @@ mod signature;
 //#[cfg(test)]
 //mod tests;
 
-pub use artifact::ArtifactError;
+pub(crate) use artifact::RuntimeId;
+pub use artifact::{Artifact, ArtifactError};
 pub use mem::MemError;
 pub use mem::MemOwn;
 pub use mem::MemRef;

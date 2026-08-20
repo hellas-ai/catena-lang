@@ -1,24 +1,56 @@
 use catena_lang::{
     codegen::GpuDialect,
-    runtime::{InitError, MemRef, Runtime, Value, ValueKind},
+    runtime::{Artifact, ExecError, InitError, MemRef, Runtime, Value, ValueKind},
     stdlib,
 };
+use std::ops::Deref;
 
 const GPU_DIALECT_ENV: &str = "CATENA_GPU_DIALECT";
 
 /// Create a runtime with a provided user source file
-fn runtime_with(source: &'static str) -> anyhow::Result<Runtime> {
+fn runtime_with(source: &'static str) -> anyhow::Result<TestRuntime> {
     let mut runtime = Runtime::new(configured_gpu_dialect()?)?;
-    runtime.load_sources(stdlib::sources().chain([source]))?;
-    Ok(runtime)
+    let artifact = runtime.load_sources(stdlib::sources().chain([source]))?;
+    Ok(TestRuntime { runtime, artifact })
 }
 
 fn runtime_with_sources(
     sources: impl IntoIterator<Item = &'static str>,
-) -> anyhow::Result<Runtime> {
+) -> anyhow::Result<TestRuntime> {
     let mut runtime = Runtime::new(configured_gpu_dialect()?)?;
-    runtime.load_sources(stdlib::sources().chain(sources))?;
-    Ok(runtime)
+    let artifact = runtime.load_sources(stdlib::sources().chain(sources))?;
+    Ok(TestRuntime { runtime, artifact })
+}
+
+struct TestRuntime {
+    runtime: Runtime,
+    artifact: Artifact,
+}
+
+impl TestRuntime {
+    fn exec<'a, const M: usize, const N: usize>(
+        &self,
+        name: &str,
+        args: [Value<'a>; M],
+    ) -> Result<[Value<'static>; N], ExecError> {
+        self.runtime.exec(&self.artifact, name, args)
+    }
+
+    fn exec_values<'a>(
+        &self,
+        name: &str,
+        args: Vec<Value<'a>>,
+    ) -> Result<Vec<Value<'static>>, ExecError> {
+        self.runtime.exec_values(&self.artifact, name, args)
+    }
+}
+
+impl Deref for TestRuntime {
+    type Target = Runtime;
+
+    fn deref(&self) -> &Self::Target {
+        &self.runtime
+    }
 }
 
 fn configured_gpu_dialect() -> anyhow::Result<GpuDialect> {
@@ -37,11 +69,31 @@ fn configured_gpu_dialect() -> anyhow::Result<GpuDialect> {
 
 #[test]
 fn runtime_can_be_created_without_sources() -> anyhow::Result<()> {
-    let runtime = Runtime::new(configured_gpu_dialect()?)?;
+    let _runtime = Runtime::new(configured_gpu_dialect()?)?;
+    Ok(())
+}
 
+#[test]
+fn multiple_artifacts_resolve_same_function_independently() -> anyhow::Result<()> {
+    const IDENTITY: &str = "(def program inspect : (u64 val) -> (u64 val) = [value])";
+    const ADD_ONE: &str = r#"
+    (def program inspect : (u64 val) -> (u64 val) = ({_ u64.one} u64.add))
+    "#;
+
+    let dialect = configured_gpu_dialect()?;
+    let mut runtime = Runtime::new(dialect)?;
+    let identity = runtime.load_sources(stdlib::sources().chain([IDENTITY]))?;
+    let add_one = runtime.load_sources(stdlib::sources().chain([ADD_ONE]))?;
+
+    let [first] = runtime.exec(&identity, "inspect", [41_u64.into()])?;
+    let [second] = runtime.exec(&add_one, "inspect", [41_u64.into()])?;
+    assert!(matches!(first, Value::U64(41)));
+    assert!(matches!(second, Value::U64(42)));
+
+    let other_runtime = Runtime::new(dialect)?;
     assert!(matches!(
-        runtime.exec::<0, 0>("missing", []),
-        Err(catena_lang::runtime::ExecError::NoSourcesLoaded)
+        other_runtime.exec::<1, 1>(&identity, "inspect", [41_u64.into()]),
+        Err(ExecError::UnknownArtifact)
     ));
     Ok(())
 }

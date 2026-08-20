@@ -46,6 +46,14 @@ def tiledScheduleCertificate
 def tiledMatmulStep (trace : SyncTrace) : SyncTrace :=
   (trace ++ [.tileLoaded]) ++ [.tileConsumed]
 
+/-- Arbitrary global resources consumed by the tiled matmul kernel. -/
+structure MatmulInputs (rows inner cols : Nat) (α : Type) where
+  a : Buffer .global (rows * inner) α
+  aLayout : Layout (.d2 rows inner) (rows * inner)
+  b : Buffer .global (inner * cols) α
+  bLayout : Layout (.d2 inner cols) (inner * cols)
+  output : Buffer .global (rows * cols) α
+
 private def tileThread
     (blockXEq : Dim3.x (LaunchConfig.block cfg) = tile)
     (blockYEq : Dim3.y (LaunchConfig.block cfg) = tile)
@@ -91,8 +99,8 @@ One tiled matmul kernel for both perfect and predicated launches.
 
 `block.x = block.y = tile` is a launch requirement. All threads execute the
 shared-memory phases and barriers, including threads with no owned outputs.
-The returned function supplies the accumulator for every output owned by the
-current thread; edge threads may own no outputs.
+Global inputs and their per-thread permissions are supplied by `launch`.
+Edge threads own no output cells but still participate in every barrier.
 -/
 def tiledMatmulKernel
     {α : Type}
@@ -100,20 +108,35 @@ def tiledMatmulKernel
     [Add α]
     [Mul α]
     (tile : Nat)
-    (_tilePositive : 0 < tile)
-    (a : Matrix rows inner (Value α))
-    (b : Matrix inner cols (Value α)) :
-    Kernel (.d2 rows cols) α where
+    (tilePositive : 0 < tile) :
+    Kernel (MatmulInputs rows inner cols α) α where
   shared := .buffer "tileA" (tile * tile) (.buffer "tileB" (tile * tile) .empty)
   requirements := fun cfg =>
     Dim3.x (LaunchConfig.block cfg) = tile ∧
       Dim3.y (LaunchConfig.block cfg) = tile ∧
-      Dim3.z (LaunchConfig.block cfg) = 1
-  sharedOwner := fun _cfg ⟨blockXEq, blockYEq, blockZEq⟩ =>
+      Dim3.z (LaunchConfig.block cfg) = 1 ∧
+      cols ≤ Dim3.x (LaunchConfig.grid cfg) * tile ∧
+      rows ≤ Dim3.y (LaunchConfig.grid cfg) * tile ∧
+      0 < Dim3.z (LaunchConfig.grid cfg)
+  globalAccess := fun cfg
+      ⟨blockXEq, blockYEq, blockZEq, coversCols, coversRows, gridZPositive⟩
+      inputs =>
+    let certificate := tiledScheduleCertificate cfg rows cols tile tilePositive
+      blockXEq blockYEq coversCols coversRows gridZPositive (by simp [blockZEq])
+    .and (.reads inputs.a (fun _ => True))
+      (.and (.reads inputs.b (fun _ => True))
+        (.owns inputs.output Layout.rowMajor2D.offset
+          Layout.rowMajor2D_injective certificate.owner))
+  sharedOwner := fun _cfg
+      ⟨blockXEq, blockYEq, blockZEq, _coversCols, _coversRows, _gridZPositive⟩ =>
     tiledOwnershipPlan blockXEq blockYEq blockZEq
   trace := iterateTrace tiledMatmulStep (ceilDiv inner tile) []
-  body := fun {_cfg} {_State} {_certificate}
-      ⟨blockXEq, blockYEq, blockZEq⟩ _launchFacts thread ownership _work => by
+  body := fun {_cfg} {_State}
+      ⟨blockXEq, blockYEq, blockZEq, coversCols, coversRows, gridZPositive⟩
+      _launchFacts inputs thread ownership globalPermissions => by
+      let readGlobalA := globalPermissions.1
+      let readGlobalB := globalPermissions.2.1
+      let ownedOutput := globalPermissions.2.2
       let threadIndex := Thread.index thread
       let block := Thread.block thread
       let blockIndex := Block.index block
@@ -170,25 +193,35 @@ def tiledMatmulKernel
           initialInvariant
           Value.zero
           fun currentTrace kTile partialSum invariant =>
-          let valueA :=
+          let loadA : KernelM plan α thread currentTrace currentTrace (Value α) :=
             let row := Fin.val (Coord.y blockIndex) * tile + Fin.val threadRow
             let kA := Fin.val kTile * tile + Fin.val threadCol
             if rowInBounds : row < rows then
               if kAInBounds : kA < inner then
-                a ⟨⟨row, rowInBounds⟩, ⟨kA, kAInBounds⟩⟩
-              else Value.zero
-            else Value.zero
-          let valueB :=
+                KernelM.readGlobal inputs.a
+                  (Layout.offset inputs.aLayout
+                    ⟨⟨row, rowInBounds⟩, ⟨kA, kAInBounds⟩⟩)
+                  readGlobalA trivial
+              else KernelM.pure Value.zero
+            else KernelM.pure Value.zero
+          let loadB : KernelM plan α thread currentTrace currentTrace (Value α) :=
             let kB := Fin.val kTile * tile + Fin.val threadRow
             let col := Fin.val (Coord.x blockIndex) * tile + Fin.val threadCol
             if kBInBounds : kB < inner then
               if colInBounds : col < cols then
-                b ⟨⟨kB, kBInBounds⟩, ⟨col, colInBounds⟩⟩
-              else Value.zero
-            else Value.zero
+                KernelM.readGlobal inputs.b
+                  (Layout.offset inputs.bLayout
+                    ⟨⟨kB, kBInBounds⟩, ⟨col, colInBounds⟩⟩)
+                  readGlobalB trivial
+              else KernelM.pure Value.zero
+            else KernelM.pure Value.zero
           let barrierFacts := fun factTrace other =>
             WroteSome α factTrace other sharedA (indexAt (Thread.index other)) ×
             WroteSome α factTrace other sharedB (indexAt (Thread.index other))
+          KernelM.bind
+            loadA fun valueA =>
+          KernelM.bind
+            loadB fun valueB =>
           KernelM.bind
             (KernelM.writeShared sharedA tileIndex valueA invariant.1) fun wroteA =>
           KernelM.bind
@@ -231,6 +264,11 @@ def tiledMatmulKernel
             simpa [tileInvariant, tiledMatmulStep, finishReads,
               BarrierGrants.Result, OwnGrants.Result] using nextOwnership
           KernelM.pure (sumAfterTile, nextInvariant)) fun result =>
-        KernelM.pure (fun _index _member => result)
+        KernelM.forEach ownedOutput.items fun outputIndex member =>
+          KernelM.bind
+            (KernelM.writeGlobal inputs.output
+              (Layout.offset Layout.rowMajor2D outputIndex) result
+              (ownedOutput.owns outputIndex member)) fun _wroteOutput =>
+          KernelM.pure ()
 
 end GpuDsl

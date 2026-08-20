@@ -109,11 +109,22 @@ structure Owns {cfg : LaunchConfig} {BlockState State SharedScalar : Type}
     (index : Fin length) : Type where
   private intro ::
 
+/-- Read-only access to one global buffer for one physical thread. -/
+structure GlobalReadShare {cfg : LaunchConfig} {α : Type}
+    {length : Nat} (thread : ThreadId cfg)
+    (buffer : Buffer .global length α)
+    (region : Fin length → Prop) : Type where
+  private intro ::
+
+/-- Exclusive access to one global-memory cell for one physical thread. -/
+structure GlobalOwns {cfg : LaunchConfig} {α : Type}
+    {length : Nat} (thread : ThreadId cfg)
+    (buffer : Buffer .global length α) (index : Fin length) : Type where
+  private intro ::
+
 /-- A pure staged value used by kernel statements. -/
 inductive Value (α : Type) : Type where
   | literal (value : α) : Value α
-  | load {length : Nat}
-      (buffer : Buffer .global length α) (index : Fin length) : Value α
   | binary (operation : α → α → α) (left right : Value α) : Value α
 
 namespace Value
@@ -127,6 +138,13 @@ def mul [Mul α] (left right : Value α) : Value α :=
   .binary (· * ·) left right
 
 end Value
+
+/-- Evidence produced only by a permission-checked global-memory write. -/
+structure WroteGlobal {cfg : LaunchConfig} {α : Type}
+    {length : Nat} (thread : ThreadId cfg)
+    (buffer : Buffer .global length α) (index : Fin length)
+    (value : Value α) : Type where
+  private intro ::
 
 /-- Evidence produced only by a shared-memory write statement. -/
 structure Wrote {cfg : LaunchConfig} {BlockState State α : Type}
@@ -243,6 +261,27 @@ inductive KernelM {cfg : LaunchConfig} {BlockState State : Type}
       (first : KernelM plan SharedScalar thread before middle α)
       (next : α → KernelM plan SharedScalar thread middle after β) :
       KernelM plan SharedScalar thread before after β
+  /-- Read global memory using a launch-granted read permission. -/
+  | readGlobal {α : Type} {n : Nat} {region : Fin n → Prop}
+      (buffer : Buffer .global n α)
+      (index : Fin n)
+      (readShare : GlobalReadShare thread.id buffer region)
+      (inRegion : region index) :
+      KernelM plan SharedScalar thread trace trace (Value α)
+  /-- Write one globally owned cell. -/
+  | writeGlobal {α : Type} {n : Nat}
+      (buffer : Buffer .global n α)
+      (index : Fin n)
+      (value : Value α)
+      (owned : GlobalOwns thread.id buffer index) :
+      KernelM plan SharedScalar thread trace trace
+        (WroteGlobal thread.id buffer index value)
+  /-- Apply a trace-preserving statement to every item in a finite list. -/
+  | forEach {Item : Type}
+      (items : List Item)
+      (body : ∀ item, List.Mem item items →
+        KernelM plan SharedScalar thread trace trace Unit) :
+      KernelM plan SharedScalar thread trace trace Unit
   /-- Write one shared-memory cell from the current physical thread. -/
   | writeShared {name : String} {n : Nat}
       (buffer : SharedBuffer (Thread.block thread) name n SharedScalar)

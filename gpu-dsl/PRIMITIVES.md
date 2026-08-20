@@ -69,7 +69,9 @@ schedule[config : launch-config, s : space] : {
 
 Since `owner` is a total function, every output has exactly one owner. A thread may own zero, one, or several outputs.
 
-The schedule is only a mapping; it does not run the kernel. `gpu.launch` uses it to collect, for every physical thread, the ordered vector of indices owned by that thread.
+The schedule is only a mapping; it does not run the kernel. An ownership access
+plan uses it to give every physical thread the complete list of cells that
+thread owns.
 
 For example, given a positive `block-size`, a linear schedule uses this
 one-dimensional configuration:
@@ -89,7 +91,8 @@ owner(i) = thread {
 }
 ```
 
-With this schedule, an active thread owns one logical index. Threads introduced by rounding the grid size up own no indices and receive an empty vector.
+With this schedule, an active thread owns one logical index. Threads introduced
+by rounding the grid size up own no cells.
 
 ## Perfect and predicated tiling
 
@@ -160,40 +163,59 @@ replaced by zero for predicated tiling.
 
 ## Kernel
 
-```text
-kernel[config : launch-config, s : space, t : type] :
-  forall count.
-  val(thread config) ● val(vec count (ix s))
-  => val(vec count t)
-```
-
-A kernel is a closure from the current physical thread and all logical outputs owned by that thread to one value for each output. A thread may receive an empty vector (i.e. inactive threads). The kernel may capture read-only input buffers.
-
-For example, global input reads use the ordinary Catena buffer operation:
+A kernel accepts arbitrary inputs together with permissions tied to the actual
+resources inside those inputs:
 
 ```text
-ref.get[n, t] : ref n t ● val(ix n) -> val(t)
+kernel[config : launch-config, inputs : type] :
+  val(inputs) ●
+  val(thread config) ●
+  permissions(inputs, thread)
+  => unit
 ```
 
-There is no output-store primitive in a kernel body. The launch primitive owns that operation.
+The kernel also declares a closed access plan. A read grant identifies a
+global buffer that the thread may read. An ownership grant gives the thread
+the complete list of cells assigned to it by an owner function:
+
+```text
+global-access ::= reads(buffer, region)
+                | owns(buffer, layout, owner)
+                | global-access ● global-access
+```
+
+Global operations require the resulting permissions:
+
+```text
+global.read :
+  buffer ● val(ix n) ● (|- read-share(thread, buffer, region))
+  ● (|- index in region)
+  -> val(t)
+
+global.write :
+  buffer ● val(ix n) ● val(t) ● (|- owns(thread, buffer, index))
+  -> unit
+```
+
+An output buffer is therefore an ordinary field of `inputs`; it is not a
+special kernel result.
 
 ## Launch
 
 ```text
-gpu.launch[s, n, t] :
+gpu.launch[inputs] :
   (config : launch-config) ●
-  buf n t ●
-  layout(s, n) ●
-  schedule(config, s) ●
-  kernel(config, s, t)
-  -> buf n t
+  val(inputs) ●
+  kernel(config, inputs)
+  -> launch
 ```
 
-`gpu.launch` collects the logical indices assigned to each physical thread and runs the kernel once per thread. It stores each returned value at the layout offset of the corresponding logical index. The updated owned output buffer is returned. Execution order between different threads is unspecified.
+`gpu.launch` interprets the kernel's access plan and runs the kernel once per
+physical thread. Read and ownership permissions refer to the exact buffers in
+`inputs`. One thread may own zero, one, or several cells. Execution order
+between different threads is unspecified.
 
 A kernel may also contain the shared-buffer declarations and ownership plan described below. In that case, `gpu.launch` creates those buffers once per block and supplies the initial ownership grants to each thread.
-
-Here, we specify the layout for the output buffer. Alternatively, we can follow the approach used in previous implementations, where `launch` takes a linear buffer and a helper computes the layout before calling `launch`.
 
 ## Defining `materialize`
 
@@ -216,23 +238,30 @@ vec.map[n, a, b] :
   -> val(vec n b)
 ```
 
-We can define `materialize` entirely in terms of these operations:
+We can define `materialize` using an output buffer in the kernel inputs and an
+ownership plan over its cells:
 
 ```text
 materialize = \n producer ->
   let config   = linear-config(n)
   let output   = buf.alloc[n, t](n)
   let layout   = linear-layout(n)
-  let schedule = linear-schedule(config, n)
+  let inputs = { output }
 
-  let kernel = \_thread indices ->
-    vec.map(producer, indices)
+  let kernel =
+    global-access owns(inputs.output, layout, linear-owner(config, n))
 
-  gpu.launch(config, output, layout, schedule, kernel)
+    \inputs _thread owned-cells ->
+      for index in owned-cells:
+        global.write(inputs.output, index, producer(index), owned-cells[index])
+
+  gpu.launch(config, inputs, kernel)
+  output
 ```
 
-Thus `materialize` needs no additional GPU primitive beyond `gpu.launch`;
-allocation and `vec.map` come from the surrounding language.
+Thus `materialize` needs no output-specific launch primitive. Allocation is
+provided by the surrounding language, and the kernel writes only the cells
+granted by its global access plan.
 
 ## Shared memory and barriers
 
@@ -260,12 +289,12 @@ For example, a square matrix tile assigns logical cell `(row, col)` to block thr
 the kernel body. Thus a shared-memory kernel has one additional input:
 
 ```text
-shared-kernel[config, s, t] :
-  forall count.
+shared-kernel[config, inputs] :
+  (inputs : val(inputs)) ●
   (thread : val(thread config)) ●
-  (indices : val(vec count (ix s))) ●
+  global-permissions(inputs, thread) ●
   initial-owns(plan, thread)
-  => val(vec count t)
+  => unit
 ```
 
 For every shared buffer and logical cell assigned to this thread,

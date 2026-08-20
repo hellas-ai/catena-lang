@@ -8,16 +8,15 @@ can interpret or compile `KernelM` while keeping its typed interface.
 
 - `Main.lean` is the executable entry point.
 - `GpuDsl.lean` is the public library entry point.
-- `GpuDsl/Matrix.lean` contains spaces, layouts, pure tensor closures, and
-  buffer views.
+- `GpuDsl/Matrix.lean` contains spaces, layouts, and pure tensor closures.
 - `GpuDsl/Launch.lean` contains scheduling, the dependent kernel-body
   interface, and the opaque `launch` primitive.
 - `GpuDsl/Shared.lean` contains block-scoped shared-memory specifications,
   allocated states, and proof-indexed lookup.
 - `GpuDsl/Matmul.lean` contains one reusable tiled matmul kernel plus perfect
   and predicated launch configurations.
-- `PRIMITIVES.md` extracts a language-independent, global-memory-only
-  `Kernel`/`launch` specification sufficient for untiled matrix multiplication.
+- `PRIMITIVES.md` presents the language-independent kernel, global-permission,
+  shared-memory, and barrier interfaces in Catena-style notation.
 
 Concrete launch examples live only in `Main.lean`, keeping launch policy and
 example dimensions out of the DSL library.
@@ -37,18 +36,10 @@ one of those spaces to a safe `Fin length` linear offset. The library provides
 linear, row-major 2D, column-major 2D, and row-major 3D layouts; callers can
 define other layouts by supplying the same bounded mapping.
 
-For example, neither conversion below allocates or copies memory:
-
-```lean
-let linear := Buffer.asVector buffer
-let rowMajor := Tensor.reshape linear Layout.rowMajor2D
-let columnMajor := Tensor.reshape linear Layout.columnMajor2D
-```
-
 `Tensor.map`, `Tensor.zipWith`, `Tensor.reindex`, and `Matrix.transpose`
-compose closures lazily. A global-buffer view has element type `Value a`,
-representing a staged global load expression; it still carries no launch
-configuration. Shared-memory reads and stores remain explicit kernel
+compose closures lazily. Global-buffer reads are deliberately not pure tensor
+views: `KernelM.readGlobal` requires a launch-created permission tied to the
+actual buffer. Global and shared memory operations are explicit kernel
 statements.
 
 `tiledMatmulKernel` is generic over its scalar type. It requires only zero,
@@ -73,11 +64,17 @@ The core design makes several future proof obligations natural:
 - `KernelM ownershipPlan scalar thread before after a` records only the
   synchronization trace transition. The fixed launch ownership plan is part
   of its type; ownership and initialization evidence remain explicit tokens.
-- A `ScheduleCertificate` assigns every logical output index to exactly one
-  `ThreadId`. A thread may own zero, one, or many output cells.
-- `OwnedOutputs` gives each physical thread the complete, duplicate-free list
-  of logical outputs assigned to it. `launch` invokes the body exactly once per
-  thread, and the body returns one value for every item in that list.
+- `Kernel Inputs SharedScalar` accepts an arbitrary input record rather than a
+  privileged list of output cells. Buffers, layouts, scalars, and other
+  resources can all be ordinary fields of `Inputs`.
+- `Kernel.globalAccess` is a closed plan over the actual buffers in `Inputs`.
+  `launch` interprets it as per-thread `GlobalReadShare` and
+  `OwnedGlobalCells` permissions. `KernelM.readGlobal` and
+  `KernelM.writeGlobal` require those permissions. Read grants carry a region,
+  and every read must prove that its bounded index belongs to that region.
+- An owned global resource includes the complete, duplicate-free list of cells
+  assigned to the current `ThreadId`. This generalizes the former
+  output-specific `OwnedOutputs` mechanism.
 - `Kernel.requirements` records uniform launch facts such as
   `block = tile × tile × 1`; `launch` accepts their proof before any thread
   executes.
@@ -120,12 +117,14 @@ The core design makes several future proof obligations natural:
 The launch surface is intentionally close to CUDA/HIP:
 
 ```lean
-let kernel := tiledMatmulKernel tile tilePositive a b
-launch config outputBuffer outputLayout certificate kernel requirementsProof
+let inputs : MatmulInputs rows inner cols α :=
+  { a, aLayout, b, bLayout, output }
+let kernel := tiledMatmulKernel tile tilePositive
+launch config kernel inputs requirementsProof
 ```
 
 `launch` is an axiom here: this project specifies its dependent interface but
 does not provide an implementation. A backend creates block/thread state,
-constructs thread references and complete owned-output lists, stores returned
-values through the output layout, and uses the supplied `Kernel.requirements`
-proof.
+constructs thread references, interprets the global and shared access plans,
+and uses the supplied `Kernel.requirements` proof. The kernel performs explicit
+permission-checked global writes and returns `Unit`.

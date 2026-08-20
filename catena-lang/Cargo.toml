@@ -40,6 +40,10 @@ path = "examples/runtime.rs"
 name = "mem"
 path = "examples/mem.rs"
 
+[[example]]
+name = "metacat_typed_definition"
+path = "examples/metacat_typed_definition.rs"
+
 [[test]]
 name = "runtime"
 path = "tests/runtime.rs"

@@ -267,7 +267,7 @@ primitive.
 
 Phases are static syntax constructors, not runtime values. The type checker
 tracks the current phase: ordinary shared operations preserve it, while
-`shared.sync` changes it according to the barrier declaration.
+`shared.sync` changes it according to the instruction's `next-phase` index.
 
 The kernel closure expresses initial ownership with dependent proof
 parameters. For example:
@@ -332,103 +332,141 @@ defined-from :
 ```
 
 The final `contains` proof is pure and may be inferred. In the matmul example,
-the barrier's `all-writes` family and the tile-coverage proof provide it.
+the first sync instruction's `all-writes` family and the tile-coverage proof
+provide it.
 
 ## Block synchronization
 
-Each barrier declaration describes three points in its lifecycle:
+There are no separate barrier definitions. Each `shared.sync` instruction
+describes the facts it lifts and the grants it creates. Its label records that
+instruction in the common trace.
 
-1. `current-grants[thread]` are the complete linear grants held by each thread
-   when it reaches the barrier. Any facts they contain, such as `wrote`, are
-   facts about that current thread. The barrier consumes the grants.
-2. `block-facts[block]` are pure facts about the whole block, derived after
-   every thread has arrived. Every continuing thread may use the same facts.
-3. `new-grants[thread]` are the complete linear grants given to that thread for
-   the destination phase.
+### Lifting thread facts
 
-The declaration records those three types together with its source and
-destination phases:
+The caller does not merely state the desired result family. A `lifting` clause
+consumes concrete facts about the ambient thread and generalizes their type by
+replacing that thread with an arbitrary block thread `u`:
 
 ```text
-barrier-declaration[
-  name : barrier,
-  config : launch-config,
-  phase : phase,
-  next-phase : phase] : {
-  current-grants[thread : thread[config]] : grants
-  block-facts[block : block[config]]       : facts
-  new-grants[thread : thread[config]]     : grants
+lifting current-facts as [u]:
+  fact-schema[u]
+```
 
-  derive-block-facts[block : block[config]] :
-    family[thread : threads[block]] { current-grants[thread] }
-    -> block-facts[block]
+The clause must establish that `current-facts` has type
+`fact-schema[thread]`. Because every thread executes the same sync instruction,
+synchronization receives one value of `fact-schema[u]` from every `u` in the
+block. It returns exactly:
+
+```text
+lift-block[block, fact-schema] =
+  family[u : threads[block]] { fact-schema[u] }
+
+lift-block[block, unit] = unit
+```
+
+This is a collective rule, not an ordinary local function that manufactures
+other threads' facts. The result family is determined by the schema in the
+`lifting` clause. The schema may contain any well-formed proposition about
+`u`, not only `wrote`. When the current facts and schema are both `unit`, the
+clause and its result may be omitted.
+
+### Grant constructors
+
+The kernel has one fixed shared ownership plan, checked at launch:
+
+```text
+ownership-plan[config] : {
+  cell  : type
+  owner : cell -> coord[config.block]
 }
+```
 
+Synchronization cannot describe an arbitrary output permission set. Its
+`granting` clause must construct one of two grant forms:
+
+```text
+barrier-grants[plan, thread] ::=
+    reads[read-grants[thread]]
+  | owns[own-grants[plan, thread]]
+```
+
+A read grant names a shared buffer and produces the family of cell read
+permissions for that buffer in the next phase:
+
+```text
+read-grant[thread, buffer] =
+  family[index : ix[buffer.length]] {
+    |- read(next-phase, thread, buffer, index) }
+```
+
+Read grants may be combined with other read grants. An ownership grant is more
+restricted:
+
+```text
+own-grant[plan, thread] :
+  (buffer : shared.buffer[block-of(thread), n, t])
+  ● (layout : plan.cell -> ix[n])
+  ● (|- injective(layout))
+  ● (cell : plan.cell)
+  ● (|- plan.owner(cell) = thread.thread-index)
+  -> own(next-phase, thread, buffer, layout(cell))
+```
+
+Ownership grants may be combined only with other ownership grants. Therefore
+one sync instruction returns either read grants or ownership grants, never a
+mixture. More importantly, `own` cannot be granted merely because the desired
+outputs appear race-free: the caller must prove that the fixed launch plan
+already designates this thread as the owner of the logical cell, and that the
+layout maps logical cells injectively to physical cells. This is the same
+evidence used to obtain the thread's initial ownership grant at launch, so a
+sync may restore ownership only to its previously designated owner.
+
+The `own` permission itself remains linear and may already have been consumed
+by `shared.write`. What is reused at a later sync is the pure ownership
+eligibility proof—`plan.owner(cell) = thread.thread-index` together with layout
+injectivity—not the consumed permission token. This is the same semantic
+distinction made by the Lean prototype.
+
+### Synchronization rule
+
+```text
 shared.sync[
   name : barrier,
   config : launch-config,
   phase : phase,
   next-phase : phase,
-  rest : trace] :
-  (thread : thread[config])
+  rest : trace,
+  fact-schema : thread[config] -> facts,
+  plan : ownership-plan[config],
+  new-grants : barrier-grants[plan, thread]] :
+  (block : block[config] where block = block-of(thread))
   ● (current-trace : name :: rest)
-  ● (current : current-grants[name, thread])
-  -> block-facts[name, block-of(thread)]
-     ● (new : new-grants[name, thread])
+  ● (current-grants : grants[phase, thread])
+  ● (current-facts : fact-schema[thread])
+  -> lift-block[block, fact-schema]
+     ● grants-result[new-grants, next-phase]
      ● (remaining-trace : rest)
 ```
 
-It has four effects:
+The block argument has the same refinement used by `shared.read` and
+`shared.write`. The ambient `thread` is determined by `current-grants` and
+`current-facts`, and the refinement enforces `block = block-of(thread)`. The
+thread is not another runtime argument.
 
-1. Every thread in `block-of(thread)` waits at the same named barrier.
-2. It combines the per-thread facts in the current grants into block-wide
-   facts.
-3. It changes the current phase and returns the declared new grants, which are
-   indexed by `next-phase`.
-4. It consumes the head of `current-trace` and returns `remaining-trace`.
+The `current-grants` argument is that thread's complete shared-permission
+context for `phase`; synchronization consumes it in full. `current-facts` are
+also consumed and lifted. The checked grant constructors produce the complete
+permission context for `next-phase`. `current-trace` is consumed and its head
+is removed. None of these inputs uses the preserving `using` syntax. Global
+memory permissions are unaffected.
 
-Both `current-grants` and `current-trace` are consumed ordinary arguments;
-neither is passed with the preserving `using` syntax. Because
-`current-grants` is the complete old shared context, a thread cannot retain a
-permission merely by omitting it from the call. The returned `new-grants` are
-the complete next shared context. Global-memory permissions are unaffected.
-
-All three lifecycle types are fixed at the barrier site. Their common forms
-are:
-
-```text
-grants           ::= unit
-                   | writes[cells]
-                   | reads[cells]
-                   | owns[cells]
-                   | grants ● grants
-current-grants   ::= grants
-block-facts      ::= unit | facts
-new-grants       ::= grants
-```
-
-The barrier declaration must also prove `derive-block-facts`: the block facts
-must follow from the current grants supplied by every physical thread in the
-block. They cannot be asserted independently. Before synchronization, a
-`wrote` fact in `current-grants[thread]` concerns only that thread; afterward,
-the derived `block-facts[block]` may quantify over all threads in the block.
-
-A barrier provides exclusive ownership only according to the kernel's checked
-ownership requirements. Read and exclusive-write modes are not mixed for the
-same cell. A `reads` new-grant produces a cell-level read permission for
-every shared cell covered by that barrier.
-
-They are not arbitrary types chosen by the caller. The complete matmul example
-below gives the exact `tile-loaded` declaration. After every thread arrives,
-each thread receives the corresponding block facts for all threads, together
-with read permissions for both tiles. From those write facts it can prove that
-every planned tile cell is defined.
-
-A later tile-consumed barrier need not produce a block fact. Its
-synchronization ensures that all threads have finished the read phase;
-changing the ambient phase invalidates all read permissions, and the barrier
-provides ownership tied to the next phase. All threads in a block must execute
-the same barriers in the same order.
+All threads in a block must execute the same labeled sync instructions, with
+the same fact family and grant form, in the same order. The common
+trace enforces the labels and order. At a call site,
+`lifting facts as [u]: schema[u]` supplies both `current-facts` and
+`fact-schema`. The `granting [u]` clause must elaborate to either the `reads`
+or `owns` constructor of `barrier-grants`; an `owns` clause must supply the
+ownership-plan and injectivity proofs above.
 
 ### Canonical call forms
 
@@ -440,7 +478,7 @@ The remainder of this note uses only these surface forms:
 | `global.write` | `global.write(thread, buffer, index, value) using ownership` | none; ownership is preserved |
 | `shared.write` | `shared.write[phase = p](block, buffer, index, value, ownership)` | write evidence; ownership is consumed |
 | `shared.read` | `shared.read[phase = p](block, buffer, index) using read-proof ● defined-proof` | `value`; the read proof is preserved |
-| `shared.sync` | `shared.sync[name = b](thread, current-trace, current-grants)` | block facts, new grants, and the remaining trace |
+| `shared.sync` | `shared.sync[name = b](block, trace, grants) lifting facts as [u]: schema[u] granting [u]: reads ... | owns ... using proofs` | lifted block facts, new grants, and the remaining trace |
 | `gpu.launch` | `gpu.launch[access-plan](config, inputs, kernel) using race-free-proof` | `launch[result]` |
 
 Static parameters not shown in a call are inferred from its arguments and
@@ -645,10 +683,27 @@ The complete kernel is a closure whose proof parameters depend on its buffer
 and thread parameters:
 
 ```text
-tile-layout(row, col) = row * tile-size + col
+tile-coordinate(thread) =
+  (thread.thread-index.y, thread.thread-index.x)
+
+tile-layout((row, col)) = row * tile-size + col
 
 tile-cell(thread) =
-  tile-layout(thread.thread-index.y, thread.thread-index.x)
+  tile-layout(tile-coordinate(thread))
+
+tile-owner((row, col)) = (col, row, 0)
+
+tile-ownership = ownership-plan {
+  cell  = ix[tile-size] × ix[tile-size]
+  owner = tile-owner
+}
+
+tile-layout-injective :
+  |- injective(tile-layout)
+
+tile-cell-owned(thread) :
+  |- tile-ownership.owner(tile-coordinate(thread))
+     = thread.thread-index
 
 matmul[rows, inner, cols, tile-size, config] :
   (A : global.buffer[rows * inner, f32])
@@ -688,39 +743,6 @@ matmul[rows, inner, cols, tile-size, config] =
   \A B C thread tile-a tile-b
    read-a read-b own-c initial-own-a initial-own-b barrier-trace =>
 
-  barrier tile-loaded[write-phase, read-phase]:
-    current-grants(thread):
-      (|- wrote(write-phase, thread, tile-a, tile-cell(thread)))
-      ● (|- wrote(write-phase, thread, tile-b, tile-cell(thread)))
-
-    block-facts(block):
-      (all-writes : family[u : threads[block]] {
-        (|- wrote(write-phase, u, tile-a, tile-cell(u)))
-        ● (|- wrote(write-phase, u, tile-b, tile-cell(u))) })
-
-    derive-block-facts(block):
-      collect every thread's current-grants as all-writes
-
-    new-grants(thread):
-      (reads-a : family[index : ix[tile-size * tile-size]] {
-        |- read(read-phase, thread, tile-a, index) })
-      ● (reads-b : family[index : ix[tile-size * tile-size]] {
-        |- read(read-phase, thread, tile-b, index) })
-
-  barrier tile-consumed[read-phase, write-phase]:
-    current-grants(thread):
-      (reads-a : family[index : ix[tile-size * tile-size]] {
-        |- read(read-phase, thread, tile-a, index) })
-      ● (reads-b : family[index : ix[tile-size * tile-size]] {
-        |- read(read-phase, thread, tile-b, index) })
-
-    block-facts(block): unit
-    derive-block-facts(block): consume current-grants and derive unit
-
-    new-grants(thread):
-      (|- own(write-phase, thread, tile-a, tile-cell(thread)))
-      ● (|- own(write-phase, thread, tile-b, tile-cell(thread)))
-
   sum = 0
 
   final-own-a ● final-own-b ● empty-trace =
@@ -752,14 +774,23 @@ matmul[rows, inner, cols, tile-size, config] =
         block-of(thread), tile-b, tile-cell(thread), b-value, own-b)
 
     all-writes ● reads-a ● reads-b ● after-loaded-trace =
-      shared.sync[name = tile-loaded](
-        thread,
+      shared.sync[
+        name = tile-loaded,
+        phase = write-phase,
+        next-phase = read-phase](
+        block-of(thread),
         current-trace,
-        wrote-a ● wrote-b)
+        unit)
+      lifting wrote-a ● wrote-b as [u]:
+        (|- wrote(write-phase, u, tile-a, tile-cell(u)))
+        ● (|- wrote(write-phase, u, tile-b, tile-cell(u)))
+      granting [u] reads:
+        tile-a
+        ● tile-b
 
     for each k in ix[tile-size]:
-      index-a = tile-layout(thread.thread-index.y, k)
-      index-b = tile-layout(k, thread.thread-index.x)
+      index-a = tile-layout((thread.thread-index.y, k))
+      index-b = tile-layout((k, thread.thread-index.x))
 
       defined-a = defined-from(all-writes, tile-a, index-a)
       defined-b = defined-from(all-writes, tile-b, index-b)
@@ -777,10 +808,18 @@ matmul[rows, inner, cols, tile-size, config] =
       sum = sum + a * b
 
     next-own-a ● next-own-b ● after-consumed-trace =
-      shared.sync[name = tile-consumed](
-        thread,
+      shared.sync[
+        name = tile-consumed,
+        phase = read-phase,
+        next-phase = write-phase](
+        block-of(thread),
         after-loaded-trace,
         reads-a ● reads-b)
+      granting [u] owns:
+        tile-a at tile-coordinate(u) via tile-layout
+          using tile-layout-injective ● tile-cell-owned(u)
+        ● tile-b at tile-coordinate(u) via tile-layout
+          using tile-layout-injective ● tile-cell-owned(u)
 
     continue with next-own-a ● next-own-b ● after-consumed-trace
 
@@ -829,7 +868,8 @@ by launch are compatible across all threads. The dependent `read-a`, `read-b`,
 and `own-c` parameters then restrict every global operation in the kernel to
 those checked permissions.
 
-The first barrier proves that reads are initialized and changes the block from
-exclusive writing to shared reading. The second waits for all reads, removes
-every read permission, and restores exclusive ownership. Consequently, a
-shared cell is never written while another thread can read or write it.
+The first sync instruction proves that reads are initialized and changes the
+block from exclusive writing to shared reading. The second waits for all
+reads, removes every read permission, and restores exclusive ownership.
+Consequently, a shared cell is never written while another thread can read or
+write it.

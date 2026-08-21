@@ -323,52 +323,70 @@ barrier.
 `defined-from` is a proof rule, not a memory operation:
 
 ```text
-defined-from :
-  (block-facts : facts)
+defined-from[phase, cell] :
   ● (buffer : shared.buffer[block, n, t])
   ● (index : ix[n])
-  ● (contains : |- contains-write(block-facts, buffer, index))
+  ● (writes :
+       family[u : threads[block]] {
+         |- wrote(phase, u, buffer, cell(u)) })
+  ● (coverage : |- exists u : threads[block], cell(u) = index)
   -> (|- defined(buffer, index))
 ```
 
-The final `contains` proof is pure and may be inferred. In the matmul example,
-the first sync instruction's `all-writes` family and the tile-coverage proof
-provide it.
+Both proof arguments are passed with `using` and remain available. The rule
+opens the coverage witness, selects that thread's member of `writes`, and
+rewrites its cell index. In the matmul example, `writes` comes from the first
+sync instruction and coverage comes from the tile-distribution proof.
 
 ## Block synchronization
 
 There are no separate barrier definitions. Each `shared.sync` instruction
-describes the facts it lifts and the grants it creates. Its label records that
-instruction in the common trace.
+describes the facts it publishes and the grants it creates. Its label records
+that instruction in the common trace.
 
-### Lifting thread facts
+### Publishing thread facts
 
-The caller does not merely state the desired result family. A `lifting` clause
-consumes concrete facts about the ambient thread and generalizes their type by
-replacing that thread with an arbitrary block thread `u`:
+A fact about the current thread does not, by itself, imply the corresponding
+fact for every block thread. The block result instead follows from collective
+execution: the kernel body is checked for an arbitrary thread, every thread in
+the block reaches the same sync instruction, and each invocation supplies its
+own instance of the same fact schema.
+
+A `publishing` clause consumes the current invocation's concrete facts and
+states their common per-thread schema:
 
 ```text
-lifting current-facts as [u]:
+publishing current-facts as [u in block]:
   fact-schema[u]
 ```
 
 The clause must establish that `current-facts` has type
-`fact-schema[thread]`. Because every thread executes the same sync instruction,
-synchronization receives one value of `fact-schema[u]` from every `u` in the
-block. It returns exactly:
+`fact-schema[thread]`. The schema is not an arbitrary claimed result: it must
+be obtained by abstracting the ambient thread from the type of
+`current-facts`. Substituting `thread` for `u` must recover that type, and the
+schema may not also capture the ambient `thread` independently. An elaborator
+should normally infer this abstraction and treat the written schema as a
+checked annotation.
+
+The common-trace rule then ensures that synchronization receives one value of
+`fact-schema[u]` from every `u` in the block. Its collective introduction rule
+is:
 
 ```text
-lift-block[block, fact-schema] =
+family[u : threads[block]] { submitted[u] : fact-schema[u] }
+-> block-facts[block, fact-schema]
+
+block-facts[block, fact-schema] =
   family[u : threads[block]] { fact-schema[u] }
 
-lift-block[block, unit] = unit
+block-facts[block, unit] = unit
 ```
 
-This is a collective rule, not an ordinary local function that manufactures
-other threads' facts. The result family is determined by the schema in the
-`lifting` clause. The schema may contain any well-formed proposition about
-`u`, not only `wrote`. When the current facts and schema are both `unit`, the
-clause and its result may be omitted.
+This is not pattern matching or a local function that manufactures other
+threads' facts. Its proof rests on parametric checking of the kernel body and
+the common sync trace. The abstracted schema may describe any well-formed
+proposition about `u`, not only `wrote`. When the current facts and schema are
+both `unit`, the clause and its result may be omitted.
 
 ### Grant constructors
 
@@ -443,7 +461,7 @@ shared.sync[
   ● (current-trace : name :: rest)
   ● (current-grants : grants[phase, thread])
   ● (current-facts : fact-schema[thread])
-  -> lift-block[block, fact-schema]
+  -> block-facts[block, fact-schema]
      ● grants-result[new-grants, next-phase]
      ● (remaining-trace : rest)
 ```
@@ -455,7 +473,7 @@ thread is not another runtime argument.
 
 The `current-grants` argument is that thread's complete shared-permission
 context for `phase`; synchronization consumes it in full. `current-facts` are
-also consumed and lifted. The checked grant constructors produce the complete
+also consumed and published. The checked grant constructors produce the complete
 permission context for `next-phase`. `current-trace` is consumed and its head
 is removed. None of these inputs uses the preserving `using` syntax. Global
 memory permissions are unaffected.
@@ -463,7 +481,7 @@ memory permissions are unaffected.
 All threads in a block must execute the same labeled sync instructions, with
 the same fact family and grant form, in the same order. The common
 trace enforces the labels and order. At a call site,
-`lifting facts as [u]: schema[u]` supplies both `current-facts` and
+`publishing facts as [u in block]: schema[u]` supplies both `current-facts` and
 `fact-schema`. The `granting [u]` clause must elaborate to either the `reads`
 or `owns` constructor of `barrier-grants`; an `owns` clause must supply the
 ownership-plan and injectivity proofs above.
@@ -478,7 +496,7 @@ The remainder of this note uses only these surface forms:
 | `global.write` | `global.write(thread, buffer, index, value) using ownership` | none; ownership is preserved |
 | `shared.write` | `shared.write[phase = p](block, buffer, index, value, ownership)` | write evidence; ownership is consumed |
 | `shared.read` | `shared.read[phase = p](block, buffer, index) using read-proof ● defined-proof` | `value`; the read proof is preserved |
-| `shared.sync` | `shared.sync[name = b](block, trace, grants) lifting facts as [u]: schema[u] granting [u]: reads ... | owns ... using proofs` | lifted block facts, new grants, and the remaining trace |
+| `shared.sync` | `shared.sync[name = b](block, trace, grants) publishing facts as [u in block]: schema[u] granting [u]: reads ... | owns ... using proofs` | published block facts, new grants, and the remaining trace |
 | `gpu.launch` | `gpu.launch[access-plan](config, inputs, kernel) using race-free-proof` | `launch[result]` |
 
 Static parameters not shown in a call are inferred from its arguments and
@@ -705,6 +723,14 @@ tile-cell-owned(thread) :
   |- tile-ownership.owner(tile-coordinate(thread))
      = thread.thread-index
 
+tile-coverage(block, index) :
+  |- exists u : threads[block], tile-cell(u) = index
+
+proof:
+  config.block = (tile-size, tile-size, 1), so every row-major tile index
+  determines exactly one pair of in-block coordinates and hence one thread
+  u in block
+
 matmul[rows, inner, cols, tile-size, config] :
   (A : global.buffer[rows * inner, f32])
   ● (B : global.buffer[inner * cols, f32])
@@ -781,7 +807,7 @@ matmul[rows, inner, cols, tile-size, config] =
         block-of(thread),
         current-trace,
         unit)
-      lifting wrote-a ● wrote-b as [u]:
+      publishing wrote-a ● wrote-b as [u in block-of(thread)]:
         (|- wrote(write-phase, u, tile-a, tile-cell(u)))
         ● (|- wrote(write-phase, u, tile-b, tile-cell(u)))
       granting [u] reads:
@@ -792,8 +818,15 @@ matmul[rows, inner, cols, tile-size, config] =
       index-a = tile-layout((thread.thread-index.y, k))
       index-b = tile-layout((k, thread.thread-index.x))
 
-      defined-a = defined-from(all-writes, tile-a, index-a)
-      defined-b = defined-from(all-writes, tile-b, index-b)
+      defined-a =
+        defined-from(tile-a, index-a)
+          using all-writes.first
+            ● tile-coverage(block-of(thread), index-a)
+
+      defined-b =
+        defined-from(tile-b, index-b)
+          using all-writes.second
+            ● tile-coverage(block-of(thread), index-b)
 
       a =
         shared.read[phase = read-phase](
@@ -868,8 +901,15 @@ by launch are compatible across all threads. The dependent `read-a`, `read-b`,
 and `own-c` parameters then restrict every global operation in the kernel to
 those checked permissions.
 
-The first sync instruction proves that reads are initialized and changes the
-block from exclusive writing to shared reading. The second waits for all
-reads, removes every read permission, and restores exclusive ownership.
-Consequently, a shared cell is never written while another thread can read or
-write it.
+At the first sync, each invocation publishes the two write facts it established
+for its own thread. Collective synchronization assembles those submissions into
+`all-writes`; it does not infer them from the current thread's facts. Separately,
+`tile-coverage` proves from the block geometry and row-major distribution that
+every tile index is `tile-cell(u)` for some block thread `u`. `defined-from`
+combines that witness with `all-writes[u]` to prove that the requested cell was
+initialized.
+
+The first sync also changes the block from exclusive writing to shared reading.
+The second waits for all reads, removes every read permission, and restores
+exclusive ownership. Consequently, a shared cell is never written while
+another thread can read or write it.

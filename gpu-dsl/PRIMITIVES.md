@@ -124,7 +124,8 @@ kernel-body[config, n, t, index] :
   (inputs : inputs)
   -> (thread : thread[config])
   -> (tile : shared.buffer[block thread, n, t])
-  -> (permission : |- own(thread, tile, index(thread)))
+  -> (permission :
+        |- own(write-phase, thread, tile, index(thread)))
   => unit
 ```
 
@@ -148,10 +149,15 @@ every block:
 
 ```text
 shared.buffer[block, n, t]
+
+phase ::= write-phase | read-phase
 ```
 
 Shared operations receive the block as a runtime argument. The dependent
-buffer type ensures that the buffer belongs to that same block.
+buffer type ensures that the buffer belongs to that same block. Phases are
+syntax constructors, not values or metavariables. The type checker tracks the
+current phase: ordinary shared operations preserve it, while `shared.sync`
+changes it according to the barrier declaration.
 
 The kernel function expresses initial ownership with dependent proof
 parameters. For example:
@@ -160,7 +166,8 @@ parameters. For example:
 kernel-body[config, n, t, index] :
   (thread : thread[config])
   -> (tile : shared.buffer[block thread, n, t])
-  -> (initial-own : |- own(thread, tile, index(thread)))
+  -> (initial-own :
+        |- own(write-phase, thread, tile, index(thread)))
   => unit
 ```
 
@@ -175,11 +182,12 @@ Exclusive ownership permits one thread to write a cell:
 
 ```text
 shared.write[config, n, t] :
-  (block : block[config])
+  phase
+  ● (block : block[config])
   ● (buffer : shared.buffer[block, n, t])
   ● (index : ix n) ● value
-  ● (|- own(thread, buffer, index))
-  -> (|- wrote(thread, buffer, index))
+  ● (|- own(phase, thread, buffer, index))
+  -> (|- wrote(phase, thread, buffer, index))
 ```
 
 The write consumes ownership and produces evidence that this thread wrote the
@@ -193,12 +201,14 @@ initialized:
 
 ```text
 shared.read[config, n, t] :
-  (block : block[config])
+  phase
+  ● (block : block[config])
   ● (buffer : shared.buffer[block, n, t])
   ● (index : ix n)
-  ● (|- read(thread, buffer, index))
+  ● (|- read(phase, thread, buffer, index))
   ● (|- defined(buffer, index))
-  -> value ● (|- read(thread, buffer, index))
+  -> value
+     ● (|- read(phase, thread, buffer, index))
 ```
 
 The cell's read permission is reusable during the current read phase.
@@ -209,29 +219,28 @@ The cell's read permission is reusable during the current read phase.
 There is one block synchronization primitive:
 
 ```text
-shared.sync :
-  current-shared-context
-  ● block
-  ● barrier
-  ● contribution
+shared.sync[config] :
+  phase
+  ● (block : block[config])
+  ● barrier[phase -> next-phase]
+  ● contribution(phase)
   ● grants
-  -> published-facts ● new-shared-context(grants)
+  -> published-facts
+     ● grants(next-phase)
 ```
-
-`current-shared-context` means all shared permissions currently held by the
-thread, not a caller-selected subset.
 
 It has three effects:
 
 1. Every thread in `block` waits at the same barrier.
 2. The barrier publishes its fixed contribution from every thread.
-3. It discards the entire old shared-permission context and replaces it with
-   `grants`.
+3. It changes the current phase and returns `grants` indexed by the barrier's
+   declared next-phase constructor.
 
-The third rule is important. A thread cannot preserve an old permission merely
-by omitting it from the arguments to `shared.sync`. After the barrier, only
-the new shared permissions returned by the barrier are usable. Global-memory
-permissions are unaffected.
+Synchronization also consumes the entire old shared-permission context. A
+thread cannot retain a proof merely by omitting it from the call. After the
+barrier, only the returned grants are available. The phase argument of a shared
+operation must equal the ambient current phase; it cannot be freely selected
+by the caller. Global-memory permissions are unaffected.
 
 The new grants are declared at the barrier site:
 
@@ -250,9 +259,9 @@ proposition chosen by the caller. For example, a tile-loaded barrier may
 publish shared writes:
 
 ```text
-tile-loaded contribution(thread) =
-  (|- wrote(thread, tile-a, cell-a(thread)))
-  ● (|- wrote(thread, tile-b, cell-b(thread)))
+tile-loaded contribution(phase, thread) =
+  (|- wrote(phase, thread, tile-a, cell-a(thread)))
+  ● (|- wrote(phase, thread, tile-b, cell-b(thread)))
 ```
 
 After every thread arrives, each thread receives the corresponding facts for
@@ -260,14 +269,10 @@ all threads, together with read permissions for both tiles. From those
 published writes it can prove that every planned tile cell is defined.
 
 A later tile-consumed barrier need not publish a fact. Its synchronization
-ensures that all threads have finished the read phase; replacing the shared
-context removes all read permissions, and the barrier grants ownership for
-the next write phase.
-
-An implementation can enforce whole-context replacement with a hidden fresh
-phase attached to shared permissions, or with an indexed effect. The phase is
-not part of kernel source syntax. In either case, all threads in a block must
-execute the same barriers in the same order.
+ensures that all threads have finished the read phase; changing the ambient
+phase invalidates all read permissions, and the barrier grants ownership tied
+to the next phase. All threads in a block must execute the same barriers in
+the same order.
 
 ## Tiled matrix multiplication
 
@@ -335,10 +340,10 @@ matmul[rows, inner, cols, tile-size, config] :
   -> (own-c : |- own(thread, C, c-index(thread)))
 
   -> (initial-own-a :
-        |- own(thread, tile-a, tile-cell(thread)))
+        |- own(write-phase, thread, tile-a, tile-cell(thread)))
 
   -> (initial-own-b :
-        |- own(thread, tile-b, tile-cell(thread)))
+        |- own(write-phase, thread, tile-b, tile-cell(thread)))
 
   => unit
 
@@ -346,22 +351,23 @@ matmul[rows, inner, cols, tile-size, config] =
   \A B C thread tile-a tile-b
    read-a read-b own-c initial-own-a initial-own-b =>
 
-  barrier tile-loaded:
+  barrier tile-loaded : write-phase -> read-phase:
     publish every thread's writes to tile-a and tile-b
-    grant each thread read proofs for every cell in tile-a and tile-b
+    grant each thread read proofs for every cell
+      in tile-a and tile-b
 
-  barrier tile-consumed:
+  barrier tile-consumed : read-phase -> write-phase:
     publish nothing
     grant each thread:
-      (|- own(thread, tile-a, tile-cell(thread)))
-      ● (|- own(thread, tile-b, tile-cell(thread)))
+      (|- own(write-phase, thread, tile-a, tile-cell(thread)))
+      ● (|- own(write-phase, thread, tile-b, tile-cell(thread)))
 
   sum = 0
 
   for each q in ix(inner / tile-size)
     maintaining invariant :
-      (|- own(thread, tile-a, tile-cell(thread)))
-      ● (|- own(thread, tile-b, tile-cell(thread)))
+      (|- own(write-phase, thread, tile-a, tile-cell(thread)))
+      ● (|- own(write-phase, thread, tile-b, tile-cell(thread)))
     initially initial-own-a ● initial-own-b:
 
     own-a ● own-b = invariant
@@ -373,15 +379,17 @@ matmul[rows, inner, cols, tile-size, config] =
       global.read(B, b-index(thread, q)) using read-b(q)
 
     wrote-a =
-      shared.write(block thread, tile-a, tile-cell(thread), a-value)
-        using own-a
+      shared.write(
+        write-phase, block thread, tile-a, tile-cell(thread), a-value)
+      using own-a
 
     wrote-b =
-      shared.write(block thread, tile-b, tile-cell(thread), b-value)
-        using own-b
+      shared.write(
+        write-phase, block thread, tile-b, tile-cell(thread), b-value)
+      using own-b
 
     all-writes ● reads-a ● reads-b =
-      shared.sync(block thread, tile-loaded)
+      shared.sync(write-phase, block thread, tile-loaded)
         publishing wrote-a ● wrote-b
 
     for each k in ix(tile-size):
@@ -391,16 +399,19 @@ matmul[rows, inner, cols, tile-size, config] =
       defined-a = defined-from(all-writes, tile-a, index-a)
       defined-b = defined-from(all-writes, tile-b, index-b)
 
-      a = shared.read(block thread, tile-a, index-a)
-            using reads-a[index-a] ● defined-a
+      a =
+        shared.read(read-phase, block thread, tile-a, index-a)
+          using reads-a[index-a] ● defined-a
 
-      b = shared.read(block thread, tile-b, index-b)
-            using reads-b[index-b] ● defined-b
+      b =
+        shared.read(read-phase, block thread, tile-b, index-b)
+          using reads-b[index-b] ● defined-b
 
       sum = sum + a * b
 
-    next-invariant = shared.sync(block thread, tile-consumed)
-    continue with next-invariant
+    next-own-a ● next-own-b =
+      shared.sync(read-phase, block thread, tile-consumed)
+    continue with next-own-a ● next-own-b
 
   global.write(C, c-index(thread), sum) using own-c
 
@@ -416,9 +427,11 @@ are value arguments, like an argument `x : u64`. Later proof arguments refer
 to those exact buffer values. The block is obtained from `block thread`, so it
 does not need another runtime binder. Launch supplies `A`, `B`, and `C`, creates
 `tile-a` and `tile-b` once per block, and constructs the proof arguments after
-checking the requirements across all threads. The accumulator `sum` remains
-an ordinary value, separate from the loop's proof invariant. Here, `using`
-passes a proof and threads it forward when the primitive preserves it.
+checking the requirements across all threads. The initial ownership proofs are
+in the `write-phase` constructor; no phase value or phase metavariable is
+passed. The accumulator `sum` remains an ordinary value, separate from the
+loop's proof invariant. Here, `using` passes a proof and threads it forward
+when the primitive preserves it.
 
 The first barrier proves that reads are initialized and changes the block from
 exclusive writing to shared reading. The second waits for all reads, removes

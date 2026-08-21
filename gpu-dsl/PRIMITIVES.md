@@ -136,22 +136,25 @@ particular buffer value.
 The proof parameters form the kernel's access contract. Launch checks that
 the requirements for all threads are race-free, supplies global buffers from
 the kernel inputs, creates block-local shared buffers, constructs the permitted
-proofs, and applies the function once per physical thread. Invoking a kernel
-function returns its barrier trace alongside its ordinary result:
+proofs, and applies the function once per physical thread. Launch also creates
+the kernel's expected barrier plan. The plan is linear: the kernel must consume
+it completely and return the empty plan.
 
 ```text
-kernel-function : inputs -> result ● trace
+kernel-function[expected-plan : trace] :
+  inputs ● expected-plan -> result ● []
 
-gpu.launch :
+gpu.launch[expected-plan : trace] :
   config
   ● inputs
-  ● (inputs -> result ● trace)
+  ● (inputs ● expected-plan -> result ● [])
   -> launch
 ```
 
-The trace is determined by the implementation rather than supplied by its
-caller. Launch checks that it is block-uniform, so every thread in a block
-reaches the same barriers in the same order.
+Launch supplies every thread in a block with a distinct linear plan having the
+same `expected-plan` type. A plan cannot be copied, discarded, or fabricated,
+so returning `[]` proves that every thread executed the expected barriers in
+order.
 
 ## Shared memory
 
@@ -230,16 +233,16 @@ The cell's read permission is reusable during the current read phase.
 There is one block synchronization primitive:
 
 ```text
-shared.sync[config, before : trace] :
+shared.sync[config, rest : trace] :
   phase
   ● (block : block[config])
-  ● before
+  ● (barrier :: rest)
   ● barrier[phase -> next-phase]
   ● contribution(phase)
   ● grants
   -> published-facts
      ● grants(next-phase)
-     ● (before ++ [barrier])
+     ● rest
 ```
 
 It has four effects:
@@ -248,7 +251,7 @@ It has four effects:
 2. The barrier publishes its fixed contribution from every thread.
 3. It changes the current phase and returns `grants` indexed by the barrier's
    declared next-phase constructor.
-4. It appends its barrier to the accumulated barrier trace.
+4. It removes its barrier from the front of the remaining barrier plan.
 
 Synchronization also consumes the entire old shared-permission context. A
 thread cannot retain a proof merely by omitting it from the call. After the
@@ -288,44 +291,72 @@ phase invalidates all read permissions, and the barrier grants ownership tied
 to the next phase. All threads in a block must execute the same barriers in
 the same order.
 
+## Loops
+
+A loop may carry both an invariant and a variant. The invariant has the same
+type before and after every iteration. The variant describes a type that
+decreases monotonically according to one iteration's exact transition:
+
+```text
+for each i in count
+  maintaining invariant :
+    invariant
+  initially initial-invariant
+
+  decreasing variant [rest] :
+    next(rest) => rest
+  initially iterate(count, next, final):
+
+  body
+```
+
+The body is checked for an arbitrary `rest`, and the generic loop has the
+following rule:
+
+```text
+body :
+  invariant ● next(rest)
+  -> invariant ● rest
+
+for[count](body) :
+  initial-invariant ● iterate(count, next, final)
+  -> invariant ● final
+```
+
+This is a type-level counterpart of the loop variant used by verification
+languages. It decreases in an order where `rest < next(rest)`. The declared
+transition is exact, not merely the monotonicity inequality, so the loop can
+compute its result type. The order and transition are generic; they do not
+refer to GPU execution or barriers.
+
 ## Barrier traces
 
 A barrier trace records synchronization structure in the kernel type:
 
 ```text
 trace ::= []
-        | [barrier]
-        | trace ++ trace
-        | loop(count, trace)
+        | barrier :: trace
 ```
 
-Kernel invocation starts with `[]`. Ordinary operations preserve the
-accumulated trace. A call to `shared.sync` transforms `before` into
-`before ++ [barrier]`. Source syntax may thread this ghost result implicitly;
-it remains part of the checked function result type.
+Kernel invocation receives its expected trace as a remaining-work plan.
+Ordinary operations preserve it. A call to `shared.sync` transforms
+`barrier :: rest` into `rest`. The kernel must return `[]`.
 
-The kernel may return `loop(count, trace)`, but an implementation cannot
-produce such a value merely by asserting it. It is produced only by the
-checked, block-uniform GPU loop primitive. The loop checks its body once for an
-arbitrary iteration:
+Barrier plans instantiate the generic variant mechanism. The structured type
+`iterate(count, barriers)` describes `count` repetitions of a barrier sequence;
+its final empty tail is implicit. For tiled matrix multiplication the plan is:
 
 ```text
-body :
-  invariant ● before
-  -> invariant
-     ● (before ++ [tile-loaded, tile-consumed])
-
-gpu.for[count](body) :
-  invariant ● before
-  -> invariant
-     ● (before ++ loop(count, [tile-loaded, tile-consumed]))
+iterate(count, tile-loaded :: tile-consumed)
 ```
 
-Thus the trace need not be expanded into one barrier list per iteration. The
-loop typing rule proves that every iteration has exactly the body trace. Both
-branches of a conditional must also have the same trace. Missing, reordered,
-or conditionally executed barriers therefore make the implementation's trace
-differ from the kernel's result type.
+The plan decreases under the suffix order. The generic loop checks its body
+once for an arbitrary `rest`: it must transform
+`tile-loaded :: tile-consumed :: rest` into `rest`. It can therefore consume
+the structured `iterate` plan without expanding the trace. Both branches of a
+conditional must return the same remaining plan. Missing, reordered, extra, or
+conditionally executed barriers therefore prevent the kernel from returning
+`[]`.
 
 An implementation may check this by threading an internal linear value:
 
@@ -333,11 +364,11 @@ An implementation may check this by threading an internal linear value:
 gpu.state[block, phase, trace]
 ```
 
-Shared reads and writes preserve this value. `shared.sync` changes its phase
-and appends one barrier, while `gpu.for` constructs the structured `loop` trace.
-The value cannot be copied, discarded, or fabricated, and may be erased after
-type checking. It is implementation machinery rather than an argument written
-in source kernels.
+Shared reads and writes preserve this value, while `shared.sync` changes its
+phase and removes the expected barrier. The generic loop checks the declared
+variant and eliminates one `iterate` layer per logical iteration. The value
+cannot be copied, discarded, or fabricated, and may be erased after type
+checking. It is implementation machinery rather than a runtime value.
 
 ## Tiled matrix multiplication
 
@@ -410,14 +441,16 @@ matmul[rows, inner, cols, tile-size, config] :
   -> (initial-own-b :
         |- own(write-phase, thread, tile-b, tile-cell(thread)))
 
-  => unit
-     ● loop(
-         inner / tile-size,
-         [tile-loaded, tile-consumed])
+  -> (barrier-plan :
+        iterate(
+          inner / tile-size,
+          tile-loaded :: tile-consumed))
+
+  => unit ● []
 
 matmul[rows, inner, cols, tile-size, config] =
   \A B C thread tile-a tile-b
-   read-a read-b own-c initial-own-a initial-own-b =>
+   read-a read-b own-c initial-own-a initial-own-b barrier-plan =>
 
   barrier tile-loaded : write-phase -> read-phase:
     publish every thread's writes to tile-a and tile-b
@@ -432,15 +465,19 @@ matmul[rows, inner, cols, tile-size, config] =
 
   sum = 0
 
-  loop-trace =
-    gpu.for each q in ix(inner / tile-size)
-    threading trace before from []
+  final-own-a ● final-own-b ● empty-plan =
+    for each q in ix(inner / tile-size)
     maintaining invariant :
       (|- own(write-phase, thread, tile-a, tile-cell(thread)))
       ● (|- own(write-phase, thread, tile-b, tile-cell(thread)))
-    initially initial-own-a ● initial-own-b:
+    initially initial-own-a ● initial-own-b
+
+    decreasing variant [rest] :
+      tile-loaded :: tile-consumed :: rest => rest
+    initially barrier-plan:
 
     own-a ● own-b = invariant
+    current-plan = variant
 
     a-value =
       global.read(A, a-index(thread, q)) using read-a(q)
@@ -459,7 +496,7 @@ matmul[rows, inner, cols, tile-size, config] =
       using own-b
 
     all-writes ● reads-a ● reads-b ● after-loaded =
-      shared.sync(write-phase, block thread, before, tile-loaded)
+      shared.sync(write-phase, block thread, current-plan, tile-loaded)
         publishing wrote-a ● wrote-b
 
     for each k in ix(tile-size):
@@ -483,12 +520,11 @@ matmul[rows, inner, cols, tile-size, config] =
       shared.sync(
         read-phase, block thread, after-loaded, tile-consumed)
 
-    continue with next-own-a ● next-own-b
-    continue trace with after-consumed
+    continue with next-own-a ● next-own-b ● after-consumed
 
   global.write(C, c-index(thread), sum) using own-c
 
-  return unit ● loop-trace
+  return unit ● empty-plan
 
 gpu.launch(
   config,
@@ -506,16 +542,23 @@ checking the requirements across all threads. The initial ownership proofs are
 in the `write-phase` constructor; no phase value or phase metavariable is
 passed. The accumulator `sum` remains an ordinary value, separate from the
 loop's proof invariant. Here, `using` passes a proof and threads it forward
-when the primitive preserves it. The `loop(...)` result is generated by
-`gpu.for` from the checked trace of its body; the kernel does not construct or
-assert it. In the loop body, `before` is an arbitrary incoming trace,
-`after-loaded` has type `before ++ [tile-loaded]`, and `after-consumed` has type
-`before ++ [tile-loaded, tile-consumed]`. Since the loop starts from `[]`, its
-result has the kernel's declared result type:
+when the primitive preserves it. Launch supplies `barrier-plan`; the kernel
+cannot construct or discard it. In the loop body, `rest` is an arbitrary
+remaining plan. The iteration starts with
+`tile-loaded :: tile-consumed :: rest`, the first synchronization produces
+`tile-consumed :: rest`, and the second produces `rest`. The body continues
+with that `rest` together with the ownership invariant. Therefore the generic
+loop consumes:
 
 ```text
-loop(inner / tile-size, [tile-loaded, tile-consumed])
+iterate(
+  inner / tile-size,
+  tile-loaded :: tile-consumed)
 ```
+
+and returns `[]`, as required by the kernel result type. Kernel completion
+reclaims the final permissions associated with its global and shared-memory
+access contract.
 
 The first barrier proves that reads are initialized and changes the block from
 exclusive writing to shared reading. The second waits for all reads, removes

@@ -59,14 +59,19 @@ block : (thread : thread[config]) -> block[config]
 ## Global memory
 
 A kernel takes arbitrary inputs. It separately declares the parts of the
-global buffers in those inputs that each thread may read or write:
+global buffers in those inputs that each thread may read or write. This
+declaration denotes a global access plan:
 
 ```text
-access {
+global-plan = access {
   read  A in read-a(thread)
   read  B in read-b(thread)
   write C in write-c(thread)
 }
+
+mode ::= none | read | write
+
+global-plan(thread, buffer, index) : mode
 ```
 
 The write region directly describes the output cells owned by a thread. A
@@ -85,16 +90,22 @@ index in write-c(thread) -> (|- own(thread, C, index))
 This region notation is shorthand. A kernel may state the same contract
 directly with dependent proof parameters, as in the matmul example below.
 
-The access declaration is valid when, for every physical global-memory cell:
+Race freedom is a proposition about the complete plan:
 
 ```text
-two writers to the same cell are the same thread
-a written cell has no readers
+race-free(plan) =
+  for every distinct threads t and u,
+  for every buffer and index,
+
+    plan(t, buffer, index) = write
+    -> plan(u, buffer, index) = none
 ```
 
+Thus a cell written by one thread cannot be read or written by another thread.
 Reads may overlap, and accesses to different buffers or different offsets do
 not conflict. Regions can therefore be as precise as one cell per thread; they
-do not need to cover a whole buffer.
+do not need to cover a whole buffer. The checked access declaration produces a
+certificate `|- race-free(plan)`.
 
 Global operations use those cell permissions directly:
 
@@ -112,6 +123,10 @@ global.write[n, t] :
 
 Reading preserves the cell's read permission. Writing preserves its exclusive
 ownership, so the owning thread may update the cell more than once.
+
+Together, the plan certificate and the operation types prove global race
+freedom: launch grants only permissions described by a race-free plan, and the
+kernel cannot perform a global access without the corresponding permission.
 
 ## Kernels and launch
 
@@ -141,20 +156,23 @@ the kernel's expected barrier plan. The plan is linear: the kernel must consume
 it completely and return the empty plan.
 
 ```text
-kernel-function[expected-plan : trace] :
-  inputs ● expected-plan -> result ● []
+kernel-function[access-plan][expected-plan : trace] :
+  inputs ● permissions(access-plan) ● expected-plan -> result ● []
 
-gpu.launch[expected-plan : trace] :
+gpu.launch[access-plan][expected-plan : trace] :
   config
   ● inputs
-  ● (inputs ● expected-plan -> result ● [])
+  ● (|- race-free(access-plan))
+  ● (inputs ● permissions(access-plan) ● expected-plan -> result ● [])
   -> launch
 ```
 
-Launch supplies every thread in a block with a distinct linear plan having the
-same `expected-plan` type. A plan cannot be copied, discarded, or fabricated,
-so returning `[]` proves that every thread executed the expected barriers in
-order.
+For each thread, launch derives `permissions(access-plan)` from the actual
+input buffers and applies the kernel function to them. It also supplies every
+thread in a block with a distinct linear barrier plan having the same
+`expected-plan` type. A barrier plan cannot be copied, discarded, or
+fabricated, so returning `[]` proves that every thread executed the expected
+barriers in order.
 
 ## Shared memory
 
@@ -406,6 +424,38 @@ c-index(thread) =
   row-major(cols, row(thread), col(thread))
 ```
 
+The exact global access plan is:
+
+```text
+matmul-access = access [thread] {
+  read A at a-index(thread, q)
+    for q in ix(inner / tile-size)
+
+  read B at b-index(thread, q)
+    for q in ix(inner / tile-size)
+
+  write C at c-index(thread)
+}
+
+c-index-injective :
+  |- c-index(t) = c-index(u) -> t = u
+
+matmul-global-safe :
+  |- race-free(matmul-access)
+
+proof:
+  A and B are read-only
+  C is distinct from the read-only buffer resources
+  c-index-injective gives at most one writer for each C cell
+```
+
+`c-index-injective` follows from the launch geometry: distinct launched
+threads have distinct `(row, col)` coordinates, and the row-major layout is
+injective within the matrix bounds. The proof is about the actual buffer
+resources, not merely their source-level names. If inputs may alias, launch
+must also establish that `C` does not alias `A` or `B`; otherwise it rejects the
+plan.
+
 The complete kernel is a function whose proof parameters depend on its buffer
 and thread parameters:
 
@@ -529,6 +579,7 @@ matmul[rows, inner, cols, tile-size, config] =
 gpu.launch(
   config,
   A ● B ● C,
+  access matmul-access using matmul-global-safe,
   matmul[rows, inner, cols, tile-size, config])
 ```
 
@@ -559,6 +610,11 @@ iterate(
 and returns `[]`, as required by the kernel result type. Kernel completion
 reclaims the final permissions associated with its global and shared-memory
 access contract.
+
+For global memory, `matmul-global-safe` proves that the permissions constructed
+by launch are compatible across all threads. The dependent `read-a`, `read-b`,
+and `own-c` parameters then restrict every global operation in the kernel to
+those checked permissions.
 
 The first barrier proves that reads are initialized and changes the block from
 exclusive writing to shared reading. The second waits for all reads, removes

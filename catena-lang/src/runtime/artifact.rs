@@ -4,6 +4,7 @@ use std::{
     ffi::OsString,
     path::{Path, PathBuf},
     process::{Command, ExitStatus},
+    sync::atomic::{AtomicU64, Ordering},
 };
 
 use thiserror::Error;
@@ -28,20 +29,55 @@ pub enum ArtifactError {
     },
 }
 
+/// Identifies one compiled Catena artifact belonging to a runtime.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Artifact {
+    runtime_id: RuntimeId,
+    index: usize,
+}
+
+impl Artifact {
+    pub(crate) fn new(runtime_id: RuntimeId, index: usize) -> Self {
+        Self { runtime_id, index }
+    }
+
+    pub(crate) fn belongs_to(&self, runtime_id: RuntimeId) -> bool {
+        self.runtime_id == runtime_id
+    }
+
+    pub(crate) fn index(&self) -> usize {
+        self.index
+    }
+}
+
+static NEXT_RUNTIME_ID: AtomicU64 = AtomicU64::new(1);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct RuntimeId(u64);
+
+impl RuntimeId {
+    pub(crate) fn new() -> Self {
+        let id = NEXT_RUNTIME_ID
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
+            .expect("runtime ID space exhausted");
+        Self(id)
+    }
+}
+
 /// A shared object file created by compiling generated Catena GPU C++.
 #[derive(Debug)]
-pub(super) struct Artifact {
+pub(super) struct SharedObject {
     _build_dir: tempfile::TempDir,
     path: PathBuf,
 }
 
-impl Artifact {
+impl SharedObject {
     pub(super) fn path(&self) -> &Path {
         &self.path
     }
 }
 
-pub(super) fn compile(cpp_path: &Path, dialect: GpuDialect) -> Result<Artifact, ArtifactError> {
+pub(super) fn compile(cpp_path: &Path, dialect: GpuDialect) -> Result<SharedObject, ArtifactError> {
     let build_dir = tempfile::Builder::new()
         .prefix("catena-module-")
         .tempdir()?;
@@ -98,7 +134,7 @@ pub(super) fn compile(cpp_path: &Path, dialect: GpuDialect) -> Result<Artifact, 
         });
     }
 
-    Ok(Artifact {
+    Ok(SharedObject {
         _build_dir: build_dir,
         path: so_path,
     })

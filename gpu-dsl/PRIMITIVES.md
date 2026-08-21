@@ -49,8 +49,9 @@ the full product types shown in the primitive declarations.
 Definitions use `=`. Record fields use `=` inside `{ ... }`. A spaced colon
 separates a declaration from its type; a trailing colon introduces an indented
 body. Hyphenated names are used for DSL identifiers; prose metavariables use
-lower-case names. Static arguments may be positional, inferred, or named as in
-`shared.read[phase = read-phase](...)`.
+lower-case names. Static arguments may be positional, inferred, or named.
+Shared-memory phases are inferred from permissions and the synchronization
+plan rather than written independently at call sites.
 
 Permission proofs are linear resources: they cannot be copied or silently
 retained after an operation consumes them. Other proofs, such as bounds or
@@ -199,52 +200,56 @@ The proof parameters form the kernel's access contract. Launch checks that
 the requirements for all threads are race-free, supplies global buffers from
 the kernel inputs, creates block-local shared buffers, constructs the permitted
 proofs, and applies the closure once per physical thread. Launch also creates
-the kernel's expected barrier trace. The trace is linear: the kernel must
-consume it completely and return the empty trace.
+the kernel's expected synchronization plan and a linear state token at its
+start. The kernel must thread that token through its shared operations, consume
+the plan completely, and return the token at its `done` state.
 
 ```text
 kernel-function[
   config : launch-config,
   access-plan : access,
-  expected-trace : trace] =
+  expected-plan : sync-plan[initial-phase, final-phase]] =
     (inputs : inputs)
     ● (thread : thread[config])
     ● (shared : shared-arguments[thread])
     ● permissions[access-plan, thread]
-    ● initial-shared-context[thread]
-    ● expected-trace
-    => result ● []
+    ● initial-shared-context[initial-phase, thread]
+    ● (initial-sync : expected-plan)
+    => result ● done[final-phase]
 
-gpu.launch[access-plan : access, expected-trace : trace] :
+gpu.launch[
+  access-plan : access,
+  expected-plan : sync-plan[initial-phase, final-phase]] :
   (config : launch-config)
   ● (inputs : inputs)
   ● (|- race-free(access-plan))
   ● (kernel :
-       kernel-function[config, access-plan, expected-trace])
+       kernel-function[config, access-plan, expected-plan])
   -> launch[result]
 ```
 
 For each physical thread, launch derives
 `permissions[access-plan, thread]` from the actual input buffers, creates its
 block's `shared-arguments[thread]`, constructs its checked
-`initial-shared-context[thread]`, and applies the kernel closure. It also
-supplies every thread in a block with a distinct linear trace having the same
-`expected-trace` type. A trace cannot be copied, discarded, or
-fabricated, so returning `[]` proves that every thread executed the expected
-barriers in order.
+`initial-shared-context[initial-phase, thread]`, and applies the kernel closure.
+It also supplies every thread in a block with a distinct linear token of type
+`expected-plan`. A synchronization token cannot be copied, discarded, or
+fabricated, so returning `done[final-phase]` proves that every thread executed
+the expected barriers and phase changes in order.
 
 `shared-arguments[thread]` is the product of the kernel's declared shared
 buffers for `block-of(thread)`. Kernel syntax may flatten that product into
 named binders such as `tile-a` and `tile-b`. It may likewise flatten `inputs`,
-`permissions[access-plan, thread]`, and `initial-shared-context[thread]` into
-the `A`/`B`/`C`, `read-a`/`read-b`/`own-c`, and `initial-own-a`/`initial-own-b`
-binders used by the complete example.
+`permissions[access-plan, thread]`, and
+`initial-shared-context[initial-phase, thread]` into the `A`/`B`/`C`,
+`read-a`/`read-b`/`own-c`, and `initial-own-a`/`initial-own-b` binders used by
+the complete example.
 
 Kernel arguments supplied by launch form a scoped resource context. On
 `return`, all still-live permissions from that context are transferred back to
-launch; arbitrary resources cannot be discarded this way. The empty barrier
-trace remains explicit in the return value because completion must check that
-the kernel consumed its whole synchronization trace.
+launch; arbitrary resources cannot be discarded this way. The `done` token
+remains explicit in the return value because completion must check that the
+kernel consumed its whole synchronization plan.
 
 ## Shared memory
 
@@ -265,9 +270,33 @@ ambient kernel thread. The buffer is then indexed by that same block value.
 There is no separate thread argument or implicit thread parameter on either
 primitive.
 
-Phases are static syntax constructors, not runtime values. The type checker
-tracks the current phase: ordinary shared operations preserve it, while
-`shared.sync` changes it according to the instruction's `next-phase` index.
+Phases are static syntax constructors, not runtime values. They index both
+shared permissions and synchronization plans. Consequently, the current phase
+is determined by the remaining plan: ordinary shared operations preserve it,
+while `shared.sync` consumes a plan step and exposes its next phase.
+
+This relation is enforced by an explicit linear synchronization token whose
+type is the remaining plan:
+
+```text
+sync : sync-plan[current-phase, final-phase]
+```
+
+Every shared-memory primitive consumes this token as a positional input.
+Ordinary reads and writes return the same token, explicitly preserving the
+current plan; `shared.sync` returns the plan's tail token. The token therefore
+creates the dataflow edge that orders a shared operation after the sync which
+produced its phase.
+
+`current-phase` and `final-phase` are obtained by matching the type of the input
+token. Reusing `current-phase` in the permission type enforces that the
+permission belongs to that state. The block remains a separate value argument;
+its equality with the thread's block is enforced by the buffer and permission
+types, not by the synchronization token. Moreover, sync consumes the complete
+grant context, so a permission cannot survive until a later occurrence of a
+phase with the same name; permissions at that occurrence must come from the
+intervening sync grant. The token may be erased after type checking, but it is
+explicit in the dataflow syntax.
 
 The kernel closure expresses initial ownership with dependent proof
 parameters. For example:
@@ -288,12 +317,16 @@ when a thread initially owns several cells.
 Exclusive ownership permits one thread to write a cell:
 
 ```text
-shared.write[config, n, t, phase] :
+shared.write[
+  config, n, t] :
   (block : block[config] where block = block-of(thread))
+  ● (current-sync :
+       sync-plan[current-phase, final-phase])
   ● (buffer : shared.buffer[block, n, t])
   ● (index : ix[n]) ● (value : t)
-  ● (permission : |- own(phase, thread, buffer, index))
-  -> (|- wrote(phase, thread, buffer, index))
+  ● (permission : |- own(current-phase, thread, buffer, index))
+  -> (|- wrote(current-phase, thread, buffer, index))
+     ● (unchanged-sync : sync-plan[current-phase, final-phase])
 ```
 
 The write consumes ownership and produces evidence that this thread wrote the
@@ -306,14 +339,18 @@ A shared read needs both permission to read the cell and evidence that it was
 initialized:
 
 ```text
-shared.read[config, n, t, phase] :
+shared.read[
+  config, n, t] :
   (block : block[config] where block = block-of(thread))
+  ● (current-sync :
+       sync-plan[current-phase, final-phase])
   ● (buffer : shared.buffer[block, n, t])
   ● (index : ix[n])
-  ● (permission : |- read(phase, thread, buffer, index))
+  ● (permission : |- read(current-phase, thread, buffer, index))
   ● (initialized : |- defined(buffer, index))
   -> (value : t)
-     ● (|- read(phase, thread, buffer, index))
+     ● (|- read(current-phase, thread, buffer, index))
+     ● (unchanged-sync : sync-plan[current-phase, final-phase])
 ```
 
 The cell's read permission is reusable during the current read phase.
@@ -342,7 +379,7 @@ sync instruction and coverage comes from the tile-distribution proof.
 
 There are no separate barrier definitions. Each `shared.sync` instruction
 describes the facts it publishes and the grants it creates. Its label records
-that instruction in the common trace.
+that instruction in the common synchronization plan.
 
 ### Publishing thread facts
 
@@ -368,7 +405,7 @@ schema may not also capture the ambient `thread` independently. An elaborator
 should normally infer this abstraction and treat the written schema as a
 checked annotation.
 
-The common-trace rule then ensures that synchronization receives one value of
+The common-plan rule then ensures that synchronization receives one value of
 `fact-schema[u]` from every `u` in the block. Its collective introduction rule
 is:
 
@@ -384,7 +421,7 @@ block-facts[block, unit] = unit
 
 This is not pattern matching or a local function that manufactures other
 threads' facts. Its proof rests on parametric checking of the kernel body and
-the common sync trace. The abstracted schema may describe any well-formed
+the common synchronization plan. The abstracted schema may describe any well-formed
 proposition about `u`, not only `wrote`. When the current facts and schema are
 both `unit`, the clause and its result may be omitted.
 
@@ -403,31 +440,31 @@ Synchronization cannot describe an arbitrary output permission set. Its
 `granting` clause must construct one of two grant forms:
 
 ```text
-barrier-grants[plan, thread] ::=
-    reads[read-grants[thread]]
-  | owns[own-grants[plan, thread]]
+barrier-grants[plan, phase, thread] ::=
+    reads[read-grants[phase, thread]]
+  | owns[own-grants[plan, phase, thread]]
 ```
 
 A read grant names a shared buffer and produces the family of cell read
 permissions for that buffer in the next phase:
 
 ```text
-read-grant[thread, buffer] =
+read-grant[phase, thread, buffer] =
   family[index : ix[buffer.length]] {
-    |- read(next-phase, thread, buffer, index) }
+    |- read(phase, thread, buffer, index) }
 ```
 
 Read grants may be combined with other read grants. An ownership grant is more
 restricted:
 
 ```text
-own-grant[plan, thread] :
+own-grant[plan, phase, thread] :
   (buffer : shared.buffer[block-of(thread), n, t])
   ● (layout : plan.cell -> ix[n])
   ● (|- injective(layout))
   ● (cell : plan.cell)
   ● (|- plan.owner(cell) = thread.thread-index)
-  -> own(next-phase, thread, buffer, layout(cell))
+  -> own(phase, thread, buffer, layout(cell))
 ```
 
 Ownership grants may be combined only with other ownership grants. Therefore
@@ -451,19 +488,21 @@ distinction made by the Lean prototype.
 shared.sync[
   name : barrier,
   config : launch-config,
-  phase : phase,
+  current-phase : phase,
   next-phase : phase,
-  rest : trace,
+  final-phase : phase,
+  rest : sync-plan[next-phase, final-phase],
   fact-schema : thread[config] -> facts,
   plan : ownership-plan[config],
-  new-grants : barrier-grants[plan, thread]] :
+  new-grants : barrier-grants[plan, next-phase, thread]] :
   (block : block[config] where block = block-of(thread))
-  ● (current-trace : name :: rest)
-  ● (current-grants : grants[phase, thread])
+  ● (current-sync :
+       step[name, current-phase, next-phase] :: rest)
+  ● (current-grants : grants[current-phase, thread])
   ● (current-facts : fact-schema[thread])
   -> block-facts[block, fact-schema]
-     ● grants-result[new-grants, next-phase]
-     ● (remaining-trace : rest)
+     ● grants-result[new-grants]
+     ● (remaining-sync : rest)
 ```
 
 The block argument has the same refinement used by `shared.read` and
@@ -472,15 +511,17 @@ The block argument has the same refinement used by `shared.read` and
 thread is not another runtime argument.
 
 The `current-grants` argument is that thread's complete shared-permission
-context for `phase`; synchronization consumes it in full. `current-facts` are
-also consumed and published. The checked grant constructors produce the complete
-permission context for `next-phase`. `current-trace` is consumed and its head
-is removed. None of these inputs uses the preserving `using` syntax. Global
-memory permissions are unaffected.
+context for `current-phase`; synchronization consumes it in full.
+`current-facts` are also consumed and published. The checked grant constructors
+produce the complete permission context for `next-phase`. `current-sync` is
+consumed and its tail token is returned. The current and next phases are
+therefore determined by that step rather than independently chosen arguments.
+None of these inputs uses the preserving `using` syntax. Global memory
+permissions are unaffected.
 
 All threads in a block must execute the same labeled sync instructions, with
-the same fact family and grant form, in the same order. The common
-trace enforces the labels and order. At a call site,
+the same phase transitions, fact family, and grant form, in the same order.
+The common synchronization plan enforces these requirements. At a call site,
 `publishing facts as [u in block]: schema[u]` supplies both `current-facts` and
 `fact-schema`. The `granting [u]` clause must elaborate to either the `reads`
 or `owns` constructor of `barrier-grants`; an `owns` clause must supply the
@@ -494,9 +535,9 @@ The remainder of this note uses only these surface forms:
 | --- | --- | --- |
 | `global.read` | `global.read(thread, buffer, index) using read-proof` | `value`; the read proof is preserved |
 | `global.write` | `global.write(thread, buffer, index, value) using ownership` | none; ownership is preserved |
-| `shared.write` | `shared.write[phase = p](block, buffer, index, value, ownership)` | write evidence; ownership is consumed |
-| `shared.read` | `shared.read[phase = p](block, buffer, index) using read-proof ● defined-proof` | `value`; the read proof is preserved |
-| `shared.sync` | `shared.sync[name = b](block, trace, grants) publishing facts as [u in block]: schema[u] granting [u]: reads ... | owns ... using proofs` | published block facts, new grants, and the remaining trace |
+| `shared.write` | `shared.write(block, sync, buffer, index, value, ownership)` | write evidence and the unchanged sync state; ownership is consumed |
+| `shared.read` | `shared.read(block, sync, buffer, index) using read-proof ● defined-proof` | `value` and the unchanged sync state; the read proof is preserved |
+| `shared.sync` | `shared.sync[name = b](block, sync, grants) publishing facts as [u in block]: schema[u] granting [u]: reads ... | owns ... using proofs` | published block facts, new grants, and the remaining synchronization plan |
 | `gpu.launch` | `gpu.launch[access-plan](config, inputs, kernel) using race-free-proof` | `launch[result]` |
 
 Static parameters not shown in a call are inferred from its arguments and
@@ -552,55 +593,59 @@ for each i in ix[n]:
 ```
 
 The inner accumulation loop in the matmul example uses this shorthand. The
-annotated outer loop is required because its barrier-trace type changes.
+annotated outer loop is required because its synchronization-plan type changes.
 
-## Barrier traces
+## Synchronization plans
 
-A barrier trace records synchronization structure in the kernel type:
+A synchronization plan records both barrier order and phase transitions in
+the kernel type:
 
 ```text
-trace ::= []
-        | barrier :: trace
+done[phase] : sync-plan[phase, phase]
+
+step[name, current-phase, next-phase]
+  :: sync-plan[next-phase, final-phase]
+  -> sync-plan[current-phase, final-phase]
 ```
 
-Kernel invocation receives its expected trace as a linear remaining trace.
-Ordinary operations preserve it. A call to `shared.sync` transforms
-`barrier :: rest` into `rest`. The kernel must return `[]`.
+The two indices are the current and final phases. A value of a synchronization
+plan type is itself the linear control token; it is not wrapped together with
+the block. Ordinary operations consume and return a token of the same type and
+must use permissions indexed by its current phase. A call to `shared.sync`
+returns the plan's tail, simultaneously checking the barrier name and changing
+the current phase. The kernel must return `done[final-phase]`.
 
-Barrier plans instantiate the generic variant mechanism without overloading
-`iterate`. Prefixing a fixed barrier sequence is an ordinary transition:
+Synchronization plans instantiate the generic variant mechanism without
+overloading `iterate`. Prefixing one tile round is an ordinary transition:
 
 ```text
-prefix[barriers](rest) = barriers ++ rest
+tile-round(rest : sync-plan[write-phase, final-phase]) =
+  step[tile-loaded, write-phase, read-phase]
+  :: step[tile-consumed, read-phase, write-phase]
+  :: rest
 
 iterate[
   count,
-  prefix[tile-loaded :: tile-consumed],
-  []]
+  tile-round,
+  done[write-phase]]
 ```
 
-This describes `count` repetitions of the two-barrier sequence ending in the
-empty trace.
+This describes `count` repetitions of the two-barrier, two-phase round, ending
+in `write-phase`. Ill-formed plans cannot connect a step's `next-phase` to a
+remainder whose current phase differs.
 
-The trace decreases under the suffix order. The generic loop checks its body
-once for an arbitrary `rest`: it must transform
-`tile-loaded :: tile-consumed :: rest` into `rest`. It can therefore consume
-the structured `iterate` trace without expanding it. Both branches of a
-conditional must return the same remaining trace. Missing, reordered, extra, or
-conditionally executed barriers therefore prevent the kernel from returning
-`[]`.
+The plan decreases under the suffix order. The generic loop checks its body
+once for an arbitrary `rest`: it must transform `tile-round(rest)` into
+`rest`. It can therefore consume the structured `iterate` plan without
+expanding it. Both branches of a conditional must return the same remaining
+plan. Missing, reordered, extra, or conditionally executed barriers, as well
+as incorrect phase changes, prevent the kernel from returning
+`done[final-phase]`.
 
-An implementation may check this by threading an internal linear value:
-
-```text
-gpu.state[block, phase, trace]
-```
-
-Shared reads and writes preserve this value, while `shared.sync` changes its
-phase and removes the expected barrier. The generic loop checks the declared
-variant and eliminates one `iterate` layer per logical iteration. The value
-cannot be copied, discarded, or fabricated, and may be erased after type
-checking. It is implementation machinery rather than a runtime value.
+The generic loop threads the token through its body and eliminates one
+`iterate` layer per logical iteration. The token cannot be copied, discarded,
+or fabricated. It may be erased after type checking, but its explicit edges
+define the shared-memory control flow in the source program.
 
 ## Guarantee boundary
 
@@ -757,21 +802,21 @@ matmul[rows, inner, cols, tile-size, config] :
   ● (initial-own-b :
         |- own(write-phase, thread, tile-b, tile-cell(thread)))
 
-  ● (barrier-trace :
+  ● (expected-sync :
         iterate[
           inner / tile-size,
-          prefix[tile-loaded :: tile-consumed],
-          []])
+          tile-round,
+          done[write-phase]])
 
-  => unit ● []
+  => unit ● done[write-phase]
 
 matmul[rows, inner, cols, tile-size, config] =
   \A B C thread tile-a tile-b
-   read-a read-b own-c initial-own-a initial-own-b barrier-trace =>
+   read-a read-b own-c initial-own-a initial-own-b expected-sync =>
 
   sum = 0
 
-  final-own-a ● final-own-b ● empty-trace =
+  final-own-a ● final-own-b ● done-sync =
     for each q in ix[inner / tile-size]
     maintaining invariant:
       (|- own(write-phase, thread, tile-a, tile-cell(thread)))
@@ -779,11 +824,11 @@ matmul[rows, inner, cols, tile-size, config] =
     initially initial-own-a ● initial-own-b
 
     decreasing variant [rest]:
-      from tile-loaded :: tile-consumed :: rest to rest
-    initially barrier-trace:
+      from tile-round(rest) to rest
+    initially expected-sync:
 
     own-a ● own-b = invariant
-    current-trace = variant
+    current-sync = variant
 
     a-value =
       global.read(thread, A, a-index(thread, q)) using read-a[q]
@@ -791,21 +836,28 @@ matmul[rows, inner, cols, tile-size, config] =
     b-value =
       global.read(thread, B, b-index(thread, q)) using read-b[q]
 
-    wrote-a =
-      shared.write[phase = write-phase](
-        block-of(thread), tile-a, tile-cell(thread), a-value, own-a)
-
-    wrote-b =
-      shared.write[phase = write-phase](
-        block-of(thread), tile-b, tile-cell(thread), b-value, own-b)
-
-    all-writes ● reads-a ● reads-b ● after-loaded-trace =
-      shared.sync[
-        name = tile-loaded,
-        phase = write-phase,
-        next-phase = read-phase](
+    wrote-a ● after-write-a-sync =
+      shared.write(
         block-of(thread),
-        current-trace,
+        current-sync,
+        tile-a,
+        tile-cell(thread),
+        a-value,
+        own-a)
+
+    wrote-b ● after-write-b-sync =
+      shared.write(
+        block-of(thread),
+        after-write-a-sync,
+        tile-b,
+        tile-cell(thread),
+        b-value,
+        own-b)
+
+    all-writes ● reads-a ● reads-b ● after-loaded-sync =
+      shared.sync[name = tile-loaded](
+        block-of(thread),
+        after-write-b-sync,
         unit)
       publishing wrote-a ● wrote-b as [u in block-of(thread)]:
         (|- wrote(write-phase, u, tile-a, tile-cell(u)))
@@ -813,6 +865,8 @@ matmul[rows, inner, cols, tile-size, config] =
       granting [u] reads:
         tile-a
         ● tile-b
+
+    read-sync = after-loaded-sync
 
     for each k in ix[tile-size]:
       index-a = tile-layout((thread.thread-index.y, k))
@@ -828,25 +882,23 @@ matmul[rows, inner, cols, tile-size, config] =
           using all-writes.second
             ● tile-coverage(block-of(thread), index-b)
 
-      a =
-        shared.read[phase = read-phase](
-          block-of(thread), tile-a, index-a)
+      a ● after-read-a-sync =
+        shared.read(
+          block-of(thread), read-sync, tile-a, index-a)
           using reads-a[index-a] ● defined-a
 
-      b =
-        shared.read[phase = read-phase](
-          block-of(thread), tile-b, index-b)
+      b ● after-read-b-sync =
+        shared.read(
+          block-of(thread), after-read-a-sync, tile-b, index-b)
           using reads-b[index-b] ● defined-b
 
       sum = sum + a * b
+      read-sync = after-read-b-sync
 
-    next-own-a ● next-own-b ● after-consumed-trace =
-      shared.sync[
-        name = tile-consumed,
-        phase = read-phase,
-        next-phase = write-phase](
+    next-own-a ● next-own-b ● after-consumed-sync =
+      shared.sync[name = tile-consumed](
         block-of(thread),
-        after-loaded-trace,
+        read-sync,
         reads-a ● reads-b)
       granting [u] owns:
         tile-a at tile-coordinate(u) via tile-layout
@@ -854,11 +906,11 @@ matmul[rows, inner, cols, tile-size, config] =
         ● tile-b at tile-coordinate(u) via tile-layout
           using tile-layout-injective ● tile-cell-owned(u)
 
-    continue with next-own-a ● next-own-b ● after-consumed-trace
+    continue with next-own-a ● next-own-b ● after-consumed-sync
 
   global.write(thread, C, c-index(thread), sum) using own-c
 
-  return unit ● empty-trace
+  return unit ● done-sync
 
 gpu.launch[matmul-access](
   config,
@@ -874,27 +926,28 @@ to those exact buffer values. The block is obtained from `block-of(thread)`, so 
 does not need another runtime binder. Launch supplies `A`, `B`, and `C`, creates
 `tile-a` and `tile-b` once per block, and constructs the proof arguments after
 checking the requirements across all threads. The initial ownership proofs are
-in the `write-phase` constructor; no phase value or phase metavariable is
+in the `write-phase` constructor; no separate phase value or metavariable is
 passed. The accumulator `sum` remains an ordinary value, separate from the
 loop's proof invariant. Here, `using` passes a proof and threads it forward
-when the primitive preserves it. Launch supplies `barrier-trace`; the kernel
-cannot construct or discard it. In the loop body, `rest` is an arbitrary
-remaining trace. The iteration starts with
-`tile-loaded :: tile-consumed :: rest`, the first synchronization produces
-`tile-consumed :: rest`, and the second produces `rest`. The body continues
-with that `rest` together with the ownership invariant. Therefore the generic
-loop consumes:
+when the primitive preserves it. Launch supplies the `expected-sync` token;
+the kernel cannot copy or discard it. In the loop body, `rest` is an arbitrary
+remaining plan beginning in `write-phase`. The iteration starts with a
+`tile-round(rest)` token. Each shared write explicitly preserves that token,
+the first synchronization returns the `tile-consumed` token in `read-phase`,
+and each shared read explicitly preserves that token. The second
+synchronization returns `rest` in `write-phase`. Therefore the generic loop
+consumes:
 
 ```text
 iterate[
   inner / tile-size,
-  prefix[tile-loaded :: tile-consumed],
-  []]
+  tile-round,
+  done[write-phase]]
 ```
 
-and returns `[]`, as required by the kernel result type. Kernel completion
-reclaims the final permissions associated with its global and shared-memory
-access contract.
+and returns `done[write-phase]`, as required by the kernel result type. Kernel
+completion reclaims the final permissions associated with its global and
+shared-memory access contract.
 
 For global memory, `matmul-global-safe` proves that the permissions constructed
 by launch are compatible across all threads. The dependent `read-a`, `read-b`,

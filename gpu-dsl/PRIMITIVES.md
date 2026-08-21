@@ -136,11 +136,22 @@ particular buffer value.
 The proof parameters form the kernel's access contract. Launch checks that
 the requirements for all threads are race-free, supplies global buffers from
 the kernel inputs, creates block-local shared buffers, constructs the permitted
-proofs, and applies the function once per physical thread:
+proofs, and applies the function once per physical thread. Invoking a kernel
+function returns its barrier trace alongside its ordinary result:
 
 ```text
-gpu.launch : config ● inputs ● kernel-function(inputs) -> launch
+kernel-function : inputs -> result ● trace
+
+gpu.launch :
+  config
+  ● inputs
+  ● (inputs -> result ● trace)
+  -> launch
 ```
+
+The trace is determined by the implementation rather than supplied by its
+caller. Launch checks that it is block-uniform, so every thread in a block
+reaches the same barriers in the same order.
 
 ## Shared memory
 
@@ -219,22 +230,25 @@ The cell's read permission is reusable during the current read phase.
 There is one block synchronization primitive:
 
 ```text
-shared.sync[config] :
+shared.sync[config, before : trace] :
   phase
   ● (block : block[config])
+  ● before
   ● barrier[phase -> next-phase]
   ● contribution(phase)
   ● grants
   -> published-facts
      ● grants(next-phase)
+     ● (before ++ [barrier])
 ```
 
-It has three effects:
+It has four effects:
 
 1. Every thread in `block` waits at the same barrier.
 2. The barrier publishes its fixed contribution from every thread.
 3. It changes the current phase and returns `grants` indexed by the barrier's
    declared next-phase constructor.
+4. It appends its barrier to the accumulated barrier trace.
 
 Synchronization also consumes the entire old shared-permission context. A
 thread cannot retain a proof merely by omitting it from the call. After the
@@ -273,6 +287,57 @@ ensures that all threads have finished the read phase; changing the ambient
 phase invalidates all read permissions, and the barrier grants ownership tied
 to the next phase. All threads in a block must execute the same barriers in
 the same order.
+
+## Barrier traces
+
+A barrier trace records synchronization structure in the kernel type:
+
+```text
+trace ::= []
+        | [barrier]
+        | trace ++ trace
+        | loop(count, trace)
+```
+
+Kernel invocation starts with `[]`. Ordinary operations preserve the
+accumulated trace. A call to `shared.sync` transforms `before` into
+`before ++ [barrier]`. Source syntax may thread this ghost result implicitly;
+it remains part of the checked function result type.
+
+The kernel may return `loop(count, trace)`, but an implementation cannot
+produce such a value merely by asserting it. It is produced only by the
+checked, block-uniform GPU loop primitive. The loop checks its body once for an
+arbitrary iteration:
+
+```text
+body :
+  invariant ● before
+  -> invariant
+     ● (before ++ [tile-loaded, tile-consumed])
+
+gpu.for[count](body) :
+  invariant ● before
+  -> invariant
+     ● (before ++ loop(count, [tile-loaded, tile-consumed]))
+```
+
+Thus the trace need not be expanded into one barrier list per iteration. The
+loop typing rule proves that every iteration has exactly the body trace. Both
+branches of a conditional must also have the same trace. Missing, reordered,
+or conditionally executed barriers therefore make the implementation's trace
+differ from the kernel's result type.
+
+An implementation may check this by threading an internal linear value:
+
+```text
+gpu.state[block, phase, trace]
+```
+
+Shared reads and writes preserve this value. `shared.sync` changes its phase
+and appends one barrier, while `gpu.for` constructs the structured `loop` trace.
+The value cannot be copied, discarded, or fabricated, and may be erased after
+type checking. It is implementation machinery rather than an argument written
+in source kernels.
 
 ## Tiled matrix multiplication
 
@@ -346,6 +411,9 @@ matmul[rows, inner, cols, tile-size, config] :
         |- own(write-phase, thread, tile-b, tile-cell(thread)))
 
   => unit
+     ● loop(
+         inner / tile-size,
+         [tile-loaded, tile-consumed])
 
 matmul[rows, inner, cols, tile-size, config] =
   \A B C thread tile-a tile-b
@@ -364,7 +432,9 @@ matmul[rows, inner, cols, tile-size, config] =
 
   sum = 0
 
-  for each q in ix(inner / tile-size)
+  loop-trace =
+    gpu.for each q in ix(inner / tile-size)
+    threading trace before from []
     maintaining invariant :
       (|- own(write-phase, thread, tile-a, tile-cell(thread)))
       ● (|- own(write-phase, thread, tile-b, tile-cell(thread)))
@@ -388,8 +458,8 @@ matmul[rows, inner, cols, tile-size, config] =
         write-phase, block thread, tile-b, tile-cell(thread), b-value)
       using own-b
 
-    all-writes ● reads-a ● reads-b =
-      shared.sync(write-phase, block thread, tile-loaded)
+    all-writes ● reads-a ● reads-b ● after-loaded =
+      shared.sync(write-phase, block thread, before, tile-loaded)
         publishing wrote-a ● wrote-b
 
     for each k in ix(tile-size):
@@ -409,11 +479,16 @@ matmul[rows, inner, cols, tile-size, config] =
 
       sum = sum + a * b
 
-    next-own-a ● next-own-b =
-      shared.sync(read-phase, block thread, tile-consumed)
+    next-own-a ● next-own-b ● after-consumed =
+      shared.sync(
+        read-phase, block thread, after-loaded, tile-consumed)
+
     continue with next-own-a ● next-own-b
+    continue trace with after-consumed
 
   global.write(C, c-index(thread), sum) using own-c
+
+  return unit ● loop-trace
 
 gpu.launch(
   config,
@@ -431,7 +506,16 @@ checking the requirements across all threads. The initial ownership proofs are
 in the `write-phase` constructor; no phase value or phase metavariable is
 passed. The accumulator `sum` remains an ordinary value, separate from the
 loop's proof invariant. Here, `using` passes a proof and threads it forward
-when the primitive preserves it.
+when the primitive preserves it. The `loop(...)` result is generated by
+`gpu.for` from the checked trace of its body; the kernel does not construct or
+assert it. In the loop body, `before` is an arbitrary incoming trace,
+`after-loaded` has type `before ++ [tile-loaded]`, and `after-consumed` has type
+`before ++ [tile-loaded, tile-consumed]`. Since the loop starts from `[]`, its
+result has the kernel's declared result type:
+
+```text
+loop(inner / tile-size, [tile-loaded, tile-consumed])
+```
 
 The first barrier proves that reads are initialized and changes the block from
 exclusive writing to shared reading. The second waits for all reads, removes

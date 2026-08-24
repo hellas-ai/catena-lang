@@ -1042,7 +1042,7 @@ pub(in crate::codegen) fn render_borrow_reduce_f32_call(
         name = output.name,
         element = c_type(output_element)
     ));
-    out.push_str(&format!("    catena_assert(({reduction_len}) <= 8192);\n"));
+    out.push_str(&format!("    catena_assert(({reduction_len}) <= 16384);\n"));
     out.push_str(&format!("    if ({}_len != 0) {{\n", output.name));
     out.push_str(&format!(
         "        catena_host_gpu_check({}((void **)&{}_data, {}_len * sizeof(float), nullptr));\n",
@@ -1111,7 +1111,7 @@ pub(in crate::codegen) fn render_borrow_routed_bf16_gemv_pair_call(
     let prefix = &gate_output.name;
 
     out.push_str(&format!(
-        "    catena_assert(({reduction_len}) != 0 && ({reduction_len}) <= 4096);\n"
+        "    catena_assert(({reduction_len}) != 0 && ({reduction_len}) <= 8192);\n"
     ));
     out.push_str(&format!(
         "    catena_assert(({slots}) != 0 && ({output_features}) != 0);\n"
@@ -1208,7 +1208,7 @@ pub(in crate::codegen) fn render_reduce_f32_call(
         "    uint64_t {name}_len = {output_len};\n    float *{name}_data = nullptr;\n",
         name = output.name
     ));
-    out.push_str(&format!("    catena_assert(({reduction_len}) <= 4096);\n"));
+    out.push_str(&format!("    catena_assert(({reduction_len}) <= 16384);\n"));
     out.push_str(&format!("    if ({}_len != 0) {{\n", output.name));
     out.push_str(&format!(
         "        catena_host_gpu_check({}((void **)&{}_data, {}_len * sizeof(float), nullptr));\n",
@@ -1252,7 +1252,7 @@ pub(in crate::codegen) fn render_reduce_f32_pair_call(
             name = output.name
         ));
     }
-    out.push_str(&format!("    catena_assert(({reduction_len}) <= 4096);\n"));
+    out.push_str(&format!("    catena_assert(({reduction_len}) <= 8192);\n"));
     out.push_str(&format!("    if ({output_len} != 0) {{\n"));
     for output in [left_output, right_output] {
         out.push_str(&format!(
@@ -1393,7 +1393,7 @@ pub(in crate::codegen) fn render_softmax_f32_call(
     let kernel_name = kernel_name(&function.name, assignment)?;
 
     out.push_str(&format!("    catena_assert(({columns}) != 0);\n"));
-    out.push_str(&format!("    catena_assert(({columns}) <= 8192);\n"));
+    out.push_str(&format!("    catena_assert(({columns}) <= 16384);\n"));
     out.push_str(&format!(
         "    catena_assert(({capacity}) % ({columns}) == 0);\n"
     ));

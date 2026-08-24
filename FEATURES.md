@@ -61,7 +61,7 @@ the resulting sum and produces output `i`.
 This logical tree is independent of GPU thread count and scheduling, making
 the result bit-deterministic despite floating-point non-associativity. The
 current GPU implementation assigns one block per output and supports
-`K ≤ 4096`.
+`K ≤ 16384`.
 
 ## `materializec.borrow-reduce-f32`
 
@@ -85,7 +85,7 @@ new owned output buffer.
 For each output, reduction uses the same exact adjacent-pair tree as
 `materializec.reduce-f32`, including carrying unmatched terms unchanged and
 using `+0.0` for an empty domain. GPU scheduling therefore cannot alter the
-resulting bits. The current implementation supports `K ≤ 8192`, selecting
+resulting bits. The current implementation supports `K ≤ 16384`, selecting
 64, 128, 256, or 512 physical threads without changing that logical tree.
 
 ## `materializec.softmax-f32`
@@ -109,7 +109,7 @@ Both row reductions use the exact adjacent-pair tree defined by
 the right is strictly greater. An input with bits `0xFF800000` (negative
 infinity) produces a `+0.0` numerator without invoking the exponential; every
 other numerator is `exp(value - maximum)`. A zero denominator produces an
-all-`+0.0` row. The current GPU implementation supports at most 8192 columns.
+all-`+0.0` row. The current GPU implementation supports at most 16384 columns.
 
 ## `materializec.borrow-argmax-f32`
 
@@ -155,7 +155,7 @@ epilogue consumes both sums and produces the corresponding pair of outputs.
 
 One kernel shares term setup and synchronization barriers between the two
 trees without changing either tree's arithmetic. The current implementation
-supports `K ≤ 4096`.
+supports `K ≤ 8192`.
 
 ## `materializec.borrow-routed-bf16-gemv-pair`
 
@@ -180,7 +180,7 @@ materializec.borrow-routed-bf16-gemv-pair[I, G, U, S, N, K] :
 ```
 
 The two unindexed values are `slots` and `output_features`. Let
-`rows = I / K`. The operation requires `0 < K ≤ 4096`, `slots > 0`,
+`rows = I / K`. The operation requires `0 < K ≤ 8192`, `slots > 0`,
 `output_features > 0`, `I = rows × K`, `S = rows × slots`, and
 `N = S × output_features`. Gate and up capacities must be equal and divisible
 by `output_features × K`; the quotient is the expert count.
@@ -237,13 +237,13 @@ the logical adjacent-pair tree is unchanged.
 The Qwen work also replaces late whole-block barriers with explicit warp/wave
 barriers in `materializec.reduce-f32`, `materializec.reduce-f32-pair`,
 `materializec.borrow-reduce-f32`, and the routed BF16 pair. Once
-`stride ≥ 256`, the maximum supported reduction length of 8192 leaves at most
-16 active lanes, all within the first 32-lane CUDA warp or 64-lane AMD wave.
+`stride ≥ 256`, the maximum supported reduction length of 16384 leaves at most
+32 active lanes, all within the first 32-lane CUDA warp or 64-lane AMD wave.
 Every addition retains the same lane, logical index, left operand, right
 operand, and parenthesization.
 
 GPU tests compare every output bit with the canonical CPU tree at reduction
-lengths 257, 2048, and 6144, including cancellation-sensitive values and
+lengths 257, 2048, 6144, 8192, and 16384, including cancellation-sensitive values and
 signed zero. The maximum-active-lane argument is part of the feature's
 determinism requirement; increasing the supported reduction length requires
 re-establishing it.

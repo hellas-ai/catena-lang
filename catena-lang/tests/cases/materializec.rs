@@ -178,7 +178,7 @@ fn materialize_reduce_f32_pair_preserves_both_logical_index_trees() -> anyhow::R
 fn materialize_reduction_wave_tail_matches_canonical_bits() -> anyhow::Result<()> {
     let runtime = runtime_with(SOURCE)?;
 
-    for len in [257_usize, 2_048, 6_144] {
+    for len in [257_usize, 2_048, 6_144, 8_192, 16_384] {
         let values = (0..len)
             .map(|index| match index % 8 {
                 0 => 1.0e20,
@@ -193,17 +193,17 @@ fn materialize_reduction_wave_tail_matches_canonical_bits() -> anyhow::Result<()
             .collect::<Vec<_>>();
         let expected = canonical_adjacent_f32_sum(&values).to_bits();
 
-        if len <= 4_096 {
-            let input = runtime.mem_f32(&values)?;
-            let [output] = runtime.exec(
-                "materialize-reduce-f32-rows",
-                [input.as_ref().into(), 1_u64.into(), (len as u64).into()],
-            )?;
-            let Value::MemOwn(output) = output else {
-                anyhow::bail!("reduce-f32 returned non-memory output: {output:?}");
-            };
-            assert_eq!(output.to_f32_vec()[0].to_bits(), expected, "len {len}");
+        let input = runtime.mem_f32(&values)?;
+        let [output] = runtime.exec(
+            "materialize-reduce-f32-rows",
+            [input.as_ref().into(), 1_u64.into(), (len as u64).into()],
+        )?;
+        let Value::MemOwn(output) = output else {
+            anyhow::bail!("reduce-f32 returned non-memory output: {output:?}");
+        };
+        assert_eq!(output.to_f32_vec()[0].to_bits(), expected, "len {len}");
 
+        if len <= 8_192 {
             let [left, right] = runtime.exec(
                 "materialize-reduce-f32-pair-rows",
                 [input.as_ref().into(), 1_u64.into(), (len as u64).into()],

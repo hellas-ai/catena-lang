@@ -1,0 +1,4 @@
+(theory type nat {
+  (arr val : 1 -> 1)
+  (arr : : 2 -> 1)
+})

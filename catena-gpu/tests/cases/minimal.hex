@@ -1,0 +1,1 @@
+(def program add : {(u64 val) (u64 val)} -> (u64 val) = u64.add)

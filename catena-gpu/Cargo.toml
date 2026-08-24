@@ -1,0 +1,30 @@
+[package]
+name = "catena-gpu"
+version = "0.1.0"
+edition = "2024"
+description = "Minimal GPU compiler and runtime for Catena"
+repository = "https://github.com/hellas-ai/catena-lang"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+hexpr.workspace = true
+libffi = "5.1.0"
+libloading = "0.9.0"
+metacat.workspace = true
+open-hypergraphs.workspace = true
+serde = { version = "1.0.228", features = ["derive"] }
+tempfile = "3.23.0"
+thiserror = "2.0.18"
+
+[dev-dependencies]
+anyhow = "1.0.101"
+metacat.workspace = true
+
+[features]
+default = []
+runtime-tests = []
+
+[[test]]
+name = "runtime"
+path = "tests/runtime.rs"
+required-features = ["runtime-tests"]

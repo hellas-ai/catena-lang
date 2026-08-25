@@ -178,7 +178,10 @@ fn render_module_body(
                 assignment,
             )?;
             out.push('\n');
-        } else if assignment.op.as_str() == "materializec.borrow-argmax-f32" {
+        } else if matches!(
+            assignment.op.as_str(),
+            "materializec.borrow-argmax-f32" | "materializec.borrow-argmax-bf16"
+        ) {
             materializec::render_borrow_argmax_f32_kernel(
                 out,
                 &materializec::kernel_name(&module.entry.name, assignment)?,
@@ -204,6 +207,14 @@ fn render_module_body(
                 out,
                 &materializec::kernel_name(&module.entry.name, assignment)?,
                 assignment,
+            )?;
+            out.push('\n');
+        } else if assignment.op.as_str() == "materializec.bf16-gemv" {
+            materializec::render_bf16_gemv_kernel(
+                out,
+                &materializec::kernel_name(&module.entry.name, assignment)?,
+                assignment,
+                dialect,
             )?;
             out.push('\n');
         } else if assignment.op.as_str() == "materializec.borrow-gated-delta-net-f32" {
@@ -377,7 +388,7 @@ fn render_assignment(
         "materializec.borrow" => {
             materializec::render_borrow_call(out, function, assignment, dialect)?
         }
-        "materializec.borrow-argmax-f32" => {
+        "materializec.borrow-argmax-f32" | "materializec.borrow-argmax-bf16" => {
             materializec::render_borrow_argmax_f32_call(out, function, assignment, dialect)?
         }
         "materializec.borrow-topk-f32" => {
@@ -390,6 +401,9 @@ fn render_assignment(
             materializec::render_borrow_routed_bf16_gemv_pair_call(
                 out, function, assignment, dialect,
             )?
+        }
+        "materializec.bf16-gemv" => {
+            materializec::render_bf16_gemv_call(out, function, assignment, dialect)?
         }
         "materializec.borrow-gated-delta-net-f32" => {
             gated_delta_net::render_call(out, function, assignment, dialect)?

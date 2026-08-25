@@ -15,6 +15,15 @@ fn bf16_values_from_bits(bits: &[u16]) -> Vec<half::bf16> {
 }
 
 #[test]
+fn runtime_allocates_zeroed_bf16_storage() -> anyhow::Result<()> {
+    let runtime = runtime_with(MATMUL_SOURCE)?;
+    let memory = runtime.mem_bf16_zeroed(17)?;
+    assert_eq!(memory.byte_len(), 34);
+    assert_eq!(memory.to_u16_vec(), vec![0; 17]);
+    Ok(())
+}
+
+#[test]
 fn bf16_matmul_row_major_bufs_from_mems() -> anyhow::Result<()> {
     let runtime = runtime_with(MATMUL_SOURCE)?;
     let a_values = bf16_values(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);

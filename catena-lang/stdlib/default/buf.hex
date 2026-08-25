@@ -115,19 +115,19 @@
   }})
 
   # Scope a read-only borrow while cooperatively reducing one independent F32
-  # domain per output. Reduction and epilogue semantics match
-  # materializec.reduce-f32; the source owner is returned with the result.
-  (arr materializec.borrow-reduce-f32 : {[x capacity n k a.]
+  # domain per output. The epilogue may retain F32 or round to BF16; the source
+  # owner is returned with the result.
+  (arr materializec.borrow-reduce-f32 : {[x capacity n k a t.]
     ({cap.own [.capacity a]} buf val)
     ({[.capacity] u64} :)
     ({[.n] u64} :)
     ({[.k] u64} :)
     ([.x])
     ({({({cap.ref [.capacity a]} buf val) ({[.x] ({([.n] ix val) ([.k] ix val)} *)} *)} *) (f32 val)} -> val)
-    ({({({cap.ref [.capacity a]} buf val) ({[.x] ({([.n] ix val) (f32 val)} *)} *)} *) (f32 val)} -> val)
-  } -> {[x capacity n k a.] {
+    ({({({cap.ref [.capacity a]} buf val) ({[.x] ({([.n] ix val) (f32 val)} *)} *)} *) ([.t] val)} -> val)
+  } -> {[x capacity n k a t.] {
     ({cap.own [.capacity a]} buf val)
-    ({cap.own [.n] f32} buf val)
+    ({cap.own [.n t]} buf val)
   }})
 
   # Run a complete gated-delta recurrent scan in one GPU kernel. Q and K are
@@ -195,6 +195,20 @@
       ({cap.own [.n] f32} buf val)
     }})
 
+  # Multiply a row-major BF16 input matrix by the transpose of a row-major
+  # BF16 weight matrix. Products use the target's packed BF16 dot operation
+  # where available, accumulate in F32, and round the result once to BF16.
+  (arr materializec.bf16-gemv : {[input-cap weight-cap n k.]
+    ({cap.own [.input-cap] bf16} buf val)
+    ({[.input-cap] u64} :)
+    ({cap.ref [.weight-cap] bf16} buf val)
+    ({[.weight-cap] u64} :)
+    ({[.n] u64} :)
+    ({[.k] u64} :)
+    (u64 val)
+    (u64 val)
+  } -> {[input-cap weight-cap n k.] ({cap.own [.n] bf16} buf val)})
+
   # Find the greatest F32 element while returning the source owner. Comparison
   # uses IEEE-bit total order (negative NaNs through positive NaNs); equal bit
   # patterns select the greatest index. The input must be non-empty. The index
@@ -205,6 +219,17 @@
     ({[.one] u64} :)
   } -> {[n one.] {
     ({cap.own [.n] f32} buf val)
+    ({cap.own [.one] u64} buf val)
+  }})
+
+  # BF16 counterpart of borrow-argmax-f32. Values are compared directly in
+  # their BF16 representation and the source owner is returned unchanged.
+  (arr materializec.borrow-argmax-bf16 : {[n one.]
+    ({cap.own [.n] bf16} buf val)
+    ({[.n] u64} :)
+    ({[.one] u64} :)
+  } -> {[n one.] {
+    ({cap.own [.n] bf16} buf val)
     ({cap.own [.one] u64} buf val)
   }})
 
@@ -224,24 +249,25 @@
     ({cap.own [.out] u64} buf val)
   }})
 
-  # Materialize F32 outputs by cooperatively reducing one independent domain
-  # per output. The reduction order is part of this operation's semantics:
+  # Materialize F32 or BF16 outputs by cooperatively reducing one independent
+  # F32 domain per output. The reduction order is part of this operation's semantics:
   # first materialize term(0)..term(k-1) as F32, then add adjacent logical
   # indices (0+1, 2+3, ...), carry an unmatched final value unchanged, and
   # repeat that rule over the surviving values until one remains. The empty
   # reduction is +0.0. Thread scheduling and block width must not change this
   # tree. The current GPU implementation supports k <= 4096.
   #
-  # A GPU block computes one output, then applies the epilogue to the exactly
-  # specified reduced sum. This is the Catena-native building block for
-  # GEMV-style kernels without baking matrix semantics into the runtime.
-  (arr materializec.reduce-f32 : {[x n k.]
+  # A GPU block computes one output, then applies an F32- or BF16-valued
+  # epilogue to the exactly specified reduced sum. This is the Catena-native
+  # building block for GEMV-style kernels without baking matrix semantics into
+  # the runtime.
+  (arr materializec.reduce-f32 : {[x n k t.]
     ({[.n] u64} :)
     ({[.k] u64} :)
     ([.x])
     ({({[.x] ({([.n] ix val) ([.k] ix val)} *)} *) (f32 val)} -> val)
-    ({({[.x] ({([.n] ix val) (f32 val)} *)} *) (f32 val)} -> val)
-  } -> {[x n k.] ({cap.own [.n] f32} buf val)})
+    ({({[.x] ({([.n] ix val) (f32 val)} *)} *) ([.t] val)} -> val)
+  } -> {[x n k t.] ({cap.own [.n t]} buf val)})
 
   # Materialize a pair of F32 reductions in one kernel. The shared term and
   # epilogue functions each return two F32 values. Each result uses the exact
@@ -258,8 +284,9 @@
     ({cap.own [.n] f32} buf val)
   }})
 
-  # Normalize contiguous F32 rows in place. The operation consumes and
-  # returns the owner; `columns` must be non-zero and divide n exactly.
+  # Normalize contiguous F32 or BF16 rows in place using F32 reductions. The
+  # operation consumes and returns the owner; `columns` must be non-zero and
+  # divide n exactly.
   #
   # For each row, maximum and denominator reductions use the same adjacent-
   # pair tree specified by materializec.reduce-f32. Maximum selection keeps
@@ -268,12 +295,12 @@
   # numerators are exponential(value - maximum). If the denominator is zero,
   # the entire row is +0. The current GPU implementation supports columns <=
   # 8192.
-  (arr materializec.softmax-f32 : {[n.]
-    ({cap.own [.n] f32} buf val)
+  (arr materializec.softmax-f32 : {[n t.]
+    ({cap.own [.n t]} buf val)
     ({[.n] u64} :)
     (u64 val)
     ({(f32 val) (f32 val)} -> val)
-  } -> {[n.] ({cap.own [.n] f32} buf val)})
+  } -> {[n t.] ({cap.own [.n t]} buf val)})
 
   # TODO: make all mem.cast.* into definitions, using the below:
   #   mem.cast : mem ● (s : u64) ● sizeof(t, s) -> (n : u64) ● val(buf n t)

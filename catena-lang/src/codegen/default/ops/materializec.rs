@@ -359,7 +359,7 @@ pub(in crate::codegen) fn render_reduce_f32_kernel(
     let Some(CType::Pointer(element)) = runtime_type(output) else {
         return Err(GpuRenderError::ErasedType(output.clone()));
     };
-    if element.as_ref() != &CType::F32 {
+    if !matches!(element.as_ref(), CType::F32 | CType::BF16) {
         return Err(GpuRenderError::UnsupportedType(
             runtime_type(output).unwrap().clone(),
         ));
@@ -367,7 +367,8 @@ pub(in crate::codegen) fn render_reduce_f32_kernel(
     let (term, epilogue, _output_len, _reduction_len, env) = reduce_f32_parts(assignment)?;
 
     out.push_str(&format!(
-        "__global__ void {kernel_name}(float *out, uint64_t output_len, uint64_t reduction_len"
+        "__global__ void {kernel_name}({} *out, uint64_t output_len, uint64_t reduction_len",
+        c_type(element)
     ));
     for arg in runtime_values(env) {
         if let GpuValue::Var(var) = arg {
@@ -418,7 +419,7 @@ pub(in crate::codegen) fn render_reduce_f32_kernel(
     out.push_str("    }\n");
     out.push_str("    if (threadIdx.x == 0) {\n");
     out.push_str("        float reduction_sum = reduction_len == 0 ? 0.0f : reduction_terms[0];\n");
-    out.push_str("        float value;\n");
+    out.push_str(&format!("        {} value;\n", c_type(element)));
     let mut epilogue_inputs = env.to_vec();
     epilogue_inputs.push(output_index);
     epilogue_inputs.push(GpuValue::Var(GpuVar {
@@ -429,7 +430,7 @@ pub(in crate::codegen) fn render_reduce_f32_kernel(
     let epilogue_output = GpuVar {
         node: output.node,
         name: "value".to_string(),
-        lowered: LoweredType::Runtime(CType::F32),
+        lowered: LoweredType::Runtime(element.as_ref().clone()),
     };
     render_function_application(
         out,
@@ -587,7 +588,7 @@ pub(in crate::codegen) fn render_borrow_reduce_f32_kernel(
     let Some(CType::Pointer(output_element)) = runtime_type(output) else {
         return Err(GpuRenderError::ErasedType(output.clone()));
     };
-    if output_element.as_ref() != &CType::F32 {
+    if !matches!(output_element.as_ref(), CType::F32 | CType::BF16) {
         return Err(GpuRenderError::UnsupportedType(
             runtime_type(output).unwrap().clone(),
         ));
@@ -596,8 +597,9 @@ pub(in crate::codegen) fn render_borrow_reduce_f32_kernel(
         borrow_reduce_f32_parts(assignment)?;
 
     out.push_str(&format!(
-        "__global__ void {kernel_name}({} *borrowed, float *out, uint64_t output_len, uint64_t reduction_len",
-        c_type(cache_element)
+        "__global__ void {kernel_name}({} *borrowed, {} *out, uint64_t output_len, uint64_t reduction_len",
+        c_type(cache_element),
+        c_type(output_element)
     ));
     for arg in runtime_values(env) {
         if let GpuValue::Var(var) = arg {
@@ -654,7 +656,7 @@ pub(in crate::codegen) fn render_borrow_reduce_f32_kernel(
     out.push_str("    }\n");
     out.push_str("    if (threadIdx.x == 0) {\n");
     out.push_str("        float reduction_sum = reduction_len == 0 ? 0.0f : reduction_terms[0];\n");
-    out.push_str("        float value;\n");
+    out.push_str(&format!("        {} value;\n", c_type(output_element)));
     let mut epilogue_inputs = vec![borrowed];
     epilogue_inputs.extend_from_slice(env);
     epilogue_inputs.push(output_index);
@@ -666,7 +668,7 @@ pub(in crate::codegen) fn render_borrow_reduce_f32_kernel(
     let epilogue_output = GpuVar {
         node: output.node,
         name: "value".to_string(),
-        lowered: LoweredType::Runtime(CType::F32),
+        lowered: LoweredType::Runtime(output_element.as_ref().clone()),
     };
     render_function_application(
         out,
@@ -748,6 +750,82 @@ pub(in crate::codegen) fn render_borrow_routed_bf16_gemv_pair_kernel(
     Ok(())
 }
 
+pub(in crate::codegen) fn render_bf16_gemv_kernel(
+    out: &mut String,
+    kernel_name: &str,
+    assignment: &GpuAssign,
+    dialect: GpuDialect,
+) -> Result<(), GpuRenderError> {
+    let [output] = assignment.outputs.as_slice() else {
+        return Err(invalid_outputs(assignment, 1));
+    };
+    let Some(CType::Pointer(element)) = runtime_type(output) else {
+        return Err(GpuRenderError::ErasedType(output.clone()));
+    };
+    if element.as_ref() != &CType::BF16 {
+        return Err(GpuRenderError::UnsupportedType(
+            runtime_type(output).unwrap().clone(),
+        ));
+    }
+    let _ = bf16_gemv_parts(assignment)?;
+
+    out.push_str(&format!(
+        "__global__ void {kernel_name}(const catena_bf16_t *input, const catena_bf16_t *weight, catena_bf16_t *out, uint64_t output_len, uint64_t reduction_len, uint64_t input_row, uint64_t output_features) {{\n"
+    ));
+    out.push_str("    uint64_t output_index = (uint64_t)blockIdx.x;\n");
+    out.push_str("    if (output_index >= output_len) { return; }\n");
+    out.push_str("    uint64_t row = input_row + output_index / output_features;\n");
+    out.push_str("    uint64_t output_feature = output_index % output_features;\n");
+    out.push_str("    uint64_t input_base = row * reduction_len;\n");
+    out.push_str("    uint64_t weight_base = output_feature * reduction_len;\n");
+    out.push_str("    float sum = 0.0f;\n");
+    out.push_str("    uint64_t pair_count = reduction_len >> 1;\n");
+    if dialect == GpuDialect::Hip {
+        out.push_str("#if defined(__gfx1100__) || defined(__gfx1101__) || defined(__gfx1102__) || defined(__gfx1103__) || defined(__gfx1150__) || defined(__gfx1151__) || defined(__gfx1152__) || defined(__gfx1153__)\n");
+        out.push_str(
+            "    typedef __bf16 catena_native_bf16x2_t __attribute__((ext_vector_type(2)));\n",
+        );
+        out.push_str("#endif\n");
+    }
+    out.push_str("    for (uint64_t pair = (uint64_t)threadIdx.x; pair < pair_count; pair += (uint64_t)blockDim.x) {\n");
+    match dialect {
+        GpuDialect::Hip => {
+            out.push_str("#if defined(__gfx1100__) || defined(__gfx1101__) || defined(__gfx1102__) || defined(__gfx1103__) || defined(__gfx1150__) || defined(__gfx1151__) || defined(__gfx1152__) || defined(__gfx1153__)\n");
+            out.push_str("        union { uint32_t bits; catena_native_bf16x2_t values; } input_pair, weight_pair;\n");
+            out.push_str("        __builtin_memcpy(&input_pair.bits, input + input_base + (pair << 1), sizeof(uint32_t));\n");
+            out.push_str("        __builtin_memcpy(&weight_pair.bits, weight + weight_base + (pair << 1), sizeof(uint32_t));\n");
+            out.push_str("        sum = __builtin_amdgcn_fdot2_f32_bf16(input_pair.values, weight_pair.values, sum, false);\n");
+            out.push_str("#else\n");
+            out.push_str("        uint64_t index = pair << 1;\n");
+            out.push_str("        sum += catena_bf16_to_f32(input[input_base + index]) * catena_bf16_to_f32(weight[weight_base + index]);\n");
+            out.push_str("        sum += catena_bf16_to_f32(input[input_base + index + 1]) * catena_bf16_to_f32(weight[weight_base + index + 1]);\n");
+            out.push_str("#endif\n");
+        }
+        GpuDialect::Cuda => {
+            out.push_str("        uint64_t index = pair << 1;\n");
+            out.push_str("        sum += catena_bf16_to_f32(input[input_base + index]) * catena_bf16_to_f32(weight[weight_base + index]);\n");
+            out.push_str("        sum += catena_bf16_to_f32(input[input_base + index + 1]) * catena_bf16_to_f32(weight[weight_base + index + 1]);\n");
+        }
+    }
+    out.push_str("    }\n");
+    out.push_str("    if ((reduction_len & 1) != 0 && threadIdx.x == 0) {\n");
+    out.push_str("        uint64_t index = reduction_len - 1;\n");
+    out.push_str("        sum += catena_bf16_to_f32(input[input_base + index]) * catena_bf16_to_f32(weight[weight_base + index]);\n");
+    out.push_str("    }\n");
+    out.push_str("    __shared__ float partial[256];\n");
+    out.push_str("    partial[threadIdx.x] = sum;\n");
+    out.push_str("    __syncthreads();\n");
+    out.push_str("    for (uint32_t stride = 128; stride != 0; stride >>= 1) {\n");
+    out.push_str("        if (threadIdx.x < stride) { partial[threadIdx.x] += partial[threadIdx.x + stride]; }\n");
+    out.push_str("        __syncthreads();\n");
+    out.push_str("    }\n");
+    out.push_str(
+        "    if (threadIdx.x == 0) { out[output_index] = catena_bf16_from_f32(partial[0]); }\n",
+    );
+    out.push_str("}\n");
+    Ok(())
+}
+
 pub(in crate::codegen) fn render_borrow_argmax_f32_kernel(
     out: &mut String,
     kernel_name: &str,
@@ -759,7 +837,7 @@ pub(in crate::codegen) fn render_borrow_argmax_f32_kernel(
     let Some(CType::Pointer(source_element)) = runtime_type(source_output) else {
         return Err(GpuRenderError::ErasedType(source_output.clone()));
     };
-    if source_element.as_ref() != &CType::F32 {
+    if !matches!(source_element.as_ref(), CType::F32 | CType::BF16) {
         return Err(GpuRenderError::UnsupportedType(
             runtime_type(source_output).unwrap().clone(),
         ));
@@ -775,7 +853,8 @@ pub(in crate::codegen) fn render_borrow_argmax_f32_kernel(
     let (_source, _len, _output_len) = borrow_argmax_f32_parts(assignment)?;
 
     out.push_str(&format!(
-        "__global__ void {kernel_name}(const float *data, uint64_t len, uint64_t *out) {{\n"
+        "__global__ void {kernel_name}(const {} *data, uint64_t len, uint64_t *out) {{\n",
+        c_type(source_element)
     ));
     out.push_str("    __shared__ uint32_t best_keys[256];\n");
     out.push_str("    __shared__ uint64_t best_indices[256];\n");
@@ -784,10 +863,19 @@ pub(in crate::codegen) fn render_borrow_argmax_f32_kernel(
     out.push_str(
         "    for (uint64_t index = (uint64_t)threadIdx.x; index < len; index += (uint64_t)blockDim.x) {\n",
     );
-    out.push_str("        uint32_t bits = catena_f32_bitcast_u32(data[index]);\n");
-    out.push_str(
-        "        uint32_t key = (bits & 0x80000000u) != 0 ? ~bits : (bits ^ 0x80000000u);\n",
-    );
+    match source_element.as_ref() {
+        CType::F32 => {
+            out.push_str("        uint32_t bits = catena_f32_bitcast_u32(data[index]);\n");
+            out.push_str("        uint32_t key = (bits & 0x80000000u) != 0 ? ~bits : (bits ^ 0x80000000u);\n");
+        }
+        CType::BF16 => {
+            out.push_str(
+                "        uint32_t bits = (uint32_t)catena_bf16_bitcast_u16(data[index]);\n",
+            );
+            out.push_str("        uint32_t key = (bits & 0x8000u) != 0 ? ((~bits) & 0xFFFFu) : (bits ^ 0x8000u);\n");
+        }
+        _ => unreachable!("source type was validated"),
+    }
     out.push_str(
         "        if (best_index == UINT64_MAX || key > best_key || (key == best_key && index > best_index)) {\n",
     );
@@ -1045,10 +1133,11 @@ pub(in crate::codegen) fn render_borrow_reduce_f32_call(
     out.push_str(&format!("    catena_assert(({reduction_len}) <= 16384);\n"));
     out.push_str(&format!("    if ({}_len != 0) {{\n", output.name));
     out.push_str(&format!(
-        "        catena_host_gpu_check({}((void **)&{}_data, {}_len * sizeof(float), nullptr));\n",
+        "        catena_host_gpu_check({}((void **)&{}_data, {}_len * sizeof({}), nullptr));\n",
         dialect.device_alloc_async_fn(),
         output.name,
-        output.name
+        output.name,
+        c_type(output_element)
     ));
     out.push_str(&format!(
         "        {kernel_name}<<<dim3({}_len), dim3(({reduction_len}) > 4096 ? 512 : (({reduction_len}) > 1024 ? 256 : (({reduction_len}) > 256 ? 128 : 64))), ({reduction_len}) * sizeof(float)>>>(\n            {}, {}_data, {}_len, {reduction_len}",
@@ -1189,6 +1278,84 @@ pub(in crate::codegen) fn render_borrow_routed_bf16_gemv_pair_call(
     Ok(())
 }
 
+pub(in crate::codegen) fn render_bf16_gemv_call(
+    out: &mut String,
+    function: &GpuFunction,
+    assignment: &GpuAssign,
+    dialect: GpuDialect,
+) -> Result<(), GpuRenderError> {
+    let [output] = assignment.outputs.as_slice() else {
+        return Err(invalid_outputs(assignment, 1));
+    };
+    let (
+        input,
+        input_capacity,
+        weight,
+        weight_capacity,
+        output_len,
+        reduction_len,
+        input_row,
+        output_features,
+    ) = bf16_gemv_parts(assignment)?;
+    let input_capacity = value_expr(input_capacity);
+    let weight_capacity = value_expr(weight_capacity);
+    let output_len = value_expr(output_len);
+    let reduction_len = value_expr(reduction_len);
+    let input_row = value_expr(input_row);
+    let output_features = value_expr(output_features);
+    let kernel_name = kernel_name(&function.name, assignment)?;
+
+    out.push_str(&format!(
+        "    uint64_t {name}_len = {output_len};\n    catena_bf16_t *{name}_data = nullptr;\n",
+        name = output.name
+    ));
+    out.push_str(&format!("    catena_assert(({reduction_len}) != 0);\n"));
+    out.push_str(&format!(
+        "    catena_assert(({input_capacity}) % ({reduction_len}) == 0);\n"
+    ));
+    out.push_str(&format!(
+        "    uint64_t {name}_input_rows = ({input_capacity}) / ({reduction_len});\n",
+        name = output.name
+    ));
+    out.push_str(&format!("    catena_assert(({output_features}) != 0);\n"));
+    out.push_str(&format!(
+        "    catena_assert({name}_len % ({output_features}) == 0);\n",
+        name = output.name
+    ));
+    out.push_str(&format!(
+        "    uint64_t {name}_rows = {name}_len / ({output_features});\n",
+        name = output.name
+    ));
+    out.push_str(&format!(
+        "    catena_assert(({input_row}) <= {name}_input_rows && {name}_rows <= {name}_input_rows - ({input_row}));\n",
+        name = output.name
+    ));
+    out.push_str(&format!(
+        "    catena_assert(({output_features}) <= UINT64_MAX / ({reduction_len}));\n"
+    ));
+    out.push_str(&format!(
+        "    catena_assert(({weight_capacity}) == ({output_features}) * ({reduction_len}));\n"
+    ));
+    out.push_str(&format!(
+        "    if ({name}_len != 0) {{\n",
+        name = output.name
+    ));
+    out.push_str(&format!(
+        "        catena_host_gpu_check({}((void **)&{name}_data, {name}_len * sizeof(catena_bf16_t), nullptr));\n",
+        dialect.device_alloc_async_fn(),
+        name = output.name
+    ));
+    out.push_str(&format!(
+        "        {kernel_name}<<<dim3({name}_len), dim3(256)>>>(\n            {}, {}, {name}_data, {name}_len, {reduction_len}, {input_row}, {output_features});\n",
+        value_expr(input),
+        value_expr(weight),
+        name = output.name
+    ));
+    out.push_str("    }\n");
+    out.push_str(&format!("    {} = {}_data;\n", output.name, output.name));
+    Ok(())
+}
+
 pub(in crate::codegen) fn render_reduce_f32_call(
     out: &mut String,
     function: &GpuFunction,
@@ -1198,6 +1365,9 @@ pub(in crate::codegen) fn render_reduce_f32_call(
     let [output] = assignment.outputs.as_slice() else {
         return Err(invalid_outputs(assignment, 1));
     };
+    let Some(CType::Pointer(output_element)) = runtime_type(output) else {
+        return Err(GpuRenderError::ErasedType(output.clone()));
+    };
     let (term, _epilogue, output_len, reduction_len, env) = reduce_f32_parts(assignment)?;
     let _ = term;
     let output_len = value_expr(output_len);
@@ -1205,16 +1375,18 @@ pub(in crate::codegen) fn render_reduce_f32_call(
     let kernel_name = kernel_name(&function.name, assignment)?;
 
     out.push_str(&format!(
-        "    uint64_t {name}_len = {output_len};\n    float *{name}_data = nullptr;\n",
-        name = output.name
+        "    uint64_t {name}_len = {output_len};\n    {element} *{name}_data = nullptr;\n",
+        name = output.name,
+        element = c_type(output_element)
     ));
     out.push_str(&format!("    catena_assert(({reduction_len}) <= 16384);\n"));
     out.push_str(&format!("    if ({}_len != 0) {{\n", output.name));
     out.push_str(&format!(
-        "        catena_host_gpu_check({}((void **)&{}_data, {}_len * sizeof(float), nullptr));\n",
+        "        catena_host_gpu_check({}((void **)&{}_data, {}_len * sizeof({}), nullptr));\n",
         dialect.device_alloc_async_fn(),
         output.name,
-        output.name
+        output.name,
+        c_type(output_element)
     ));
     out.push_str(&format!(
         "        {kernel_name}<<<dim3({}_len), dim3(({reduction_len}) > 1024 ? 256 : 64), ({reduction_len}) * sizeof(float)>>>(\n            {}_data, {}_len, {reduction_len}",
@@ -1291,7 +1463,7 @@ pub(in crate::codegen) fn render_softmax_f32_kernel(
     let Some(CType::Pointer(element)) = runtime_type(output) else {
         return Err(GpuRenderError::ErasedType(output.clone()));
     };
-    if element.as_ref() != &CType::F32 {
+    if !matches!(element.as_ref(), CType::F32 | CType::BF16) {
         return Err(GpuRenderError::UnsupportedType(
             runtime_type(output).unwrap().clone(),
         ));
@@ -1299,7 +1471,8 @@ pub(in crate::codegen) fn render_softmax_f32_kernel(
     let (exponential, _buffer, _capacity, _columns) = softmax_f32_parts(assignment)?;
 
     out.push_str(&format!(
-        "__global__ void {kernel_name}(float *data, uint64_t rows, uint64_t columns) {{\n"
+        "__global__ void {kernel_name}({} *data, uint64_t rows, uint64_t columns) {{\n",
+        c_type(element)
     ));
     out.push_str("    uint64_t row = (uint64_t)blockIdx.x;\n");
     out.push_str("    if (row >= rows) { return; }\n");
@@ -1308,7 +1481,12 @@ pub(in crate::codegen) fn render_softmax_f32_kernel(
     out.push_str(
         "    for (uint64_t column = (uint64_t)threadIdx.x; column < columns; column += (uint64_t)blockDim.x) {\n",
     );
-    out.push_str("        reduction_terms[column] = data[row_offset + column];\n");
+    let load = match element.as_ref() {
+        CType::F32 => "data[row_offset + column]",
+        CType::BF16 => "catena_bf16_to_f32(data[row_offset + column])",
+        _ => unreachable!("element type was validated"),
+    };
+    out.push_str(&format!("        reduction_terms[column] = {load};\n"));
     out.push_str("    }\n");
     out.push_str("    __syncthreads();\n");
     out.push_str("    for (uint64_t stride = 1; stride < columns; stride <<= 1) {\n");
@@ -1329,7 +1507,7 @@ pub(in crate::codegen) fn render_softmax_f32_kernel(
     out.push_str(
         "    for (uint64_t column = (uint64_t)threadIdx.x; column < columns; column += (uint64_t)blockDim.x) {\n",
     );
-    out.push_str("        float score = data[row_offset + column];\n");
+    out.push_str(&format!("        float score = {load};\n"));
     out.push_str("        float numerator;\n");
     out.push_str("        if (catena_f32_bitcast_u32(score) == 0xFF800000u) {\n");
     out.push_str("            numerator = 0.0f;\n");
@@ -1354,7 +1532,9 @@ pub(in crate::codegen) fn render_softmax_f32_kernel(
     )?;
     out.push_str("        }\n");
     out.push_str("        reduction_terms[column] = numerator;\n");
-    out.push_str("        data[row_offset + column] = numerator;\n");
+    if element.as_ref() == &CType::F32 {
+        out.push_str("        data[row_offset + column] = numerator;\n");
+    }
     out.push_str("    }\n");
     out.push_str("    __syncthreads();\n");
     out.push_str("    for (uint64_t stride = 1; stride < columns; stride <<= 1) {\n");
@@ -1373,7 +1553,40 @@ pub(in crate::codegen) fn render_softmax_f32_kernel(
         "    for (uint64_t column = (uint64_t)threadIdx.x; column < columns; column += (uint64_t)blockDim.x) {\n",
     );
     out.push_str("        uint64_t index = row_offset + column;\n");
-    out.push_str("        data[index] = denominator == 0.0f ? 0.0f : data[index] / denominator;\n");
+    match element.as_ref() {
+        CType::F32 => {
+            out.push_str(
+                "        data[index] = denominator == 0.0f ? 0.0f : data[index] / denominator;\n",
+            );
+        }
+        CType::BF16 => {
+            out.push_str("        float score = catena_bf16_to_f32(data[index]);\n");
+            out.push_str("        float numerator;\n");
+            out.push_str("        if (catena_f32_bitcast_u32(score) == 0xFF800000u) {\n");
+            out.push_str("            numerator = 0.0f;\n");
+            out.push_str("        } else {\n");
+            out.push_str("            float shifted = score - row_maximum;\n");
+            render_function_application(
+                out,
+                "            ",
+                exponential,
+                &[GpuValue::Var(GpuVar {
+                    node: output.node,
+                    name: "shifted".to_string(),
+                    lowered: LoweredType::Runtime(CType::F32),
+                })],
+                &[GpuVar {
+                    node: output.node,
+                    name: "numerator".to_string(),
+                    lowered: LoweredType::Runtime(CType::F32),
+                }],
+            )?;
+            out.push_str("        }\n");
+            out.push_str("        float probability = denominator == 0.0f ? 0.0f : numerator / denominator;\n");
+            out.push_str("        data[index] = catena_bf16_from_f32(probability);\n");
+        }
+        _ => unreachable!("element type was validated"),
+    }
     out.push_str("    }\n");
     out.push_str("}\n");
     Ok(())
@@ -1625,6 +1838,51 @@ fn borrow_routed_bf16_gemv_pair_parts(
         single_runtime_input(assignment, "output_len", output_len)?,
         single_runtime_input(assignment, "reduction_len", reduction_len)?,
         single_runtime_input(assignment, "slots", slots)?,
+        single_runtime_input(assignment, "output_features", output_features)?,
+    ))
+}
+
+fn bf16_gemv_parts(
+    assignment: &GpuAssign,
+) -> Result<
+    (
+        &GpuValue,
+        &GpuValue,
+        &GpuValue,
+        &GpuValue,
+        &GpuValue,
+        &GpuValue,
+        &GpuValue,
+        &GpuValue,
+    ),
+    GpuRenderError,
+> {
+    let components = input_components(assignment)?;
+    let [
+        input,
+        input_capacity,
+        weight,
+        weight_capacity,
+        output_len,
+        reduction_len,
+        input_row,
+        output_features,
+    ] = components.as_slice()
+    else {
+        return Err(GpuRenderError::InvalidInputComponentCount {
+            op: assignment.op.clone(),
+            expected: 8,
+            actual: components.len(),
+        });
+    };
+    Ok((
+        single_runtime_input(assignment, "input", input)?,
+        single_runtime_input(assignment, "input_capacity", input_capacity)?,
+        single_runtime_input(assignment, "weight", weight)?,
+        single_runtime_input(assignment, "weight_capacity", weight_capacity)?,
+        single_runtime_input(assignment, "output_len", output_len)?,
+        single_runtime_input(assignment, "reduction_len", reduction_len)?,
+        single_runtime_input(assignment, "input_row", input_row)?,
         single_runtime_input(assignment, "output_features", output_features)?,
     ))
 }

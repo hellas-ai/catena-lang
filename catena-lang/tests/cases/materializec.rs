@@ -100,6 +100,27 @@ fn materialize_reduce_f32_uses_one_cooperative_reduction_per_output() -> anyhow:
 }
 
 #[test]
+fn materialize_reduce_f32_can_round_outputs_to_bf16() -> anyhow::Result<()> {
+    let runtime = runtime_with(SOURCE)?;
+    let input = runtime.mem_f32(&[1.0, 2.0, 3.0, 5.0, 8.0, 13.0])?;
+
+    let [output] = runtime.exec(
+        "materialize-reduce-f32-bf16-rows",
+        [input.as_ref().into(), 2_u64.into(), 3_u64.into()],
+    )?;
+    let Value::MemOwn(output) = output else {
+        anyhow::bail!("BF16 reduce-f32 returned non-memory: {output:?}");
+    };
+    assert_eq!(
+        output.to_u16_vec(),
+        [6.0_f32, 26.0]
+            .map(half::bf16::from_f32)
+            .map(half::bf16::to_bits)
+    );
+    Ok(())
+}
+
+#[test]
 fn materialize_reduce_f32_uses_the_specified_logical_index_tree() -> anyhow::Result<()> {
     let runtime = runtime_with(SOURCE)?;
     let input = runtime.mem_f32(&[1.0e20, 1.0, -1.0e20, 1.0])?;
@@ -305,6 +326,32 @@ fn materialize_softmax_f32_normalizes_rows_in_place() -> anyhow::Result<()> {
 }
 
 #[test]
+fn materialize_softmax_f32_normalizes_bf16_rows_in_place() -> anyhow::Result<()> {
+    let runtime = runtime_with(SOURCE)?;
+    let values = [0.0_f32, 1.0, 2.0, f32::NEG_INFINITY, 3.0, 3.0]
+        .map(half::bf16::from_f32)
+        .map(half::bf16::to_bits);
+    let input = runtime.mem_u16(&values)?;
+    let input_ptr = input.as_ptr();
+
+    let [output] = runtime.exec(
+        "materialize-softmax-bf16-rows",
+        [input.into(), 3_u64.into()],
+    )?;
+    let Value::MemOwn(output) = output else {
+        anyhow::bail!("BF16 softmax returned non-memory: {output:?}");
+    };
+    assert_eq!(output.as_ptr(), input_ptr);
+    assert_eq!(
+        output.to_u16_vec(),
+        [0.0_f32, 1.0 / 3.0, 2.0 / 3.0, 0.0, 0.5, 0.5]
+            .map(half::bf16::from_f32)
+            .map(half::bf16::to_bits)
+    );
+    Ok(())
+}
+
+#[test]
 fn materialize_borrow_reduce_f32_returns_source_and_reductions() -> anyhow::Result<()> {
     let runtime = runtime_with(SOURCE)?;
     let input = runtime.mem_f32(&[1.0, 2.0, 3.0, 5.0, 8.0, 13.0])?;
@@ -361,6 +408,60 @@ fn materialize_borrow_argmax_f32_returns_source_and_last_maximum() -> anyhow::Re
     assert_eq!(source.as_ptr(), input_ptr);
     assert_eq!(source.to_f32_vec(), vec![3.0, 7.0, -1.0, 7.0]);
     assert_eq!(output.to_u64_vec(), vec![3]);
+    Ok(())
+}
+
+#[test]
+fn materialize_borrow_argmax_bf16_returns_source_and_last_maximum() -> anyhow::Result<()> {
+    let runtime = runtime_with(SOURCE)?;
+    let values = [3.0_f32, 7.0, -1.0, 7.0]
+        .map(half::bf16::from_f32)
+        .map(half::bf16::to_bits);
+    let input = runtime.mem_u16(&values)?;
+    let input_ptr = input.as_ptr();
+
+    let [source, output] = runtime.exec("materialize-borrow-argmax-bf16", [input.into()])?;
+    let Value::MemOwn(source) = source else {
+        anyhow::bail!("BF16 argmax returned non-memory source: {source:?}");
+    };
+    let Value::MemOwn(output) = output else {
+        anyhow::bail!("BF16 argmax returned non-memory output: {output:?}");
+    };
+    assert_eq!(source.as_ptr(), input_ptr);
+    assert_eq!(source.to_u16_vec(), values);
+    assert_eq!(output.to_u64_vec(), vec![3]);
+    Ok(())
+}
+
+#[test]
+fn materialize_bf16_gemv_accumulates_in_f32_and_selects_input_rows() -> anyhow::Result<()> {
+    let runtime = runtime_with(SOURCE)?;
+    let bf16_bits = |values: &[f32]| {
+        values
+            .iter()
+            .copied()
+            .map(half::bf16::from_f32)
+            .map(half::bf16::to_bits)
+            .collect::<Vec<_>>()
+    };
+    let input = runtime.mem_u16(&bf16_bits(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]))?;
+    let weight = runtime.mem_u16(&bf16_bits(&[1.0, -1.0, 2.0, 0.5, 1.0, -0.5]))?;
+
+    let [output] = runtime.exec(
+        "materialize-bf16-gemv",
+        [
+            input.into(),
+            weight.as_ref().into(),
+            1_u64.into(),
+            2_u64.into(),
+            3_u64.into(),
+            1_u64.into(),
+        ],
+    )?;
+    let Value::MemOwn(output) = output else {
+        anyhow::bail!("BF16 GEMV returned non-memory output: {output:?}");
+    };
+    assert_eq!(output.to_u16_vec(), bf16_bits(&[11.0, 4.0]));
     Ok(())
 }
 

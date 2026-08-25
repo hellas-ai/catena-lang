@@ -130,6 +130,43 @@
     ({cap.own [.n] f32} buf val)
   }})
 
+  # Run a complete gated-delta recurrent scan in one GPU kernel. Q and K are
+  # laid out [token, key-head, dim], V and the result are
+  # [token, value-head, dim], and gate/beta are [token, value-head]. The
+  # recurrent state occupies value-head*dim*dim F32 values in `state`, at the
+  # supplied offset. All source owners are returned after the launch.
+  (arr materializec.borrow-gated-delta-net-f32 :
+    {[state-cap q-cap k-cap v-cap gate-cap beta-cap out-cap.]
+      ({cap.own [.state-cap] f32} buf val)
+      ({[.state-cap] u64} :)
+      ({cap.own [.q-cap] f32} buf val)
+      ({[.q-cap] u64} :)
+      ({cap.own [.k-cap] f32} buf val)
+      ({[.k-cap] u64} :)
+      ({cap.own [.v-cap] f32} buf val)
+      ({[.v-cap] u64} :)
+      ({cap.own [.gate-cap] f32} buf val)
+      ({[.gate-cap] u64} :)
+      ({cap.own [.beta-cap] f32} buf val)
+      ({[.beta-cap] u64} :)
+      (u64 val)
+      (u64 val)
+      (u64 val)
+      (u64 val)
+      (u64 val)
+      ({[.out-cap] u64} :)
+    }
+    ->
+    {[state-cap q-cap k-cap v-cap gate-cap beta-cap out-cap.] {
+      ({cap.own [.state-cap] f32} buf val)
+      ({cap.own [.q-cap] f32} buf val)
+      ({cap.own [.k-cap] f32} buf val)
+      ({cap.own [.v-cap] f32} buf val)
+      ({cap.own [.gate-cap] f32} buf val)
+      ({cap.own [.beta-cap] f32} buf val)
+      ({cap.own [.out-cap] f32} buf val)
+    }})
+
   # Compute paired routed BF16 matrix-vector products while returning the
   # owned input and expert-index buffers. For each output, both F32 sums use
   # the exact adjacent-pair tree specified by materializec.reduce-f32. The

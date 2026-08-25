@@ -79,6 +79,7 @@ fn function_directly_requires_host(function: &GpuFunction) -> bool {
                 | "materializec.borrow-topk-f32"
                 | "materializec.borrow-reduce-f32"
                 | "materializec.borrow-routed-bf16-gemv-pair"
+                | "materializec.borrow-gated-delta-net-f32"
                 | "materializec.reduce-f32"
                 | "materializec.reduce-f32-pair"
                 | "materializec.softmax-f32"

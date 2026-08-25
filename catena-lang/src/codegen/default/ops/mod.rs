@@ -1,3 +1,4 @@
+pub(super) mod gated_delta_net;
 pub(super) mod ifc;
 pub(super) mod materializec;
 pub(super) mod reducec;

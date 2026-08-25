@@ -20,6 +20,7 @@ pub(super) fn assignment(
         | "materializec.borrow"
         | "materializec.borrow-argmax-f32"
         | "materializec.borrow-reduce-f32"
+        | "materializec.borrow-gated-delta-net-f32"
         | "materializec.reduce-f32"
         | "materializec.reduce-f32-pair"
         | "materializec.softmax-f32" => materializec_producer(definitions, caller, inputs),
@@ -84,6 +85,7 @@ fn is_materialize_op(op: &Operation) -> bool {
             | "materializec.borrow-topk-f32"
             | "materializec.borrow-reduce-f32"
             | "materializec.borrow-routed-bf16-gemv-pair"
+            | "materializec.borrow-gated-delta-net-f32"
             | "materializec.reduce-f32"
             | "materializec.reduce-f32-pair"
             | "materializec.softmax-f32"

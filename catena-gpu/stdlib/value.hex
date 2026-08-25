@@ -1,4 +1,25 @@
 (theory type nat {
   (arr val : 1 -> 1)
   (arr : : 2 -> 1)
+  (arr |- : 1 -> 1)
+  (arr ==> : 2 -> 1)
+  (arr = : 2 -> 1)
+  (arr not : 1 -> 1)
+})
+
+(theory program type {
+  # Forget a static name while retaining the underlying runtime value.
+  (arr :.forget : : -> ([x t.t] val))
+
+  # Recover the static name carried by a named runtime value.
+  (arr :.param : : -> [x t . x])
+
+  # Preserve a named value while also exposing its static name and type.
+  (arr :.ty : : -> {({[.x] [.t]} :) [x t . x]})
+
+  # Modus ponens. Logical values are erased by code generation.
+  (arr ax-mp : {[p q.]
+    ([.p] |-)
+    ([.p q] ==> |-)
+  } -> ([p q . q] |-))
 })

@@ -1,17 +1,40 @@
 (theory type nat {
   (arr bool : 0 -> 1)
+  (arr bool.t : 0 -> 1)
+  (arr bool.f : 0 -> 1)
   (arr u64 : 0 -> 1)
   (arr u32 : 0 -> 1)
   (arr f32 : 0 -> 1)
 })
 
 (theory program type {
+  # Convert a true runtime predicate into logical evidence. This operation is
+  # partial: a false predicate stops the current execution.
+  (arr assert : ({[b] bool} :) -> ({[b] bool.t} = |-))
+
+  (def assert-then : {[b p.]
+    ({[.b] bool} :)
+    ({({[.b] bool.t} =) [.p]} ==> |-)
+  } -> ([b p . p] |-) = ({assert [is-true]} ax-mp))
+
   (arr bool.t : [] -> (bool val))
   (arr bool.f : [] -> (bool val))
   (arr bool.not : (bool val) -> (bool val))
   (arr bool.or : {(bool val) (bool val)} -> (bool val))
   (arr bool.and : {(bool val) (bool val)} -> (bool val))
   (arr bool.select : {(bool val) (bool val) (bool val)} -> (bool val))
+
+  # First-order conditional over already-converted branches. Environments and
+  # function names are explicit; source closures and closure conversion remain
+  # outside this minimal compiler.
+  (arr bool.ifc : {[x y a b.]
+    ([.x])
+    ([.x a] {* [.b]} -> val)
+    ([.y])
+    ([.y a] {* [.b]} -> val)
+    (bool val)
+    ([.a])
+  } -> ([x y a b . b]))
 
   (arr u64.zero : [] -> (u64 val))
   (arr u64.one : [] -> (u64 val))

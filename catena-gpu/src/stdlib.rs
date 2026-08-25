@@ -42,7 +42,13 @@ mod tests {
         assert!(!filenames.iter().any(|name| name.contains("matrix")));
 
         let source = sources().collect::<String>();
-        for excluded in ["=>", "bool.if", "materialize", "reduce", "matrix"] {
+        for excluded in [
+            "(arr =>",
+            "(arr bool.if :",
+            "materialize",
+            "reduce",
+            "matrix",
+        ] {
             assert!(
                 !source.contains(excluded),
                 "found excluded feature `{excluded}`"

@@ -4,7 +4,8 @@ use hexpr::Operation;
 use thiserror::Error;
 
 use super::{
-    GpuAssign, GpuDialect, GpuFunction, GpuModuleMap, GpuVar, lower_types::CType, runtime_type,
+    GpuAssign, GpuDialect, GpuFunction, GpuModuleMap, GpuValue, GpuVar, lower_types::CType,
+    runtime_type,
 };
 
 #[derive(Debug, Error)]
@@ -17,6 +18,8 @@ pub enum GpuRenderError {
         expected: usize,
         outputs: usize,
     },
+    #[error("invalid bool.ifc assignment: {0}")]
+    InvalidIfc(&'static str),
 }
 
 pub fn render_modules(
@@ -97,11 +100,7 @@ fn render_function(output: &mut String, function: &GpuFunction) -> Result<(), Gp
 
 fn render_assignment(output: &mut String, assignment: &GpuAssign) -> Result<(), GpuRenderError> {
     if let Some(symbol) = &assignment.call_symbol {
-        let mut args = assignment
-            .inputs
-            .iter()
-            .map(|var| var.name.clone())
-            .collect::<Vec<_>>();
+        let mut args = assignment.inputs.iter().map(value_expr).collect::<Vec<_>>();
         args.extend(
             assignment
                 .outputs
@@ -113,6 +112,18 @@ fn render_assignment(output: &mut String, assignment: &GpuAssign) -> Result<(), 
     }
     let op = assignment.op.as_str();
     match op {
+        "assert" => {
+            if assignment.inputs.len() != 1 || !assignment.outputs.is_empty() {
+                return Err(arity(assignment, 1));
+            }
+            output.push_str(&format!(
+                "    if (!{}) __builtin_trap();\n",
+                value_expr(&assignment.inputs[0])
+            ));
+            Ok(())
+        }
+        ":.ty" | ":.forget" => identity(output, assignment),
+        "bool.ifc" => render_ifc(output, assignment),
         "bool.t" => unary_output(output, assignment, "1", 0),
         "bool.f" | "u64.zero" | "u32.zero" => unary_output(output, assignment, "0", 0),
         "u64.one" | "u32.one" | "f32.one" => unary_output(output, assignment, "1", 0),
@@ -146,6 +157,10 @@ fn render_assignment(output: &mut String, assignment: &GpuAssign) -> Result<(), 
         "f32.fma" => call3(output, assignment, "fmaf"),
         _ => Err(GpuRenderError::UnsupportedOp(assignment.op.clone())),
     }
+}
+
+fn identity(output: &mut String, a: &GpuAssign) -> Result<(), GpuRenderError> {
+    unary_output(output, a, &input(a, 0)?, 1)
 }
 
 fn unary_output(
@@ -211,16 +226,91 @@ fn bitcast(output: &mut String, a: &GpuAssign, to: &str, from: &str) -> Result<(
     }
     output.push_str(&format!(
         "    {{ union {{ {from} from; {to} to; }} bits = {{ {} }}; {} = bits.to; }}\n",
-        a.inputs[0].name, a.outputs[0].name
+        value_expr(&a.inputs[0]),
+        a.outputs[0].name
     ));
     Ok(())
 }
 
-fn input(a: &GpuAssign, index: usize) -> Result<&str, GpuRenderError> {
+fn input(a: &GpuAssign, index: usize) -> Result<String, GpuRenderError> {
     a.inputs
         .get(index)
-        .map(|var| var.name.as_str())
+        .map(value_expr)
         .ok_or_else(|| arity(a, index + 1))
+}
+
+fn value_expr(value: &GpuValue) -> String {
+    match value {
+        GpuValue::Var(var) => var.name.clone(),
+        GpuValue::FnSymbol(target) => sanitize_ident(&format!("program.{target}")),
+    }
+}
+
+fn render_ifc(output: &mut String, assignment: &GpuAssign) -> Result<(), GpuRenderError> {
+    let function_positions = assignment
+        .inputs
+        .iter()
+        .enumerate()
+        .filter_map(|(index, value)| matches!(value, GpuValue::FnSymbol(_)).then_some(index))
+        .collect::<Vec<_>>();
+    let [true_fn, false_fn] = function_positions.as_slice() else {
+        return Err(GpuRenderError::InvalidIfc(
+            "expected exactly two direct function names",
+        ));
+    };
+    let tail = assignment
+        .inputs
+        .get(false_fn + 1..)
+        .ok_or(GpuRenderError::InvalidIfc("missing decision Boolean"))?;
+    let [flag, arguments @ ..] = tail else {
+        return Err(GpuRenderError::InvalidIfc("missing decision Boolean"));
+    };
+
+    output.push_str(&format!("    if ({}) {{\n", value_expr(flag)));
+    render_ifc_call(
+        output,
+        &assignment.inputs[*true_fn],
+        assignment.inputs[..*true_fn].iter().chain(arguments.iter()),
+        &assignment.outputs,
+    );
+    output.push_str("    } else {\n");
+    render_ifc_call(
+        output,
+        &assignment.inputs[*false_fn],
+        assignment.inputs[true_fn + 1..*false_fn]
+            .iter()
+            .chain(arguments.iter()),
+        &assignment.outputs,
+    );
+    output.push_str("    }\n");
+    Ok(())
+}
+
+fn render_ifc_call<'a>(
+    output: &mut String,
+    function: &GpuValue,
+    inputs: impl Iterator<Item = &'a GpuValue>,
+    outputs: &[GpuVar],
+) {
+    let mut arguments = inputs.map(value_expr).collect::<Vec<_>>();
+    arguments.extend(outputs.iter().map(|var| format!("&{}", var.name)));
+    output.push_str(&format!(
+        "        {}({});\n",
+        value_expr(function),
+        arguments.join(", ")
+    ));
+}
+
+fn sanitize_ident(name: &str) -> String {
+    name.chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect()
 }
 
 fn arity(a: &GpuAssign, expected: usize) -> GpuRenderError {

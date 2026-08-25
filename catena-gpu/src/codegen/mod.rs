@@ -3,7 +3,7 @@
 pub mod gpu;
 pub mod lower_types;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use hexpr::Operation;
 use metacat::{
@@ -54,8 +54,14 @@ pub struct GpuFunction {
 pub struct GpuAssign {
     pub op: Operation,
     pub call_symbol: Option<String>,
-    pub inputs: Vec<GpuVar>,
+    pub inputs: Vec<GpuValue>,
     pub outputs: Vec<GpuVar>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GpuValue {
+    Var(GpuVar),
+    FnSymbol(Operation),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -73,6 +79,10 @@ pub enum CodegenError {
     Quotient(open_hypergraphs::strict::vec::FiniteFunction),
     #[error(transparent)]
     LowerType(#[from] LowerTypeError),
+    #[error("generated function name `{operation}` expected one output, found {actual}")]
+    InvalidNameArity { operation: Operation, actual: usize },
+    #[error("generated function name `{0}` has an invalid target")]
+    InvalidNameTarget(String),
 }
 
 pub fn codegen(terms: &TheoryTermMap) -> Result<GpuModuleMap, CodegenError> {
@@ -98,6 +108,7 @@ fn codegen_definition(
 ) -> Result<GpuModule, CodegenError> {
     let mut term = term.clone();
     term.quotient().map_err(CodegenError::Quotient)?;
+    let function_symbols = direct_function_symbols(&term)?;
     let sources = term
         .sources
         .iter()
@@ -119,8 +130,12 @@ fn codegen_definition(
         let inputs = assignment
             .sources
             .iter()
-            .map(|(node, _)| var(*node, &term))
-            .filter_map(runtime_var)
+            .filter_map(|(node, _)| {
+                if let Some(symbol) = function_symbols.get(node) {
+                    return Some(Ok(GpuValue::FnSymbol(symbol.clone())));
+                }
+                runtime_var(var(*node, &term)).map(|value| value.map(GpuValue::Var))
+            })
             .collect::<Result<Vec<_>, _>>()?;
         let outputs = assignment
             .targets
@@ -151,6 +166,27 @@ fn codegen_definition(
             assignments,
         },
     })
+}
+
+fn direct_function_symbols(term: &CodegenTerm) -> Result<HashMap<NodeId, Operation>, CodegenError> {
+    let mut symbols = HashMap::new();
+    for (edge_index, operation) in term.hypergraph.edges.iter().enumerate() {
+        let Some(target) = operation.as_str().strip_prefix("name.") else {
+            continue;
+        };
+        let adjacency = &term.hypergraph.adjacency[edge_index];
+        let [node] = adjacency.targets.as_slice() else {
+            return Err(CodegenError::InvalidNameArity {
+                operation: operation.clone(),
+                actual: adjacency.targets.len(),
+            });
+        };
+        let target = target
+            .parse()
+            .map_err(|_| CodegenError::InvalidNameTarget(target.to_string()))?;
+        symbols.insert(*node, target);
+    }
+    Ok(symbols)
 }
 
 fn var(node: NodeId, term: &CodegenTerm) -> Result<GpuVar, LowerTypeError> {

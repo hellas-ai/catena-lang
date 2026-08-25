@@ -167,6 +167,41 @@
       ({cap.own [.out-cap] f32} buf val)
     }})
 
+  # BF16-storage variant of the fused gated-delta scan. The generated kernel
+  # widens every input and recurrent-state load to F32, keeps the recurrence in
+  # F32 registers for the complete scan, and rounds only result/state stores.
+  (arr materializec.borrow-gated-delta-net-bf16 :
+    {[state-cap q-cap k-cap v-cap gate-cap beta-cap out-cap.]
+      ({cap.own [.state-cap] bf16} buf val)
+      ({[.state-cap] u64} :)
+      ({cap.own [.q-cap] bf16} buf val)
+      ({[.q-cap] u64} :)
+      ({cap.own [.k-cap] bf16} buf val)
+      ({[.k-cap] u64} :)
+      ({cap.own [.v-cap] bf16} buf val)
+      ({[.v-cap] u64} :)
+      ({cap.own [.gate-cap] bf16} buf val)
+      ({[.gate-cap] u64} :)
+      ({cap.own [.beta-cap] bf16} buf val)
+      ({[.beta-cap] u64} :)
+      (u64 val)
+      (u64 val)
+      (u64 val)
+      (u64 val)
+      (u64 val)
+      ({[.out-cap] u64} :)
+    }
+    ->
+    {[state-cap q-cap k-cap v-cap gate-cap beta-cap out-cap.] {
+      ({cap.own [.state-cap] bf16} buf val)
+      ({cap.own [.q-cap] bf16} buf val)
+      ({cap.own [.k-cap] bf16} buf val)
+      ({cap.own [.v-cap] bf16} buf val)
+      ({cap.own [.gate-cap] bf16} buf val)
+      ({cap.own [.beta-cap] bf16} buf val)
+      ({cap.own [.out-cap] bf16} buf val)
+    }})
+
   # Compute paired routed BF16 matrix-vector products while returning the
   # owned input and expert-index buffers. For each output, both F32 sums use
   # the exact adjacent-pair tree specified by materializec.reduce-f32. The

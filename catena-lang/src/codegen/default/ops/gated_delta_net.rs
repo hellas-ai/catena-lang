@@ -7,6 +7,35 @@ use crate::codegen::{
 
 type Parts<'a> = [&'a GpuValue; 18];
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::codegen) enum StorageType {
+    F32,
+    Bf16,
+}
+
+impl StorageType {
+    fn c_type(self) -> &'static str {
+        match self {
+            Self::F32 => "float",
+            Self::Bf16 => "catena_bf16_t",
+        }
+    }
+
+    fn load(self, expression: &str) -> String {
+        match self {
+            Self::F32 => expression.to_owned(),
+            Self::Bf16 => format!("catena_bf16_to_f32({expression})"),
+        }
+    }
+
+    fn store(self, expression: &str) -> String {
+        match self {
+            Self::F32 => expression.to_owned(),
+            Self::Bf16 => format!("catena_bf16_from_f32({expression})"),
+        }
+    }
+}
+
 fn parts(assignment: &GpuAssign) -> Result<Parts<'_>, GpuRenderError> {
     let components = input_components(assignment)?;
     if components.len() != 18 {
@@ -35,7 +64,12 @@ pub(in crate::codegen) fn kernel_name(
     Ok(format!("gated_delta_net_{}_{}", function.name, output.name))
 }
 
-pub(in crate::codegen) fn render_kernel(out: &mut String, name: &str, dialect: GpuDialect) {
+pub(in crate::codegen) fn render_kernel(
+    out: &mut String,
+    name: &str,
+    dialect: GpuDialect,
+    storage: StorageType,
+) {
     let shuffle = match dialect {
         GpuDialect::Hip => "__shfl_down(value, offset, width)",
         GpuDialect::Cuda => "__shfl_down_sync(0xffffffffu, value, offset, width)",
@@ -44,15 +78,26 @@ pub(in crate::codegen) fn render_kernel(out: &mut String, name: &str, dialect: G
         GpuDialect::Hip => "__shfl(prediction, 0, width)",
         GpuDialect::Cuda => "__shfl_sync(0xffffffffu, prediction, 0, width)",
     };
-    out.push_str(&format!(r#"
+    let storage_type = storage.c_type();
+    let state_load = storage.load("state[state_base + i]");
+    let key_load = storage.load("k[(t * key_heads + key_head) * dim + i]");
+    let query_load = storage.load("q[(t * key_heads + key_head) * dim + i]");
+    let value_load = storage.load("v[(t * value_heads + value_head) * dim + column]");
+    let gate_load = storage.load("gate[t * value_heads + value_head]");
+    let beta_load = storage.load("beta[t * value_heads + value_head]");
+    let result_store = storage.store("output * scale");
+    let state_store = storage.store("s[r]");
+    out.push_str(&format!(
+        r#"
 __device__ __forceinline__ float {name}_sum(float value, int width) {{
     for (int offset = width / 2; offset > 0; offset /= 2) value += {shuffle};
     return value;
 }}
 
-__global__ void {name}(float *state, uint64_t state_offset,
-    const float *q, const float *k, const float *v, const float *gate,
-    const float *beta, float *result, uint64_t tokens,
+__global__ void {name}({storage_type} *state, uint64_t state_offset,
+    const {storage_type} *q, const {storage_type} *k, const {storage_type} *v,
+    const {storage_type} *gate, const {storage_type} *beta, {storage_type} *result,
+    uint64_t tokens,
     uint64_t key_heads, uint64_t value_heads, uint64_t dim) {{
     const int lane = threadIdx.x;
     const int warp = threadIdx.y;
@@ -66,40 +111,41 @@ __global__ void {name}(float *state, uint64_t state_offset,
     #pragma unroll
     for (int r = 0; r < 4; ++r) {{
         int i = lane + r * width;
-        s[r] = i < dim ? state[state_base + i] : 0.0f;
+        s[r] = i < dim ? {state_load} : 0.0f;
     }}
     const float scale = rsqrtf((float)dim);
     for (uint64_t t = 0; t < tokens; ++t) {{
-        const float decay = expf(gate[t * value_heads + value_head]);
-        const float b = beta[t * value_heads + value_head];
+        const float decay = expf({gate_load});
+        const float b = {beta_load};
         float prediction = 0.0f;
         #pragma unroll
         for (int r = 0; r < 4; ++r) {{
             int i = lane + r * width;
-            if (i < dim) prediction += s[r] * k[(t * key_heads + key_head) * dim + i];
+            if (i < dim) prediction += s[r] * {key_load};
         }}
         prediction = {name}_sum(prediction, width);
         prediction = {broadcast};
-        const float delta = (v[(t * value_heads + value_head) * dim + column] - decay * prediction) * b;
+        const float delta = ({value_load} - decay * prediction) * b;
         float output = 0.0f;
         #pragma unroll
         for (int r = 0; r < 4; ++r) {{
             int i = lane + r * width;
             if (i < dim) {{
-                s[r] = decay * s[r] + k[(t * key_heads + key_head) * dim + i] * delta;
-                output += s[r] * q[(t * key_heads + key_head) * dim + i];
+                s[r] = decay * s[r] + {key_load} * delta;
+                output += s[r] * {query_load};
             }}
         }}
         output = {name}_sum(output, width);
-        if (lane == 0) result[(t * value_heads + value_head) * dim + column] = output * scale;
+        if (lane == 0) result[(t * value_heads + value_head) * dim + column] = {result_store};
     }}
     #pragma unroll
     for (int r = 0; r < 4; ++r) {{
         int i = lane + r * width;
-        if (i < dim) state[state_base + i] = s[r];
+        if (i < dim) state[state_base + i] = {state_store};
     }}
 }}
-"#));
+"#
+    ));
 }
 
 #[cfg(test)]
@@ -109,7 +155,7 @@ mod tests {
     #[test]
     fn renders_a_single_token_scan_loop_for_hip() {
         let mut source = String::new();
-        render_kernel(&mut source, "scan", GpuDialect::Hip);
+        render_kernel(&mut source, "scan", GpuDialect::Hip, StorageType::F32);
         assert!(source.contains("for (uint64_t t = 0; t < tokens; ++t)"));
         assert!(source.contains("state[state_base + i] = s[r]"));
         assert!(source.contains("__shfl_down(value, offset, width)"));
@@ -119,9 +165,20 @@ mod tests {
     #[test]
     fn renders_cuda_synchronous_shuffle() {
         let mut source = String::new();
-        render_kernel(&mut source, "scan", GpuDialect::Cuda);
+        render_kernel(&mut source, "scan", GpuDialect::Cuda, StorageType::F32);
         assert!(source.contains("__shfl_down_sync(0xffffffffu"));
         assert!(source.contains("__shfl_sync(0xffffffffu, prediction"));
+    }
+
+    #[test]
+    fn renders_bf16_storage_with_f32_recurrence() {
+        let mut source = String::new();
+        render_kernel(&mut source, "scan", GpuDialect::Hip, StorageType::Bf16);
+        assert!(source.contains("catena_bf16_t *state"));
+        assert!(source.contains("catena_bf16_to_f32(state[state_base + i])"));
+        assert!(source.contains("float s[4]"));
+        assert!(source.contains("catena_bf16_from_f32(output * scale)"));
+        assert!(source.contains("catena_bf16_from_f32(s[r])"));
     }
 }
 
@@ -130,6 +187,7 @@ pub(in crate::codegen) fn render_call(
     function: &GpuFunction,
     assignment: &GpuAssign,
     dialect: GpuDialect,
+    storage: StorageType,
 ) -> Result<(), GpuRenderError> {
     let p = parts(assignment)?;
     let outputs = output_components(assignment)?;
@@ -173,10 +231,11 @@ pub(in crate::codegen) fn render_call(
     ));
     out.push_str(&format!("    catena_assert(({off}) <= ({scap}) && ({vh}) * ({dim}) * ({dim}) <= ({scap}) - ({off}));\n", off=e(12), scap=e(1), vh=e(15), dim=e(16)));
     out.push_str(&format!(
-        "    float *{result}_data = nullptr;\n    if (({tokens}) != 0) {{\n",
+        "    {storage_type} *{result}_data = nullptr;\n    if (({tokens}) != 0) {{\n",
+        storage_type = storage.c_type(),
         tokens = e(13)
     ));
-    out.push_str(&format!("        catena_host_gpu_check({alloc}((void **)&{result}_data, ({tokens}) * ({vh}) * ({dim}) * sizeof(float), nullptr));\n", alloc=dialect.device_alloc_async_fn(), tokens=e(13), vh=e(15), dim=e(16)));
+    out.push_str(&format!("        catena_host_gpu_check({alloc}((void **)&{result}_data, ({tokens}) * ({vh}) * ({dim}) * sizeof({storage_type}), nullptr));\n", alloc=dialect.device_alloc_async_fn(), tokens=e(13), vh=e(15), dim=e(16), storage_type=storage.c_type()));
     out.push_str(&format!("        dim3 block(({dim}) < 32 ? ({dim}) : 32, 4);\n        dim3 grid(({vh}), 1, (({dim}) + 3) / 4);\n", dim=e(16), vh=e(15)));
     out.push_str(&format!("        {name}<<<grid, block>>>({state}, {off}, {q}, {k}, {v}, {gate}, {beta}, {result}_data, {tokens}, {kh}, {vh}, {dim});\n    }}\n", state=e(0), off=e(12), q=e(2), k=e(4), v=e(6), gate=e(8), beta=e(10), tokens=e(13), kh=e(14), vh=e(15), dim=e(16)));
     for (i, input_index) in [0usize, 2, 4, 6, 8, 10].iter().enumerate() {

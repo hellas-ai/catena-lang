@@ -51,7 +51,6 @@ pub fn lower_type(ty: &Tree<(), Operation>) -> Result<LoweredType, LowerTypeErro
             lower_runtime_type(inner).map(LoweredType::Runtime)
         }
         "mem" => lower_runtime_type(ty).map(LoweredType::Runtime),
-        "gpu.scheduling" => lower_runtime_type(ty).map(LoweredType::Runtime),
         _ => Ok(LoweredType::Erased),
     }
 }

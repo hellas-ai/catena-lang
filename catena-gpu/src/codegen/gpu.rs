@@ -141,7 +141,30 @@ typedef struct {{
     uint64_t block_linear_id;
 }} catena_thread_t;
 typedef struct {{ uint64_t linear_id; }} catena_block_t;
-typedef uint8_t catena_scheduling_t;
+typedef enum {{
+    CATENA_CELL_INACCESSIBLE = 0,
+    CATENA_CELL_READABLE = 1,
+    CATENA_CELL_OWNED = 2,
+}} catena_cell_access_t;
+typedef enum {{
+    CATENA_SCHEDULING_LINEAR = 1,
+}} catena_scheduling_kind_t;
+typedef struct {{ catena_scheduling_kind_t kind; }} catena_scheduling_t;
+
+__host__ __device__ static inline catena_cell_access_t catena_scheduling_resolve(
+    catena_scheduling_t scheduling,
+    catena_thread_t thread,
+    uint64_t cell
+) {{
+    switch (scheduling.kind) {{
+    case CATENA_SCHEDULING_LINEAR:
+        return thread.global_linear_id == cell
+            ? CATENA_CELL_OWNED
+            : CATENA_CELL_INACCESSIBLE;
+    default:
+        return CATENA_CELL_INACCESSIBLE;
+    }}
+}}
 
 __host__ static inline void catena_gpu_check({error_type} error) {{
     if (error != {success}) {{

@@ -14,7 +14,7 @@
         [.buffer-id buffer-size]
         ({[.grid-shape block-shape global-shape global-size]} gpu.grid)
         [.schedule-id]
-      } gpu.scheduling)
+      } gpu.scheduling val)
       ({
         ({[.buffer-size] u64} :)
         ({
@@ -42,7 +42,7 @@
     [.buffer-id buffer-size]
     ({[.grid-shape block-shape global-shape global-size]} gpu.grid)
     [.schedule-id]
-  } gpu.scheduling)
+  } gpu.scheduling val)
 } = ([branch-input.]
   ([.branch-input] *.elim [in-bounds-if-true branch-state.])
   ([.branch-state] *.elim [scheduling length-and-tail.])
@@ -81,7 +81,7 @@
         [.buffer-id buffer-size]
         ({[.grid-shape block-shape global-shape global-size]} gpu.grid)
         [.schedule-id]
-      } gpu.scheduling)
+      } gpu.scheduling val)
       ({
         ({[.buffer-size] u64} :)
         ({
@@ -109,7 +109,7 @@
     [.buffer-id buffer-size]
     ({[.grid-shape block-shape global-shape global-size]} gpu.grid)
     [.schedule-id]
-  } gpu.scheduling)
+  } gpu.scheduling val)
 } = ([branch-input.]
   ([.branch-input] *.elim [_not-in-bounds-if-false branch-state.])
   ([.branch-state] *.elim [scheduling _unused-thread-state.])
@@ -136,7 +136,7 @@
     [.buffer-id buffer-size]
     ({[.grid-shape block-shape global-shape global-size]} gpu.grid)
     [.schedule-id]
-  } gpu.scheduling)
+  } gpu.scheduling val)
 } -> {[
   buffer-id buffer-size grid-shape block-shape global-shape global-size
   schedule-id.
@@ -145,7 +145,7 @@
     [.buffer-id buffer-size]
     ({[.grid-shape block-shape global-shape global-size]} gpu.grid)
     [.schedule-id]
-  } gpu.scheduling)
+  } gpu.scheduling val)
 } = ([length buffer-id grid-shape block-shape global-shape global-size
   schedule-id buffer value thread scheduling.]
   ([.length] u64.copies2 [length-for-name length-for-check-and-branch.])

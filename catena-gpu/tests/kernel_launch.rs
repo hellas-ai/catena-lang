@@ -48,7 +48,9 @@ fn check_launch_case(parameters: LaunchParameters, dialect: GpuDialect) -> anyho
     assert!(generated.contains("__global__"));
     assert!(generated.contains("global_linear_id"));
     assert!(generated.contains("catena_gpu_synchronize"));
-    assert!(generated.contains(".global_linear_id =="));
+    assert!(generated.contains("CATENA_SCHEDULING_LINEAR"));
+    assert!(generated.contains("catena_scheduling_resolve("));
+    assert!(generated.contains("== CATENA_CELL_OWNED"));
     assert!(generated.contains("uint64_t *buffer"));
     Ok(())
 }

@@ -4,6 +4,8 @@ A global memory is a buffer with a number of cells. A thread can own or read fro
 
 This distribution is called a "scheduling". For each global memory in input for a kernel function, we specify what a thread can do for each cell. Informally, we can see a schedule as a function from buffer indices to thread indices.
 
+A scheduling is an opaque runtime value. `launch` passes the same value to the kernel, and the kernel can only query it through `gpu.scheduling.can-own` and `gpu.scheduling.can-read`. Both operations use one backend resolver, so the kernel cannot accidentally use permission rules from a different scheduling policy. The proofs produced by these queries are erased.
+
 A race-free condition is: for each cell, either only one thread owns it or some threads can read it.
 
 ## What sort of proofs do we want? Safety is not functional correctness

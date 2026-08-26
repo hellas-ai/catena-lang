@@ -140,7 +140,7 @@
       [.buffer-id buffer-size]
       ({[.grid-shape block-shape global-shape global-size]} gpu.grid)
       [.schedule-id]
-    } gpu.scheduling)
+    } gpu.scheduling val)
   })
 
   # The Boolean and its positive/negative proofs stay explicit. The operation
@@ -151,7 +151,7 @@
     decision.
   ]
     ({[.buffer-id buffer-size] [.grid-topology] [.schedule-id]}
-      gpu.scheduling)
+      gpu.scheduling val)
     ([.grid-topology] gpu.thread val)
     ({({[.buffer-size]} shape.1d)} ix val)
   } -> {[
@@ -164,7 +164,7 @@
       gpu.schedule.owns [owns.])
 
     ({[.buffer-id buffer-size] [.grid-topology] [.schedule-id]}
-      gpu.scheduling)
+      gpu.scheduling val)
     ({[.thread-id] ([.grid-topology] gpu.thread val)} :)
     ({[.cell-index] ({({[.buffer-size]} shape.1d)} ix)} :)
     ({[.decision] bool} :)
@@ -177,7 +177,7 @@
     decision.
   ]
     ({[.buffer-id buffer-size] [.grid-topology] [.schedule-id]}
-      gpu.scheduling)
+      gpu.scheduling val)
     ([.grid-topology] gpu.thread val)
     ({({[.buffer-size]} shape.1d)} ix val)
   } -> {[
@@ -190,7 +190,7 @@
       gpu.schedule.reads [reads.])
 
     ({[.buffer-id buffer-size] [.grid-topology] [.schedule-id]}
-      gpu.scheduling)
+      gpu.scheduling val)
     ({[.thread-id] ([.grid-topology] gpu.thread val)} :)
     ({[.cell-index] ({({[.buffer-size]} shape.1d)} ix)} :)
     ({[.decision] bool} :)
@@ -256,7 +256,7 @@
       [.buffer-id buffer-size]
       ({[.grid-shape block-shape global-shape global-size]} gpu.grid)
       [.schedule-id]
-    } gpu.scheduling)
+    } gpu.scheduling val)
     ({
       ({
         ({[.buffer-size] u64} :)
@@ -284,7 +284,7 @@
                             ({[.grid-shape block-shape global-shape global-size]}
                               gpu.grid)
                             [.schedule-id]
-                          } gpu.scheduling)
+                          } gpu.scheduling val)
                         } *)
                       } *)
                     } *)
@@ -299,7 +299,7 @@
         [.buffer-id buffer-size]
         ({[.grid-shape block-shape global-shape global-size]} gpu.grid)
         [.schedule-id]
-      } gpu.scheduling)
+      } gpu.scheduling val)
     } -> val)
   } -> {[
     buffer-id buffer-size grid-shape block-shape global-shape global-size schedule-id

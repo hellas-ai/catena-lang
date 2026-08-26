@@ -1,0 +1,27 @@
+# First-order row-major helpers for GPU global buffers. These are ordinary
+# definitions: matrix storage and permissions remain explicit in the kernel.
+
+# row-major-index(row, column-count, column) = row * column-count + column
+(def program matrix.row-major.index :
+  {(u64 val) (u64 val) (u64 val)} -> (u64 val)
+= ([row column-count column.]
+  ({[.row column-count]} u64.mul [row-offset.])
+  ({[.row-offset column]} u64.add [index.])
+  [.index]
+))
+
+# A[row, inner] in an A(rows x shared-size) buffer.
+(def program matrix.matmul.left-index :
+  {(u64 val) (u64 val) (u64 val)} -> (u64 val)
+= ([row shared-size inner.]
+  ({[.row shared-size inner]} matrix.row-major.index [index.])
+  [.index]
+))
+
+# B[inner, column] in a B(shared-size x column-count) buffer.
+(def program matrix.matmul.right-index :
+  {(u64 val) (u64 val) (u64 val)} -> (u64 val)
+= ([inner column-count column.]
+  ({[.inner column-count column]} matrix.row-major.index [index.])
+  [.index]
+))

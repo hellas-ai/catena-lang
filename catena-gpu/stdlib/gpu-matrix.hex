@@ -1,6 +1,6 @@
 # Generic row-major matrix access over a global buffer. Matrix indexing and
 # permission handling do not depend on the buffer's element type.
-(def program gpu.global.matrix.read : {[
+(def program gpu.global.matrix.2d.row-major.read : {[
   buffer-name buffer-size element-type row-count column-count
   grid-topology schedule-name thread-name.
 ]
@@ -61,3 +61,54 @@
     buffer-length-after-read column-count-after-read value]}
 ))
 
+# Write a two-dimensional row-major matrix cell after proving that the current
+# thread owns the corresponding cell under the supplied schedule.
+(def program gpu.global.matrix.2d.row-major.write : {[
+  buffer-name buffer-size element-type row-count column-count
+  grid-topology schedule-name thread-name.
+]
+  ({[.buffer-name buffer-size] [.grid-topology] [.schedule-name]}
+    gpu.scheduling val)
+  ({[.thread-name] ([.grid-topology] gpu.thread)} :)
+  ({[.buffer-name] ({cap.own [.buffer-size element-type]} gpu.global)} :)
+  ({[.buffer-size] u64} :)
+  ({[.column-count] u64} :)
+  ({({[.row-count column-count]} shape.2d)} ix val)
+  ([.element-type] val)
+} -> {[
+  buffer-name buffer-size element-type row-count column-count
+  grid-topology schedule-name thread-name.
+]
+  ({[.buffer-name buffer-size] [.grid-topology] [.schedule-name]}
+    gpu.scheduling val)
+} = ([scheduling thread buffer buffer-length column-count-value matrix-index value.]
+  ({[.column-count-value matrix-index]}
+    matrix.row-major.flatten
+    [flat-index-value.])
+  ([.flat-index-value] u64.name [named-flat-index.])
+  ([.named-flat-index]
+    u64.copies2
+    [flat-index-for-check flat-index-for-cell.])
+  ([.buffer-length]
+    u64.copies2
+    [buffer-length-for-check buffer-length-for-cell.])
+  ({[.flat-index-for-check buffer-length-for-check]}
+    u64.lt
+    [in-bounds bounds-true _bounds-false.])
+  ({[.in-bounds bounds-true]} assert-then [is-in-bounds.])
+  ({[.flat-index-for-cell buffer-length-for-cell is-in-bounds]}
+    u64.to-ix
+    [named-cell.])
+  ([.named-cell] :.forget [cell.])
+  ({[.scheduling thread cell]}
+    gpu.scheduling.can-own
+    [scheduling-after-query thread-after-query cell-after-query
+      can-own owns-if-allowed _not-owned-if-denied.])
+  ({[.can-own owns-if-allowed]} assert-then [owns-cell.])
+  ([.owns-cell] gpu.permissions.grant-own [ownership.])
+  ({[.thread-after-query buffer cell-after-query value ownership]}
+    gpu.global.write
+    [ownership-after-write.])
+  ([.ownership-after-write] gpu.global.own.forget)
+  [.scheduling-after-query]
+))

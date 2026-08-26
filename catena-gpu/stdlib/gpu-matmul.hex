@@ -239,11 +239,11 @@
   ({[.output-for-b inner-for-b]} matrix.matmul.right-index [b-index.])
 
   ({[.a-scheduling thread a-buffer a-length a-columns a-index]}
-    gpu.global.matrix.read
+    gpu.global.matrix.2d.row-major.read
     [a-scheduling-after-read thread-after-a-read a-buffer-after-read
       a-length-after-read a-columns-after-read a-value.])
   ({[.b-scheduling thread-after-a-read b-buffer b-length b-columns b-index]}
-    gpu.global.matrix.read
+    gpu.global.matrix.2d.row-major.read
     [b-scheduling-after-read thread-after-b-read b-buffer-after-read
       b-length-after-read b-columns-after-read b-value.])
   ({[.a-value b-value]} scalar.mul [product.])

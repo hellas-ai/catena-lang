@@ -32,11 +32,11 @@ Race free and safe access is the guarnatee we need in order to prove that the ke
 
 For convenience, `gpu.scheduling.own-each` constructs a schedule that gives each buffer cell one owner. Common scheduling disciplines as primitives avoid repeating tedious race-freedom proofs.
 
-Specifically, `gpu.scheduling.own-each` assigns buffer cell `i` to global thread `i`. The owner may read and write that cell. No other thread receives permission for it, so there cannot be two writers or a writer and a distinct reader.
+Specifically, `gpu.scheduling.own-each` assigns buffer cell `i` to global thread `i` for a 1D launch. The owner may read and write that cell. No other thread receives permission for it, so there cannot be two writers or a writer and a distinct reader.
 
 The constructor requires `buffer-size <= global-size`. This ensures that every buffer cell has a corresponding global thread. If the grid is larger, excess threads own no cell. Own-each scheduling is therefore race-free by construction; the internal race-free argument is part of this fixed primitive rather than a proof rebuilt by each program. The schedule and every permission carry the buffer identity, preventing a grant for one buffer from being used with another.
 
-`gpu.scheduling.read-all` is the complementary read-only policy: every thread may read every cell, and no thread may own or write one. It is race-free because concurrent reads do not conflict. A kernel can therefore use an own-each schedule for its destination buffer and a read-all schedule for a separate source buffer.
+`gpu.scheduling.read-all` is the complementary 1D read-only policy: every thread may read every cell, and no thread may own or write one. The corresponding 2D row-major policies are `gpu.scheduling.2d.row-major.own-each` and `gpu.scheduling.2d.row-major.read-all`.
 
 ## Access inside a kernel
 

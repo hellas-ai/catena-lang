@@ -8,7 +8,9 @@ pub fn render(output: &mut String, assignment: &GpuAssign) -> Result<bool, GpuRe
                 return Err(invalid_arity(assignment, 1, 0));
             }
         }
-        operation @ ("gpu.scheduling.own-each" | "gpu.scheduling.read-all") => {
+        operation @ ("gpu.scheduling.own-each"
+        | "gpu.scheduling.read-all"
+        | "gpu.scheduling.2d.row-major.read-all") => {
             if !assignment.inputs.is_empty() || assignment.outputs.len() != 1 {
                 return Err(invalid_arity(assignment, 0, 1));
             }
@@ -22,7 +24,7 @@ pub fn render(output: &mut String, assignment: &GpuAssign) -> Result<bool, GpuRe
                 assignment.outputs[0].name,
             ));
         }
-        "gpu.scheduling.own-matrix-2d" => {
+        "gpu.scheduling.2d.row-major.own-each" => {
             let [column_count] = assignment.inputs.as_slice() else {
                 return Err(invalid_arity(assignment, 1, 1));
             };
@@ -30,7 +32,7 @@ pub fn render(output: &mut String, assignment: &GpuAssign) -> Result<bool, GpuRe
                 return Err(invalid_arity(assignment, 1, 1));
             };
             output.push_str(&format!(
-                "    {} = {{ CATENA_SCHEDULING_OWN_MATRIX_2D, {} }};\n",
+                "    {} = {{ CATENA_SCHEDULING_2D_ROW_MAJOR_OWN, {} }};\n",
                 scheduling.name,
                 value_expr(column_count),
             ));

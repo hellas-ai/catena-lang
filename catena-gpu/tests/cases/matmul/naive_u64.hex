@@ -41,12 +41,12 @@
   ([.a-length] u64.copies2 [a-length-for-kernel a-length-for-name.])
   ([.a-length-for-name] :.param [a-size.])
   ({[.a-buffer-name a-size grid-shape block-shape global-shape global-size-name]}
-    gpu.scheduling.read-all
+    gpu.scheduling.2d.row-major.read-all
     [a-schedule-name a-scheduling.])
   ([.b-length] u64.copies2 [b-length-for-kernel b-length-for-name.])
   ([.b-length-for-name] :.param [b-size.])
   ({[.b-buffer-name b-size grid-shape block-shape global-shape global-size-name]}
-    gpu.scheduling.read-all
+    gpu.scheduling.2d.row-major.read-all
     [b-schedule-name b-scheduling.])
 
   ([.output-rows-input] u64.name [named-output-rows.])
@@ -62,7 +62,7 @@
     [output-columns-value output-columns.])
   ({[.c-buffer-name c-size output-columns-for-schedule
       grid-shape block-shape global-shape global-size-name]}
-    gpu.scheduling.own-matrix-2d
+    gpu.scheduling.2d.row-major.own-each
     [c-schedule-name c-scheduling.])
 
   ({[.shared-size-value output-columns-value]} *.intro [shared-and-columns.])

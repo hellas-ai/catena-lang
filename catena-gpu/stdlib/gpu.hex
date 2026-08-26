@@ -136,22 +136,27 @@
   # race-free by construction. The proof ensures every buffer cell has a
   # corresponding global thread; excess threads simply receive no cell.
   (arr gpu.scheduling.own-each : {[
-    buffer-name buffer-size grid-shape block-shape global-shape global-size
+    buffer-name buffer-size grid-count block-count global-count global-size
     schedule-name.
   ]
     [.buffer-name]
-    [.grid-shape]
-    [.block-shape]
-    [.global-shape]
+    ({[.grid-count]} shape.1d)
+    ({[.block-count]} shape.1d)
+    ({[.global-count]} shape.1d)
     ([.buffer-size global-size] u64.lte |-)
   } -> {[
-    buffer-name buffer-size grid-shape block-shape global-shape global-size
+    buffer-name buffer-size grid-count block-count global-count global-size
     schedule-name.
   ]
     [.schedule-name]
     ({
       [.buffer-name buffer-size]
-      ({[.grid-shape block-shape global-shape global-size]} gpu.grid)
+      ({
+        ({[.grid-count]} shape.1d)
+        ({[.block-count]} shape.1d)
+        ({[.global-count]} shape.1d)
+        [.global-size]
+      } gpu.grid)
       [.schedule-name]
     } gpu.scheduling val)
   })
@@ -159,25 +164,63 @@
   # Assign matrix cell [row, column] to grid thread [column, row]. This policy
   # is race-free by construction; a grid that is too small is safe but does
   # not provide complete functional coverage.
-  (arr gpu.scheduling.own-matrix-2d : {[
+  (arr gpu.scheduling.2d.row-major.own-each : {[
     buffer-name buffer-size matrix-columns
-    grid-shape block-shape global-shape global-size schedule-name.
+    grid-columns grid-rows block-columns block-rows
+    global-columns global-rows global-size schedule-name.
   ]
     [.buffer-name]
     [.buffer-size]
     ({[.matrix-columns] u64} :)
-    [.grid-shape]
-    [.block-shape]
-    [.global-shape]
+    ({[.grid-columns grid-rows]} shape.2d)
+    ({[.block-columns block-rows]} shape.2d)
+    ({[.global-columns global-rows]} shape.2d)
     [.global-size]
   } -> {[
     buffer-name buffer-size matrix-columns
-    grid-shape block-shape global-shape global-size schedule-name.
+    grid-columns grid-rows block-columns block-rows
+    global-columns global-rows global-size schedule-name.
   ]
     [.schedule-name]
     ({
       [.buffer-name buffer-size]
-      ({[.grid-shape block-shape global-shape global-size]} gpu.grid)
+      ({
+        ({[.grid-columns grid-rows]} shape.2d)
+        ({[.block-columns block-rows]} shape.2d)
+        ({[.global-columns global-rows]} shape.2d)
+        [.global-size]
+      } gpu.grid)
+      [.schedule-name]
+    } gpu.scheduling val)
+  })
+
+  # Every thread may read every cell in a row-major matrix. The policy is
+  # read-only, but its topology is explicitly two-dimensional.
+  (arr gpu.scheduling.2d.row-major.read-all : {[
+    buffer-name buffer-size
+    grid-columns grid-rows block-columns block-rows
+    global-columns global-rows global-size schedule-name.
+  ]
+    [.buffer-name]
+    [.buffer-size]
+    ({[.grid-columns grid-rows]} shape.2d)
+    ({[.block-columns block-rows]} shape.2d)
+    ({[.global-columns global-rows]} shape.2d)
+    [.global-size]
+  } -> {[
+    buffer-name buffer-size
+    grid-columns grid-rows block-columns block-rows
+    global-columns global-rows global-size schedule-name.
+  ]
+    [.schedule-name]
+    ({
+      [.buffer-name buffer-size]
+      ({
+        ({[.grid-columns grid-rows]} shape.2d)
+        ({[.block-columns block-rows]} shape.2d)
+        ({[.global-columns global-rows]} shape.2d)
+        [.global-size]
+      } gpu.grid)
       [.schedule-name]
     } gpu.scheduling val)
   })
@@ -185,23 +228,28 @@
   # Every thread may read every cell. Since this policy grants no ownership,
   # it is race-free independently of the grid and buffer sizes.
   (arr gpu.scheduling.read-all : {[
-    buffer-name buffer-size grid-shape block-shape global-shape global-size
+    buffer-name buffer-size grid-count block-count global-count global-size
     schedule-name.
   ]
     [.buffer-name]
     [.buffer-size]
-    [.grid-shape]
-    [.block-shape]
-    [.global-shape]
+    ({[.grid-count]} shape.1d)
+    ({[.block-count]} shape.1d)
+    ({[.global-count]} shape.1d)
     [.global-size]
   } -> {[
-    buffer-name buffer-size grid-shape block-shape global-shape global-size
+    buffer-name buffer-size grid-count block-count global-count global-size
     schedule-name.
   ]
     [.schedule-name]
     ({
       [.buffer-name buffer-size]
-      ({[.grid-shape block-shape global-shape global-size]} gpu.grid)
+      ({
+        ({[.grid-count]} shape.1d)
+        ({[.block-count]} shape.1d)
+        ({[.global-count]} shape.1d)
+        [.global-size]
+      } gpu.grid)
       [.schedule-name]
     } gpu.scheduling val)
   })

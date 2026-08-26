@@ -2,8 +2,8 @@
 # and 1 through a read-all schedule.
 
 (def program write-readable-pair-sum-in-bounds-branch : {[
-  buffer-id buffer-size grid-shape block-shape global-shape global-size
-  schedule-id candidate-index bounds-decision.
+  buffer-name buffer-size grid-shape block-shape global-shape global-size
+  schedule-name candidate-index bounds-decision.
 ]
   ({[.bounds-decision] bool.t} = [bounds-true.])
   ({[.bounds-decision] bool.f} = [bounds-false.])
@@ -12,9 +12,9 @@
     ([.bounds-true is-in-bounds] ==> |-)
     ({
       ({
-        [.buffer-id buffer-size]
+        [.buffer-name buffer-size]
         ({[.grid-shape block-shape global-shape global-size]} gpu.grid)
-        [.schedule-id]
+        [.schedule-name]
       } gpu.scheduling val)
       ({
         ({[.buffer-size] u64} :)
@@ -26,7 +26,7 @@
               ({({[.grid-shape block-shape global-shape global-size]} gpu.grid)}
                 gpu.thread val)
               ({
-                ({[.buffer-id] ({cap.own [.buffer-size] u64} gpu.global)} :)
+                ({[.buffer-name] ({cap.own [.buffer-size] u64} gpu.global)} :)
                 (u64 val)
               } *)
             } *)
@@ -36,13 +36,13 @@
     } *)
   } *)
 } -> {[
-  buffer-id buffer-size grid-shape block-shape global-shape global-size
-  schedule-id candidate-index bounds-decision.
+  buffer-name buffer-size grid-shape block-shape global-shape global-size
+  schedule-name candidate-index bounds-decision.
 ]
   ({
-    [.buffer-id buffer-size]
+    [.buffer-name buffer-size]
     ({[.grid-shape block-shape global-shape global-size]} gpu.grid)
-    [.schedule-id]
+    [.schedule-name]
   } gpu.scheduling val)
 } = ([branch-input.]
   ([.branch-input] *.elim [in-bounds-if-true branch-state.])
@@ -69,8 +69,8 @@
 ))
 
 (def program skip-readable-pair-sum-out-of-bounds-branch : {[
-  buffer-id buffer-size grid-shape block-shape global-shape global-size
-  schedule-id candidate-index bounds-decision.
+  buffer-name buffer-size grid-shape block-shape global-shape global-size
+  schedule-name candidate-index bounds-decision.
 ]
   ({[.bounds-decision] bool.t} = [bounds-true.])
   ({[.bounds-decision] bool.f} = [bounds-false.])
@@ -79,9 +79,9 @@
     ([.is-in-bounds] {[.bounds-false] not} ==> |-)
     ({
       ({
-        [.buffer-id buffer-size]
+        [.buffer-name buffer-size]
         ({[.grid-shape block-shape global-shape global-size]} gpu.grid)
-        [.schedule-id]
+        [.schedule-name]
       } gpu.scheduling val)
       ({
         ({[.buffer-size] u64} :)
@@ -93,7 +93,7 @@
               ({({[.grid-shape block-shape global-shape global-size]} gpu.grid)}
                 gpu.thread val)
               ({
-                ({[.buffer-id] ({cap.own [.buffer-size] u64} gpu.global)} :)
+                ({[.buffer-name] ({cap.own [.buffer-size] u64} gpu.global)} :)
                 (u64 val)
               } *)
             } *)
@@ -103,13 +103,13 @@
     } *)
   } *)
 } -> {[
-  buffer-id buffer-size grid-shape block-shape global-shape global-size
-  schedule-id candidate-index bounds-decision.
+  buffer-name buffer-size grid-shape block-shape global-shape global-size
+  schedule-name candidate-index bounds-decision.
 ]
   ({
-    [.buffer-id buffer-size]
+    [.buffer-name buffer-size]
     ({[.grid-shape block-shape global-shape global-size]} gpu.grid)
-    [.schedule-id]
+    [.schedule-name]
   } gpu.scheduling val)
 } = ([branch-input.]
   ([.branch-input] *.elim [_not-in-bounds-if-false branch-state.])
@@ -118,31 +118,31 @@
 ))
 
 (def program sum-readable-pair-kernel : {[
-  destination-id destination-size source-id source-size
+  destination-buffer-name destination-size source-buffer-name source-size
   grid-shape block-shape global-shape global-size
-  destination-schedule-id source-schedule-id.
+  destination-schedule-name source-schedule-name.
 ]
   ({
     ({
       ({[.destination-size] u64} :)
       ({
-        ({[.destination-id]
+        ({[.destination-buffer-name]
           ({cap.own [.destination-size] u64} gpu.global)} :)
         ({
           ({
-            [.destination-id destination-size]
+            [.destination-buffer-name destination-size]
             ({[.grid-shape block-shape global-shape global-size]} gpu.grid)
-            [.destination-schedule-id]
+            [.destination-schedule-name]
           } gpu.scheduling val)
           ({
-            [.destination-id]
+            [.destination-buffer-name]
             ({
               [.grid-shape]
               ({
                 [.block-shape]
                 ({
                   [.global-shape]
-                  ({[.global-size destination-schedule-id]} *)
+                  ({[.global-size destination-schedule-name]} *)
                 } *)
               } *)
             } *)
@@ -153,11 +153,11 @@
     ({
       ({[.source-size] u64} :)
       ({
-        ({[.source-id] ({cap.own [.source-size] u64} gpu.global)} :)
+        ({[.source-buffer-name] ({cap.own [.source-size] u64} gpu.global)} :)
         ({
-          [.source-id source-size]
+          [.source-buffer-name source-size]
           ({[.grid-shape block-shape global-shape global-size]} gpu.grid)
-          [.source-schedule-id]
+          [.source-schedule-name]
         } gpu.scheduling val)
       } *)
     } *)
@@ -165,14 +165,14 @@
   ({({[.grid-shape block-shape global-shape global-size]} gpu.grid)}
     gpu.thread val)
 } -> {[
-  destination-id destination-size source-id source-size
+  destination-buffer-name destination-size source-buffer-name source-size
   grid-shape block-shape global-shape global-size
-  destination-schedule-id source-schedule-id.
+  destination-schedule-name source-schedule-name.
 ]
   ({
-    [.destination-id destination-size]
+    [.destination-buffer-name destination-size]
     ({[.grid-shape block-shape global-shape global-size]} gpu.grid)
-    [.destination-schedule-id]
+    [.destination-schedule-name]
   } gpu.scheduling val)
 } = ([kernel-arguments thread.]
   ([.kernel-arguments]
@@ -189,7 +189,7 @@
     [destination-scheduling destination-context.])
   ([.destination-context]
     *.elim
-    [destination-id grid-context.])
+    [destination-buffer-name grid-context.])
   ([.grid-context] *.elim [grid-shape block-context.])
   ([.block-context] *.elim [block-shape global-shape-context.])
   ([.global-shape-context]
@@ -197,7 +197,7 @@
     [global-shape global-size-and-schedule.])
   ([.global-size-and-schedule]
     *.elim
-    [global-size destination-schedule-id.])
+    [global-size destination-schedule-name.])
   ([.source-arguments] *.elim [source-length source-tail.])
   ([.source-tail] *.elim [source-buffer source-scheduling.])
 
@@ -302,12 +302,12 @@
     *.intro
     [destination-branch-state.])
 
-  ({[.destination-id destination-size-name grid-shape block-shape global-shape
-      global-size destination-schedule-id candidate-index bounds-decision]}
+  ({[.destination-buffer-name destination-size-name grid-shape block-shape global-shape
+      global-size destination-schedule-name candidate-index bounds-decision]}
     name.write-readable-pair-sum-in-bounds-branch
     [destination-true-branch.])
-  ({[.destination-id destination-size-name grid-shape block-shape global-shape
-      global-size destination-schedule-id candidate-index bounds-decision]}
+  ({[.destination-buffer-name destination-size-name grid-shape block-shape global-shape
+      global-size destination-schedule-name candidate-index bounds-decision]}
     name.skip-readable-pair-sum-out-of-bounds-branch
     [destination-false-branch.])
   ({[.destination-bounds-true destination-true-branch
@@ -329,11 +329,11 @@
     [destination-length named-destination-buffer.])
   ([.named-destination-buffer]
     :.ty
-    [destination-buffer destination-id.])
+    [destination-buffer destination-buffer-name.])
   ([.source-input] mem.cast.u64 [source-length named-source-buffer.])
   ([.named-source-buffer]
     :.ty
-    [source-buffer source-id.])
+    [source-buffer source-buffer-name.])
 
   ([.grid-x-value] u64.name [grid-x.])
   ([.block-x-value] u64.name [block-x.])
@@ -357,9 +357,9 @@
     [fits-decision fits-if-true.])
   ([.fits-decision] assert [fits-is-true.])
   ({[.fits-is-true fits-if-true]} ax-mp [fits.])
-  ({[.destination-id grid-shape block-shape global-shape fits]}
+  ({[.destination-buffer-name grid-shape block-shape global-shape fits]}
       gpu.scheduling.own-each
-    [destination-schedule-id destination-scheduling.])
+    [destination-schedule-name destination-scheduling.])
 
   ([.source-length]
     u64.copies2
@@ -376,13 +376,13 @@
   ({[.source-has-pair source-has-pair-if-true]}
     assert-then
     [_source-pair-bounds.])
-  ({[.source-id source-size grid-shape block-shape global-shape global-size-name]}
+  ({[.source-buffer-name source-size grid-shape block-shape global-shape global-size-name]}
     gpu.scheduling.read-all
-    [source-schedule-id source-scheduling.])
+    [source-schedule-name source-scheduling.])
   ({[.source-buffer source-scheduling]} *.intro [source-tail.])
   ({[.source-length-for-kernel source-tail]} *.intro [source-arguments.])
 
-  ({[.global-size-name destination-schedule-id]}
+  ({[.global-size-name destination-schedule-name]}
     *.intro
     [global-size-and-destination-schedule.])
   ({[.global-shape global-size-and-destination-schedule]}
@@ -390,7 +390,7 @@
     [global-shape-context.])
   ({[.block-shape global-shape-context]} *.intro [block-context.])
   ({[.grid-shape block-context]} *.intro [grid-context.])
-  ({[.destination-id grid-context]} *.intro [destination-context.])
+  ({[.destination-buffer-name grid-context]} *.intro [destination-context.])
   ({[.destination-scheduling destination-context]}
     *.intro
     [destination-schedule-and-context.])
@@ -404,8 +404,8 @@
     *.intro
     [kernel-arguments.])
 
-  ({[.destination-id destination-size source-id source-size grid-shape block-shape
-      global-shape global-size-name destination-schedule-id source-schedule-id]}
+  ({[.destination-buffer-name destination-size source-buffer-name source-size grid-shape block-shape
+      global-shape global-size-name destination-schedule-name source-schedule-name]}
     name.sum-readable-pair-kernel
     [kernel.])
   ({[.grid kernel-arguments kernel]}

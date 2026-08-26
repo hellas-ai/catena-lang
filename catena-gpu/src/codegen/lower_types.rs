@@ -70,8 +70,10 @@ fn lower_runtime_type(ty: &Tree<(), Operation>) -> Result<CType, LowerTypeError>
             Ok(CType::U64Ptr)
         }
         ("gpu.thread", [_grid]) => Ok(CType::Thread),
-        ("gpu.block", [_grid, _block_id]) => Ok(CType::Block),
-        ("gpu.scheduling", [_buffer_id, _buffer_size, _grid, _schedule]) => Ok(CType::Scheduling),
+        ("gpu.block", [_grid, _block_name]) => Ok(CType::Block),
+        ("gpu.scheduling", [_buffer_name, _buffer_size, _grid, _schedule_name]) => {
+            Ok(CType::Scheduling)
+        }
         ("ix", [_shape]) => Ok(CType::U64),
         ("val", [inner]) => lower_runtime_type(inner),
         _ => Err(LowerTypeError::NoRuntimeRepresentation(ty.clone())),

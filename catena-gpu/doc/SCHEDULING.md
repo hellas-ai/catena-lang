@@ -15,6 +15,11 @@ A scheduling is an opaque runtime value. Schedules are ordinary kernel arguments
 
 The types connect each triple. If `b` names a global buffer of length `n`, its schedule is indexed by the same `b` and `n`. A schedule or bounded index for one buffer therefore cannot be used with another buffer.
 
+Names in these types are static identities, not runtime objects. For example,
+`destination-buffer-name` names `destination-buffer`, while
+`destination-schedule-name` names `destination-scheduling`. The same convention
+is used for source buffers, threads, and blocks.
+
 A race-free condition is: for each cell, either only one thread owns it or some threads can read it.
 
 ## What sort of proofs do we want? Safety is not functional correctness

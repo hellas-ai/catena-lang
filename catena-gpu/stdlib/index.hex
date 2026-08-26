@@ -1,0 +1,26 @@
+# Shapes describe coordinate bounds and preserve their logical rank.
+(theory type nat {
+  (arr shape.1d : 1 -> 1)
+  (arr shape.2d : 2 -> 1)
+  (arr shape.3d : 3 -> 1)
+  (arr ix : 1 -> 1)
+})
+
+(theory program type {
+  # Return the row-major linear offset of an index, independently of rank.
+  (arr ix.to-u64 : {[index-shape.]
+    ([.index-shape] ix val)
+  } -> {[index-shape.]
+    ([.index-shape] ix val)
+    (u64 val)
+  })
+
+  # Refine a scalar into a bounded one-dimensional index.
+  (arr u64.to-ix : {[index bound.]
+    ({[.index] u64} :)
+    ({[.bound] u64} :)
+    ([.index bound] u64.lt |-)
+  } -> {[index bound.]
+    ({[.index] ({({[.bound]} shape.1d)} ix)} :)
+  })
+})

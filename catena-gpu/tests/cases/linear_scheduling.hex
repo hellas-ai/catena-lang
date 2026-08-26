@@ -1,0 +1,233 @@
+# Generic one-dimensional linear scheduling case.
+
+(def program write-in-bounds-cell-branch : {[
+  buffer-id buffer-size grid-shape block-shape global-shape global-size
+  schedule-id candidate-index bounds-decision.
+]
+  ({[.bounds-decision] bool.t} = [bounds-true.])
+  ({[.bounds-decision] bool.f} = [bounds-false.])
+  ([.candidate-index buffer-size] u64.lt [is-in-bounds.])
+  ({
+    ([.bounds-true is-in-bounds] ==> |-)
+    ({
+      ({
+        [.buffer-id buffer-size]
+        ({[.grid-shape block-shape global-shape global-size]} gpu.grid)
+        [.schedule-id]
+      } gpu.scheduling)
+      ({
+        ({[.buffer-size] u64} :)
+        ({
+          ({[.candidate-index] u64} :)
+          ({
+            ({[.bounds-decision] bool} :)
+            ({
+              ({({[.grid-shape block-shape global-shape global-size]} gpu.grid)}
+                gpu.thread val)
+              ({
+                ({cap.own [.buffer-id buffer-size] u64} gpu.global val)
+                (u64 val)
+              } *)
+            } *)
+          } *)
+        } *)
+      } *)
+    } *)
+  } *)
+} -> {[
+  buffer-id buffer-size grid-shape block-shape global-shape global-size
+  schedule-id candidate-index bounds-decision.
+]
+  ({
+    [.buffer-id buffer-size]
+    ({[.grid-shape block-shape global-shape global-size]} gpu.grid)
+    [.schedule-id]
+  } gpu.scheduling)
+} = ([branch-input.]
+  ([.branch-input] *.elim [in-bounds-if-true branch-state.])
+  ([.branch-state] *.elim [scheduling length-and-tail.])
+  ([.length-and-tail] *.elim [length candidate-and-tail.])
+  ([.candidate-and-tail] *.elim [candidate bounds-and-tail.])
+  ([.bounds-and-tail] *.elim [in-bounds thread-and-tail.])
+  ([.thread-and-tail] *.elim [thread buffer-and-value.])
+  ([.buffer-and-value] *.elim [buffer value.])
+  ({[.in-bounds in-bounds-if-true]} assert-then [is-in-bounds.])
+  ({[.candidate length is-in-bounds]} u64.to-ix [named-cell.])
+  ([.named-cell] :.forget [cell.])
+  ({[.scheduling thread cell]}
+    gpu.scheduling.can-own
+    [scheduling-after-decision thread-after-decision cell-after-decision
+      allowed owns-if-allowed _not-owns-if-denied.])
+  ({[.allowed owns-if-allowed]} assert-then [owns-cell.])
+  ([.owns-cell] gpu.permissions.grant-own [ownership.])
+  ({[.thread-after-decision buffer cell-after-decision value ownership]}
+    gpu.global.write
+    [ownership-after-write.])
+  ([.ownership-after-write] gpu.global.own.forget)
+  [.scheduling-after-decision]
+))
+
+(def program skip-out-of-bounds-thread-branch : {[
+  buffer-id buffer-size grid-shape block-shape global-shape global-size
+  schedule-id candidate-index bounds-decision.
+]
+  ({[.bounds-decision] bool.t} = [bounds-true.])
+  ({[.bounds-decision] bool.f} = [bounds-false.])
+  ([.candidate-index buffer-size] u64.lt [is-in-bounds.])
+  ({
+    ([.is-in-bounds] {[.bounds-false] not} ==> |-)
+    ({
+      ({
+        [.buffer-id buffer-size]
+        ({[.grid-shape block-shape global-shape global-size]} gpu.grid)
+        [.schedule-id]
+      } gpu.scheduling)
+      ({
+        ({[.buffer-size] u64} :)
+        ({
+          ({[.candidate-index] u64} :)
+          ({
+            ({[.bounds-decision] bool} :)
+            ({
+              ({({[.grid-shape block-shape global-shape global-size]} gpu.grid)}
+                gpu.thread val)
+              ({
+                ({cap.own [.buffer-id buffer-size] u64} gpu.global val)
+                (u64 val)
+              } *)
+            } *)
+          } *)
+        } *)
+      } *)
+    } *)
+  } *)
+} -> {[
+  buffer-id buffer-size grid-shape block-shape global-shape global-size
+  schedule-id candidate-index bounds-decision.
+]
+  ({
+    [.buffer-id buffer-size]
+    ({[.grid-shape block-shape global-shape global-size]} gpu.grid)
+    [.schedule-id]
+  } gpu.scheduling)
+} = ([branch-input.]
+  ([.branch-input] *.elim [_not-in-bounds-if-false branch-state.])
+  ([.branch-state] *.elim [scheduling _unused-thread-state.])
+  [.scheduling]
+))
+
+
+(def program write-if-owned-cell-kernel : {[
+  buffer-id buffer-size grid-shape block-shape global-shape global-size
+  schedule-id.
+]
+  ({[.buffer-size] u64} :)
+  [.buffer-id]
+  [.grid-shape]
+  [.block-shape]
+  [.global-shape]
+  [.global-size]
+  [.schedule-id]
+  ({cap.own [.buffer-id buffer-size] u64} gpu.global val)
+  (u64 val)
+  ({({[.grid-shape block-shape global-shape global-size]} gpu.grid)}
+    gpu.thread val)
+  ({
+    [.buffer-id buffer-size]
+    ({[.grid-shape block-shape global-shape global-size]} gpu.grid)
+    [.schedule-id]
+  } gpu.scheduling)
+} -> {[
+  buffer-id buffer-size grid-shape block-shape global-shape global-size
+  schedule-id.
+]
+  ({
+    [.buffer-id buffer-size]
+    ({[.grid-shape block-shape global-shape global-size]} gpu.grid)
+    [.schedule-id]
+  } gpu.scheduling)
+} = ([length buffer-id grid-shape block-shape global-shape global-size
+  schedule-id buffer value thread scheduling.]
+  ([.length] u64.copies2 [length-for-name length-for-check-and-branch.])
+  ([.length-for-name] :.param [buffer-size-name.])
+  ([.length-for-check-and-branch]
+    u64.copies2
+    [length-for-check length-for-branch.])
+  ([.thread] gpu.thread.in-grid.index [thread-for-branch grid-index.])
+  ([.grid-index] ix.to-u64 [_grid-index-after-conversion candidate-cell.])
+  ([.candidate-cell] u64.name [named-candidate.])
+  ([.named-candidate]
+    u64.copies2
+    [candidate-for-check candidate-for-branch.])
+  ({[.candidate-for-check length-for-check]}
+    u64.lt
+    [in-bounds bounds-if-true not-bounds-if-false.])
+  ([.in-bounds] bool.copies2 [bounds-for-ifc bounds-for-branch.])
+  ([.bounds-for-ifc] :.forget [bounds-value.])
+  ([.candidate-for-branch] :.ty [candidate-for-state candidate-index-name.])
+  ([.bounds-for-branch] :.ty [bounds-for-state bounds-decision-name.])
+
+  ({[.buffer value]} *.intro [buffer-and-value.])
+  ({[.thread-for-branch buffer-and-value]} *.intro [thread-and-tail.])
+  ({[.bounds-for-state thread-and-tail]} *.intro [bounds-and-tail.])
+  ({[.candidate-for-state bounds-and-tail]} *.intro [candidate-and-tail.])
+  ({[.length-for-branch candidate-and-tail]} *.intro [length-and-tail.])
+  ({[.scheduling length-and-tail]} *.intro [branch-state.])
+
+  ({[.buffer-id buffer-size-name grid-shape block-shape global-shape
+      global-size schedule-id candidate-index-name bounds-decision-name]}
+    name.write-in-bounds-cell-branch
+    [true-branch.])
+  ({[.buffer-id buffer-size-name grid-shape block-shape global-shape
+      global-size schedule-id candidate-index-name bounds-decision-name]}
+    name.skip-out-of-bounds-thread-branch
+    [false-branch.])
+  ({[.bounds-if-true true-branch not-bounds-if-false false-branch
+      bounds-value branch-state]}
+    bool.ifc
+    [scheduling-after-bounds.])
+  [.scheduling-after-bounds]
+))
+
+(def program fill-linear-scheduled :
+  {(cap.own mem) (u64 val) (u64 val)}
+  ->
+  (cap.own mem)
+= ([input grid-x-value block-x-value.]
+  ([.input] mem.cast.u64 [length named-buffer.])
+  ([.named-buffer] :.ty [named-buffer-after-type buffer-id.])
+  ([.named-buffer-after-type] :.forget [buffer.])
+  ([.grid-x-value] u64.name [grid-x.])
+  ([.block-x-value] u64.name [block-x.])
+  ({[.grid-x block-x]}
+    gpu.grid.1d.intro
+    [grid-shape block-shape global-shape grid global-size.])
+  ([.length] u64.copies2 [length-for-launch-and-kernel length-for-check-and-name.])
+  ([.length-for-launch-and-kernel]
+    u64.copies2
+    [length-for-launch-call length-for-kernel.])
+  ([.length-for-check-and-name]
+    u64.copies2
+    [length-for-check length-for-name.])
+  ([.length-for-name] :.param [buffer-size.])
+  ([.global-size] u64.copies2 [size-for-check size-for-name.])
+  ([.size-for-name] :.param [global-size-name.])
+  ({[.length-for-check size-for-check]}
+    u64.lte
+    [fits-decision fits-if-true.])
+  ([.fits-decision] assert [fits-is-true.])
+  ({[.fits-is-true fits-if-true]} ax-mp [fits.])
+  ({[.buffer-id grid-shape block-shape global-shape fits]}
+    gpu.scheduling.linear
+    [schedule-id scheduling.])
+  u64.one [value.]
+  ({[.buffer-id buffer-size grid-shape block-shape global-shape
+      global-size-name schedule-id]}
+    name.write-if-owned-cell-kernel
+    [kernel.])
+  ({[.length-for-launch-call grid buffer value buffer-id grid-shape block-shape
+      global-shape global-size-name schedule-id scheduling kernel]}
+    gpu.launch
+    [result.])
+  ({[.length-for-launch-call result]} gpu.global.to-mem)
+))

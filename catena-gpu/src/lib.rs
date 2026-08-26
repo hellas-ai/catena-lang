@@ -1,10 +1,9 @@
 //! A minimal Catena-to-GPU compiler and runtime.
 //!
 //! The included language surface is limited to name elaboration, products,
-//! scalar values and scalar operations.
-//! Closures/CMC, explicit GPU kernels, matrices, buffers, materialization,
-//! reduction and source closures are not part of [`stdlib`]. The minimal
-//! `bool.ifc` primitive accepts explicit environments and direct function names.
+//! scalar operations, and a small typed model of grids, scheduling, permissions,
+//! and global buffers. Closures/CMC, matrices, materialization, reduction, shared
+//! memory, and closure conversion are not part of [`stdlib`].
 
 pub mod check;
 pub mod codegen;

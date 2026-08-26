@@ -27,7 +27,7 @@ pub fn render_modules(
     dialect: GpuDialect,
 ) -> Result<String, GpuRenderError> {
     let mut output = format!(
-        "#include <{}>\n#include <stdint.h>\n#include <math.h>\n\n",
+        "#include <{}>\n#include <stdint.h>\n#include <math.h>\n\ntypedef struct {{ uint32_t x; uint32_t y; uint32_t z; }} catena_dim3_t;\ntypedef struct {{ catena_dim3_t grid_dim; catena_dim3_t block_dim; }} catena_grid_t;\n\n",
         dialect.runtime_header()
     );
     for module in modules.values() {
@@ -68,6 +68,7 @@ fn c_type(ty: &CType) -> &'static str {
         CType::U32 => "uint32_t",
         CType::U64 => "uint64_t",
         CType::F32 => "float",
+        CType::Grid => "catena_grid_t",
     }
 }
 
@@ -122,7 +123,10 @@ fn render_assignment(output: &mut String, assignment: &GpuAssign) -> Result<(), 
             ));
             Ok(())
         }
-        ":.ty" | ":.forget" => identity(output, assignment),
+        ":.ty" | ":.forget" | "u64.name" => identity(output, assignment),
+        "gpu.grid.1d.intro" => render_grid_intro(output, assignment, 1),
+        "gpu.grid.2d.intro" => render_grid_intro(output, assignment, 2),
+        "gpu.grid.3d.intro" => render_grid_intro(output, assignment, 3),
         "bool.ifc" => render_ifc(output, assignment),
         "bool.t" => unary_output(output, assignment, "1", 0),
         "bool.f" | "u64.zero" | "u32.zero" => unary_output(output, assignment, "0", 0),
@@ -157,6 +161,33 @@ fn render_assignment(output: &mut String, assignment: &GpuAssign) -> Result<(), 
         "f32.fma" => call3(output, assignment, "fmaf"),
         _ => Err(GpuRenderError::UnsupportedOp(assignment.op.clone())),
     }
+}
+
+fn render_grid_intro(
+    output: &mut String,
+    a: &GpuAssign,
+    dimensions: usize,
+) -> Result<(), GpuRenderError> {
+    let expected = dimensions * 2;
+    if a.inputs.len() != expected || a.outputs.len() != 2 {
+        return Err(arity(a, expected));
+    }
+    let mut grid = ["1".to_string(), "1".to_string(), "1".to_string()];
+    let mut block = ["1".to_string(), "1".to_string(), "1".to_string()];
+    for axis in 0..dimensions {
+        grid[axis] = input(a, axis)?;
+        block[axis] = input(a, dimensions + axis)?;
+    }
+    output.push_str(&format!(
+        "    {} = {{ {{ (uint32_t){}, (uint32_t){}, (uint32_t){} }}, {{ (uint32_t){}, (uint32_t){}, (uint32_t){} }} }};\n",
+        a.outputs[0].name,
+        grid[0], grid[1], grid[2], block[0], block[1], block[2],
+    ));
+    output.push_str(&format!(
+        "    {} = ({} * {}) * ({} * {}) * ({} * {});\n",
+        a.outputs[1].name, grid[0], block[0], grid[1], block[1], grid[2], block[2],
+    ));
+    Ok(())
 }
 
 fn identity(output: &mut String, a: &GpuAssign) -> Result<(), GpuRenderError> {
@@ -318,5 +349,52 @@ fn arity(a: &GpuAssign, expected: usize) -> GpuRenderError {
         op: a.op.clone(),
         expected,
         outputs: a.outputs.len(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use open_hypergraphs::lax::NodeId;
+
+    use super::*;
+    use crate::codegen::lower_types::LoweredType;
+
+    #[test]
+    fn lower_rank_grids_are_padded_only_in_generated_code() {
+        let one_d = grid_assignment("gpu.grid.1d.intro", &["gx", "bx"]);
+        let mut generated = String::new();
+        render_grid_intro(&mut generated, &one_d, 1).unwrap();
+        assert!(generated.contains("{ (uint32_t)gx, (uint32_t)1, (uint32_t)1 }"));
+        assert!(generated.contains("{ (uint32_t)bx, (uint32_t)1, (uint32_t)1 }"));
+
+        let two_d = grid_assignment("gpu.grid.2d.intro", &["gx", "gy", "bx", "by"]);
+        generated.clear();
+        render_grid_intro(&mut generated, &two_d, 2).unwrap();
+        assert!(generated.contains("{ (uint32_t)gx, (uint32_t)gy, (uint32_t)1 }"));
+        assert!(generated.contains("{ (uint32_t)bx, (uint32_t)by, (uint32_t)1 }"));
+    }
+
+    fn grid_assignment(operation: &str, inputs: &[&str]) -> GpuAssign {
+        GpuAssign {
+            op: operation.parse().unwrap(),
+            call_symbol: None,
+            inputs: inputs
+                .iter()
+                .enumerate()
+                .map(|(node, name)| GpuValue::Var(var(node, name, CType::U64)))
+                .collect(),
+            outputs: vec![
+                var(inputs.len(), "grid", CType::Grid),
+                var(inputs.len() + 1, "size", CType::U64),
+            ],
+        }
+    }
+
+    fn var(node: usize, name: &str, ty: CType) -> GpuVar {
+        GpuVar {
+            node: NodeId(node),
+            name: name.into(),
+            lowered: LoweredType::Runtime(ty),
+        }
     }
 }

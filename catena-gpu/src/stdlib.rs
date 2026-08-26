@@ -18,8 +18,16 @@ macro_rules! stdlib_files {
 }
 
 /// The complete, deliberately small standard library used by `catena-gpu`.
-pub const FILES: &[StdlibFile] =
-    stdlib_files!["value.hex", "data.hex", "fn.hex", "product.hex", "math.hex",];
+pub const FILES: &[StdlibFile] = stdlib_files![
+    "value.hex",
+    "data.hex",
+    "buf.hex",
+    "fn.hex",
+    "index.hex",
+    "product.hex",
+    "gpu.hex",
+    "math.hex",
+];
 
 pub fn sources() -> impl ExactSizeIterator<Item = &'static str> {
     FILES.iter().map(|file| file.source)
@@ -35,10 +43,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn excluded_features_are_not_embedded() {
+    fn complex_features_are_not_embedded() {
         let filenames = FILES.iter().map(|file| file.filename).collect::<Vec<_>>();
         assert!(!filenames.iter().any(|name| name.contains("cmc")));
-        assert!(!filenames.iter().any(|name| name.contains("gpu")));
         assert!(!filenames.iter().any(|name| name.contains("matrix")));
 
         let source = sources().collect::<String>();

@@ -14,6 +14,7 @@ pub enum CType {
     U32,
     U64,
     F32,
+    Grid,
 }
 
 #[derive(Debug, Error)]
@@ -57,6 +58,7 @@ fn lower_runtime_type(ty: &Tree<(), Operation>) -> Result<CType, LowerTypeError>
         ("u32", []) => Ok(CType::U32),
         ("u64", []) => Ok(CType::U64),
         ("f32", []) => Ok(CType::F32),
+        ("gpu.grid", [_grid_shape, _block_shape, _global_shape, _global_size]) => Ok(CType::Grid),
         ("val", [inner]) => lower_runtime_type(inner),
         _ => Err(LowerTypeError::NoRuntimeRepresentation(ty.clone())),
     }

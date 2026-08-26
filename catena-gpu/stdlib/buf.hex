@@ -1,0 +1,24 @@
+(theory type nat {
+  (arr cap.own : 0 -> 1)
+  (arr cap.ref : 0 -> 1)
+  (arr mem : 1 -> 1)
+})
+
+(theory program type {
+  # Interpret memory as a u64 global buffer. The memory value's static name is
+  # retained inside the buffer handle, independently of any GPU thread.
+  (arr mem.cast.u64 :
+    ([allocation-mode buffer-size buffer-id.allocation-mode] mem)
+  -> {[allocation-mode buffer-size buffer-id.]
+    ({[.buffer-size] u64} :)
+    ({[.buffer-id]
+      ({[.allocation-mode buffer-id buffer-size] u64}
+        gpu.global)} :)
+  })
+
+  # Forget the typed global view and return the same allocation.
+  (arr gpu.global.to-mem : {[allocation-mode buffer-id buffer-size.]
+    ({[.buffer-size] u64} :)
+    ({[.allocation-mode buffer-id buffer-size] u64} gpu.global val)
+  } -> ([allocation-mode buffer-id buffer-size.allocation-mode] mem))
+})

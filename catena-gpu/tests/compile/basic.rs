@@ -25,4 +25,10 @@ fn minimal_stdlib_elaborates_names_and_generates_gpu_modules() {
     ));
     assert!(generated.contains(" = x0 + x1;"));
     assert!(generated.contains("catena_grid_t"));
+    assert!(generated.contains("template<typename T"));
+    assert!(generated.contains("void program_gpu_global_matrix_read("));
+    let kernel = generated
+        .find("void program_gpu_global_matrix_matmul_kernel(")
+        .unwrap();
+    assert!(generated[kernel.saturating_sub(100)..kernel].contains("template<"));
 }

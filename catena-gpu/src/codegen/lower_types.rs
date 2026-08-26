@@ -16,7 +16,9 @@ pub enum CType {
     F32,
     Grid,
     MemOwn,
-    U64Ptr,
+    Ptr(Box<CType>),
+    Generic(usize),
+    Ix,
     Thread,
     Block,
     Scheduling,
@@ -57,7 +59,10 @@ pub fn lower_type(ty: &Tree<(), Operation>) -> Result<LoweredType, LowerTypeErro
 
 fn lower_runtime_type(ty: &Tree<(), Operation>) -> Result<CType, LowerTypeError> {
     let Tree::Node(operation, _, children) = ty else {
-        return Err(LowerTypeError::NoRuntimeRepresentation(ty.clone()));
+        let Tree::Leaf(index, ()) = ty else {
+            return Err(LowerTypeError::NoRuntimeRepresentation(ty.clone()));
+        };
+        return Ok(CType::Generic(*index));
     };
     match (operation.as_str(), children.as_slice()) {
         ("bool", []) => Ok(CType::Bool),
@@ -66,20 +71,16 @@ fn lower_runtime_type(ty: &Tree<(), Operation>) -> Result<CType, LowerTypeError>
         ("f32", []) => Ok(CType::F32),
         ("gpu.grid", [_grid_shape, _block_shape, _global_shape, _global_size]) => Ok(CType::Grid),
         ("mem", [_capability]) => Ok(CType::MemOwn),
-        ("gpu.global", [_capability, _buffer_size, element]) if is_nullary(element, "u64") => {
-            Ok(CType::U64Ptr)
+        ("gpu.global", [_capability, _buffer_size, element]) => {
+            Ok(CType::Ptr(Box::new(lower_runtime_type(element)?)))
         }
         ("gpu.thread", [_grid]) => Ok(CType::Thread),
         ("gpu.block", [_grid, _block_name]) => Ok(CType::Block),
         ("gpu.scheduling", [_buffer_name, _buffer_size, _grid, _schedule_name]) => {
             Ok(CType::Scheduling)
         }
-        ("ix", [_shape]) => Ok(CType::U64),
+        ("ix", [_shape]) => Ok(CType::Ix),
         ("val", [inner]) => lower_runtime_type(inner),
         _ => Err(LowerTypeError::NoRuntimeRepresentation(ty.clone())),
     }
-}
-
-fn is_nullary(tree: &Tree<(), Operation>, name: &str) -> bool {
-    matches!(tree, Tree::Node(operation, _, children) if operation.as_str() == name && children.is_empty())
 }

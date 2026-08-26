@@ -70,11 +70,47 @@ fn signature(function: &GpuFunction, placement: Placement) -> String {
         Placement::HostOnly => "__host__",
         Placement::HostAndDevice => "__host__ __device__",
     };
+    let generic_types = generic_types(function);
+    let template = if generic_types.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "template<{}>\n",
+            generic_types
+                .iter()
+                .map(|index| format!("typename T{index}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    };
+    let linkage = if generic_types.is_empty() {
+        "extern \"C\" "
+    } else {
+        ""
+    };
     format!(
-        "extern \"C\" {qualifiers} void {}({})",
+        "{template}{linkage}{qualifiers} void {}({})",
         function.name,
         params.join(", ")
     )
+}
+
+fn generic_types(function: &GpuFunction) -> BTreeSet<usize> {
+    let mut output = BTreeSet::new();
+    for var in function.sources.iter().chain(&function.targets) {
+        collect_generic_types(runtime_type(var).unwrap(), &mut output);
+    }
+    output
+}
+
+fn collect_generic_types(ty: &CType, output: &mut BTreeSet<usize>) {
+    match ty {
+        CType::Generic(index) => {
+            output.insert(*index);
+        }
+        CType::Ptr(element) => collect_generic_types(element, output),
+        _ => {}
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -99,18 +135,20 @@ fn param(var: &GpuVar) -> String {
     format!("{} {}", c_type(runtime_type(var).unwrap()), var.name)
 }
 
-pub(super) fn c_type(ty: &CType) -> &'static str {
+pub(super) fn c_type(ty: &CType) -> String {
     match ty {
-        CType::Bool => "uint8_t",
-        CType::U32 => "uint32_t",
-        CType::U64 => "uint64_t",
-        CType::F32 => "float",
-        CType::Grid => "catena_grid_t",
-        CType::MemOwn => "catena_mem_own_t",
-        CType::U64Ptr => "uint64_t *",
-        CType::Thread => "catena_thread_t",
-        CType::Block => "catena_block_t",
-        CType::Scheduling => "catena_scheduling_t",
+        CType::Bool => "uint8_t".into(),
+        CType::U32 => "uint32_t".into(),
+        CType::U64 => "uint64_t".into(),
+        CType::F32 => "float".into(),
+        CType::Grid => "catena_grid_t".into(),
+        CType::MemOwn => "catena_mem_own_t".into(),
+        CType::Ptr(element) => format!("{} *", c_type(element)),
+        CType::Generic(index) => format!("T{index}"),
+        CType::Ix => "catena_ix_t".into(),
+        CType::Thread => "catena_thread_t".into(),
+        CType::Block => "catena_block_t".into(),
+        CType::Scheduling => "catena_scheduling_t".into(),
     }
 }
 
@@ -138,12 +176,13 @@ fn render_prelude(dialect: GpuDialect) -> String {
 typedef struct {{ uint32_t x; uint32_t y; uint32_t z; }} catena_dim3_t;
 typedef struct {{ catena_dim3_t grid_dim; catena_dim3_t block_dim; }} catena_grid_t;
 typedef struct {{ void *data; uint64_t len; }} catena_mem_own_t;
+typedef struct {{ uint64_t first; uint64_t second; uint64_t third; uint64_t linear; }} catena_ix_t;
 typedef struct {{
-    uint64_t global_linear_id;
-    uint64_t in_block_linear_id;
-    uint64_t block_linear_id;
+    catena_ix_t global_index;
+    catena_ix_t in_block_index;
+    catena_ix_t block_index;
 }} catena_thread_t;
-typedef struct {{ uint64_t linear_id; }} catena_block_t;
+typedef struct {{ catena_ix_t index; }} catena_block_t;
 typedef enum {{
     CATENA_CELL_INACCESSIBLE = 0,
     CATENA_CELL_READABLE = 1,
@@ -152,21 +191,28 @@ typedef enum {{
 typedef enum {{
     CATENA_SCHEDULING_OWN_EACH = 1,
     CATENA_SCHEDULING_READ_ALL = 2,
+    CATENA_SCHEDULING_OWN_MATRIX_2D = 3,
 }} catena_scheduling_kind_t;
-typedef struct {{ catena_scheduling_kind_t kind; }} catena_scheduling_t;
+typedef struct {{ catena_scheduling_kind_t kind; uint64_t matrix_columns; }} catena_scheduling_t;
 
 __host__ __device__ static inline catena_cell_access_t catena_scheduling_resolve(
     catena_scheduling_t scheduling,
     catena_thread_t thread,
-    uint64_t cell
+    catena_ix_t cell
 ) {{
     switch (scheduling.kind) {{
     case CATENA_SCHEDULING_OWN_EACH:
-        return thread.global_linear_id == cell
+        return thread.global_index.linear == cell.linear
             ? CATENA_CELL_OWNED
             : CATENA_CELL_INACCESSIBLE;
     case CATENA_SCHEDULING_READ_ALL:
         return CATENA_CELL_READABLE;
+    case CATENA_SCHEDULING_OWN_MATRIX_2D:
+        if (scheduling.matrix_columns == 0) return CATENA_CELL_INACCESSIBLE;
+        return thread.global_index.first == cell.linear % scheduling.matrix_columns
+            && thread.global_index.second == cell.linear / scheduling.matrix_columns
+            ? CATENA_CELL_OWNED
+            : CATENA_CELL_INACCESSIBLE;
     default:
         return CATENA_CELL_INACCESSIBLE;
     }}
@@ -252,8 +298,13 @@ fn render_assignment(
             Ok(())
         }
         ":.param" => Ok(()),
-        ":.ty" | ":.forget" | "u64.name" | "gpu.thread.name" => identity(output, assignment),
-        "u64.copies2" | "bool.copies2" => copy_two(output, assignment),
+        ":.ty"
+        | ":.forget"
+        | "bool.name"
+        | "u64.name"
+        | "gpu.thread.name"
+        | "gpu.global.element-type" => identity(output, assignment),
+        "u64.copies2" | "bool.copies2" | "ix.copies2" => copy_two(output, assignment),
         "gpu.grid.1d.intro" => render_grid_intro(output, assignment, 1),
         "gpu.grid.2d.intro" => render_grid_intro(output, assignment, 2),
         "gpu.grid.3d.intro" => render_grid_intro(output, assignment, 3),
@@ -261,16 +312,18 @@ fn render_assignment(
         "fold" => ops::fold::render(output, assignment),
         "bool.ifc" => render_ifc(output, assignment),
         "bool.t" => unary_output(output, assignment, "1", 0),
-        "bool.f" | "u64.zero" | "u32.zero" => unary_output(output, assignment, "0", 0),
+        "bool.f" | "u64.zero" | "u32.zero" | "scalar.zero" => {
+            unary_output(output, assignment, "0", 0)
+        }
         "u64.one" | "u32.one" | "f32.one" => unary_output(output, assignment, "1", 0),
         "bool.not" => unary(output, assignment, "!"),
         "u32.not" => unary(output, assignment, "~"),
         "f32.neg" => unary(output, assignment, "-"),
         "bool.and" => binary(output, assignment, "&&"),
         "bool.or" => binary(output, assignment, "||"),
-        "u64.add" | "u32.add" | "f32.add" => binary(output, assignment, "+"),
+        "u64.add" | "u32.add" | "f32.add" | "scalar.add" => binary(output, assignment, "+"),
         "u64.sub" | "u32.sub" | "f32.sub" => binary(output, assignment, "-"),
-        "u64.mul" | "u32.mul" | "f32.mul" => binary(output, assignment, "*"),
+        "u64.mul" | "u32.mul" | "f32.mul" | "scalar.mul" => binary(output, assignment, "*"),
         "u64.div" | "f32.div" => binary(output, assignment, "/"),
         "u64.rem" => binary(output, assignment, "%"),
         "u32.and" => binary(output, assignment, "&"),

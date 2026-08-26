@@ -4,15 +4,20 @@ const NAIVE_U64: &str = include_str!("matmul/naive_u64.hex");
 
 #[test]
 fn perfect_tiling_computes_naive_u64_matmul() -> anyhow::Result<()> {
-    check_naive_u64_matmul(2, 2)
+    check_naive_u64_matmul(1, 1, 2, 2)
 }
 
 #[test]
 fn predicated_tiling_computes_naive_u64_matmul() -> anyhow::Result<()> {
-    check_naive_u64_matmul(3, 2)
+    check_naive_u64_matmul(1, 1, 3, 2)
 }
 
-fn check_naive_u64_matmul(grid_x: u64, block_x: u64) -> anyhow::Result<()> {
+fn check_naive_u64_matmul(
+    grid_x: u64,
+    grid_y: u64,
+    block_x: u64,
+    block_y: u64,
+) -> anyhow::Result<()> {
     let (runtime, artifact) = runtime_with(NAIVE_U64)?;
     let c = runtime.mem_u64(&[u64::MAX; 4])?;
     let a_values = [
@@ -34,10 +39,13 @@ fn check_naive_u64_matmul(grid_x: u64, block_x: u64) -> anyhow::Result<()> {
             c.into(),
             a.into(),
             b.into(),
+            2_u64.into(),
             3_u64.into(),
             2_u64.into(),
             grid_x.into(),
+            grid_y.into(),
             block_x.into(),
+            block_y.into(),
         ],
     )?;
     let Value::MemOwn(c) = c else {

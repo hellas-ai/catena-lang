@@ -1,583 +1,3 @@
-# Naive row-major u64 matrix multiplication over global buffers.
-#
-# One thread computes one C cell. A and B use read-all schedules; C uses an
-# own-each schedule. The output row count is implicit in C's allocation size.
-
-(def program naive-matmul-write-in-bounds-branch : {[
-  buffer-name buffer-size grid-shape block-shape global-shape global-size
-  schedule-name thread-name candidate-index bounds-decision.
-]
-  ({[.bounds-decision] bool.t} = [bounds-true.])
-  ({[.bounds-decision] bool.f} = [bounds-false.])
-  ([.candidate-index buffer-size] u64.lt [is-in-bounds.])
-  ({
-    ([.bounds-true is-in-bounds] ==> |-)
-    ({
-      ({
-        [.buffer-name buffer-size]
-        ({[.grid-shape block-shape global-shape global-size]} gpu.grid)
-        [.schedule-name]
-      } gpu.scheduling val)
-      ({
-        ({[.buffer-size] u64} :)
-        ({
-          ({[.candidate-index] u64} :)
-          ({
-            ({[.bounds-decision] bool} :)
-            ({
-              ({[.thread-name]
-                ({({[.grid-shape block-shape global-shape global-size]} gpu.grid)}
-                  gpu.thread)} :)
-              ({
-                ({[.buffer-name] ({cap.own [.buffer-size] u64} gpu.global)} :)
-                (u64 val)
-              } *)
-            } *)
-          } *)
-        } *)
-      } *)
-    } *)
-  } *)
-} -> {[
-  buffer-name buffer-size grid-shape block-shape global-shape global-size
-  schedule-name thread-name candidate-index bounds-decision.
-]
-  ({
-    [.buffer-name buffer-size]
-    ({[.grid-shape block-shape global-shape global-size]} gpu.grid)
-    [.schedule-name]
-  } gpu.scheduling val)
-} = ([branch-input.]
-  ([.branch-input] *.elim [in-bounds-if-true branch-state.])
-  ([.branch-state] *.elim [scheduling length-and-tail.])
-  ([.length-and-tail] *.elim [length candidate-and-tail.])
-  ([.candidate-and-tail] *.elim [candidate bounds-and-tail.])
-  ([.bounds-and-tail] *.elim [in-bounds thread-and-tail.])
-  ([.thread-and-tail] *.elim [thread buffer-and-value.])
-  ([.buffer-and-value] *.elim [buffer value.])
-  ({[.in-bounds in-bounds-if-true]} assert-then [is-in-bounds.])
-  ({[.candidate length is-in-bounds]} u64.to-ix [named-cell.])
-  ([.named-cell] :.forget [cell.])
-  ({[.scheduling thread cell]}
-    gpu.scheduling.can-own
-    [scheduling-after-decision thread-after-decision cell-after-decision
-      allowed owns-if-allowed _not-owns-if-denied.])
-  ({[.allowed owns-if-allowed]} assert-then [owns-cell.])
-  ([.owns-cell] gpu.permissions.grant-own [ownership.])
-  ({[.thread-after-decision buffer cell-after-decision value ownership]}
-    gpu.global.write
-    [ownership-after-write.])
-  ([.ownership-after-write] gpu.global.own.forget)
-  [.scheduling-after-decision]
-))
-
-(def program naive-matmul-skip-out-of-bounds-branch : {[
-  buffer-name buffer-size grid-shape block-shape global-shape global-size
-  schedule-name thread-name candidate-index bounds-decision.
-]
-  ({[.bounds-decision] bool.t} = [bounds-true.])
-  ({[.bounds-decision] bool.f} = [bounds-false.])
-  ([.candidate-index buffer-size] u64.lt [is-in-bounds.])
-  ({
-    ([.is-in-bounds] {[.bounds-false] not} ==> |-)
-    ({
-      ({
-        [.buffer-name buffer-size]
-        ({[.grid-shape block-shape global-shape global-size]} gpu.grid)
-        [.schedule-name]
-      } gpu.scheduling val)
-      ({
-        ({[.buffer-size] u64} :)
-        ({
-          ({[.candidate-index] u64} :)
-          ({
-            ({[.bounds-decision] bool} :)
-            ({
-              ({[.thread-name]
-                ({({[.grid-shape block-shape global-shape global-size]} gpu.grid)}
-                  gpu.thread)} :)
-              ({
-                ({[.buffer-name] ({cap.own [.buffer-size] u64} gpu.global)} :)
-                (u64 val)
-              } *)
-            } *)
-          } *)
-        } *)
-      } *)
-    } *)
-  } *)
-} -> {[
-  buffer-name buffer-size grid-shape block-shape global-shape global-size
-  schedule-name thread-name candidate-index bounds-decision.
-]
-  ({
-    [.buffer-name buffer-size]
-    ({[.grid-shape block-shape global-shape global-size]} gpu.grid)
-    [.schedule-name]
-  } gpu.scheduling val)
-} = ([branch-input.]
-  ([.branch-input] *.elim [_not-in-bounds-if-false branch-state.])
-  ([.branch-state] *.elim [scheduling _unused-thread-state.])
-  [.scheduling]
-))
-
-# fold state:
-#   A schedule * (B schedule * (thread *
-#     (A buffer * (B buffer *
-#       (A length * (B length *
-#         (row * (column * (shared size * (column count * sum))))))))))
-(def program naive-matmul-dot-fold-step : {[
-  a-buffer-name a-size b-buffer-name b-size
-  grid-shape block-shape global-shape global-size
-  a-schedule-name b-schedule-name thread-name
-  row-name column-name shared-size shared-stride-name column-count.
-]
-  ({
-    ({({[.shared-size]} shape.1d)} ix val)
-    ({
-      ({
-        [.a-buffer-name a-size]
-        ({[.grid-shape block-shape global-shape global-size]} gpu.grid)
-        [.a-schedule-name]
-      } gpu.scheduling val)
-      ({
-        ({
-          [.b-buffer-name b-size]
-          ({[.grid-shape block-shape global-shape global-size]} gpu.grid)
-          [.b-schedule-name]
-        } gpu.scheduling val)
-        ({
-          ({[.thread-name]
-            ({({[.grid-shape block-shape global-shape global-size]} gpu.grid)}
-              gpu.thread)} :)
-          ({
-            ({[.a-buffer-name] ({cap.own [.a-size] u64} gpu.global)} :)
-            ({
-              ({[.b-buffer-name] ({cap.own [.b-size] u64} gpu.global)} :)
-              ({
-                ({[.a-size] u64} :)
-                ({
-                  ({[.b-size] u64} :)
-                  ({
-                    ({[.row-name] u64} :)
-                    ({
-                      ({[.column-name] u64} :)
-                      ({
-                        ({[.shared-stride-name] u64} :)
-                        ({({[.column-count] u64} :) (u64 val)} *)
-                      } *)
-                    } *)
-                  } *)
-                } *)
-              } *)
-            } *)
-          } *)
-        } *)
-      } *)
-    } *)
-  } *)
-} -> {[
-  a-buffer-name a-size b-buffer-name b-size
-  grid-shape block-shape global-shape global-size
-  a-schedule-name b-schedule-name thread-name
-  row-name column-name shared-size shared-stride-name column-count.
-]
-  ({
-    ({
-      [.a-buffer-name a-size]
-      ({[.grid-shape block-shape global-shape global-size]} gpu.grid)
-      [.a-schedule-name]
-    } gpu.scheduling val)
-    ({
-      ({
-        [.b-buffer-name b-size]
-        ({[.grid-shape block-shape global-shape global-size]} gpu.grid)
-        [.b-schedule-name]
-      } gpu.scheduling val)
-      ({
-        ({[.thread-name]
-          ({({[.grid-shape block-shape global-shape global-size]} gpu.grid)}
-            gpu.thread)} :)
-        ({
-          ({[.a-buffer-name] ({cap.own [.a-size] u64} gpu.global)} :)
-          ({
-            ({[.b-buffer-name] ({cap.own [.b-size] u64} gpu.global)} :)
-            ({
-              ({[.a-size] u64} :)
-              ({
-                ({[.b-size] u64} :)
-                ({
-                  ({[.row-name] u64} :)
-                  ({
-                    ({[.column-name] u64} :)
-                    ({
-                      ({[.shared-stride-name] u64} :)
-                      ({({[.column-count] u64} :) (u64 val)} *)
-                    } *)
-                  } *)
-                } *)
-              } *)
-            } *)
-          } *)
-        } *)
-      } *)
-    } *)
-  } *)
-} = ([fold-input.]
-  ([.fold-input] *.elim [inner-index state.])
-  ([.state] *.elim [a-scheduling b-schedule-and-tail.])
-  ([.b-schedule-and-tail] *.elim [b-scheduling thread-and-tail.])
-  ([.thread-and-tail] *.elim [thread a-buffer-and-tail.])
-  ([.a-buffer-and-tail] *.elim [a-buffer b-buffer-and-tail.])
-  ([.b-buffer-and-tail] *.elim [b-buffer a-length-and-tail.])
-  ([.a-length-and-tail] *.elim [a-length b-length-and-tail.])
-  ([.b-length-and-tail] *.elim [b-length row-and-tail.])
-  ([.row-and-tail] *.elim [row column-and-tail.])
-  ([.column-and-tail] *.elim [column shared-and-tail.])
-  ([.shared-and-tail] *.elim [shared-size-value columns-and-sum.])
-  ([.columns-and-sum] *.elim [column-count-value sum.])
-
-  ([.inner-index] ix.to-u64 [_inner-index-after inner.])
-  ([.inner] u64.name [named-inner.])
-  ([.named-inner] u64.copies2 [inner-for-a inner-for-b.])
-  ([.row] u64.copies2 [row-for-index row-for-next.])
-  ([.shared-size-value]
-    u64.copies2
-    [shared-size-for-index shared-size-for-next.])
-  ([.row-for-index] :.forget [row-index-value.])
-  ([.shared-size-for-index] :.forget [shared-size-index-value.])
-  ([.inner-for-a] :.forget [inner-a-value.])
-  ({[.row-index-value shared-size-index-value inner-a-value]}
-    matrix.matmul.left-index
-    [a-index-value.])
-  ([.a-index-value] u64.name [named-a-index.])
-  ([.named-a-index] u64.copies2 [a-index-for-check a-index-for-cell.])
-  ([.a-length]
-    u64.copies2
-    [a-length-for-next a-length-for-check-and-cell.])
-  ([.a-length-for-check-and-cell]
-    u64.copies2
-    [a-length-for-check a-length-for-cell.])
-  ({[.a-index-for-check a-length-for-check]}
-    u64.lt
-    [a-in-bounds a-bounds-true _a-bounds-false.])
-  ({[.a-in-bounds a-bounds-true]} assert-then [a-index-is-valid.])
-  ({[.a-index-for-cell a-length-for-cell a-index-is-valid]}
-    u64.to-ix
-    [named-a-cell.])
-  ([.named-a-cell] :.forget [a-cell.])
-  ({[.a-scheduling thread a-cell]}
-    gpu.scheduling.can-read
-    [a-scheduling-after-query thread-after-a-query a-cell-after-query
-      can-read-a reads-a-if-allowed _not-readable-a-if-denied.])
-  ({[.can-read-a reads-a-if-allowed]} assert-then [reads-a.])
-  ([.reads-a] gpu.permissions.grant-read [a-read-grant.])
-  ({[.a-buffer a-cell-after-query a-read-grant]}
-    gpu.global.read
-    [a-buffer-after-read a-read-grant-after-read a-value.])
-  ([.a-read-grant-after-read] gpu.global.read.forget)
-
-  ([.column] u64.copies2 [column-for-index column-for-next.])
-  ([.column-count-value]
-    u64.copies2
-    [column-count-for-index column-count-for-next.])
-  ([.inner-for-b] :.forget [inner-b-value.])
-  ([.column-count-for-index] :.forget [column-count-index-value.])
-  ([.column-for-index] :.forget [column-index-value.])
-  ({[.inner-b-value column-count-index-value column-index-value]}
-    matrix.matmul.right-index
-    [b-index-value.])
-  ([.b-index-value] u64.name [named-b-index.])
-  ([.named-b-index] u64.copies2 [b-index-for-check b-index-for-cell.])
-  ([.b-length]
-    u64.copies2
-    [b-length-for-next b-length-for-check-and-cell.])
-  ([.b-length-for-check-and-cell]
-    u64.copies2
-    [b-length-for-check b-length-for-cell.])
-  ({[.b-index-for-check b-length-for-check]}
-    u64.lt
-    [b-in-bounds b-bounds-true _b-bounds-false.])
-  ({[.b-in-bounds b-bounds-true]} assert-then [b-index-is-valid.])
-  ({[.b-index-for-cell b-length-for-cell b-index-is-valid]}
-    u64.to-ix
-    [named-b-cell.])
-  ([.named-b-cell] :.forget [b-cell.])
-  ({[.b-scheduling thread-after-a-query b-cell]}
-    gpu.scheduling.can-read
-    [b-scheduling-after-query thread-after-b-query b-cell-after-query
-      can-read-b reads-b-if-allowed _not-readable-b-if-denied.])
-  ({[.can-read-b reads-b-if-allowed]} assert-then [reads-b.])
-  ([.reads-b] gpu.permissions.grant-read [b-read-grant.])
-  ({[.b-buffer b-cell-after-query b-read-grant]}
-    gpu.global.read
-    [b-buffer-after-read b-read-grant-after-read b-value.])
-  ([.b-read-grant-after-read] gpu.global.read.forget)
-
-  ({[.a-value b-value]} u64.mul [product.])
-  ({[.sum product]} u64.add [next-sum.])
-
-  ({[.column-count-for-next next-sum]} *.intro [next-columns-and-sum.])
-  ({[.shared-size-for-next next-columns-and-sum]} *.intro [next-shared-and-tail.])
-  ({[.column-for-next next-shared-and-tail]} *.intro [next-column-and-tail.])
-  ({[.row-for-next next-column-and-tail]} *.intro [next-row-and-tail.])
-  ({[.b-length-for-next next-row-and-tail]} *.intro [next-b-length-and-tail.])
-  ({[.a-length-for-next next-b-length-and-tail]} *.intro [next-a-length-and-tail.])
-  ({[.b-buffer-after-read next-a-length-and-tail]} *.intro [next-b-buffer-and-tail.])
-  ({[.a-buffer-after-read next-b-buffer-and-tail]} *.intro [next-a-buffer-and-tail.])
-  ({[.thread-after-b-query next-a-buffer-and-tail]} *.intro [next-thread-and-tail.])
-  ({[.b-scheduling-after-query next-thread-and-tail]} *.intro [next-b-schedule-and-tail.])
-  ({[.a-scheduling-after-query next-b-schedule-and-tail]} *.intro [next-state.])
-  [.next-state]
-))
-
-(def program naive-matmul-kernel : {[
-  c-buffer-name c-size a-buffer-name a-size b-buffer-name b-size
-  grid-shape block-shape global-shape global-size
-  c-schedule-name a-schedule-name b-schedule-name
-  shared-size column-count.
-]
-  ({
-    ({
-      ({[.c-size] u64} :)
-      ({
-        ({[.c-buffer-name] ({cap.own [.c-size] u64} gpu.global)} :)
-        ({
-          ({
-            [.c-buffer-name c-size]
-            ({[.grid-shape block-shape global-shape global-size]} gpu.grid)
-            [.c-schedule-name]
-          } gpu.scheduling val)
-          ({
-            [.c-buffer-name]
-            ({
-              [.grid-shape]
-              ({
-                [.block-shape]
-                ({
-                  [.global-shape]
-                  ({[.global-size c-schedule-name]} *)
-                } *)
-              } *)
-            } *)
-          } *)
-        } *)
-      } *)
-    } *)
-    ({
-      ({
-        ({[.a-size] u64} :)
-        ({
-          ({[.a-buffer-name] ({cap.own [.a-size] u64} gpu.global)} :)
-          ({
-            ({
-              [.a-buffer-name a-size]
-              ({[.grid-shape block-shape global-shape global-size]} gpu.grid)
-              [.a-schedule-name]
-            } gpu.scheduling val)
-            ({[.a-buffer-name] ({[.a-size a-schedule-name]} *)} *)
-          } *)
-        } *)
-      } *)
-      ({
-        ({
-          ({[.b-size] u64} :)
-          ({
-            ({[.b-buffer-name] ({cap.own [.b-size] u64} gpu.global)} :)
-            ({
-              ({
-                [.b-buffer-name b-size]
-                ({[.grid-shape block-shape global-shape global-size]} gpu.grid)
-                [.b-schedule-name]
-              } gpu.scheduling val)
-              ({[.b-buffer-name] ({[.b-size b-schedule-name]} *)} *)
-            } *)
-          } *)
-        } *)
-        ({({[.shared-size] u64} :) ({[.column-count] u64} :)} *)
-      } *)
-    } *)
-  } *)
-  ({({[.grid-shape block-shape global-shape global-size]} gpu.grid)}
-    gpu.thread val)
-} -> {[
-  c-buffer-name c-size a-buffer-name a-size b-buffer-name b-size
-  grid-shape block-shape global-shape global-size
-  c-schedule-name a-schedule-name b-schedule-name
-  shared-size column-count.
-]
-  ({
-    [.c-buffer-name c-size]
-    ({[.grid-shape block-shape global-shape global-size]} gpu.grid)
-    [.c-schedule-name]
-  } gpu.scheduling val)
-} = ([kernel-arguments thread.]
-  ([.kernel-arguments] *.elim [c-arguments a-b-and-dimensions.])
-  ([.a-b-and-dimensions] *.elim [a-arguments b-and-dimensions.])
-  ([.b-and-dimensions] *.elim [b-arguments dimensions.])
-  ([.dimensions] *.elim [shared-size-value column-count-value.])
-
-  ([.c-arguments] *.elim [c-length c-tail.])
-  ([.c-tail] *.elim [c-buffer c-schedule-and-context.])
-  ([.c-schedule-and-context] *.elim [c-scheduling c-context.])
-  ([.c-context] *.elim [c-buffer-name-value grid-context.])
-  ([.grid-context] *.elim [grid-shape-value block-context.])
-  ([.block-context] *.elim [block-shape-value global-context.])
-  ([.global-context] *.elim [global-shape-value global-size-and-schedule.])
-  ([.global-size-and-schedule] *.elim [global-size-value c-schedule-name-value.])
-
-  ([.a-arguments] *.elim [a-length a-tail.])
-  ([.a-tail] *.elim [a-buffer a-schedule-and-context.])
-  ([.a-schedule-and-context] *.elim [a-scheduling a-context.])
-  ([.a-context] *.elim [a-buffer-name-value a-size-and-schedule.])
-  ([.a-size-and-schedule] *.elim [a-size-value a-schedule-name-value.])
-
-  ([.b-arguments] *.elim [b-length b-tail.])
-  ([.b-tail] *.elim [b-buffer b-schedule-and-context.])
-  ([.b-schedule-and-context] *.elim [b-scheduling b-context.])
-  ([.b-context] *.elim [b-buffer-name-value b-size-and-schedule.])
-  ([.b-size-and-schedule] *.elim [b-size-value b-schedule-name-value.])
-
-  ([.c-length] u64.copies2 [c-length-for-check c-length-for-cell-and-name.])
-  ([.c-length-for-cell-and-name]
-    u64.copies2
-    [c-length-for-cell c-length-for-name.])
-  ([.c-length-for-name] :.param [c-size-name.])
-  ([.thread] gpu.thread.in-grid.index [thread-for-own grid-index.])
-  ([.grid-index] ix.to-u64 [_grid-index-after candidate-value.])
-  ([.candidate-value] u64.name [named-candidate.])
-  ([.named-candidate]
-    u64.copies2
-    [candidate-for-state candidate-for-check-and-position.])
-  ([.candidate-for-check-and-position]
-    u64.copies2
-    [candidate-for-check candidate-for-position.])
-  ({[.candidate-for-check c-length-for-check]}
-    u64.lt
-    [c-in-bounds c-bounds-true _c-bounds-false.])
-  ([.c-in-bounds]
-    bool.copies2
-    [c-bounds-for-position c-bounds-for-branches.])
-  ([.c-bounds-for-branches]
-    bool.copies2
-    [c-bounds-for-ifc c-bounds-for-branch.])
-  ([.c-bounds-for-ifc] :.forget [c-bounds-value.])
-  ([.candidate-for-state] :.ty [c-candidate-for-state candidate-index.])
-  ([.c-bounds-for-branch] :.ty [c-bounds-for-state bounds-decision.])
-
-  # Every thread participates in the fold. Predicated threads use C[0]'s row
-  # and column as safe filler work, then discard the sum in the false branch.
-  ([.c-bounds-for-position] :.forget [c-bounds-position-value.])
-  ([.candidate-for-position] :.forget [candidate-position-value.])
-  u64.zero [fallback-position.]
-  ({[.c-bounds-position-value candidate-position-value fallback-position]}
-    u64.select
-    [work-position-value.])
-  ([.work-position-value] u64.name [named-work-position.])
-  ([.named-work-position]
-    u64.copies2
-    [candidate-for-row candidate-for-column.])
-
-  ([.column-count-value]
-    u64.copies2
-    [column-count-for-fold-and-name column-count-for-position.])
-  ([.column-count-for-fold-and-name]
-    :.ty
-    [column-count-for-fold column-count-name-for-step.])
-  ([.column-count-for-position]
-    u64.copies2
-    [column-count-for-row column-count-for-column.])
-  ([.candidate-for-row] :.forget [candidate-row-value.])
-  ([.column-count-for-row] :.forget [column-count-row-value.])
-  ({[.candidate-row-value column-count-row-value]} u64.div [row-value.])
-  ([.candidate-for-column] :.forget [candidate-column-value.])
-  ([.column-count-for-column] :.forget [column-count-column-value.])
-  ({[.candidate-column-value column-count-column-value]} u64.rem [column-value.])
-  ([.row-value] u64.name [named-row.])
-  ([.named-row] :.ty [row row-name-for-step.])
-  ([.column-value] u64.name [named-column.])
-  ([.named-column] :.ty [column column-name-for-step.])
-  ([.shared-size-value]
-    u64.copies2
-    [shared-size-for-count-and-name shared-size-for-state.])
-  ([.shared-size-for-count-and-name]
-    :.ty
-    [shared-size-for-count shared-size-name-for-step.])
-  ([.shared-size-for-state] :.forget [shared-stride-value.])
-  ([.shared-stride-value] u64.name [named-shared-stride.])
-  ([.named-shared-stride]
-    :.ty
-    [shared-stride-for-state shared-stride-name.])
-
-  ([.thread-for-own] gpu.thread.name [named-thread-for-fold.])
-  ([.named-thread-for-fold] :.ty [thread-for-fold thread-name.])
-
-  u64.zero [zero-sum.]
-  ({[.column-count-for-fold zero-sum]} *.intro [columns-and-sum.])
-  ({[.shared-stride-for-state columns-and-sum]} *.intro [shared-and-tail.])
-  ({[.column shared-and-tail]} *.intro [column-and-tail.])
-  ({[.row column-and-tail]} *.intro [row-and-tail.])
-  ({[.b-length row-and-tail]} *.intro [b-length-and-tail.])
-  ({[.a-length b-length-and-tail]} *.intro [a-length-and-tail.])
-  ({[.b-buffer a-length-and-tail]} *.intro [b-buffer-and-tail.])
-  ({[.a-buffer b-buffer-and-tail]} *.intro [a-buffer-and-tail.])
-  ({[.thread-for-fold a-buffer-and-tail]} *.intro [thread-and-tail.])
-  ({[.b-scheduling thread-and-tail]} *.intro [b-schedule-and-tail.])
-  ({[.a-scheduling b-schedule-and-tail]} *.intro [initial-fold-state.])
-
-  ({
-    [.initial-fold-state]
-    [.shared-size-for-count]
-    ({[
-      .a-buffer-name-value a-size-value b-buffer-name-value b-size-value
-      grid-shape-value block-shape-value global-shape-value global-size-value
-      a-schedule-name-value b-schedule-name-value thread-name
-      row-name-for-step column-name-for-step shared-size-name-for-step
-      shared-stride-name column-count-name-for-step
-    ]} name.naive-matmul-dot-fold-step)
-  } fold [final-fold-state.])
-
-  ([.final-fold-state] *.elim [a-scheduling-after-fold b-schedule-and-tail-after.])
-  ([.b-schedule-and-tail-after] *.elim [b-scheduling-after-fold thread-and-tail-after.])
-  ([.thread-and-tail-after] *.elim [thread-after-fold a-buffer-and-tail-after.])
-  ([.a-buffer-and-tail-after] *.elim [a-buffer-after-fold b-buffer-and-tail-after.])
-  ([.b-buffer-and-tail-after] *.elim [b-buffer-after-fold a-length-and-tail-after.])
-  ([.a-length-and-tail-after] *.elim [_a-length-after b-length-and-tail-after.])
-  ([.b-length-and-tail-after] *.elim [_b-length-after row-and-tail-after.])
-  ([.row-and-tail-after] *.elim [_row-after column-and-tail-after.])
-  ([.column-and-tail-after] *.elim [_column-after shared-and-tail-after.])
-  ([.shared-and-tail-after] *.elim [_shared-size-after columns-and-sum-after.])
-  ([.columns-and-sum-after] *.elim [_column-count-after sum.])
-  ([.a-scheduling-after-fold] gpu.scheduling.forget)
-  ([.b-scheduling-after-fold] gpu.scheduling.forget)
-  ([.a-buffer-after-fold] gpu.global.forget)
-  ([.b-buffer-after-fold] gpu.global.forget)
-
-  ({[.c-buffer sum]} *.intro [c-buffer-and-value.])
-  ({[.thread-after-fold c-buffer-and-value]} *.intro [c-thread-and-tail.])
-  ({[.c-bounds-for-state c-thread-and-tail]} *.intro [c-bounds-and-tail.])
-  ({[.c-candidate-for-state c-bounds-and-tail]} *.intro [c-candidate-and-tail.])
-  ({[.c-length-for-cell c-candidate-and-tail]} *.intro [c-length-and-tail.])
-  ({[.c-scheduling c-length-and-tail]} *.intro [c-branch-state.])
-
-  ({[.c-buffer-name-value c-size-name grid-shape-value block-shape-value
-      global-shape-value global-size-value c-schedule-name-value thread-name
-      candidate-index bounds-decision]}
-    name.naive-matmul-write-in-bounds-branch
-    [c-true-branch.])
-  ({[.c-buffer-name-value c-size-name grid-shape-value block-shape-value
-      global-shape-value global-size-value c-schedule-name-value thread-name
-      candidate-index bounds-decision]}
-    name.naive-matmul-skip-out-of-bounds-branch
-    [c-false-branch.])
-  ({[.c-bounds-true c-true-branch
-      _c-bounds-false c-false-branch
-      c-bounds-value c-branch-state]}
-    bool.ifc
-    [c-scheduling-after-bounds.])
-  [.c-scheduling-after-bounds]
-))
-
 (def program naive-u64-matmul :
   {
     (cap.own mem)
@@ -587,39 +7,36 @@
     (u64 val)
     (u64 val)
     (u64 val)
+    (u64 val)
+    (u64 val)
+    (u64 val)
   }
   ->
   {(cap.own mem) (cap.own mem) (cap.own mem)}
-= ([c-input a-input b-input shared-size-input column-count-input
-    grid-x-value block-x-value.]
+= ([c-input a-input b-input output-rows-input shared-size-input
+    output-columns-input grid-x-input grid-y-input block-x-input block-y-input.]
   ([.c-input] mem.cast.u64 [c-length named-c-buffer.])
-  ([.named-c-buffer] :.ty [c-buffer c-buffer-name.])
+  ([.named-c-buffer] :.ty [c-buffer-before-type c-buffer-name.])
+  ([.c-buffer-before-type]
+    gpu.global.element-type
+    [c-buffer element-type.])
   ([.a-input] mem.cast.u64 [a-length named-a-buffer.])
   ([.named-a-buffer] :.ty [a-buffer a-buffer-name.])
   ([.b-input] mem.cast.u64 [b-length named-b-buffer.])
   ([.named-b-buffer] :.ty [b-buffer b-buffer-name.])
 
-  ([.grid-x-value] u64.name [grid-x.])
-  ([.block-x-value] u64.name [block-x.])
-  ({[.grid-x block-x]}
-    gpu.grid.1d.intro
-    [grid-shape block-shape global-shape grid global-size.])
+  ([.grid-x-input] u64.name [grid-x.])
+  ([.grid-y-input] u64.name [grid-y.])
+  ([.block-x-input] u64.name [block-x.])
+  ([.block-y-input] u64.name [block-y.])
+  ({[.grid-x grid-y block-x block-y]}
+    gpu.grid.2d.intro
+    [grid-shape block-shape global-shape global-columns global-rows
+      grid global-size.])
 
-  ([.c-length] u64.copies2 [c-length-for-launch c-length-for-check-and-name.])
-  ([.c-length-for-check-and-name]
-    u64.copies2
-    [c-length-for-fit c-length-for-name.])
+  ([.c-length] u64.copies2 [c-length-for-launch c-length-for-name.])
   ([.c-length-for-name] :.param [c-size.])
-  ([.global-size] u64.copies2 [global-size-for-fit global-size-for-name.])
-  ([.global-size-for-name] :.param [global-size-name.])
-  ({[.c-length-for-fit global-size-for-fit]}
-    u64.lte
-    [fits-decision fits-if-true.])
-  ([.fits-decision] assert [fits-is-true.])
-  ({[.fits-is-true fits-if-true]} ax-mp [fits.])
-  ({[.c-buffer-name grid-shape block-shape global-shape fits]}
-    gpu.scheduling.own-each
-    [c-schedule-name c-scheduling.])
+  ([.global-size] :.param [global-size-name.])
 
   ([.a-length] u64.copies2 [a-length-for-kernel a-length-for-name.])
   ([.a-length-for-name] :.param [a-size.])
@@ -632,11 +49,24 @@
     gpu.scheduling.read-all
     [b-schedule-name b-scheduling.])
 
+  ([.output-rows-input] u64.name [named-output-rows.])
+  ([.named-output-rows] :.ty [output-rows-value output-rows.])
   ([.shared-size-input] u64.name [named-shared-size.])
   ([.named-shared-size] :.ty [shared-size-value shared-size.])
-  ([.column-count-input] u64.name [named-column-count.])
-  ([.named-column-count] :.ty [column-count-value column-count.])
-  ({[.shared-size-value column-count-value]} *.intro [dimensions.])
+  ([.output-columns-input] u64.name [named-output-columns.])
+  ([.named-output-columns]
+    u64.copies2
+    [output-columns-for-schedule named-output-columns-for-kernel.])
+  ([.named-output-columns-for-kernel]
+    :.ty
+    [output-columns-value output-columns.])
+  ({[.c-buffer-name c-size output-columns-for-schedule
+      grid-shape block-shape global-shape global-size-name]}
+    gpu.scheduling.own-matrix-2d
+    [c-schedule-name c-scheduling.])
+
+  ({[.shared-size-value output-columns-value]} *.intro [shared-and-columns.])
+  ({[.output-rows-value shared-and-columns]} *.intro [dimensions.])
 
   ({[.a-size a-schedule-name]} *.intro [a-size-and-schedule.])
   ({[.a-buffer-name a-size-and-schedule]} *.intro [a-context.])
@@ -654,7 +84,8 @@
   ({[.global-shape global-size-and-c-schedule]} *.intro [global-context.])
   ({[.block-shape global-context]} *.intro [block-context.])
   ({[.grid-shape block-context]} *.intro [grid-context.])
-  ({[.c-buffer-name grid-context]} *.intro [c-context.])
+  ({[.element-type grid-context]} *.intro [element-and-grid-context.])
+  ({[.c-buffer-name element-and-grid-context]} *.intro [c-context.])
   ({[.c-scheduling c-context]} *.intro [c-schedule-and-context.])
   ({[.c-buffer c-schedule-and-context]} *.intro [c-tail.])
   ({[.c-length-for-launch c-tail]} *.intro [c-arguments.])
@@ -664,11 +95,11 @@
   ({[.c-arguments a-b-and-dimensions]} *.intro [kernel-arguments.])
 
   ({[
-    .c-buffer-name c-size a-buffer-name a-size b-buffer-name b-size
-    grid-shape block-shape global-shape global-size-name
+    .element-type c-buffer-name c-size a-buffer-name a-size b-buffer-name b-size
+    grid-shape block-shape global-columns global-rows global-size-name
     c-schedule-name a-schedule-name b-schedule-name
-    shared-size column-count
-  ]} name.naive-matmul-kernel [kernel.])
+    output-rows shared-size output-columns
+  ]} name.gpu.global.matrix.matmul.kernel [kernel.])
   ({[.grid kernel-arguments kernel]} gpu.launch [returned-kernel-arguments.])
 
   ([.returned-kernel-arguments]

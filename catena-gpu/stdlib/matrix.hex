@@ -1,7 +1,21 @@
-# First-order row-major helpers for GPU global buffers. These are ordinary
-# definitions: matrix storage and permissions remain explicit in the kernel.
+# First-order matrix operations. Matrix coordinates remain two-dimensional;
+# storage-specific code decides how those coordinates address memory.
 
-# row-major-index(row, column-count, column) = row * column-count + column
+(def program matrix.row-major.flatten : {[
+  row-count column-count.
+]
+  ({[.column-count] u64} :)
+  ({({[.row-count column-count]} shape.2d)} ix val)
+} -> ([row-count column-count.] (u64 val))
+= ([column-count-value matrix-index.]
+  ([.matrix-index] ix.2d.elim [row-index column-index.])
+  ([.row-index] ix.to-u64 [_row-index-after row.])
+  ([.column-index] ix.to-u64 [_column-index-after column.])
+  ([.column-count-value] :.forget [column-count.])
+  ({[.row column-count column]} matrix.row-major.index [flat-index.])
+  [.flat-index]
+))
+
 (def program matrix.row-major.index :
   {(u64 val) (u64 val) (u64 val)} -> (u64 val)
 = ([row column-count column.]
@@ -10,18 +24,35 @@
   [.index]
 ))
 
-# A[row, inner] in an A(rows x shared-size) buffer.
-(def program matrix.matmul.left-index :
-  {(u64 val) (u64 val) (u64 val)} -> (u64 val)
-= ([row shared-size inner.]
-  ({[.row shared-size inner]} matrix.row-major.index [index.])
-  [.index]
+(def program matrix.matmul.left-index : {[
+  row-count column-count shared-size.
+]
+  ({({[.row-count column-count]} shape.2d)} ix val)
+  ({({[.shared-size]} shape.1d)} ix val)
+} -> {[
+  row-count column-count shared-size.
+]
+  ({({[.row-count shared-size]} shape.2d)} ix val)
+} = ([output-index inner-index.]
+  ([.output-index] ix.2d.elim [row-index unused-column-index.])
+  ([.unused-column-index] ix.forget)
+  ({[.row-index inner-index]} ix.2d.intro [left-index.])
+  [.left-index]
 ))
 
-# B[inner, column] in a B(shared-size x column-count) buffer.
-(def program matrix.matmul.right-index :
-  {(u64 val) (u64 val) (u64 val)} -> (u64 val)
-= ([inner column-count column.]
-  ({[.inner column-count column]} matrix.row-major.index [index.])
-  [.index]
+# Convert C[row, column] and an inner index into B[inner, column].
+(def program matrix.matmul.right-index : {[
+  row-count column-count shared-size.
+]
+  ({({[.row-count column-count]} shape.2d)} ix val)
+  ({({[.shared-size]} shape.1d)} ix val)
+} -> {[
+  row-count column-count shared-size.
+]
+  ({({[.shared-size column-count]} shape.2d)} ix val)
+} = ([output-index inner-index.]
+  ([.output-index] ix.2d.elim [unused-row-index column-index.])
+  ([.unused-row-index] ix.forget)
+  ({[.inner-index column-index]} ix.2d.intro [right-index.])
+  [.right-index]
 ))

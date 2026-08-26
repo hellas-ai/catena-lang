@@ -3,7 +3,7 @@ use crate::codegen::GpuAssign;
 
 pub fn render(output: &mut String, assignment: &GpuAssign) -> Result<bool, GpuRenderError> {
     match assignment.op.as_str() {
-        "gpu.thread.forget" => {
+        "gpu.thread.forget" | "ix.forget" => {
             if assignment.inputs.len() != 1 || !assignment.outputs.is_empty() {
                 return Err(invalid_arity(assignment, 1, 0));
             }
@@ -16,7 +16,7 @@ pub fn render(output: &mut String, assignment: &GpuAssign) -> Result<bool, GpuRe
                 return Err(invalid_arity(assignment, 1, 2));
             };
             output.push_str(&format!(
-                "    {} = {};\n    {} = {}.global_linear_id;\n",
+                "    {} = {};\n    {} = {}.global_index;\n",
                 thread_after.name,
                 value_expr(thread),
                 index.name,
@@ -31,7 +31,7 @@ pub fn render(output: &mut String, assignment: &GpuAssign) -> Result<bool, GpuRe
                 return Err(invalid_arity(assignment, 1, 2));
             };
             output.push_str(&format!(
-                "    {} = {};\n    {} = {}.in_block_linear_id;\n",
+                "    {} = {};\n    {} = {}.in_block_index;\n",
                 thread_after.name,
                 value_expr(thread),
                 index.name,
@@ -46,7 +46,7 @@ pub fn render(output: &mut String, assignment: &GpuAssign) -> Result<bool, GpuRe
                 return Err(invalid_arity(assignment, 1, 2));
             };
             output.push_str(&format!(
-                "    {} = {};\n    {} = {{ {}.block_linear_id }};\n",
+                "    {} = {};\n    {} = {{ {}.block_index }};\n",
                 thread_after.name,
                 value_expr(thread),
                 block.name,
@@ -61,7 +61,7 @@ pub fn render(output: &mut String, assignment: &GpuAssign) -> Result<bool, GpuRe
                 return Err(invalid_arity(assignment, 1, 2));
             };
             output.push_str(&format!(
-                "    {} = {};\n    {} = {}.linear_id;\n",
+                "    {} = {};\n    {} = {}.index;\n",
                 block_after.name,
                 value_expr(block),
                 index.name,
@@ -77,8 +77,35 @@ pub fn render(output: &mut String, assignment: &GpuAssign) -> Result<bool, GpuRe
             };
             let index = value_expr(index);
             output.push_str(&format!(
-                "    {} = {index};\n    {} = {index};\n",
+                "    {} = {index};\n    {} = {index}.linear;\n",
                 index_after.name, offset.name,
+            ));
+        }
+        "ix.2d.intro" => {
+            let [first, second] = assignment.inputs.as_slice() else {
+                return Err(invalid_arity(assignment, 2, 1));
+            };
+            let [index] = assignment.outputs.as_slice() else {
+                return Err(invalid_arity(assignment, 2, 1));
+            };
+            output.push_str(&format!(
+                "    {} = {{ {}.linear, {}.linear, 0, 0 }};\n",
+                index.name,
+                value_expr(first),
+                value_expr(second),
+            ));
+        }
+        "ix.2d.elim" => {
+            let [index] = assignment.inputs.as_slice() else {
+                return Err(invalid_arity(assignment, 1, 2));
+            };
+            let [first, second] = assignment.outputs.as_slice() else {
+                return Err(invalid_arity(assignment, 1, 2));
+            };
+            let index = value_expr(index);
+            output.push_str(&format!(
+                "    {} = {{ {index}.first, 0, 0, {index}.first }};\n    {} = {{ {index}.second, 0, 0, {index}.second }};\n",
+                first.name, second.name,
             ));
         }
         "u64.to-ix" => {
@@ -89,9 +116,10 @@ pub fn render(output: &mut String, assignment: &GpuAssign) -> Result<bool, GpuRe
                 return Err(invalid_arity(assignment, 2, 1));
             };
             output.push_str(&format!(
-                "    {} = {};\n",
+                "    {} = {{ {}, 0, 0, {} }};\n",
                 index.name,
-                value_expr(candidate)
+                value_expr(candidate),
+                value_expr(candidate),
             ));
         }
         _ => return Ok(false),

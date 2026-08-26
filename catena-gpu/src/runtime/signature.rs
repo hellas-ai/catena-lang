@@ -50,6 +50,12 @@ fn value_kind(ty: &CType) -> Option<ValueKind> {
         CType::U64 => Some(ValueKind::U64),
         CType::F32 => Some(ValueKind::F32),
         CType::MemOwn => Some(ValueKind::MemOwn),
-        CType::Grid | CType::U64Ptr | CType::Thread | CType::Block | CType::Scheduling => None,
+        CType::Grid
+        | CType::Ptr(_)
+        | CType::Generic(_)
+        | CType::Ix
+        | CType::Thread
+        | CType::Block
+        | CType::Scheduling => None,
     }
 }

@@ -18,8 +18,21 @@ pub fn render(output: &mut String, assignment: &GpuAssign) -> Result<bool, GpuRe
                 "CATENA_SCHEDULING_READ_ALL"
             };
             output.push_str(&format!(
-                "    {} = {{ {kind} }};\n",
+                "    {} = {{ {kind}, 0 }};\n",
                 assignment.outputs[0].name,
+            ));
+        }
+        "gpu.scheduling.own-matrix-2d" => {
+            let [column_count] = assignment.inputs.as_slice() else {
+                return Err(invalid_arity(assignment, 1, 1));
+            };
+            let [scheduling] = assignment.outputs.as_slice() else {
+                return Err(invalid_arity(assignment, 1, 1));
+            };
+            output.push_str(&format!(
+                "    {} = {{ CATENA_SCHEDULING_OWN_MATRIX_2D, {} }};\n",
+                scheduling.name,
+                value_expr(column_count),
             ));
         }
         operation @ ("gpu.scheduling.can-own" | "gpu.scheduling.can-read") => {

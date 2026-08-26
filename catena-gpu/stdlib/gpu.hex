@@ -44,6 +44,8 @@
     ({[.gx gy]} shape.2d)
     ({[.bx by]} shape.2d)
     ({({[.gx bx]} *) ({[.gy by]} *)} shape.2d)
+    ({[.gx bx]} *)
+    ({[.gy by]} *)
     ({
       ({[.gx gy]} shape.2d)
       ({[.bx by]} shape.2d)
@@ -145,6 +147,32 @@
   } -> {[
     buffer-name buffer-size grid-shape block-shape global-shape global-size
     schedule-name.
+  ]
+    [.schedule-name]
+    ({
+      [.buffer-name buffer-size]
+      ({[.grid-shape block-shape global-shape global-size]} gpu.grid)
+      [.schedule-name]
+    } gpu.scheduling val)
+  })
+
+  # Assign matrix cell [row, column] to grid thread [column, row]. This policy
+  # is race-free by construction; a grid that is too small is safe but does
+  # not provide complete functional coverage.
+  (arr gpu.scheduling.own-matrix-2d : {[
+    buffer-name buffer-size matrix-columns
+    grid-shape block-shape global-shape global-size schedule-name.
+  ]
+    [.buffer-name]
+    [.buffer-size]
+    ({[.matrix-columns] u64} :)
+    [.grid-shape]
+    [.block-shape]
+    [.global-shape]
+    [.global-size]
+  } -> {[
+    buffer-name buffer-size matrix-columns
+    grid-shape block-shape global-shape global-size schedule-name.
   ]
     [.schedule-name]
     ({
@@ -259,31 +287,33 @@
   # Matching names ensure that the grant belongs to the executing thread and
   # to the exact buffer being written.
   (arr gpu.global.write : {[
-    buffer-name buffer-size grid-topology schedule-name thread-name cell-index.
+    buffer-name buffer-size element-type
+    grid-topology schedule-name thread-name cell-index.
   ]
     ({[.thread-name] ([.grid-topology] gpu.thread)} :)
-    ({[.buffer-name] ({cap.own [.buffer-size] u64} gpu.global)} :)
+    ({[.buffer-name] ({cap.own [.buffer-size element-type]} gpu.global)} :)
     ({[.cell-index] ({({[.buffer-size]} shape.1d)} ix)} :)
-    (u64 val)
+    ([.element-type] val)
     ([.buffer-name schedule-name thread-name cell-index] gpu.global.own)
   } -> {[
-    buffer-name buffer-size grid-topology schedule-name thread-name cell-index.
+    buffer-name buffer-size element-type
+    grid-topology schedule-name thread-name cell-index.
   ]
     ([.buffer-name schedule-name thread-name cell-index] gpu.global.own)
   })
 
   (arr gpu.global.read : {[
-    buffer-name buffer-size schedule-name thread-name cell-index.
+    buffer-name buffer-size element-type schedule-name thread-name cell-index.
   ]
-    ({[.buffer-name] ({cap.own [.buffer-size] u64} gpu.global)} :)
+    ({[.buffer-name] ({cap.own [.buffer-size element-type]} gpu.global)} :)
     ({[.cell-index] ({({[.buffer-size]} shape.1d)} ix)} :)
     ([.buffer-name schedule-name thread-name cell-index] gpu.global.read-grant)
   } -> {[
-    buffer-name buffer-size schedule-name thread-name cell-index.
+    buffer-name buffer-size element-type schedule-name thread-name cell-index.
   ]
-    ({[.buffer-name] ({cap.own [.buffer-size] u64} gpu.global)} :)
+    ({[.buffer-name] ({cap.own [.buffer-size element-type]} gpu.global)} :)
     ([.buffer-name schedule-name thread-name cell-index] gpu.global.read-grant)
-    (u64 val)
+    ([.element-type] val)
   })
 
   (arr gpu.global.read.forget : {[
@@ -292,9 +322,18 @@
     ([.buffer-name schedule-name thread-name cell-index] gpu.global.read-grant)
   } -> ([buffer-name schedule-name thread-name cell-index.] []))
 
-  (arr gpu.global.forget : {[buffer-name buffer-size.]
-    ({[.buffer-name] ({cap.own [.buffer-size] u64} gpu.global)} :)
-  } -> ([buffer-name buffer-size.] []))
+  (arr gpu.global.forget : {[buffer-name buffer-size element-type.]
+    ({[.buffer-name] ({cap.own [.buffer-size element-type]} gpu.global)} :)
+  } -> ([buffer-name buffer-size element-type.] []))
+
+  # Preserve the runtime handle while exposing its element type to definitions
+  # that specialize a generic kernel name.
+  (arr gpu.global.element-type : {[buffer-name buffer-size element-type.]
+    ({[.buffer-name] ({cap.own [.buffer-size element-type]} gpu.global)} :)
+  } -> {[buffer-name buffer-size element-type.]
+    ({[.buffer-name] ({cap.own [.buffer-size element-type]} gpu.global)} :)
+    [.element-type]
+  })
 
   (arr gpu.global.own.forget : {[
     buffer-name schedule-name thread-name cell-index.

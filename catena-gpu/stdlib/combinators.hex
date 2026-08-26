@@ -1,0 +1,12 @@
+# Finite sequential iteration with one loop-carried state. The body is a
+# direct named function; this minimal compiler has no source closures.
+(theory program type {
+  (arr fold : {[count state.]
+    ([.state])
+    ({[.count] u64} :)
+    ({
+      ({({({[.count]} shape.1d)} ix val) ([.state])} *)
+      ([.state])
+    } -> val)
+  } -> ([count state . state]))
+})

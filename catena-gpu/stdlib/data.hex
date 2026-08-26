@@ -3,6 +3,8 @@
   (arr bool.t : 0 -> 1)
   (arr bool.f : 0 -> 1)
   (arr u64 : 0 -> 1)
+  (arr u64.lt : 2 -> 1)
+  (arr u64.lte : 2 -> 1)
   (arr u32 : 0 -> 1)
   (arr f32 : 0 -> 1)
 })
@@ -41,12 +43,37 @@
   (arr u64.add : {(u64 val) (u64 val)} -> (u64 val))
   (arr u64.sub : {(u64 val) (u64 val)} -> (u64 val))
   (arr u64.ne : {(u64 val) (u64 val)} -> (bool val))
-  (arr u64.lt : {(u64 val) (u64 val)} -> (bool val))
-  (arr u64.lte : {(u64 val) (u64 val)} -> (bool val))
+  (arr u64.lt : {[x y decision.]
+    ({[.x] u64} :)
+    ({[.y] u64} :)
+  } -> {[x y decision.]
+    ({[.decision] bool.t} = [decision-true.])
+    ({[.decision] bool.f} = [decision-false.])
+    ([.x y] u64.lt [is-less.])
+    ({[.decision] bool} :)
+    ([.decision-true is-less] ==> |-)
+    ([.is-less] {[.decision-false] not} ==> |-)
+  })
+  (arr u64.lte : {[x y decision.]
+    ({[.x] u64} :)
+    ({[.y] u64} :)
+  } -> {[x y decision.]
+    ({[.decision] bool.t} = [decision-true.])
+    ([.x y] u64.lte [fits.])
+    ({[.decision] bool} :)
+    ([.decision-true fits] ==> |-)
+  })
   (arr u64.gte : {(u64 val) (u64 val)} -> (bool val))
   (arr u64.mul : {(u64 val) (u64 val)} -> (u64 val))
   (arr u64.div : {(u64 val) (u64 val)} -> (u64 val))
   (arr u64.rem : {(u64 val) (u64 val)} -> (u64 val))
+  (arr u64.name : {[x.] (u64 val)} -> ([x.] ({[.x] u64} :)))
+  (arr u64.copies2 : {[x.]
+    ({[.x] u64} :)
+  } -> {[x.]
+    ({[.x] u64} :)
+    ({[.x] u64} :)
+  })
   (arr u64.select : {(bool val) (u64 val) (u64 val)} -> (u64 val))
   (arr u64.to-f32 : (u64 val) -> (f32 val))
 

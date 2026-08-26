@@ -4,7 +4,14 @@ use libffi::middle::{Arg, Cif, CodePtr, Type};
 use libloading::Library;
 use thiserror::Error;
 
-use super::{Value, ValueKind, signature::SignatureTable};
+use super::{ValueKind, signature::SignatureTable};
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub(super) struct CatenaMem {
+    pub(super) data: *mut c_void,
+    pub(super) len: u64,
+}
 
 #[derive(Debug)]
 pub(crate) enum AbiValue {
@@ -12,6 +19,7 @@ pub(crate) enum AbiValue {
     U32(u32),
     U64(u64),
     F32(f32),
+    Mem(CatenaMem),
 }
 
 impl AbiValue {
@@ -21,28 +29,10 @@ impl AbiValue {
             ValueKind::U32 => Self::U32(0),
             ValueKind::U64 => Self::U64(0),
             ValueKind::F32 => Self::F32(0.0),
-        }
-    }
-}
-
-impl From<Value> for AbiValue {
-    fn from(value: Value) -> Self {
-        match value {
-            Value::Bool(v) => Self::Bool(v),
-            Value::U32(v) => Self::U32(v),
-            Value::U64(v) => Self::U64(v),
-            Value::F32(v) => Self::F32(v),
-        }
-    }
-}
-
-impl From<AbiValue> for Value {
-    fn from(value: AbiValue) -> Self {
-        match value {
-            AbiValue::Bool(v) => Self::Bool(v),
-            AbiValue::U32(v) => Self::U32(v),
-            AbiValue::U64(v) => Self::U64(v),
-            AbiValue::F32(v) => Self::F32(v),
+            ValueKind::MemOwn => Self::Mem(CatenaMem {
+                data: std::ptr::null_mut(),
+                len: 0,
+            }),
         }
     }
 }
@@ -121,6 +111,7 @@ fn ffi_type(kind: ValueKind) -> Type {
         ValueKind::U32 => Type::u32(),
         ValueKind::U64 => Type::u64(),
         ValueKind::F32 => Type::f32(),
+        ValueKind::MemOwn => Type::structure([Type::pointer(), Type::u64()]),
     }
 }
 
@@ -130,6 +121,7 @@ fn input_arg(value: &AbiValue) -> Arg<'_> {
         AbiValue::U32(v) => Arg::new(v),
         AbiValue::U64(v) => Arg::new(v),
         AbiValue::F32(v) => Arg::new(v),
+        AbiValue::Mem(v) => Arg::new(v),
     }
 }
 
@@ -139,5 +131,6 @@ fn output_pointer(value: &mut AbiValue) -> *mut c_void {
         AbiValue::U32(v) => (v as *mut u32).cast(),
         AbiValue::U64(v) => (v as *mut u64).cast(),
         AbiValue::F32(v) => (v as *mut f32).cast(),
+        AbiValue::Mem(v) => (v as *mut CatenaMem).cast(),
     }
 }

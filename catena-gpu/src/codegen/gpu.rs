@@ -4,7 +4,7 @@ use hexpr::Operation;
 use thiserror::Error;
 
 use super::{
-    GpuAssign, GpuDialect, GpuFunction, GpuModuleMap, GpuValue, GpuVar, lower_types::CType,
+    GpuAssign, GpuDialect, GpuFunction, GpuModuleMap, GpuValue, GpuVar, lower_types::CType, ops,
     runtime_type,
 };
 
@@ -20,21 +20,36 @@ pub enum GpuRenderError {
     },
     #[error("invalid bool.ifc assignment: {0}")]
     InvalidIfc(&'static str),
+    #[error("invalid gpu.launch assignment: {0}")]
+    InvalidLaunch(&'static str),
+    #[error("invalid fold assignment: {0}")]
+    InvalidFold(&'static str),
 }
 
 pub fn render_modules(
     modules: &GpuModuleMap,
     dialect: GpuDialect,
 ) -> Result<String, GpuRenderError> {
-    let mut output = format!(
-        "#include <{}>\n#include <stdint.h>\n#include <math.h>\n\n",
-        dialect.runtime_header()
-    );
+    let mut output = render_prelude(dialect);
     for module in modules.values() {
-        output.push_str(&signature(&module.entry));
+        output.push_str(&signature(&module.entry, placement(&module.entry)));
         output.push_str(";\n");
     }
     output.push('\n');
+    for module in modules.values() {
+        for (assignment_index, assignment) in module.entry.assignments.iter().enumerate() {
+            if assignment.op.as_str() == "gpu.launch" {
+                ops::launch::render_kernel(
+                    &mut output,
+                    modules,
+                    &module.entry,
+                    assignment_index,
+                    assignment,
+                )?;
+                output.push('\n');
+            }
+        }
+    }
     for module in modules.values() {
         render_function(&mut output, &module.entry)?;
         output.push('\n');
@@ -42,7 +57,7 @@ pub fn render_modules(
     Ok(output)
 }
 
-fn signature(function: &GpuFunction) -> String {
+fn signature(function: &GpuFunction, placement: Placement) -> String {
     let mut params = function.sources.iter().map(param).collect::<Vec<_>>();
     params.extend(
         function
@@ -51,35 +66,138 @@ fn signature(function: &GpuFunction) -> String {
             .enumerate()
             .map(|(index, var)| format!("{} *out_{index}", c_type(runtime_type(var).unwrap()))),
     );
+    let qualifiers = match placement {
+        Placement::HostOnly => "__host__",
+        Placement::HostAndDevice => "__host__ __device__",
+    };
     format!(
-        "extern \"C\" __host__ void {}({})",
+        "extern \"C\" {qualifiers} void {}({})",
         function.name,
         params.join(", ")
     )
+}
+
+#[derive(Debug, Clone, Copy)]
+enum Placement {
+    HostOnly,
+    HostAndDevice,
+}
+
+fn placement(function: &GpuFunction) -> Placement {
+    if function
+        .assignments
+        .iter()
+        .any(|assignment| assignment.op.as_str() == "gpu.launch")
+    {
+        Placement::HostOnly
+    } else {
+        Placement::HostAndDevice
+    }
 }
 
 fn param(var: &GpuVar) -> String {
     format!("{} {}", c_type(runtime_type(var).unwrap()), var.name)
 }
 
-fn c_type(ty: &CType) -> &'static str {
+pub(super) fn c_type(ty: &CType) -> &'static str {
     match ty {
         CType::Bool => "uint8_t",
         CType::U32 => "uint32_t",
         CType::U64 => "uint64_t",
         CType::F32 => "float",
+        CType::Grid => "catena_grid_t",
+        CType::MemOwn => "catena_mem_own_t",
+        CType::U64Ptr => "uint64_t *",
+        CType::Thread => "catena_thread_t",
+        CType::Block => "catena_block_t",
+        CType::Scheduling => "catena_scheduling_t",
     }
 }
 
+fn render_prelude(dialect: GpuDialect) -> String {
+    let (error_type, success, error_string, synchronize) = match dialect {
+        GpuDialect::Hip => (
+            "hipError_t",
+            "hipSuccess",
+            "hipGetErrorString",
+            "hipDeviceSynchronize",
+        ),
+        GpuDialect::Cuda => (
+            "cudaError_t",
+            "cudaSuccess",
+            "cudaGetErrorString",
+            "cudaDeviceSynchronize",
+        ),
+    };
+    format!(
+        r#"#include <{runtime_header}>
+#include <stdint.h>
+#include <math.h>
+#include <stdio.h>
+
+typedef struct {{ uint32_t x; uint32_t y; uint32_t z; }} catena_dim3_t;
+typedef struct {{ catena_dim3_t grid_dim; catena_dim3_t block_dim; }} catena_grid_t;
+typedef struct {{ void *data; uint64_t len; }} catena_mem_own_t;
+typedef struct {{
+    uint64_t global_linear_id;
+    uint64_t in_block_linear_id;
+    uint64_t block_linear_id;
+}} catena_thread_t;
+typedef struct {{ uint64_t linear_id; }} catena_block_t;
+typedef enum {{
+    CATENA_CELL_INACCESSIBLE = 0,
+    CATENA_CELL_READABLE = 1,
+    CATENA_CELL_OWNED = 2,
+}} catena_cell_access_t;
+typedef enum {{
+    CATENA_SCHEDULING_OWN_EACH = 1,
+    CATENA_SCHEDULING_READ_ALL = 2,
+}} catena_scheduling_kind_t;
+typedef struct {{ catena_scheduling_kind_t kind; }} catena_scheduling_t;
+
+__host__ __device__ static inline catena_cell_access_t catena_scheduling_resolve(
+    catena_scheduling_t scheduling,
+    catena_thread_t thread,
+    uint64_t cell
+) {{
+    switch (scheduling.kind) {{
+    case CATENA_SCHEDULING_OWN_EACH:
+        return thread.global_linear_id == cell
+            ? CATENA_CELL_OWNED
+            : CATENA_CELL_INACCESSIBLE;
+    case CATENA_SCHEDULING_READ_ALL:
+        return CATENA_CELL_READABLE;
+    default:
+        return CATENA_CELL_INACCESSIBLE;
+    }}
+}}
+
+__host__ static inline void catena_gpu_check({error_type} error) {{
+    if (error != {success}) {{
+        fprintf(stderr, "catena GPU error: %s\n", {error_string}(error));
+        fflush(stderr);
+        __builtin_trap();
+    }}
+}}
+
+__host__ static inline void catena_gpu_synchronize(void) {{
+    catena_gpu_check({synchronize}());
+}}
+
+"#,
+        runtime_header = dialect.runtime_header(),
+    )
+}
+
 fn render_function(output: &mut String, function: &GpuFunction) -> Result<(), GpuRenderError> {
-    output.push_str(&signature(function));
+    output.push_str(&signature(function, placement(function)));
     output.push_str(" {\n");
     let mut declared = function
         .sources
         .iter()
         .map(|var| var.name.clone())
         .collect::<BTreeSet<_>>();
-    for assignment in &function.assignments {
+    for (assignment_index, assignment) in function.assignments.iter().enumerate() {
         for var in &assignment.outputs {
             if declared.insert(var.name.clone()) {
                 output.push_str(&format!(
@@ -89,7 +207,7 @@ fn render_function(output: &mut String, function: &GpuFunction) -> Result<(), Gp
                 ));
             }
         }
-        render_assignment(output, assignment)?;
+        render_assignment(output, function, assignment_index, assignment)?;
     }
     for (index, target) in function.targets.iter().enumerate() {
         output.push_str(&format!("    *out_{index} = {};\n", target.name));
@@ -98,7 +216,12 @@ fn render_function(output: &mut String, function: &GpuFunction) -> Result<(), Gp
     Ok(())
 }
 
-fn render_assignment(output: &mut String, assignment: &GpuAssign) -> Result<(), GpuRenderError> {
+fn render_assignment(
+    output: &mut String,
+    function: &GpuFunction,
+    assignment_index: usize,
+    assignment: &GpuAssign,
+) -> Result<(), GpuRenderError> {
     if let Some(symbol) = &assignment.call_symbol {
         let mut args = assignment.inputs.iter().map(value_expr).collect::<Vec<_>>();
         args.extend(
@@ -108,6 +231,12 @@ fn render_assignment(output: &mut String, assignment: &GpuAssign) -> Result<(), 
                 .map(|var| format!("&{}", var.name)),
         );
         output.push_str(&format!("    {symbol}({});\n", args.join(", ")));
+        return Ok(());
+    }
+    if ops::memory::render(output, assignment)?
+        || ops::indexing::render(output, assignment)?
+        || ops::scheduling::render(output, assignment)?
+    {
         return Ok(());
     }
     let op = assignment.op.as_str();
@@ -122,7 +251,14 @@ fn render_assignment(output: &mut String, assignment: &GpuAssign) -> Result<(), 
             ));
             Ok(())
         }
-        ":.ty" | ":.forget" => identity(output, assignment),
+        ":.param" => Ok(()),
+        ":.ty" | ":.forget" | "u64.name" | "gpu.thread.name" => identity(output, assignment),
+        "u64.copies2" | "bool.copies2" => copy_two(output, assignment),
+        "gpu.grid.1d.intro" => render_grid_intro(output, assignment, 1),
+        "gpu.grid.2d.intro" => render_grid_intro(output, assignment, 2),
+        "gpu.grid.3d.intro" => render_grid_intro(output, assignment, 3),
+        "gpu.launch" => ops::launch::render_call(output, function, assignment_index, assignment),
+        "fold" => ops::fold::render(output, assignment),
         "bool.ifc" => render_ifc(output, assignment),
         "bool.t" => unary_output(output, assignment, "1", 0),
         "bool.f" | "u64.zero" | "u32.zero" => unary_output(output, assignment, "0", 0),
@@ -159,8 +295,47 @@ fn render_assignment(output: &mut String, assignment: &GpuAssign) -> Result<(), 
     }
 }
 
+fn render_grid_intro(
+    output: &mut String,
+    a: &GpuAssign,
+    dimensions: usize,
+) -> Result<(), GpuRenderError> {
+    let expected = dimensions * 2;
+    if a.inputs.len() != expected || a.outputs.len() != 2 {
+        return Err(arity(a, expected));
+    }
+    let mut grid = ["1".to_string(), "1".to_string(), "1".to_string()];
+    let mut block = ["1".to_string(), "1".to_string(), "1".to_string()];
+    for axis in 0..dimensions {
+        grid[axis] = input(a, axis)?;
+        block[axis] = input(a, dimensions + axis)?;
+    }
+    output.push_str(&format!(
+        "    {} = {{ {{ (uint32_t){}, (uint32_t){}, (uint32_t){} }}, {{ (uint32_t){}, (uint32_t){}, (uint32_t){} }} }};\n",
+        a.outputs[0].name,
+        grid[0], grid[1], grid[2], block[0], block[1], block[2],
+    ));
+    output.push_str(&format!(
+        "    {} = ({} * {}) * ({} * {}) * ({} * {});\n",
+        a.outputs[1].name, grid[0], block[0], grid[1], block[1], grid[2], block[2],
+    ));
+    Ok(())
+}
+
 fn identity(output: &mut String, a: &GpuAssign) -> Result<(), GpuRenderError> {
     unary_output(output, a, &input(a, 0)?, 1)
+}
+
+fn copy_two(output: &mut String, a: &GpuAssign) -> Result<(), GpuRenderError> {
+    if a.inputs.len() != 1 || a.outputs.len() != 2 {
+        return Err(arity(a, 1));
+    }
+    let value = input(a, 0)?;
+    output.push_str(&format!(
+        "    {} = {value};\n    {} = {value};\n",
+        a.outputs[0].name, a.outputs[1].name,
+    ));
+    Ok(())
 }
 
 fn unary_output(
@@ -239,7 +414,7 @@ fn input(a: &GpuAssign, index: usize) -> Result<String, GpuRenderError> {
         .ok_or_else(|| arity(a, index + 1))
 }
 
-fn value_expr(value: &GpuValue) -> String {
+pub(super) fn value_expr(value: &GpuValue) -> String {
     match value {
         GpuValue::Var(var) => var.name.clone(),
         GpuValue::FnSymbol(target) => sanitize_ident(&format!("program.{target}")),
@@ -301,7 +476,7 @@ fn render_ifc_call<'a>(
     ));
 }
 
-fn sanitize_ident(name: &str) -> String {
+pub(super) fn sanitize_ident(name: &str) -> String {
     name.chars()
         .map(|character| {
             if character.is_ascii_alphanumeric() {
@@ -318,5 +493,60 @@ fn arity(a: &GpuAssign, expected: usize) -> GpuRenderError {
         op: a.op.clone(),
         expected,
         outputs: a.outputs.len(),
+    }
+}
+
+pub(super) fn invalid_arity(
+    assignment: &GpuAssign,
+    expected_inputs: usize,
+    _expected_outputs: usize,
+) -> GpuRenderError {
+    arity(assignment, expected_inputs)
+}
+
+#[cfg(test)]
+mod tests {
+    use open_hypergraphs::lax::NodeId;
+
+    use super::*;
+    use crate::codegen::lower_types::LoweredType;
+
+    #[test]
+    fn lower_rank_grids_are_padded_only_in_generated_code() {
+        let one_d = grid_assignment("gpu.grid.1d.intro", &["gx", "bx"]);
+        let mut generated = String::new();
+        render_grid_intro(&mut generated, &one_d, 1).unwrap();
+        assert!(generated.contains("{ (uint32_t)gx, (uint32_t)1, (uint32_t)1 }"));
+        assert!(generated.contains("{ (uint32_t)bx, (uint32_t)1, (uint32_t)1 }"));
+
+        let two_d = grid_assignment("gpu.grid.2d.intro", &["gx", "gy", "bx", "by"]);
+        generated.clear();
+        render_grid_intro(&mut generated, &two_d, 2).unwrap();
+        assert!(generated.contains("{ (uint32_t)gx, (uint32_t)gy, (uint32_t)1 }"));
+        assert!(generated.contains("{ (uint32_t)bx, (uint32_t)by, (uint32_t)1 }"));
+    }
+
+    fn grid_assignment(operation: &str, inputs: &[&str]) -> GpuAssign {
+        GpuAssign {
+            op: operation.parse().unwrap(),
+            call_symbol: None,
+            inputs: inputs
+                .iter()
+                .enumerate()
+                .map(|(node, name)| GpuValue::Var(var(node, name, CType::U64)))
+                .collect(),
+            outputs: vec![
+                var(inputs.len(), "grid", CType::Grid),
+                var(inputs.len() + 1, "size", CType::U64),
+            ],
+        }
+    }
+
+    fn var(node: usize, name: &str, ty: CType) -> GpuVar {
+        GpuVar {
+            node: NodeId(node),
+            name: name.into(),
+            lowered: LoweredType::Runtime(ty),
+        }
     }
 }

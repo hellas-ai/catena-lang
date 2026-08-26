@@ -7,6 +7,17 @@
   (arr not : 1 -> 1)
 })
 
+(def program bool.copies2 :
+  ([x.] ({[.x] bool} :))
+  ->
+  ([x.] {({[.x] bool} :) ({[.x] bool} :)})
+= ([value.]
+  ([.value] :.ty [first _first-type.])
+  ([.first] :.ty [second _second-type.])
+  {[.first second]}
+))
+
+
 (theory program type {
   # Forget a static name while retaining the underlying runtime value.
   (arr :.forget : : -> ([x t.t] val))

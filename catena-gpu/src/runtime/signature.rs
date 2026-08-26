@@ -44,10 +44,12 @@ pub(crate) fn signatures(modules: &GpuModuleMap) -> SignatureTable {
 }
 
 fn value_kind(ty: &CType) -> Option<ValueKind> {
-    Some(match ty {
-        CType::Bool => ValueKind::Bool,
-        CType::U32 => ValueKind::U32,
-        CType::U64 => ValueKind::U64,
-        CType::F32 => ValueKind::F32,
-    })
+    match ty {
+        CType::Bool => Some(ValueKind::Bool),
+        CType::U32 => Some(ValueKind::U32),
+        CType::U64 => Some(ValueKind::U64),
+        CType::F32 => Some(ValueKind::F32),
+        CType::MemOwn => Some(ValueKind::MemOwn),
+        CType::Grid | CType::U64Ptr | CType::Thread | CType::Block | CType::Scheduling => None,
+    }
 }

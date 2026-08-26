@@ -2,13 +2,15 @@
 
 pub mod gpu;
 pub mod lower_types;
+mod ops;
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use hexpr::Operation;
 use metacat::{
     ssa::{SSAError, ssa},
     theory::TheoryId,
+    tree::Tree,
 };
 use open_hypergraphs::lax::NodeId;
 use serde::{Deserialize, Serialize};
@@ -83,6 +85,12 @@ pub enum CodegenError {
     InvalidNameArity { operation: Operation, actual: usize },
     #[error("generated function name `{0}` has an invalid target")]
     InvalidNameTarget(String),
+    #[error("structural product operation `{operation}` has incompatible runtime components")]
+    InvalidProduct { operation: Operation },
+    #[error("a function symbol reached the runtime output of `{0}`")]
+    FunctionOutput(Operation),
+    #[error("kernel `{kernel}` is not device-callable: {path}")]
+    NestedLaunch { kernel: Operation, path: String },
 }
 
 pub fn codegen(terms: &TheoryTermMap) -> Result<GpuModuleMap, CodegenError> {
@@ -90,14 +98,87 @@ pub fn codegen(terms: &TheoryTermMap) -> Result<GpuModuleMap, CodegenError> {
     let Some(definitions) = terms.get(&program) else {
         return Ok(BTreeMap::new());
     };
-    definitions
+    let modules = definitions
         .iter()
         .map(|(name, term)| {
             let symbol = sanitize_ident(&format!("program.{name}"));
             let module = codegen_definition(term, definitions, name.clone(), symbol)?;
             Ok((name.clone(), module))
         })
-        .collect()
+        .collect::<Result<GpuModuleMap, CodegenError>>()?;
+    validate_device_callability(&modules)?;
+    Ok(modules)
+}
+
+fn validate_device_callability(modules: &GpuModuleMap) -> Result<(), CodegenError> {
+    for module in modules.values() {
+        for assignment in &module.entry.assignments {
+            if assignment.op.as_str() != "gpu.launch" {
+                continue;
+            }
+            let Some(GpuValue::FnSymbol(kernel)) = assignment.inputs.last() else {
+                continue;
+            };
+            let mut active = HashSet::new();
+            let mut checked = HashSet::new();
+            let mut path = Vec::new();
+            validate_device_function(
+                modules,
+                kernel,
+                kernel,
+                &mut active,
+                &mut checked,
+                &mut path,
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_device_function(
+    modules: &GpuModuleMap,
+    kernel: &Operation,
+    function: &Operation,
+    active: &mut HashSet<Operation>,
+    checked: &mut HashSet<Operation>,
+    path: &mut Vec<Operation>,
+) -> Result<(), CodegenError> {
+    if checked.contains(function) || !active.insert(function.clone()) {
+        return Ok(());
+    }
+    let Some(module) = modules.get(function) else {
+        active.remove(function);
+        return Ok(());
+    };
+    path.push(function.clone());
+
+    for assignment in &module.entry.assignments {
+        if assignment.op.as_str() == "gpu.launch" {
+            let mut call_path = path.iter().map(Operation::as_str).collect::<Vec<_>>();
+            call_path.push("gpu.launch");
+            return Err(CodegenError::NestedLaunch {
+                kernel: kernel.clone(),
+                path: call_path.join(" -> "),
+            });
+        }
+
+        let mut callees = Vec::new();
+        if assignment.call_symbol.is_some() {
+            callees.push(&assignment.op);
+        }
+        callees.extend(assignment.inputs.iter().filter_map(|input| match input {
+            GpuValue::FnSymbol(callee) => Some(callee),
+            GpuValue::Var(_) => None,
+        }));
+        for callee in callees {
+            validate_device_function(modules, kernel, callee, active, checked, path)?;
+        }
+    }
+
+    path.pop();
+    active.remove(function);
+    checked.insert(function.clone());
+    Ok(())
 }
 
 fn codegen_definition(
@@ -109,40 +190,65 @@ fn codegen_definition(
     let mut term = term.clone();
     term.quotient().map_err(CodegenError::Quotient)?;
     let function_symbols = direct_function_symbols(&term)?;
-    let sources = term
-        .sources
-        .iter()
-        .map(|node| var(*node, &term))
-        .filter_map(runtime_var)
-        .collect::<Result<Vec<_>, _>>()?;
-    let targets = term
-        .targets
-        .iter()
-        .map(|node| var(*node, &term))
-        .filter_map(runtime_var)
-        .collect::<Result<Vec<_>, _>>()?;
+    let mut aliases = HashMap::<NodeId, Vec<GpuValue>>::new();
+    let mut sources = Vec::new();
+    for node in &term.sources {
+        let components = vars(*node, &term)?;
+        sources.extend(components.iter().cloned());
+        aliases.insert(*node, components.into_iter().map(GpuValue::Var).collect());
+    }
     let mut assignments = Vec::new();
     for assignment in ssa(term.clone().to_strict())? {
         let op = assignment.op;
         if op.as_str().starts_with("name.") {
             continue;
         }
-        let inputs = assignment
-            .sources
-            .iter()
-            .filter_map(|(node, _)| {
-                if let Some(symbol) = function_symbols.get(node) {
-                    return Some(Ok(GpuValue::FnSymbol(symbol.clone())));
-                }
-                runtime_var(var(*node, &term)).map(|value| value.map(GpuValue::Var))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        let outputs = assignment
-            .targets
-            .iter()
-            .map(|(node, _)| var(*node, &term))
-            .filter_map(runtime_var)
-            .collect::<Result<Vec<_>, _>>()?;
+        if op.as_str() == "*.intro" {
+            let inputs = resolve_nodes(
+                assignment.sources.iter().map(|(node, _)| *node),
+                &aliases,
+                &function_symbols,
+                &term,
+            )?;
+            let [(target, _)] = assignment.targets.as_slice() else {
+                return Err(CodegenError::InvalidProduct { operation: op });
+            };
+            aliases.insert(*target, inputs);
+            continue;
+        }
+        if op.as_str() == "*.elim" {
+            let [(source, _)] = assignment.sources.as_slice() else {
+                return Err(CodegenError::InvalidProduct { operation: op });
+            };
+            let components = resolve_node(*source, &aliases, &function_symbols, &term)?;
+            let mut offset = 0;
+            for (target, _) in &assignment.targets {
+                let count = vars(*target, &term)?.len();
+                let Some(values) = components.get(offset..offset + count) else {
+                    return Err(CodegenError::InvalidProduct {
+                        operation: op.clone(),
+                    });
+                };
+                aliases.insert(*target, values.to_vec());
+                offset += count;
+            }
+            if offset != components.len() {
+                return Err(CodegenError::InvalidProduct { operation: op });
+            }
+            continue;
+        }
+        let inputs = resolve_nodes(
+            assignment.sources.iter().map(|(node, _)| *node),
+            &aliases,
+            &function_symbols,
+            &term,
+        )?;
+        let mut outputs = Vec::new();
+        for (node, _) in &assignment.targets {
+            let components = vars(*node, &term)?;
+            outputs.extend(components.iter().cloned());
+            aliases.insert(*node, components.into_iter().map(GpuValue::Var).collect());
+        }
         if inputs.is_empty() && outputs.is_empty() {
             continue;
         }
@@ -156,6 +262,18 @@ fn codegen_definition(
             outputs,
         });
     }
+    let targets = resolve_nodes(
+        term.targets.iter().copied(),
+        &aliases,
+        &function_symbols,
+        &term,
+    )?
+    .into_iter()
+    .map(|value| match value {
+        GpuValue::Var(var) => Ok(var),
+        GpuValue::FnSymbol(_) => Err(CodegenError::FunctionOutput(source_name.clone())),
+    })
+    .collect::<Result<Vec<_>, _>>()?;
     Ok(GpuModule {
         name: symbol.clone(),
         source_name: Some(source_name),
@@ -189,20 +307,68 @@ fn direct_function_symbols(term: &CodegenTerm) -> Result<HashMap<NodeId, Operati
     Ok(symbols)
 }
 
-fn var(node: NodeId, term: &CodegenTerm) -> Result<GpuVar, LowerTypeError> {
-    Ok(GpuVar {
+fn vars(node: NodeId, term: &CodegenTerm) -> Result<Vec<GpuVar>, LowerTypeError> {
+    let mut output = Vec::new();
+    lower_components(
         node,
-        name: format!("x{}", node.0),
-        lowered: lower_type(&term.hypergraph.nodes[node.0])?,
-    })
+        &term.hypergraph.nodes[node.0],
+        &format!("x{}", node.0),
+        &mut output,
+    )?;
+    Ok(output)
 }
 
-fn runtime_var(value: Result<GpuVar, LowerTypeError>) -> Option<Result<GpuVar, LowerTypeError>> {
-    match value {
-        Ok(var) if matches!(var.lowered, LoweredType::Runtime(_)) => Some(Ok(var)),
-        Ok(_) => None,
-        Err(error) => Some(Err(error)),
+fn lower_components(
+    node: NodeId,
+    ty: &Tree<(), Operation>,
+    name: &str,
+    output: &mut Vec<GpuVar>,
+) -> Result<(), LowerTypeError> {
+    if let Tree::Node(operation, _, children) = ty
+        && operation.as_str() == "*"
+    {
+        for (index, child) in children.iter().enumerate() {
+            lower_components(node, child, &format!("{name}_{index}"), output)?;
+        }
+        return Ok(());
     }
+    let lowered = lower_type(ty)?;
+    if let LoweredType::Runtime(_) = &lowered {
+        output.push(GpuVar {
+            node,
+            name: name.into(),
+            lowered,
+        });
+    }
+    Ok(())
+}
+
+fn resolve_nodes(
+    nodes: impl IntoIterator<Item = NodeId>,
+    aliases: &HashMap<NodeId, Vec<GpuValue>>,
+    function_symbols: &HashMap<NodeId, Operation>,
+    term: &CodegenTerm,
+) -> Result<Vec<GpuValue>, LowerTypeError> {
+    let mut output = Vec::new();
+    for node in nodes {
+        output.extend(resolve_node(node, aliases, function_symbols, term)?);
+    }
+    Ok(output)
+}
+
+fn resolve_node(
+    node: NodeId,
+    aliases: &HashMap<NodeId, Vec<GpuValue>>,
+    function_symbols: &HashMap<NodeId, Operation>,
+    term: &CodegenTerm,
+) -> Result<Vec<GpuValue>, LowerTypeError> {
+    if let Some(symbol) = function_symbols.get(&node) {
+        return Ok(vec![GpuValue::FnSymbol(symbol.clone())]);
+    }
+    if let Some(values) = aliases.get(&node) {
+        return Ok(values.clone());
+    }
+    Ok(vars(node, term)?.into_iter().map(GpuValue::Var).collect())
 }
 
 pub fn runtime_type(var: &GpuVar) -> Option<&CType> {
@@ -216,4 +382,78 @@ fn sanitize_ident(name: &str) -> String {
     name.chars()
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn nested_launch_reachable_through_fold_and_helper_is_rejected() {
+        let mut modules = GpuModuleMap::new();
+        modules.insert(
+            op("entry"),
+            module(
+                "entry",
+                vec![assignment(
+                    "gpu.launch",
+                    false,
+                    vec![GpuValue::FnSymbol(op("outer-kernel"))],
+                )],
+            ),
+        );
+        modules.insert(
+            op("outer-kernel"),
+            module(
+                "outer-kernel",
+                vec![assignment(
+                    "fold",
+                    false,
+                    vec![GpuValue::FnSymbol(op("fold-step"))],
+                )],
+            ),
+        );
+        modules.insert(
+            op("fold-step"),
+            module("fold-step", vec![assignment("helper", true, Vec::new())]),
+        );
+        modules.insert(
+            op("helper"),
+            module("helper", vec![assignment("gpu.launch", false, Vec::new())]),
+        );
+
+        let error = validate_device_callability(&modules).unwrap_err();
+        assert!(matches!(
+            error,
+            CodegenError::NestedLaunch { kernel, path }
+                if kernel.as_str() == "outer-kernel"
+                    && path == "outer-kernel -> fold-step -> helper -> gpu.launch"
+        ));
+    }
+
+    fn op(name: &str) -> Operation {
+        name.parse().unwrap()
+    }
+
+    fn module(name: &str, assignments: Vec<GpuAssign>) -> GpuModule {
+        GpuModule {
+            name: sanitize_ident(&format!("program.{name}")),
+            source_name: Some(op(name)),
+            entry: GpuFunction {
+                name: sanitize_ident(&format!("program.{name}")),
+                sources: Vec::new(),
+                targets: Vec::new(),
+                assignments,
+            },
+        }
+    }
+
+    fn assignment(op_name: &str, direct_call: bool, inputs: Vec<GpuValue>) -> GpuAssign {
+        GpuAssign {
+            op: op(op_name),
+            call_symbol: direct_call.then(|| sanitize_ident(&format!("program.{op_name}"))),
+            inputs,
+            outputs: Vec::new(),
+        }
+    }
 }

@@ -1,1 +1,3 @@
-pub const MINIMAL: &str = include_str!("minimal.hex");
+use super::*;
+
+mod launch;

@@ -1,0 +1,41 @@
+# The first index past the buffer is its length. A raw u64 carrying that value
+# cannot be used as the bounded buffer index required by can-own.
+
+(def program permission-for-past-end-cell-kernel : {[
+  buffer-name buffer-size grid-shape block-shape global-shape global-size
+  schedule-name.
+]
+  ({[.buffer-size] u64} :)
+  [.buffer-name]
+  [.grid-shape]
+  [.block-shape]
+  [.global-shape]
+  [.global-size]
+  [.schedule-name]
+  ({[.buffer-name] ({cap.own [.buffer-size] u64} gpu.global)} :)
+  ({({[.grid-shape block-shape global-shape global-size]} gpu.grid)}
+    gpu.thread val)
+  ({
+    [.buffer-name buffer-size]
+    ({[.grid-shape block-shape global-shape global-size]} gpu.grid)
+    [.schedule-name]
+  } gpu.scheduling val)
+} -> {[
+  buffer-name buffer-size grid-shape block-shape global-shape global-size
+  schedule-name.
+]
+  ({
+    [.buffer-name buffer-size]
+    ({[.grid-shape block-shape global-shape global-size]} gpu.grid)
+    [.schedule-name]
+  } gpu.scheduling val)
+} = ([buffer-length buffer-name grid-shape block-shape global-shape global-size
+  schedule-name buffer thread scheduling.]
+  ([.buffer-length] :.forget [past-end-cell.])
+  ([.thread] gpu.thread.name [named-thread.])
+  ({[.scheduling named-thread past-end-cell]}
+    gpu.scheduling.can-own
+    [scheduling-after _thread-after _cell-after _decision _owns _not-owns.])
+  ([.buffer] gpu.global.forget)
+  [.scheduling-after]
+))

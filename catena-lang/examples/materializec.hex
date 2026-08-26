@@ -495,3 +495,63 @@
     ({[.output-count] [.up-output]} buf.to-mem)
   }
 ))
+
+(def program materialize-borrow-cached-context-f32 :
+  {(cap.own mem) (cap.own mem)}
+  ->
+  {(cap.own mem) (cap.own mem) (cap.own mem)}
+= ([cache probabilities.]
+  ([.cache] mem.cast.f32 [cache-count cache-buffer.])
+  ([.probabilities] mem.cast.f32 [probability-count probability-buffer.])
+  (const.u64.0x0000000000000004 u64.name [output-count.])
+  (const.u64.0x0000000000000001 [sequence.])
+  (const.u64.0x0000000000000003 [history.])
+  (const.u64.0x0000000000000003 [token-capacity.])
+  (const.u64.0x0000000000000000 [layer.])
+  (const.u64.0x0000000000000002 [query-heads.])
+  (const.u64.0x0000000000000001 [key-value-heads.])
+  (const.u64.0x0000000000000002 [head-dim.])
+  {
+    [.cache-buffer] [.cache-count]
+    [.probability-buffer] [.probability-count]
+    [.output-count]
+    [.sequence] [.history] [.token-capacity] [.layer]
+    [.query-heads] [.key-value-heads] [.head-dim]
+  } materializec.borrow-cached-context-f32
+    [cache-after probabilities-after output.]
+  {
+    ({[.cache-count] [.cache-after]} buf.to-mem)
+    ({[.probability-count] [.probabilities-after]} buf.to-mem)
+    ({[.output-count] [.output]} buf.to-mem)
+  }
+))
+
+(def program materialize-borrow-cached-context-bf16 :
+  {(cap.own mem) (cap.own mem)}
+  ->
+  {(cap.own mem) (cap.own mem) (cap.own mem)}
+= ([cache probabilities.]
+  ([.cache] mem.cast.bf16 [cache-count cache-buffer.])
+  ([.probabilities] mem.cast.bf16 [probability-count probability-buffer.])
+  (const.u64.0x0000000000000004 u64.name [output-count.])
+  (const.u64.0x0000000000000001 [sequence.])
+  (const.u64.0x0000000000000003 [history.])
+  (const.u64.0x0000000000000003 [token-capacity.])
+  (const.u64.0x0000000000000000 [layer.])
+  (const.u64.0x0000000000000002 [query-heads.])
+  (const.u64.0x0000000000000001 [key-value-heads.])
+  (const.u64.0x0000000000000002 [head-dim.])
+  {
+    [.cache-buffer] [.cache-count]
+    [.probability-buffer] [.probability-count]
+    [.output-count]
+    [.sequence] [.history] [.token-capacity] [.layer]
+    [.query-heads] [.key-value-heads] [.head-dim]
+  } materializec.borrow-cached-context-bf16
+    [cache-after probabilities-after output.]
+  {
+    ({[.cache-count] [.cache-after]} buf.to-mem)
+    ({[.probability-count] [.probabilities-after]} buf.to-mem)
+    ({[.output-count] [.output]} buf.to-mem)
+  }
+))

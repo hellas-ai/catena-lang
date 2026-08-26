@@ -130,6 +130,47 @@
     ({cap.own [.n t]} buf val)
   }})
 
+  # Compute the probability-times-cached-value half of grouped-query
+  # attention. The cache layout is [layer, K-or-V, token, KV-head, channel],
+  # probabilities are [query-position, query-head, key-position], and output
+  # is [query-position, query-head, channel]. Cache and probabilities are
+  # returned after the coalesced kernel launch.
+  (arr materializec.borrow-cached-context-f32 :
+    {[cache-cap probability-cap output-cap.]
+      ({cap.own [.cache-cap] f32} buf val)
+      ({[.cache-cap] u64} :)
+      ({cap.own [.probability-cap] f32} buf val)
+      ({[.probability-cap] u64} :)
+      ({[.output-cap] u64} :)
+      (u64 val) (u64 val) (u64 val) (u64 val)
+      (u64 val) (u64 val) (u64 val)
+    }
+    ->
+    {[cache-cap probability-cap output-cap.] {
+      ({cap.own [.cache-cap] f32} buf val)
+      ({cap.own [.probability-cap] f32} buf val)
+      ({cap.own [.output-cap] f32} buf val)
+    }})
+
+  # BF16-storage counterpart; products accumulate in F32 and each context
+  # channel is rounded once when stored.
+  (arr materializec.borrow-cached-context-bf16 :
+    {[cache-cap probability-cap output-cap.]
+      ({cap.own [.cache-cap] bf16} buf val)
+      ({[.cache-cap] u64} :)
+      ({cap.own [.probability-cap] bf16} buf val)
+      ({[.probability-cap] u64} :)
+      ({[.output-cap] u64} :)
+      (u64 val) (u64 val) (u64 val) (u64 val)
+      (u64 val) (u64 val) (u64 val)
+    }
+    ->
+    {[cache-cap probability-cap output-cap.] {
+      ({cap.own [.cache-cap] bf16} buf val)
+      ({cap.own [.probability-cap] bf16} buf val)
+      ({cap.own [.output-cap] bf16} buf val)
+    }})
+
   # Run a complete gated-delta recurrent scan in one GPU kernel. Q and K are
   # laid out [token, key-head, dim], V and the result are
   # [token, value-head, dim], and gate/beta are [token, value-head]. The
@@ -228,6 +269,59 @@
       ({cap.own [.selected-cap] u64} buf val)
       ({cap.own [.n] f32} buf val)
       ({cap.own [.n] f32} buf val)
+    }})
+
+  # Native-BF16-storage counterpart of the routed paired GEMV. Inputs,
+  # weights, and outputs are BF16; products use packed BF16 dot instructions
+  # where available and accumulate in F32 before one final rounding.
+  (arr materializec.borrow-routed-native-bf16-gemv-pair :
+    {[input-cap gate-cap up-cap selected-cap n k.]
+      ({cap.own [.input-cap] bf16} buf val)
+      ({[.input-cap] u64} :)
+      ({cap.ref [.gate-cap] bf16} buf val)
+      ({[.gate-cap] u64} :)
+      ({cap.ref [.up-cap] bf16} buf val)
+      ({[.up-cap] u64} :)
+      ({cap.own [.selected-cap] u64} buf val)
+      ({[.selected-cap] u64} :)
+      ({[.n] u64} :)
+      ({[.k] u64} :)
+      (u64 val)
+      (u64 val)
+    }
+    ->
+    {[input-cap gate-cap up-cap selected-cap n k.] {
+      ({cap.own [.input-cap] bf16} buf val)
+      ({cap.own [.selected-cap] u64} buf val)
+      ({cap.own [.n] bf16} buf val)
+      ({cap.own [.n] bf16} buf val)
+    }})
+
+  # Native routed down projection. The active selected-expert rows and weights
+  # are BF16, accumulation and residual addition are F32, and the output is
+  # rounded once to BF16. All owned inputs are returned after the launch.
+  (arr materializec.borrow-routed-native-bf16-gemv-residual :
+    {[active-cap down-cap selected-cap residual-cap n k.]
+      ({cap.own [.active-cap] bf16} buf val)
+      ({[.active-cap] u64} :)
+      ({cap.ref [.down-cap] bf16} buf val)
+      ({[.down-cap] u64} :)
+      ({cap.own [.selected-cap] u64} buf val)
+      ({[.selected-cap] u64} :)
+      ({cap.own [.residual-cap] bf16} buf val)
+      ({[.residual-cap] u64} :)
+      ({[.n] u64} :)
+      ({[.k] u64} :)
+      (u64 val)
+      (u64 val)
+      (u64 val)
+    }
+    ->
+    {[active-cap down-cap selected-cap residual-cap n k.] {
+      ({cap.own [.active-cap] bf16} buf val)
+      ({cap.own [.selected-cap] u64} buf val)
+      ({cap.own [.residual-cap] bf16} buf val)
+      ({cap.own [.n] bf16} buf val)
     }})
 
   # Multiply a row-major BF16 input matrix by the transpose of a row-major

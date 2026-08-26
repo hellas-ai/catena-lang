@@ -307,6 +307,63 @@ fn materialize_borrow_routed_bf16_gemv_pair_executes_both_trees() -> anyhow::Res
 }
 
 #[test]
+fn materialize_borrow_cached_context_f32_coalesces_value_channels() -> anyhow::Result<()> {
+    let runtime = runtime_with(SOURCE)?;
+    let cache_values = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2.0, 4.0, 6.0, 8.0, 10.0, 12.0];
+    let probability_values = [0.25, 0.25, 0.5, 1.0, 0.0, 0.0];
+    let cache = runtime.mem_f32(&cache_values)?;
+    let probabilities = runtime.mem_f32(&probability_values)?;
+    let cache_ptr = cache.as_ptr();
+    let probabilities_ptr = probabilities.as_ptr();
+
+    let [cache_after, probabilities_after, output] = runtime.exec(
+        "materialize-borrow-cached-context-f32",
+        [cache.into(), probabilities.into()],
+    )?;
+    let Value::MemOwn(cache_after) = cache_after else {
+        anyhow::bail!("cached context returned non-memory cache: {cache_after:?}");
+    };
+    let Value::MemOwn(probabilities_after) = probabilities_after else {
+        anyhow::bail!("cached context returned non-memory probabilities: {probabilities_after:?}");
+    };
+    let Value::MemOwn(output) = output else {
+        anyhow::bail!("cached context returned non-memory output: {output:?}");
+    };
+    assert_eq!(cache_after.as_ptr(), cache_ptr);
+    assert_eq!(probabilities_after.as_ptr(), probabilities_ptr);
+    assert_eq!(output.to_f32_vec(), vec![7.0, 9.0, 2.0, 4.0]);
+    Ok(())
+}
+
+#[test]
+fn materialize_borrow_cached_context_bf16_accumulates_in_f32() -> anyhow::Result<()> {
+    let runtime = runtime_with(SOURCE)?;
+    let cache_values = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2.0, 4.0, 6.0, 8.0, 10.0, 12.0]
+        .map(half::bf16::from_f32)
+        .map(half::bf16::to_bits);
+    let probability_values = [0.25, 0.25, 0.5, 1.0, 0.0, 0.0]
+        .map(half::bf16::from_f32)
+        .map(half::bf16::to_bits);
+    let cache = runtime.mem_u16(&cache_values)?;
+    let probabilities = runtime.mem_u16(&probability_values)?;
+
+    let [_cache_after, _probabilities_after, output] = runtime.exec(
+        "materialize-borrow-cached-context-bf16",
+        [cache.into(), probabilities.into()],
+    )?;
+    let Value::MemOwn(output) = output else {
+        anyhow::bail!("BF16 cached context returned non-memory output: {output:?}");
+    };
+    assert_eq!(
+        output.to_u16_vec(),
+        [7.0_f32, 9.0, 2.0, 4.0]
+            .map(half::bf16::from_f32)
+            .map(half::bf16::to_bits)
+    );
+    Ok(())
+}
+
+#[test]
 fn materialize_softmax_f32_normalizes_rows_in_place() -> anyhow::Result<()> {
     let runtime = runtime_with(SOURCE)?;
     let input = runtime.mem_f32(&[0.0, 1.0, 2.0, f32::NEG_INFINITY, 3.0, 3.0])?;

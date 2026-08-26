@@ -750,6 +750,195 @@ pub(in crate::codegen) fn render_borrow_routed_bf16_gemv_pair_kernel(
     Ok(())
 }
 
+pub(in crate::codegen) fn render_borrow_routed_native_bf16_gemv_pair_kernel(
+    out: &mut String,
+    kernel_name: &str,
+    assignment: &GpuAssign,
+    dialect: GpuDialect,
+) -> Result<(), GpuRenderError> {
+    let [input_output, selected_output, gate_output, up_output] = assignment.outputs.as_slice()
+    else {
+        return Err(invalid_outputs(assignment, 4));
+    };
+    for (output, expected) in [
+        (input_output, CType::BF16),
+        (selected_output, CType::U64),
+        (gate_output, CType::BF16),
+        (up_output, CType::BF16),
+    ] {
+        let Some(CType::Pointer(element)) = runtime_type(output) else {
+            return Err(GpuRenderError::ErasedType(output.clone()));
+        };
+        if element.as_ref() != &expected {
+            return Err(GpuRenderError::UnsupportedType(
+                runtime_type(output).unwrap().clone(),
+            ));
+        }
+    }
+    let _ = borrow_routed_bf16_gemv_pair_parts(assignment)?;
+
+    out.push_str(&format!(
+        "__global__ void {kernel_name}(const catena_bf16_t *input, const catena_bf16_t *gate_weight, const catena_bf16_t *up_weight, const uint64_t *selected, catena_bf16_t *gate_out, catena_bf16_t *up_out, uint64_t output_len, uint64_t reduction_len, uint64_t slots, uint64_t output_features, uint64_t expert_count) {{\n"
+    ));
+    out.push_str("    uint64_t output_index = (uint64_t)blockIdx.x;\n");
+    out.push_str("    if (output_index >= output_len) { return; }\n");
+    out.push_str("    uint64_t active_width = slots * output_features;\n");
+    out.push_str("    uint64_t row = output_index / active_width;\n");
+    out.push_str("    uint64_t row_element = output_index % active_width;\n");
+    out.push_str("    uint64_t slot = row_element / output_features;\n");
+    out.push_str("    uint64_t output_feature = row_element % output_features;\n");
+    out.push_str("    uint64_t expert = selected[row * slots + slot];\n");
+    out.push_str("    catena_assert(expert < expert_count);\n");
+    out.push_str("    uint64_t input_base = row * reduction_len;\n");
+    out.push_str(
+        "    uint64_t weight_base = (expert * output_features + output_feature) * reduction_len;\n",
+    );
+    out.push_str("    float gate_sum = 0.0f;\n    float up_sum = 0.0f;\n");
+    out.push_str("    uint64_t pair_count = reduction_len >> 1;\n");
+    if dialect == GpuDialect::Hip {
+        out.push_str("#if defined(__gfx1100__) || defined(__gfx1101__) || defined(__gfx1102__) || defined(__gfx1103__) || defined(__gfx1150__) || defined(__gfx1151__) || defined(__gfx1152__) || defined(__gfx1153__)\n");
+        out.push_str(
+            "    typedef __bf16 catena_native_bf16x2_t __attribute__((ext_vector_type(2)));\n",
+        );
+        out.push_str("#endif\n");
+    }
+    out.push_str("    for (uint64_t pair = (uint64_t)threadIdx.x; pair < pair_count; pair += (uint64_t)blockDim.x) {\n");
+    match dialect {
+        GpuDialect::Hip => {
+            out.push_str("#if defined(__gfx1100__) || defined(__gfx1101__) || defined(__gfx1102__) || defined(__gfx1103__) || defined(__gfx1150__) || defined(__gfx1151__) || defined(__gfx1152__) || defined(__gfx1153__)\n");
+            out.push_str("        union { uint32_t bits; catena_native_bf16x2_t values; } input_pair, gate_pair, up_pair;\n");
+            out.push_str("        __builtin_memcpy(&input_pair.bits, input + input_base + (pair << 1), sizeof(uint32_t));\n");
+            out.push_str("        __builtin_memcpy(&gate_pair.bits, gate_weight + weight_base + (pair << 1), sizeof(uint32_t));\n");
+            out.push_str("        __builtin_memcpy(&up_pair.bits, up_weight + weight_base + (pair << 1), sizeof(uint32_t));\n");
+            out.push_str("        gate_sum = __builtin_amdgcn_fdot2_f32_bf16(input_pair.values, gate_pair.values, gate_sum, false);\n");
+            out.push_str("        up_sum = __builtin_amdgcn_fdot2_f32_bf16(input_pair.values, up_pair.values, up_sum, false);\n");
+            out.push_str("#else\n");
+            out.push_str("        uint64_t index = pair << 1;\n");
+            out.push_str("        float x0 = catena_bf16_to_f32(input[input_base + index]);\n");
+            out.push_str("        float x1 = catena_bf16_to_f32(input[input_base + index + 1]);\n");
+            out.push_str("        gate_sum += x0 * catena_bf16_to_f32(gate_weight[weight_base + index]) + x1 * catena_bf16_to_f32(gate_weight[weight_base + index + 1]);\n");
+            out.push_str("        up_sum += x0 * catena_bf16_to_f32(up_weight[weight_base + index]) + x1 * catena_bf16_to_f32(up_weight[weight_base + index + 1]);\n");
+            out.push_str("#endif\n");
+        }
+        GpuDialect::Cuda => {
+            out.push_str("        uint64_t index = pair << 1;\n");
+            out.push_str("        float x0 = catena_bf16_to_f32(input[input_base + index]);\n");
+            out.push_str("        float x1 = catena_bf16_to_f32(input[input_base + index + 1]);\n");
+            out.push_str("        gate_sum += x0 * catena_bf16_to_f32(gate_weight[weight_base + index]) + x1 * catena_bf16_to_f32(gate_weight[weight_base + index + 1]);\n");
+            out.push_str("        up_sum += x0 * catena_bf16_to_f32(up_weight[weight_base + index]) + x1 * catena_bf16_to_f32(up_weight[weight_base + index + 1]);\n");
+        }
+    }
+    out.push_str("    }\n");
+    out.push_str("    if ((reduction_len & 1) != 0 && threadIdx.x == 0) {\n");
+    out.push_str("        uint64_t index = reduction_len - 1;\n");
+    out.push_str("        float x = catena_bf16_to_f32(input[input_base + index]);\n");
+    out.push_str("        gate_sum += x * catena_bf16_to_f32(gate_weight[weight_base + index]);\n");
+    out.push_str("        up_sum += x * catena_bf16_to_f32(up_weight[weight_base + index]);\n");
+    out.push_str("    }\n");
+    out.push_str(
+        "    __shared__ float gate_partial[256];\n    __shared__ float up_partial[256];\n",
+    );
+    out.push_str("    gate_partial[threadIdx.x] = gate_sum;\n    up_partial[threadIdx.x] = up_sum;\n    __syncthreads();\n");
+    out.push_str("    for (uint32_t stride = 128; stride != 0; stride >>= 1) {\n");
+    out.push_str("        if (threadIdx.x < stride) { gate_partial[threadIdx.x] += gate_partial[threadIdx.x + stride]; up_partial[threadIdx.x] += up_partial[threadIdx.x + stride]; }\n");
+    out.push_str("        __syncthreads();\n    }\n");
+    out.push_str("    if (threadIdx.x == 0) { gate_out[output_index] = catena_bf16_from_f32(gate_partial[0]); up_out[output_index] = catena_bf16_from_f32(up_partial[0]); }\n");
+    out.push_str("}\n");
+    Ok(())
+}
+
+pub(in crate::codegen) fn render_borrow_routed_native_bf16_gemv_residual_kernel(
+    out: &mut String,
+    kernel_name: &str,
+    assignment: &GpuAssign,
+    dialect: GpuDialect,
+) -> Result<(), GpuRenderError> {
+    let [active_output, selected_output, residual_output, output] = assignment.outputs.as_slice()
+    else {
+        return Err(invalid_outputs(assignment, 4));
+    };
+    for (value, expected) in [
+        (active_output, CType::BF16),
+        (selected_output, CType::U64),
+        (residual_output, CType::BF16),
+        (output, CType::BF16),
+    ] {
+        let Some(CType::Pointer(element)) = runtime_type(value) else {
+            return Err(GpuRenderError::ErasedType(value.clone()));
+        };
+        if element.as_ref() != &expected {
+            return Err(GpuRenderError::UnsupportedType(
+                runtime_type(value).unwrap().clone(),
+            ));
+        }
+    }
+    let _ = borrow_routed_bf16_gemv_residual_parts(assignment)?;
+
+    out.push_str(&format!("__global__ void {kernel_name}(const catena_bf16_t *active, const catena_bf16_t *down_weight, const uint64_t *selected, const catena_bf16_t *residual, catena_bf16_t *out, uint64_t output_len, uint64_t reduction_len, uint64_t slots, uint64_t intermediate, uint64_t output_features, uint64_t expert_count) {{\n"));
+    out.push_str("    uint64_t output_index = (uint64_t)blockIdx.x;\n");
+    out.push_str("    if (output_index >= output_len) { return; }\n");
+    out.push_str("    uint64_t row = output_index / output_features;\n");
+    out.push_str("    uint64_t output_feature = output_index % output_features;\n");
+    out.push_str("    uint64_t active_base = row * reduction_len;\n");
+    out.push_str("    float sum = 0.0f;\n");
+    out.push_str("    uint64_t pair_count = reduction_len >> 1;\n");
+    if dialect == GpuDialect::Hip {
+        out.push_str("#if defined(__gfx1100__) || defined(__gfx1101__) || defined(__gfx1102__) || defined(__gfx1103__) || defined(__gfx1150__) || defined(__gfx1151__) || defined(__gfx1152__) || defined(__gfx1153__)\n");
+        out.push_str(
+            "    typedef __bf16 catena_native_bf16x2_t __attribute__((ext_vector_type(2)));\n",
+        );
+        out.push_str("#endif\n");
+    }
+    out.push_str("    for (uint64_t pair = (uint64_t)threadIdx.x; pair < pair_count; pair += (uint64_t)blockDim.x) {\n");
+    out.push_str("        uint64_t flat = pair << 1;\n");
+    out.push_str("        uint64_t slot = flat / intermediate;\n");
+    out.push_str("        uint64_t channel = flat % intermediate;\n");
+    out.push_str("        uint64_t expert = selected[row * slots + slot];\n");
+    out.push_str("        catena_assert(expert < expert_count);\n");
+    out.push_str("        uint64_t weight_base = (expert * output_features + output_feature) * intermediate + channel;\n");
+    match dialect {
+        GpuDialect::Hip => {
+            out.push_str("#if defined(__gfx1100__) || defined(__gfx1101__) || defined(__gfx1102__) || defined(__gfx1103__) || defined(__gfx1150__) || defined(__gfx1151__) || defined(__gfx1152__) || defined(__gfx1153__)\n");
+            out.push_str("        if (channel + 1 < intermediate) {\n");
+            out.push_str("            union { uint32_t bits; catena_native_bf16x2_t values; } active_pair, weight_pair;\n");
+            out.push_str("            __builtin_memcpy(&active_pair.bits, active + active_base + flat, sizeof(uint32_t));\n");
+            out.push_str("            __builtin_memcpy(&weight_pair.bits, down_weight + weight_base, sizeof(uint32_t));\n");
+            out.push_str("            sum = __builtin_amdgcn_fdot2_f32_bf16(active_pair.values, weight_pair.values, sum, false);\n");
+            out.push_str("        } else {\n");
+            out.push_str("            sum += catena_bf16_to_f32(active[active_base + flat]) * catena_bf16_to_f32(down_weight[weight_base]);\n");
+            out.push_str("            uint64_t next_slot = slot + 1;\n");
+            out.push_str("            uint64_t next_expert = selected[row * slots + next_slot];\n");
+            out.push_str("            uint64_t next_weight = (next_expert * output_features + output_feature) * intermediate;\n");
+            out.push_str("            sum += catena_bf16_to_f32(active[active_base + flat + 1]) * catena_bf16_to_f32(down_weight[next_weight]);\n");
+            out.push_str("        }\n");
+            out.push_str("#else\n");
+            out.push_str("        float x0 = catena_bf16_to_f32(active[active_base + flat]);\n");
+            out.push_str("        float w0 = catena_bf16_to_f32(down_weight[weight_base]);\n");
+            out.push_str("        uint64_t flat1 = flat + 1; uint64_t slot1 = flat1 / intermediate; uint64_t channel1 = flat1 % intermediate; uint64_t expert1 = selected[row * slots + slot1];\n");
+            out.push_str("        uint64_t weight1 = (expert1 * output_features + output_feature) * intermediate + channel1;\n");
+            out.push_str("        sum += x0 * w0 + catena_bf16_to_f32(active[active_base + flat1]) * catena_bf16_to_f32(down_weight[weight1]);\n");
+            out.push_str("#endif\n");
+        }
+        GpuDialect::Cuda => {
+            out.push_str("        float x0 = catena_bf16_to_f32(active[active_base + flat]);\n");
+            out.push_str("        float w0 = catena_bf16_to_f32(down_weight[weight_base]);\n");
+            out.push_str("        uint64_t flat1 = flat + 1; uint64_t slot1 = flat1 / intermediate; uint64_t channel1 = flat1 % intermediate; uint64_t expert1 = selected[row * slots + slot1];\n");
+            out.push_str("        uint64_t weight1 = (expert1 * output_features + output_feature) * intermediate + channel1;\n");
+            out.push_str("        sum += x0 * w0 + catena_bf16_to_f32(active[active_base + flat1]) * catena_bf16_to_f32(down_weight[weight1]);\n");
+        }
+    }
+    out.push_str("    }\n");
+    out.push_str("    if ((reduction_len & 1) != 0 && threadIdx.x == 0) {\n");
+    out.push_str("        uint64_t flat = reduction_len - 1; uint64_t slot = flat / intermediate; uint64_t channel = flat % intermediate; uint64_t expert = selected[row * slots + slot];\n");
+    out.push_str("        uint64_t weight_index = (expert * output_features + output_feature) * intermediate + channel;\n");
+    out.push_str("        sum += catena_bf16_to_f32(active[active_base + flat]) * catena_bf16_to_f32(down_weight[weight_index]);\n    }\n");
+    out.push_str("    __shared__ float partial[256];\n    partial[threadIdx.x] = sum;\n    __syncthreads();\n");
+    out.push_str("    for (uint32_t stride = 128; stride != 0; stride >>= 1) { if (threadIdx.x < stride) partial[threadIdx.x] += partial[threadIdx.x + stride]; __syncthreads(); }\n");
+    out.push_str("    if (threadIdx.x == 0) out[output_index] = catena_bf16_from_f32(partial[0] + catena_bf16_to_f32(residual[output_index]));\n");
+    out.push_str("}\n");
+    Ok(())
+}
+
 pub(in crate::codegen) fn render_bf16_gemv_kernel(
     out: &mut String,
     kernel_name: &str,
@@ -1274,6 +1463,166 @@ pub(in crate::codegen) fn render_borrow_routed_bf16_gemv_pair_call(
         gate_output.name,
         up_output.name,
         up_output.name,
+    ));
+    Ok(())
+}
+
+pub(in crate::codegen) fn render_borrow_routed_native_bf16_gemv_pair_call(
+    out: &mut String,
+    function: &GpuFunction,
+    assignment: &GpuAssign,
+    dialect: GpuDialect,
+) -> Result<(), GpuRenderError> {
+    let [input_output, selected_output, gate_output, up_output] = assignment.outputs.as_slice()
+    else {
+        return Err(invalid_outputs(assignment, 4));
+    };
+    let (
+        input,
+        input_capacity,
+        gate_weight,
+        gate_capacity,
+        up_weight,
+        up_capacity,
+        selected,
+        selected_capacity,
+        output_len,
+        reduction_len,
+        slots,
+        output_features,
+    ) = borrow_routed_bf16_gemv_pair_parts(assignment)?;
+    let input_capacity = value_expr(input_capacity);
+    let gate_capacity = value_expr(gate_capacity);
+    let up_capacity = value_expr(up_capacity);
+    let selected_capacity = value_expr(selected_capacity);
+    let output_len = value_expr(output_len);
+    let reduction_len = value_expr(reduction_len);
+    let slots = value_expr(slots);
+    let output_features = value_expr(output_features);
+    let kernel_name = kernel_name(&function.name, assignment)?;
+    let prefix = &gate_output.name;
+
+    out.push_str(&format!("    catena_assert(({reduction_len}) != 0);\n"));
+    out.push_str(&format!(
+        "    catena_assert(({slots}) != 0 && ({output_features}) != 0);\n"
+    ));
+    out.push_str(&format!(
+        "    catena_assert(({input_capacity}) % ({reduction_len}) == 0);\n"
+    ));
+    out.push_str(&format!(
+        "    uint64_t {prefix}_rows = ({input_capacity}) / ({reduction_len});\n"
+    ));
+    out.push_str(&format!(
+        "    catena_assert(({selected_capacity}) == {prefix}_rows * ({slots}));\n"
+    ));
+    out.push_str(&format!(
+        "    catena_assert(({output_len}) == ({selected_capacity}) * ({output_features}));\n"
+    ));
+    out.push_str(&format!(
+        "    uint64_t {prefix}_expert_stride = ({output_features}) * ({reduction_len});\n"
+    ));
+    out.push_str(&format!("    catena_assert(({gate_capacity}) == ({up_capacity}) && ({gate_capacity}) % {prefix}_expert_stride == 0);\n"));
+    out.push_str(&format!(
+        "    uint64_t {prefix}_expert_count = ({gate_capacity}) / {prefix}_expert_stride;\n"
+    ));
+    out.push_str(&format!(
+        "    catena_bf16_t *{}_data = nullptr;\n    catena_bf16_t *{}_data = nullptr;\n",
+        gate_output.name, up_output.name
+    ));
+    out.push_str(&format!("    if (({output_len}) != 0) {{\n"));
+    for output in [gate_output, up_output] {
+        out.push_str(&format!("        catena_host_gpu_check({}((void **)&{}_data, ({output_len}) * sizeof(catena_bf16_t), nullptr));\n", dialect.device_alloc_async_fn(), output.name));
+    }
+    out.push_str(&format!("        {kernel_name}<<<dim3({output_len}), dim3(256)>>>(\n            {}, {}, {}, {}, {}_data, {}_data, {output_len}, {reduction_len}, {slots}, {output_features}, {prefix}_expert_count);\n", value_expr(input), value_expr(gate_weight), value_expr(up_weight), value_expr(selected), gate_output.name, up_output.name));
+    out.push_str("    }\n");
+    out.push_str(&format!(
+        "    {} = {};\n    {} = {};\n    {} = {}_data;\n    {} = {}_data;\n",
+        input_output.name,
+        value_expr(input),
+        selected_output.name,
+        value_expr(selected),
+        gate_output.name,
+        gate_output.name,
+        up_output.name,
+        up_output.name
+    ));
+    Ok(())
+}
+
+pub(in crate::codegen) fn render_borrow_routed_native_bf16_gemv_residual_call(
+    out: &mut String,
+    function: &GpuFunction,
+    assignment: &GpuAssign,
+    dialect: GpuDialect,
+) -> Result<(), GpuRenderError> {
+    let [active_output, selected_output, residual_output, output] = assignment.outputs.as_slice()
+    else {
+        return Err(invalid_outputs(assignment, 4));
+    };
+    let (
+        active,
+        active_capacity,
+        down,
+        down_capacity,
+        selected,
+        selected_capacity,
+        residual,
+        residual_capacity,
+        output_len,
+        reduction_len,
+        slots,
+        intermediate,
+        output_features,
+    ) = borrow_routed_bf16_gemv_residual_parts(assignment)?;
+    let active_capacity = value_expr(active_capacity);
+    let down_capacity = value_expr(down_capacity);
+    let selected_capacity = value_expr(selected_capacity);
+    let residual_capacity = value_expr(residual_capacity);
+    let output_len = value_expr(output_len);
+    let reduction_len = value_expr(reduction_len);
+    let slots = value_expr(slots);
+    let intermediate = value_expr(intermediate);
+    let output_features = value_expr(output_features);
+    let kernel_name = kernel_name(&function.name, assignment)?;
+    let prefix = &output.name;
+    out.push_str(&format!(
+        "    catena_assert(({reduction_len}) == ({slots}) * ({intermediate}));\n"
+    ));
+    out.push_str(&format!(
+        "    catena_assert(({active_capacity}) % ({reduction_len}) == 0);\n"
+    ));
+    out.push_str(&format!(
+        "    uint64_t {prefix}_rows = ({active_capacity}) / ({reduction_len});\n"
+    ));
+    out.push_str(&format!(
+        "    catena_assert(({selected_capacity}) == {prefix}_rows * ({slots}));\n"
+    ));
+    out.push_str(&format!("    catena_assert(({output_len}) == {prefix}_rows * ({output_features}) && ({residual_capacity}) == ({output_len}));\n"));
+    out.push_str(&format!(
+        "    uint64_t {prefix}_expert_stride = ({output_features}) * ({intermediate});\n"
+    ));
+    out.push_str(&format!(
+        "    catena_assert(({down_capacity}) % {prefix}_expert_stride == 0);\n"
+    ));
+    out.push_str(&format!(
+        "    uint64_t {prefix}_expert_count = ({down_capacity}) / {prefix}_expert_stride;\n"
+    ));
+    out.push_str(&format!(
+        "    catena_bf16_t *{}_data = nullptr;\n",
+        output.name
+    ));
+    out.push_str(&format!("    if (({output_len}) != 0) {{\n        catena_host_gpu_check({}((void **)&{}_data, ({output_len}) * sizeof(catena_bf16_t), nullptr));\n", dialect.device_alloc_async_fn(), output.name));
+    out.push_str(&format!("        {kernel_name}<<<dim3({output_len}), dim3(256)>>>(\n            {}, {}, {}, {}, {}_data, {output_len}, {reduction_len}, {slots}, {intermediate}, {output_features}, {prefix}_expert_count);\n    }}\n", value_expr(active), value_expr(down), value_expr(selected), value_expr(residual), output.name));
+    out.push_str(&format!(
+        "    {} = {};\n    {} = {};\n    {} = {};\n    {} = {}_data;\n",
+        active_output.name,
+        value_expr(active),
+        selected_output.name,
+        value_expr(selected),
+        residual_output.name,
+        value_expr(residual),
+        output.name,
+        output.name
     ));
     Ok(())
 }
@@ -1838,6 +2187,66 @@ fn borrow_routed_bf16_gemv_pair_parts(
         single_runtime_input(assignment, "output_len", output_len)?,
         single_runtime_input(assignment, "reduction_len", reduction_len)?,
         single_runtime_input(assignment, "slots", slots)?,
+        single_runtime_input(assignment, "output_features", output_features)?,
+    ))
+}
+
+fn borrow_routed_bf16_gemv_residual_parts(
+    assignment: &GpuAssign,
+) -> Result<
+    (
+        &GpuValue,
+        &GpuValue,
+        &GpuValue,
+        &GpuValue,
+        &GpuValue,
+        &GpuValue,
+        &GpuValue,
+        &GpuValue,
+        &GpuValue,
+        &GpuValue,
+        &GpuValue,
+        &GpuValue,
+        &GpuValue,
+    ),
+    GpuRenderError,
+> {
+    let components = input_components(assignment)?;
+    let [
+        active,
+        active_capacity,
+        down,
+        down_capacity,
+        selected,
+        selected_capacity,
+        residual,
+        residual_capacity,
+        output_len,
+        reduction_len,
+        slots,
+        intermediate,
+        output_features,
+    ] = components.as_slice()
+    else {
+        return Err(GpuRenderError::InvalidInputComponentCount {
+            op: assignment.op.clone(),
+            expected: 13,
+            actual: components.len(),
+        });
+    };
+    Ok((
+        single_runtime_input(assignment, "active", active)?,
+        single_runtime_input(assignment, "active_capacity", active_capacity)?,
+        single_runtime_input(assignment, "down", down)?,
+        single_runtime_input(assignment, "down_capacity", down_capacity)?,
+        single_runtime_input(assignment, "selected", selected)?,
+        single_runtime_input(assignment, "selected_capacity", selected_capacity)?,
+        single_runtime_input(assignment, "residual", residual)?,
+        single_runtime_input(assignment, "residual_capacity", residual_capacity)?,
+        single_runtime_input(assignment, "output_len", output_len)?,
+        single_runtime_input(assignment, "reduction_len", reduction_len)?,
+        single_runtime_input(assignment, "slots", slots)?,
+        single_runtime_input(assignment, "intermediate", intermediate)?,
         single_runtime_input(assignment, "output_features", output_features)?,
     ))
 }

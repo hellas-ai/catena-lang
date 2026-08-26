@@ -8,7 +8,7 @@ use crate::codegen::default::{
     components::{input_components, single_value, value_expr},
     gpu_placement::{GpuFunctionPlacement, function_placement, function_placements},
     lower_types::{CType, LoweredType},
-    ops::{gated_delta_net, ifc, materializec, reducec, row_major},
+    ops::{cached_context, gated_delta_net, ifc, materializec, reducec, row_major},
     prelude::render_gpu_prelude,
     render_utils::{c_type, invalid_inputs, invalid_outputs, param_decl},
     runtime_type,
@@ -202,11 +202,43 @@ fn render_module_body(
                 assignment,
             )?;
             out.push('\n');
+        } else if assignment.op.as_str() == "materializec.borrow-cached-context-f32" {
+            cached_context::render_kernel(
+                out,
+                &cached_context::kernel_name(&module.entry, assignment)?,
+                assignment,
+                cached_context::StorageType::F32,
+            )?;
+            out.push('\n');
+        } else if assignment.op.as_str() == "materializec.borrow-cached-context-bf16" {
+            cached_context::render_kernel(
+                out,
+                &cached_context::kernel_name(&module.entry, assignment)?,
+                assignment,
+                cached_context::StorageType::Bf16,
+            )?;
+            out.push('\n');
         } else if assignment.op.as_str() == "materializec.borrow-routed-bf16-gemv-pair" {
             materializec::render_borrow_routed_bf16_gemv_pair_kernel(
                 out,
                 &materializec::kernel_name(&module.entry.name, assignment)?,
                 assignment,
+            )?;
+            out.push('\n');
+        } else if assignment.op.as_str() == "materializec.borrow-routed-native-bf16-gemv-pair" {
+            materializec::render_borrow_routed_native_bf16_gemv_pair_kernel(
+                out,
+                &materializec::kernel_name(&module.entry.name, assignment)?,
+                assignment,
+                dialect,
+            )?;
+            out.push('\n');
+        } else if assignment.op.as_str() == "materializec.borrow-routed-native-bf16-gemv-residual" {
+            materializec::render_borrow_routed_native_bf16_gemv_residual_kernel(
+                out,
+                &materializec::kernel_name(&module.entry.name, assignment)?,
+                assignment,
+                dialect,
             )?;
             out.push('\n');
         } else if assignment.op.as_str() == "materializec.bf16-gemv" {
@@ -406,8 +438,32 @@ fn render_assignment(
         "materializec.borrow-reduce-f32" => {
             materializec::render_borrow_reduce_f32_call(out, function, assignment, dialect)?
         }
+        "materializec.borrow-cached-context-f32" => cached_context::render_call(
+            out,
+            function,
+            assignment,
+            dialect,
+            cached_context::StorageType::F32,
+        )?,
+        "materializec.borrow-cached-context-bf16" => cached_context::render_call(
+            out,
+            function,
+            assignment,
+            dialect,
+            cached_context::StorageType::Bf16,
+        )?,
         "materializec.borrow-routed-bf16-gemv-pair" => {
             materializec::render_borrow_routed_bf16_gemv_pair_call(
+                out, function, assignment, dialect,
+            )?
+        }
+        "materializec.borrow-routed-native-bf16-gemv-pair" => {
+            materializec::render_borrow_routed_native_bf16_gemv_pair_call(
+                out, function, assignment, dialect,
+            )?
+        }
+        "materializec.borrow-routed-native-bf16-gemv-residual" => {
+            materializec::render_borrow_routed_native_bf16_gemv_residual_call(
                 out, function, assignment, dialect,
             )?
         }

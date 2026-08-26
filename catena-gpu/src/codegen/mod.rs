@@ -4,7 +4,7 @@ pub mod gpu;
 pub mod lower_types;
 mod ops;
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use hexpr::Operation;
 use metacat::{
@@ -89,6 +89,8 @@ pub enum CodegenError {
     InvalidProduct { operation: Operation },
     #[error("a function symbol reached the runtime output of `{0}`")]
     FunctionOutput(Operation),
+    #[error("kernel `{kernel}` is not device-callable: {path}")]
+    NestedLaunch { kernel: Operation, path: String },
 }
 
 pub fn codegen(terms: &TheoryTermMap) -> Result<GpuModuleMap, CodegenError> {
@@ -96,14 +98,87 @@ pub fn codegen(terms: &TheoryTermMap) -> Result<GpuModuleMap, CodegenError> {
     let Some(definitions) = terms.get(&program) else {
         return Ok(BTreeMap::new());
     };
-    definitions
+    let modules = definitions
         .iter()
         .map(|(name, term)| {
             let symbol = sanitize_ident(&format!("program.{name}"));
             let module = codegen_definition(term, definitions, name.clone(), symbol)?;
             Ok((name.clone(), module))
         })
-        .collect()
+        .collect::<Result<GpuModuleMap, CodegenError>>()?;
+    validate_device_callability(&modules)?;
+    Ok(modules)
+}
+
+fn validate_device_callability(modules: &GpuModuleMap) -> Result<(), CodegenError> {
+    for module in modules.values() {
+        for assignment in &module.entry.assignments {
+            if assignment.op.as_str() != "gpu.launch" {
+                continue;
+            }
+            let Some(GpuValue::FnSymbol(kernel)) = assignment.inputs.last() else {
+                continue;
+            };
+            let mut active = HashSet::new();
+            let mut checked = HashSet::new();
+            let mut path = Vec::new();
+            validate_device_function(
+                modules,
+                kernel,
+                kernel,
+                &mut active,
+                &mut checked,
+                &mut path,
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_device_function(
+    modules: &GpuModuleMap,
+    kernel: &Operation,
+    function: &Operation,
+    active: &mut HashSet<Operation>,
+    checked: &mut HashSet<Operation>,
+    path: &mut Vec<Operation>,
+) -> Result<(), CodegenError> {
+    if checked.contains(function) || !active.insert(function.clone()) {
+        return Ok(());
+    }
+    let Some(module) = modules.get(function) else {
+        active.remove(function);
+        return Ok(());
+    };
+    path.push(function.clone());
+
+    for assignment in &module.entry.assignments {
+        if assignment.op.as_str() == "gpu.launch" {
+            let mut call_path = path.iter().map(Operation::as_str).collect::<Vec<_>>();
+            call_path.push("gpu.launch");
+            return Err(CodegenError::NestedLaunch {
+                kernel: kernel.clone(),
+                path: call_path.join(" -> "),
+            });
+        }
+
+        let mut callees = Vec::new();
+        if assignment.call_symbol.is_some() {
+            callees.push(&assignment.op);
+        }
+        callees.extend(assignment.inputs.iter().filter_map(|input| match input {
+            GpuValue::FnSymbol(callee) => Some(callee),
+            GpuValue::Var(_) => None,
+        }));
+        for callee in callees {
+            validate_device_function(modules, kernel, callee, active, checked, path)?;
+        }
+    }
+
+    path.pop();
+    active.remove(function);
+    checked.insert(function.clone());
+    Ok(())
 }
 
 fn codegen_definition(
@@ -307,4 +382,78 @@ fn sanitize_ident(name: &str) -> String {
     name.chars()
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn nested_launch_reachable_through_fold_and_helper_is_rejected() {
+        let mut modules = GpuModuleMap::new();
+        modules.insert(
+            op("entry"),
+            module(
+                "entry",
+                vec![assignment(
+                    "gpu.launch",
+                    false,
+                    vec![GpuValue::FnSymbol(op("outer-kernel"))],
+                )],
+            ),
+        );
+        modules.insert(
+            op("outer-kernel"),
+            module(
+                "outer-kernel",
+                vec![assignment(
+                    "fold",
+                    false,
+                    vec![GpuValue::FnSymbol(op("fold-step"))],
+                )],
+            ),
+        );
+        modules.insert(
+            op("fold-step"),
+            module("fold-step", vec![assignment("helper", true, Vec::new())]),
+        );
+        modules.insert(
+            op("helper"),
+            module("helper", vec![assignment("gpu.launch", false, Vec::new())]),
+        );
+
+        let error = validate_device_callability(&modules).unwrap_err();
+        assert!(matches!(
+            error,
+            CodegenError::NestedLaunch { kernel, path }
+                if kernel.as_str() == "outer-kernel"
+                    && path == "outer-kernel -> fold-step -> helper -> gpu.launch"
+        ));
+    }
+
+    fn op(name: &str) -> Operation {
+        name.parse().unwrap()
+    }
+
+    fn module(name: &str, assignments: Vec<GpuAssign>) -> GpuModule {
+        GpuModule {
+            name: sanitize_ident(&format!("program.{name}")),
+            source_name: Some(op(name)),
+            entry: GpuFunction {
+                name: sanitize_ident(&format!("program.{name}")),
+                sources: Vec::new(),
+                targets: Vec::new(),
+                assignments,
+            },
+        }
+    }
+
+    fn assignment(op_name: &str, direct_call: bool, inputs: Vec<GpuValue>) -> GpuAssign {
+        GpuAssign {
+            op: op(op_name),
+            call_symbol: direct_call.then(|| sanitize_ident(&format!("program.{op_name}"))),
+            inputs,
+            outputs: Vec::new(),
+        }
+    }
 }

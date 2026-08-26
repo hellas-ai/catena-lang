@@ -2,10 +2,12 @@
 
 mod artifact;
 mod executor;
+mod mem;
 mod signature;
 mod value;
 
 pub use artifact::{Artifact, ArtifactError};
+pub use mem::{MemError, MemOwn};
 pub use runtime::{ExecError, InitError, Runtime};
 pub use value::{Value, ValueKind};
 

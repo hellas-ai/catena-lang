@@ -9,6 +9,7 @@ pub mod check;
 pub mod codegen;
 pub mod compile;
 pub mod elaborate;
+mod gpu;
 pub mod runtime;
 pub mod stdlib;
 

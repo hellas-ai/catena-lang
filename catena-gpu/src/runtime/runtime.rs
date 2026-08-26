@@ -1,4 +1,4 @@
-use std::fs;
+use std::{fs, sync::Arc};
 
 use libloading::{
     Library,
@@ -13,10 +13,11 @@ use crate::{
         gpu::{GpuRenderError, render_modules},
     },
     compile::CompileFailure,
+    gpu::GpuApi,
 };
 
 use super::{
-    Artifact, ArtifactError, Value, ValueKind,
+    Artifact, ArtifactError, MemError, MemOwn, Value, ValueKind,
     artifact::{RuntimeId, SharedObject, compile as compile_artifact},
     executor::{AbiValue, Executor, ExecutorError},
     signature::{FunctionSignature, SignatureTable, signatures},
@@ -25,6 +26,7 @@ use super::{
 #[derive(Debug)]
 pub struct Runtime {
     dialect: GpuDialect,
+    gpu: Arc<GpuApi>,
     id: RuntimeId,
     artifacts: Vec<LoadedArtifact>,
 }
@@ -55,6 +57,8 @@ pub enum InitError {
         symbol: String,
         source: libloading::Error,
     },
+    #[error(transparent)]
+    Memory(#[from] MemError),
 }
 
 #[derive(Debug, Error)]
@@ -81,15 +85,22 @@ pub enum ExecError {
         expected: ValueKind,
         actual: ValueKind,
     },
+    #[error("argument {index} contains memory for a different GPU dialect")]
+    IncompatibleMemory { index: usize },
 }
 
 impl Runtime {
     pub fn new(dialect: GpuDialect) -> Result<Self, InitError> {
         Ok(Self {
             dialect,
+            gpu: GpuApi::load(dialect)?,
             id: RuntimeId::new(),
             artifacts: vec![],
         })
+    }
+
+    pub fn mem_u64(&self, values: &[u64]) -> Result<MemOwn, MemError> {
+        MemOwn::from_u64_slice(values, self.gpu.clone())
     }
 
     pub fn load_sources<'a>(
@@ -145,7 +156,7 @@ impl Runtime {
                 actual: N,
             });
         }
-        let values = execute(loaded, name, signature, args.into())?;
+        let values = execute(loaded, name, signature, args.into(), self.gpu.clone())?;
         Ok(values.try_into().expect("output arity was checked"))
     }
 
@@ -164,6 +175,7 @@ fn execute(
     name: &str,
     signature: &FunctionSignature,
     args: Vec<Value>,
+    gpu: Arc<GpuApi>,
 ) -> Result<Vec<Value>, ExecError> {
     if signature.inputs.len() != args.len() {
         return Err(ExecError::InputArity {
@@ -180,8 +192,22 @@ fn execute(
                 actual: actual.kind(),
             });
         }
+        if let Value::MemOwn(memory) = actual
+            && memory.dialect() != gpu.dialect()
+        {
+            return Err(ExecError::IncompatibleMemory { index });
+        }
     }
-    let inputs = args.into_iter().map(AbiValue::from).collect::<Vec<_>>();
+    let inputs = args
+        .into_iter()
+        .map(|value| match value {
+            Value::Bool(v) => AbiValue::Bool(v),
+            Value::U32(v) => AbiValue::U32(v),
+            Value::U64(v) => AbiValue::U64(v),
+            Value::F32(v) => AbiValue::F32(v),
+            Value::MemOwn(memory) => AbiValue::Mem(memory.into_abi()),
+        })
+        .collect::<Vec<_>>();
     let mut outputs = signature
         .outputs
         .iter()
@@ -191,7 +217,16 @@ fn execute(
     loaded
         .executor
         .call(&signature.symbol, &inputs, &mut outputs);
-    Ok(outputs.into_iter().map(Value::from).collect())
+    Ok(outputs
+        .into_iter()
+        .map(|output| match output {
+            AbiValue::Bool(v) => Value::Bool(v),
+            AbiValue::U32(v) => Value::U32(v),
+            AbiValue::U64(v) => Value::U64(v),
+            AbiValue::F32(v) => Value::F32(v),
+            AbiValue::Mem(abi) => Value::MemOwn(unsafe { MemOwn::from_abi(abi, gpu.clone()) }),
+        })
+        .collect())
 }
 
 fn load_library(path: &std::path::Path) -> Result<Library, libloading::Error> {

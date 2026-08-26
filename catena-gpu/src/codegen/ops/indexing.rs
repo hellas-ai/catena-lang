@@ -3,6 +3,11 @@ use crate::codegen::GpuAssign;
 
 pub fn render(output: &mut String, assignment: &GpuAssign) -> Result<bool, GpuRenderError> {
     match assignment.op.as_str() {
+        "gpu.thread.forget" => {
+            if assignment.inputs.len() != 1 || !assignment.outputs.is_empty() {
+                return Err(invalid_arity(assignment, 1, 0));
+            }
+        }
         "gpu.thread.in-grid.index" => {
             let [thread] = assignment.inputs.as_slice() else {
                 return Err(invalid_arity(assignment, 1, 2));

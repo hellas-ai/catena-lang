@@ -39,6 +39,7 @@ pub fn render_modules(
             if assignment.op.as_str() == "gpu.launch" {
                 ops::launch::render_kernel(
                     &mut output,
+                    modules,
                     &module.entry,
                     assignment_index,
                     assignment,
@@ -96,7 +97,7 @@ fn param(var: &GpuVar) -> String {
     format!("{} {}", c_type(runtime_type(var).unwrap()), var.name)
 }
 
-fn c_type(ty: &CType) -> &'static str {
+pub(super) fn c_type(ty: &CType) -> &'static str {
     match ty {
         CType::Bool => "uint8_t",
         CType::U32 => "uint32_t",
@@ -147,7 +148,8 @@ typedef enum {{
     CATENA_CELL_OWNED = 2,
 }} catena_cell_access_t;
 typedef enum {{
-    CATENA_SCHEDULING_LINEAR = 1,
+    CATENA_SCHEDULING_OWN_EACH = 1,
+    CATENA_SCHEDULING_READ_ALL = 2,
 }} catena_scheduling_kind_t;
 typedef struct {{ catena_scheduling_kind_t kind; }} catena_scheduling_t;
 
@@ -157,10 +159,12 @@ __host__ __device__ static inline catena_cell_access_t catena_scheduling_resolve
     uint64_t cell
 ) {{
     switch (scheduling.kind) {{
-    case CATENA_SCHEDULING_LINEAR:
+    case CATENA_SCHEDULING_OWN_EACH:
         return thread.global_linear_id == cell
             ? CATENA_CELL_OWNED
             : CATENA_CELL_INACCESSIBLE;
+    case CATENA_SCHEDULING_READ_ALL:
+        return CATENA_CELL_READABLE;
     default:
         return CATENA_CELL_INACCESSIBLE;
     }}

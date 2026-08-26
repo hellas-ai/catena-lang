@@ -1,3 +1,3 @@
-#![allow(dead_code)]
+use super::*;
 
-pub const MINIMAL: &str = include_str!("minimal.hex");
+mod launch;

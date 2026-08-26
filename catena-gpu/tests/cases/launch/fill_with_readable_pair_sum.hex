@@ -1,0 +1,436 @@
+# Each destination thread owns one destination cell and reads source cells 0
+# and 1 through a read-all schedule.
+
+(def program write-readable-pair-sum-in-bounds-branch : {[
+  buffer-id buffer-size grid-shape block-shape global-shape global-size
+  schedule-id candidate-index bounds-decision.
+]
+  ({[.bounds-decision] bool.t} = [bounds-true.])
+  ({[.bounds-decision] bool.f} = [bounds-false.])
+  ([.candidate-index buffer-size] u64.lt [is-in-bounds.])
+  ({
+    ([.bounds-true is-in-bounds] ==> |-)
+    ({
+      ({
+        [.buffer-id buffer-size]
+        ({[.grid-shape block-shape global-shape global-size]} gpu.grid)
+        [.schedule-id]
+      } gpu.scheduling val)
+      ({
+        ({[.buffer-size] u64} :)
+        ({
+          ({[.candidate-index] u64} :)
+          ({
+            ({[.bounds-decision] bool} :)
+            ({
+              ({({[.grid-shape block-shape global-shape global-size]} gpu.grid)}
+                gpu.thread val)
+              ({
+                ({[.buffer-id] ({cap.own [.buffer-size] u64} gpu.global)} :)
+                (u64 val)
+              } *)
+            } *)
+          } *)
+        } *)
+      } *)
+    } *)
+  } *)
+} -> {[
+  buffer-id buffer-size grid-shape block-shape global-shape global-size
+  schedule-id candidate-index bounds-decision.
+]
+  ({
+    [.buffer-id buffer-size]
+    ({[.grid-shape block-shape global-shape global-size]} gpu.grid)
+    [.schedule-id]
+  } gpu.scheduling val)
+} = ([branch-input.]
+  ([.branch-input] *.elim [in-bounds-if-true branch-state.])
+  ([.branch-state] *.elim [scheduling length-and-tail.])
+  ([.length-and-tail] *.elim [length candidate-and-tail.])
+  ([.candidate-and-tail] *.elim [candidate bounds-and-tail.])
+  ([.bounds-and-tail] *.elim [in-bounds thread-and-tail.])
+  ([.thread-and-tail] *.elim [thread buffer-and-value.])
+  ([.buffer-and-value] *.elim [buffer value.])
+  ({[.in-bounds in-bounds-if-true]} assert-then [is-in-bounds.])
+  ({[.candidate length is-in-bounds]} u64.to-ix [named-cell.])
+  ([.named-cell] :.forget [cell.])
+  ({[.scheduling thread cell]}
+    gpu.scheduling.can-own
+    [scheduling-after-decision thread-after-decision cell-after-decision
+      allowed owns-if-allowed _not-owns-if-denied.])
+  ({[.allowed owns-if-allowed]} assert-then [owns-cell.])
+  ([.owns-cell] gpu.permissions.grant-own [ownership.])
+  ({[.thread-after-decision buffer cell-after-decision value ownership]}
+    gpu.global.write
+    [ownership-after-write.])
+  ([.ownership-after-write] gpu.global.own.forget)
+  [.scheduling-after-decision]
+))
+
+(def program skip-readable-pair-sum-out-of-bounds-branch : {[
+  buffer-id buffer-size grid-shape block-shape global-shape global-size
+  schedule-id candidate-index bounds-decision.
+]
+  ({[.bounds-decision] bool.t} = [bounds-true.])
+  ({[.bounds-decision] bool.f} = [bounds-false.])
+  ([.candidate-index buffer-size] u64.lt [is-in-bounds.])
+  ({
+    ([.is-in-bounds] {[.bounds-false] not} ==> |-)
+    ({
+      ({
+        [.buffer-id buffer-size]
+        ({[.grid-shape block-shape global-shape global-size]} gpu.grid)
+        [.schedule-id]
+      } gpu.scheduling val)
+      ({
+        ({[.buffer-size] u64} :)
+        ({
+          ({[.candidate-index] u64} :)
+          ({
+            ({[.bounds-decision] bool} :)
+            ({
+              ({({[.grid-shape block-shape global-shape global-size]} gpu.grid)}
+                gpu.thread val)
+              ({
+                ({[.buffer-id] ({cap.own [.buffer-size] u64} gpu.global)} :)
+                (u64 val)
+              } *)
+            } *)
+          } *)
+        } *)
+      } *)
+    } *)
+  } *)
+} -> {[
+  buffer-id buffer-size grid-shape block-shape global-shape global-size
+  schedule-id candidate-index bounds-decision.
+]
+  ({
+    [.buffer-id buffer-size]
+    ({[.grid-shape block-shape global-shape global-size]} gpu.grid)
+    [.schedule-id]
+  } gpu.scheduling val)
+} = ([branch-input.]
+  ([.branch-input] *.elim [_not-in-bounds-if-false branch-state.])
+  ([.branch-state] *.elim [scheduling _unused-thread-state.])
+  [.scheduling]
+))
+
+(def program sum-readable-pair-kernel : {[
+  destination-id destination-size source-id source-size
+  grid-shape block-shape global-shape global-size
+  destination-schedule-id source-schedule-id.
+]
+  ({
+    ({
+      ({[.destination-size] u64} :)
+      ({
+        ({[.destination-id]
+          ({cap.own [.destination-size] u64} gpu.global)} :)
+        ({
+          ({
+            [.destination-id destination-size]
+            ({[.grid-shape block-shape global-shape global-size]} gpu.grid)
+            [.destination-schedule-id]
+          } gpu.scheduling val)
+          ({
+            [.destination-id]
+            ({
+              [.grid-shape]
+              ({
+                [.block-shape]
+                ({
+                  [.global-shape]
+                  ({[.global-size destination-schedule-id]} *)
+                } *)
+              } *)
+            } *)
+          } *)
+        } *)
+      } *)
+    } *)
+    ({
+      ({[.source-size] u64} :)
+      ({
+        ({[.source-id] ({cap.own [.source-size] u64} gpu.global)} :)
+        ({
+          [.source-id source-size]
+          ({[.grid-shape block-shape global-shape global-size]} gpu.grid)
+          [.source-schedule-id]
+        } gpu.scheduling val)
+      } *)
+    } *)
+  } *)
+  ({({[.grid-shape block-shape global-shape global-size]} gpu.grid)}
+    gpu.thread val)
+} -> {[
+  destination-id destination-size source-id source-size
+  grid-shape block-shape global-shape global-size
+  destination-schedule-id source-schedule-id.
+]
+  ({
+    [.destination-id destination-size]
+    ({[.grid-shape block-shape global-shape global-size]} gpu.grid)
+    [.destination-schedule-id]
+  } gpu.scheduling val)
+} = ([kernel-arguments thread.]
+  ([.kernel-arguments]
+    *.elim
+    [destination-arguments source-arguments.])
+  ([.destination-arguments]
+    *.elim
+    [destination-length destination-tail.])
+  ([.destination-tail]
+    *.elim
+    [destination-buffer destination-schedule-and-context.])
+  ([.destination-schedule-and-context]
+    *.elim
+    [destination-scheduling destination-context.])
+  ([.destination-context]
+    *.elim
+    [destination-id grid-context.])
+  ([.grid-context] *.elim [grid-shape block-context.])
+  ([.block-context] *.elim [block-shape global-shape-context.])
+  ([.global-shape-context]
+    *.elim
+    [global-shape global-size-and-schedule.])
+  ([.global-size-and-schedule]
+    *.elim
+    [global-size destination-schedule-id.])
+  ([.source-arguments] *.elim [source-length source-tail.])
+  ([.source-tail] *.elim [source-buffer source-scheduling.])
+
+  ([.destination-length]
+    u64.copies2
+    [destination-length-for-check destination-length-for-cell-and-name.])
+  ([.destination-length-for-cell-and-name]
+    u64.copies2
+    [destination-length-for-cell destination-length-for-name.])
+  ([.destination-length-for-name] :.param [destination-size-name.])
+  ([.thread] gpu.thread.in-grid.index [thread-for-own grid-index.])
+  ([.grid-index] ix.to-u64 [_grid-index-after candidate.])
+  ([.candidate] u64.name [named-candidate.])
+  ([.named-candidate]
+    u64.copies2
+    [candidate-for-check candidate-for-cell.])
+  ({[.candidate-for-check destination-length-for-check]}
+    u64.lt
+    [destination-in-bounds destination-bounds-true _destination-bounds-false.])
+  ([.destination-in-bounds]
+    bool.copies2
+    [destination-bounds-for-ifc destination-bounds-for-branch.])
+  ([.destination-bounds-for-ifc] :.forget [destination-bounds-value.])
+  ([.candidate-for-cell] :.ty [destination-candidate-for-state candidate-index.])
+  ([.destination-bounds-for-branch]
+    :.ty
+    [destination-bounds-for-state bounds-decision.])
+
+  ([.source-length]
+    u64.copies2
+    [source-length-for-zero-pair source-length-for-one-pair.])
+  ([.source-length-for-zero-pair]
+    u64.copies2
+    [source-length-for-zero-check source-length-for-zero-cell.])
+  ([.source-length-for-one-pair]
+    u64.copies2
+    [source-length-for-one-check source-length-for-one-cell.])
+  u64.zero [zero-value.]
+  ([.zero-value] u64.name [zero.])
+  ([.zero] u64.copies2 [zero-for-check zero-for-cell.])
+  ({[.zero-for-check source-length-for-zero-check]}
+    u64.lt
+    [zero-in-bounds zero-bounds-true _zero-bounds-false.])
+  ({[.zero-in-bounds zero-bounds-true]} assert-then [zero-bounds.])
+  ({[.zero-for-cell source-length-for-zero-cell zero-bounds]}
+    u64.to-ix
+    [source-cell-zero.])
+  ([.source-cell-zero] :.forget [source-cell-zero-value.])
+  ({[.source-scheduling thread-for-own source-cell-zero-value]}
+    gpu.scheduling.can-read
+    [source-scheduling-after-zero thread-after-zero source-cell-zero-after
+      can-read-zero reads-zero-if-allowed _not-readable-zero.])
+  ({[.can-read-zero reads-zero-if-allowed]} assert-then [reads-zero.])
+  ([.reads-zero] gpu.permissions.grant-read [zero-read-grant.])
+  ({[.source-buffer source-cell-zero-after zero-read-grant]}
+    gpu.global.read
+    [zero-read-grant-after zero-cell-value.])
+  ([.zero-read-grant-after] gpu.global.read.forget)
+  ([.thread-after-zero] gpu.thread.forget)
+
+  u64.one [one-value.]
+  ([.one-value] u64.name [one.])
+  ([.one] u64.copies2 [one-for-check one-for-cell.])
+  ({[.one-for-check source-length-for-one-check]}
+    u64.lt
+    [one-in-bounds one-bounds-true _one-bounds-false.])
+  ({[.one-in-bounds one-bounds-true]} assert-then [one-bounds.])
+  ({[.one-for-cell source-length-for-one-cell one-bounds]}
+    u64.to-ix
+    [source-cell-one.])
+  ([.source-cell-one] :.forget [source-cell-one-value.])
+  ({[.source-scheduling-after-zero thread-for-own source-cell-one-value]}
+    gpu.scheduling.can-read
+    [source-scheduling-after-one thread-after-one source-cell-one-after
+      can-read-one reads-one-if-allowed _not-readable-one.])
+  ({[.can-read-one reads-one-if-allowed]} assert-then [reads-one.])
+  ([.reads-one] gpu.permissions.grant-read [one-read-grant.])
+  ({[.source-buffer source-cell-one-after one-read-grant]}
+    gpu.global.read
+    [one-read-grant-after one-cell-value.])
+  ([.one-read-grant-after] gpu.global.read.forget)
+  ([.thread-after-one] gpu.thread.forget)
+  ([.source-scheduling-after-one] gpu.scheduling.forget)
+  ([.source-buffer] gpu.global.forget)
+
+  ({[.zero-cell-value one-cell-value]} u64.add [sum.])
+
+  ({[.destination-buffer sum]} *.intro [destination-buffer-and-sum.])
+  ({[.thread-for-own destination-buffer-and-sum]}
+    *.intro
+    [destination-thread-and-tail.])
+  ({[.destination-bounds-for-state destination-thread-and-tail]}
+    *.intro
+    [destination-bounds-and-tail.])
+  ({[.destination-candidate-for-state destination-bounds-and-tail]}
+    *.intro
+    [destination-candidate-and-tail.])
+  ({[.destination-length-for-cell destination-candidate-and-tail]}
+    *.intro
+    [destination-length-and-tail.])
+  ({[.destination-scheduling destination-length-and-tail]}
+    *.intro
+    [destination-branch-state.])
+
+  ({[.destination-id destination-size-name grid-shape block-shape global-shape
+      global-size destination-schedule-id candidate-index bounds-decision]}
+    name.write-readable-pair-sum-in-bounds-branch
+    [destination-true-branch.])
+  ({[.destination-id destination-size-name grid-shape block-shape global-shape
+      global-size destination-schedule-id candidate-index bounds-decision]}
+    name.skip-readable-pair-sum-out-of-bounds-branch
+    [destination-false-branch.])
+  ({[.destination-bounds-true destination-true-branch
+      _destination-bounds-false destination-false-branch
+      destination-bounds-value destination-branch-state]}
+    bool.ifc
+    [destination-scheduling-after-bounds.])
+
+  [.destination-scheduling-after-bounds]
+))
+
+(def program fill-with-readable-pair-sum :
+  {(cap.own mem) (cap.own mem) (u64 val) (u64 val)}
+  ->
+  {(cap.own mem) (cap.own mem)}
+= ([destination-input source-input grid-x-value block-x-value.]
+  ([.destination-input]
+    mem.cast.u64
+    [destination-length named-destination-buffer.])
+  ([.named-destination-buffer]
+    :.ty
+    [destination-buffer destination-id.])
+  ([.source-input] mem.cast.u64 [source-length named-source-buffer.])
+  ([.named-source-buffer]
+    :.ty
+    [source-buffer source-id.])
+
+  ([.grid-x-value] u64.name [grid-x.])
+  ([.block-x-value] u64.name [block-x.])
+  ({[.grid-x block-x]}
+    gpu.grid.1d.intro
+    [grid-shape block-shape global-shape grid global-size.])
+
+  ([.destination-length]
+    u64.copies2
+    [destination-length-for-launch destination-length-for-check-and-name.])
+  ([.destination-length-for-check-and-name]
+    u64.copies2
+    [destination-length-for-fit destination-length-for-name.])
+  ([.destination-length-for-name] :.param [destination-size.])
+  ([.global-size]
+    u64.copies2
+    [global-size-for-fit global-size-for-name.])
+  ([.global-size-for-name] :.param [global-size-name.])
+  ({[.destination-length-for-fit global-size-for-fit]}
+    u64.lte
+    [fits-decision fits-if-true.])
+  ([.fits-decision] assert [fits-is-true.])
+  ({[.fits-is-true fits-if-true]} ax-mp [fits.])
+  ({[.destination-id grid-shape block-shape global-shape fits]}
+      gpu.scheduling.own-each
+    [destination-schedule-id destination-scheduling.])
+
+  ([.source-length]
+    u64.copies2
+    [source-length-for-kernel source-length-for-check-and-name.])
+  ([.source-length-for-check-and-name]
+    u64.copies2
+    [source-length-for-check source-length-for-name.])
+  ([.source-length-for-name] :.param [source-size.])
+  u64.one [minimum-source-index-value.]
+  ([.minimum-source-index-value] u64.name [minimum-source-index.])
+  ({[.minimum-source-index source-length-for-check]}
+    u64.lt
+    [source-has-pair source-has-pair-if-true _source-too-short-if-false.])
+  ({[.source-has-pair source-has-pair-if-true]}
+    assert-then
+    [_source-pair-bounds.])
+  ({[.source-id source-size grid-shape block-shape global-shape global-size-name]}
+    gpu.scheduling.read-all
+    [source-schedule-id source-scheduling.])
+  ({[.source-buffer source-scheduling]} *.intro [source-tail.])
+  ({[.source-length-for-kernel source-tail]} *.intro [source-arguments.])
+
+  ({[.global-size-name destination-schedule-id]}
+    *.intro
+    [global-size-and-destination-schedule.])
+  ({[.global-shape global-size-and-destination-schedule]}
+    *.intro
+    [global-shape-context.])
+  ({[.block-shape global-shape-context]} *.intro [block-context.])
+  ({[.grid-shape block-context]} *.intro [grid-context.])
+  ({[.destination-id grid-context]} *.intro [destination-context.])
+  ({[.destination-scheduling destination-context]}
+    *.intro
+    [destination-schedule-and-context.])
+  ({[.destination-buffer destination-schedule-and-context]}
+    *.intro
+    [destination-tail.])
+  ({[.destination-length-for-launch destination-tail]}
+    *.intro
+    [destination-arguments.])
+  ({[.destination-arguments source-arguments]}
+    *.intro
+    [kernel-arguments.])
+
+  ({[.destination-id destination-size source-id source-size grid-shape block-shape
+      global-shape global-size-name destination-schedule-id source-schedule-id]}
+    name.sum-readable-pair-kernel
+    [kernel.])
+  ({[.grid kernel-arguments kernel]}
+    gpu.launch
+    [returned-kernel-arguments.])
+  ([.returned-kernel-arguments]
+    *.elim
+    [returned-destination-arguments returned-source-arguments.])
+  ([.returned-destination-arguments]
+    *.elim
+    [destination-length-after-launch returned-destination-tail.])
+  ([.returned-destination-tail]
+    *.elim
+    [destination-buffer-after-launch _returned-destination-schedule-and-context.])
+  ([.returned-source-arguments]
+    *.elim
+    [source-length-after-launch source-tail-after-launch.])
+  ([.source-tail-after-launch]
+    *.elim
+    [source-buffer-after-launch _source-scheduling-after-launch.])
+  ({[.destination-length-after-launch destination-buffer-after-launch]}
+    gpu.global.to-mem
+    [destination-output.])
+  ({[.source-length-after-launch source-buffer-after-launch]}
+    gpu.global.to-mem
+    [source-output.])
+  {[.destination-output source-output]}
+))

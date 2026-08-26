@@ -12,13 +12,13 @@
   -> {[allocation-mode buffer-size buffer-id.]
     ({[.buffer-size] u64} :)
     ({[.buffer-id]
-      ({[.allocation-mode buffer-id buffer-size] u64}
-        gpu.global)} :)
+      ({[.allocation-mode buffer-size] u64} gpu.global)} :)
   })
 
   # Forget the typed global view and return the same allocation.
   (arr gpu.global.to-mem : {[allocation-mode buffer-id buffer-size.]
     ({[.buffer-size] u64} :)
-    ({[.allocation-mode buffer-id buffer-size] u64} gpu.global val)
+    ({[.buffer-id]
+      ({[.allocation-mode buffer-size] u64} gpu.global)} :)
   } -> ([allocation-mode buffer-id buffer-size.allocation-mode] mem))
 })

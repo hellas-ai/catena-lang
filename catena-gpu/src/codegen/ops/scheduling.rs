@@ -3,13 +3,23 @@ use crate::codegen::GpuAssign;
 
 pub fn render(output: &mut String, assignment: &GpuAssign) -> Result<bool, GpuRenderError> {
     match assignment.op.as_str() {
-        "gpu.scheduling.linear" => {
+        "gpu.scheduling.forget" => {
+            if assignment.inputs.len() != 1 || !assignment.outputs.is_empty() {
+                return Err(invalid_arity(assignment, 1, 0));
+            }
+        }
+        operation @ ("gpu.scheduling.own-each" | "gpu.scheduling.read-all") => {
             if !assignment.inputs.is_empty() || assignment.outputs.len() != 1 {
                 return Err(invalid_arity(assignment, 0, 1));
             }
+            let kind = if operation == "gpu.scheduling.own-each" {
+                "CATENA_SCHEDULING_OWN_EACH"
+            } else {
+                "CATENA_SCHEDULING_READ_ALL"
+            };
             output.push_str(&format!(
-                "    {} = {{ CATENA_SCHEDULING_LINEAR }};\n",
-                assignment.outputs[0].name
+                "    {} = {{ {kind} }};\n",
+                assignment.outputs[0].name,
             ));
         }
         operation @ ("gpu.scheduling.can-own" | "gpu.scheduling.can-read") => {

@@ -6,13 +6,13 @@
   (arr gpu.block : 2 -> 1)
 
   # A global handle is independent of the thread layout.
-  (arr gpu.global : 4 -> 1)
+  (arr gpu.global : 3 -> 1)
 
   # The scheduling relates buffer cells to global thread indices.
   (arr gpu.scheduling : 4 -> 1)
   (arr gpu.schedule.reads : 4 -> 1)
   (arr gpu.schedule.owns : 4 -> 1)
-  (arr gpu.global.read : 4 -> 1)
+  (arr gpu.global.read-grant : 4 -> 1)
   (arr gpu.global.own : 4 -> 1)
 })
 
@@ -106,6 +106,10 @@
     ({[.block-id] ({[.grid-topology block-id]} gpu.block)} :)
   })
 
+  (arr gpu.thread.forget : {[grid-topology thread-id.]
+    ({[.thread-id] ([.grid-topology] gpu.thread)} :)
+  } -> ([grid-topology thread-id.] []))
+
   (arr gpu.block.index : {[
     grid-shape block-shape global-shape global-size block-id.
   ]
@@ -122,7 +126,7 @@
   # The fixed linear policy assigns buffer cell i to global thread i. It is
   # race-free by construction. The proof ensures every buffer cell has a
   # corresponding global thread; excess threads simply receive no cell.
-  (arr gpu.scheduling.linear : {[
+  (arr gpu.scheduling.own-each : {[
     buffer-id buffer-size grid-shape block-shape global-shape global-size
     schedule-id.
   ]
@@ -131,6 +135,30 @@
     [.block-shape]
     [.global-shape]
     ([.buffer-size global-size] u64.lte |-)
+  } -> {[
+    buffer-id buffer-size grid-shape block-shape global-shape global-size
+    schedule-id.
+  ]
+    [.schedule-id]
+    ({
+      [.buffer-id buffer-size]
+      ({[.grid-shape block-shape global-shape global-size]} gpu.grid)
+      [.schedule-id]
+    } gpu.scheduling val)
+  })
+
+  # Every thread may read every cell. Since this policy grants no ownership,
+  # it is race-free independently of the grid and buffer sizes.
+  (arr gpu.scheduling.read-all : {[
+    buffer-id buffer-size grid-shape block-shape global-shape global-size
+    schedule-id.
+  ]
+    [.buffer-id]
+    [.buffer-size]
+    [.grid-shape]
+    [.block-shape]
+    [.global-shape]
+    [.global-size]
   } -> {[
     buffer-id buffer-size grid-shape block-shape global-shape global-size
     schedule-id.
@@ -165,7 +193,7 @@
 
     ({[.buffer-id buffer-size] [.grid-topology] [.schedule-id]}
       gpu.scheduling val)
-    ({[.thread-id] ([.grid-topology] gpu.thread val)} :)
+    ({[.thread-id] ([.grid-topology] gpu.thread)} :)
     ({[.cell-index] ({({[.buffer-size]} shape.1d)} ix)} :)
     ({[.decision] bool} :)
     ([.decision-true owns] ==> |-)
@@ -191,19 +219,26 @@
 
     ({[.buffer-id buffer-size] [.grid-topology] [.schedule-id]}
       gpu.scheduling val)
-    ({[.thread-id] ([.grid-topology] gpu.thread val)} :)
+    ({[.thread-id] ([.grid-topology] gpu.thread)} :)
     ({[.cell-index] ({({[.buffer-size]} shape.1d)} ix)} :)
     ({[.decision] bool} :)
     ([.decision-true reads] ==> |-)
     ([.reads] {[.decision-false] not} ==> |-)
   })
 
+  (arr gpu.scheduling.forget : {[
+    buffer-id buffer-size grid-topology schedule-id.
+  ]
+    ({[.buffer-id buffer-size] [.grid-topology] [.schedule-id]}
+      gpu.scheduling val)
+  } -> ([buffer-id buffer-size grid-topology schedule-id.] []))
+
   (arr gpu.permissions.grant-read : {[
     buffer-id schedule-id thread-id cell-index.
   ]
     ([.buffer-id schedule-id thread-id cell-index] gpu.schedule.reads |-)
   } -> {[buffer-id schedule-id thread-id cell-index.]
-    ([.buffer-id schedule-id thread-id cell-index] gpu.global.read)
+    ([.buffer-id schedule-id thread-id cell-index] gpu.global.read-grant)
   })
 
   (arr gpu.permissions.grant-own : {[
@@ -219,8 +254,8 @@
   (arr gpu.global.write : {[
     buffer-id buffer-size grid-topology schedule-id thread-id cell-index.
   ]
-    ({[.thread-id] ([.grid-topology] gpu.thread val)} :)
-    ({cap.own [.buffer-id buffer-size] u64} gpu.global val)
+    ({[.thread-id] ([.grid-topology] gpu.thread)} :)
+    ({[.buffer-id] ({cap.own [.buffer-size] u64} gpu.global)} :)
     ({[.cell-index] ({({[.buffer-size]} shape.1d)} ix)} :)
     (u64 val)
     ([.buffer-id schedule-id thread-id cell-index] gpu.global.own)
@@ -230,81 +265,53 @@
     ([.buffer-id schedule-id thread-id cell-index] gpu.global.own)
   })
 
+  (arr gpu.global.read : {[
+    buffer-id buffer-size schedule-id thread-id cell-index.
+  ]
+    ({[.buffer-id] ({cap.own [.buffer-size] u64} gpu.global)} :)
+    ({[.cell-index] ({({[.buffer-size]} shape.1d)} ix)} :)
+    ([.buffer-id schedule-id thread-id cell-index] gpu.global.read-grant)
+  } -> {[
+    buffer-id buffer-size schedule-id thread-id cell-index.
+  ]
+    ([.buffer-id schedule-id thread-id cell-index] gpu.global.read-grant)
+    (u64 val)
+  })
+
+  (arr gpu.global.read.forget : {[
+    buffer-id schedule-id thread-id cell-index.
+  ]
+    ([.buffer-id schedule-id thread-id cell-index] gpu.global.read-grant)
+  } -> ([buffer-id schedule-id thread-id cell-index.] []))
+
+  (arr gpu.global.forget : {[buffer-id buffer-size.]
+    ({[.buffer-id] ({cap.own [.buffer-size] u64} gpu.global)} :)
+  } -> ([buffer-id buffer-size.] []))
+
   (arr gpu.global.own.forget : {[
     buffer-id schedule-id thread-id cell-index.
   ]
     ([.buffer-id schedule-id thread-id cell-index] gpu.global.own)
   } -> ([buffer-id schedule-id thread-id cell-index.] []))
 
-  # Launch connects one concrete grid topology to scheduling over its derived
-  # global-thread shape.
+  # Launch is generic over the kernel arguments. Their specific structure,
+  # including all buffers, lengths, and schedules, is declared by the kernel.
   (arr gpu.launch : {[
-    buffer-id buffer-size grid-shape block-shape global-shape global-size schedule-id
-    kernel-argument.
+    grid-shape block-shape global-shape global-size kernel-arguments kernel-result.
   ]
-    ({[.buffer-size] u64} :)
     ({[.grid-shape block-shape global-shape global-size]} gpu.grid val)
-    ({cap.own [.buffer-id buffer-size] u64} gpu.global val)
-    ([.kernel-argument])
-    [.buffer-id]
-    [.grid-shape]
-    [.block-shape]
-    [.global-shape]
-    [.global-size]
-    [.schedule-id]
-    ({
-      [.buffer-id buffer-size]
-      ({[.grid-shape block-shape global-shape global-size]} gpu.grid)
-      [.schedule-id]
-    } gpu.scheduling val)
+    ([.kernel-arguments])
     ({
       ({
-        ({[.buffer-size] u64} :)
-        ({
-          [.buffer-id]
-          ({
-            [.grid-shape]
-            ({
-              [.block-shape]
-              ({
-                [.global-shape]
-                ({
-                  [.global-size]
-                  ({
-                    [.schedule-id]
-                    ({
-                      ({cap.own [.buffer-id buffer-size] u64} gpu.global val)
-                      ({
-                        ([.kernel-argument])
-                        ({
-                          ({({[.grid-shape block-shape global-shape global-size]}
-                            gpu.grid)} gpu.thread val)
-                          ({
-                            [.buffer-id buffer-size]
-                            ({[.grid-shape block-shape global-shape global-size]}
-                              gpu.grid)
-                            [.schedule-id]
-                          } gpu.scheduling val)
-                        } *)
-                      } *)
-                    } *)
-                  } *)
-                } *)
-              } *)
-            } *)
-          } *)
-        } *)
+        ([.kernel-arguments])
+        ({({[.grid-shape block-shape global-shape global-size]} gpu.grid)}
+          gpu.thread val)
       } *)
-      ({
-        [.buffer-id buffer-size]
-        ({[.grid-shape block-shape global-shape global-size]} gpu.grid)
-        [.schedule-id]
-      } gpu.scheduling val)
+      ([.kernel-result])
     } -> val)
   } -> {[
-    buffer-id buffer-size grid-shape block-shape global-shape global-size schedule-id
-    kernel-argument.
+    grid-shape block-shape global-shape global-size kernel-arguments kernel-result.
   ]
-    ({cap.own [.buffer-id buffer-size] u64} gpu.global val)
+    ([.kernel-arguments])
   })
 })

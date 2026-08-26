@@ -66,9 +66,7 @@ fn lower_runtime_type(ty: &Tree<(), Operation>) -> Result<CType, LowerTypeError>
         ("f32", []) => Ok(CType::F32),
         ("gpu.grid", [_grid_shape, _block_shape, _global_shape, _global_size]) => Ok(CType::Grid),
         ("mem", [_capability]) => Ok(CType::MemOwn),
-        ("gpu.global", [_capability, _buffer_id, _buffer_size, element])
-            if is_nullary(element, "u64") =>
-        {
+        ("gpu.global", [_capability, _buffer_size, element]) if is_nullary(element, "u64") => {
             Ok(CType::U64Ptr)
         }
         ("gpu.thread", [_grid]) => Ok(CType::Thread),

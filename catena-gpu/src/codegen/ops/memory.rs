@@ -3,6 +3,11 @@ use crate::codegen::GpuAssign;
 
 pub fn render(output: &mut String, assignment: &GpuAssign) -> Result<bool, GpuRenderError> {
     match assignment.op.as_str() {
+        "gpu.global.forget" => {
+            if assignment.inputs.len() != 1 || !assignment.outputs.is_empty() {
+                return Err(invalid_arity(assignment, 1, 0));
+            }
+        }
         "mem.cast.u64" => {
             let [memory] = assignment.inputs.as_slice() else {
                 return Err(invalid_arity(assignment, 1, 2));
@@ -43,6 +48,20 @@ pub fn render(output: &mut String, assignment: &GpuAssign) -> Result<bool, GpuRe
                 value_expr(buffer),
                 value_expr(cell),
                 value_expr(value),
+            ));
+        }
+        "gpu.global.read" => {
+            let [buffer, cell] = assignment.inputs.as_slice() else {
+                return Err(invalid_arity(assignment, 2, 1));
+            };
+            let [value] = assignment.outputs.as_slice() else {
+                return Err(invalid_arity(assignment, 2, 1));
+            };
+            output.push_str(&format!(
+                "    {} = {}[{}];\n",
+                value.name,
+                value_expr(buffer),
+                value_expr(cell),
             ));
         }
         _ => return Ok(false),

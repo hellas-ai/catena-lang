@@ -26,7 +26,7 @@ fn minimal_stdlib_elaborates_names_and_generates_gpu_modules() {
 
     let generated = render_modules(modules, GpuDialect::Hip).unwrap();
     assert!(generated.contains(
-        "extern \"C\" __host__ void program_add(uint64_t x0, uint64_t x1, uint64_t *out_0)"
+        "extern \"C\" __host__ __device__ void program_add(uint64_t x0, uint64_t x1, uint64_t *out_0)"
     ));
     assert!(generated.contains(" = x0 + x1;"));
     assert!(generated.contains("catena_grid_t"));

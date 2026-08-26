@@ -4,7 +4,7 @@ use hexpr::Operation;
 use thiserror::Error;
 
 use super::{
-    GpuAssign, GpuDialect, GpuFunction, GpuModuleMap, GpuValue, GpuVar, lower_types::CType,
+    GpuAssign, GpuDialect, GpuFunction, GpuModuleMap, GpuValue, GpuVar, lower_types::CType, ops,
     runtime_type,
 };
 
@@ -20,21 +20,33 @@ pub enum GpuRenderError {
     },
     #[error("invalid bool.ifc assignment: {0}")]
     InvalidIfc(&'static str),
+    #[error("invalid gpu.launch assignment: {0}")]
+    InvalidLaunch(&'static str),
 }
 
 pub fn render_modules(
     modules: &GpuModuleMap,
     dialect: GpuDialect,
 ) -> Result<String, GpuRenderError> {
-    let mut output = format!(
-        "#include <{}>\n#include <stdint.h>\n#include <math.h>\n\ntypedef struct {{ uint32_t x; uint32_t y; uint32_t z; }} catena_dim3_t;\ntypedef struct {{ catena_dim3_t grid_dim; catena_dim3_t block_dim; }} catena_grid_t;\n\n",
-        dialect.runtime_header()
-    );
+    let mut output = render_prelude(dialect);
     for module in modules.values() {
-        output.push_str(&signature(&module.entry));
+        output.push_str(&signature(&module.entry, placement(&module.entry)));
         output.push_str(";\n");
     }
     output.push('\n');
+    for module in modules.values() {
+        for (assignment_index, assignment) in module.entry.assignments.iter().enumerate() {
+            if assignment.op.as_str() == "gpu.launch" {
+                ops::launch::render_kernel(
+                    &mut output,
+                    &module.entry,
+                    assignment_index,
+                    assignment,
+                )?;
+                output.push('\n');
+            }
+        }
+    }
     for module in modules.values() {
         render_function(&mut output, &module.entry)?;
         output.push('\n');
@@ -42,7 +54,7 @@ pub fn render_modules(
     Ok(output)
 }
 
-fn signature(function: &GpuFunction) -> String {
+fn signature(function: &GpuFunction, placement: Placement) -> String {
     let mut params = function.sources.iter().map(param).collect::<Vec<_>>();
     params.extend(
         function
@@ -51,11 +63,33 @@ fn signature(function: &GpuFunction) -> String {
             .enumerate()
             .map(|(index, var)| format!("{} *out_{index}", c_type(runtime_type(var).unwrap()))),
     );
+    let qualifiers = match placement {
+        Placement::HostOnly => "__host__",
+        Placement::HostAndDevice => "__host__ __device__",
+    };
     format!(
-        "extern \"C\" __host__ void {}({})",
+        "extern \"C\" {qualifiers} void {}({})",
         function.name,
         params.join(", ")
     )
+}
+
+#[derive(Debug, Clone, Copy)]
+enum Placement {
+    HostOnly,
+    HostAndDevice,
+}
+
+fn placement(function: &GpuFunction) -> Placement {
+    if function
+        .assignments
+        .iter()
+        .any(|assignment| assignment.op.as_str() == "gpu.launch")
+    {
+        Placement::HostOnly
+    } else {
+        Placement::HostAndDevice
+    }
 }
 
 fn param(var: &GpuVar) -> String {
@@ -69,18 +103,72 @@ fn c_type(ty: &CType) -> &'static str {
         CType::U64 => "uint64_t",
         CType::F32 => "float",
         CType::Grid => "catena_grid_t",
+        CType::MemOwn => "catena_mem_own_t",
+        CType::U64Ptr => "uint64_t *",
+        CType::Thread => "catena_thread_t",
+        CType::Block => "catena_block_t",
+        CType::Scheduling => "catena_scheduling_t",
     }
 }
 
+fn render_prelude(dialect: GpuDialect) -> String {
+    let (error_type, success, error_string, synchronize) = match dialect {
+        GpuDialect::Hip => (
+            "hipError_t",
+            "hipSuccess",
+            "hipGetErrorString",
+            "hipDeviceSynchronize",
+        ),
+        GpuDialect::Cuda => (
+            "cudaError_t",
+            "cudaSuccess",
+            "cudaGetErrorString",
+            "cudaDeviceSynchronize",
+        ),
+    };
+    format!(
+        r#"#include <{runtime_header}>
+#include <stdint.h>
+#include <math.h>
+#include <stdio.h>
+
+typedef struct {{ uint32_t x; uint32_t y; uint32_t z; }} catena_dim3_t;
+typedef struct {{ catena_dim3_t grid_dim; catena_dim3_t block_dim; }} catena_grid_t;
+typedef struct {{ void *data; uint64_t len; }} catena_mem_own_t;
+typedef struct {{
+    uint64_t global_linear_id;
+    uint64_t in_block_linear_id;
+    uint64_t block_linear_id;
+}} catena_thread_t;
+typedef struct {{ uint64_t linear_id; }} catena_block_t;
+typedef uint8_t catena_scheduling_t;
+
+__host__ static inline void catena_gpu_check({error_type} error) {{
+    if (error != {success}) {{
+        fprintf(stderr, "catena GPU error: %s\n", {error_string}(error));
+        fflush(stderr);
+        __builtin_trap();
+    }}
+}}
+
+__host__ static inline void catena_gpu_synchronize(void) {{
+    catena_gpu_check({synchronize}());
+}}
+
+"#,
+        runtime_header = dialect.runtime_header(),
+    )
+}
+
 fn render_function(output: &mut String, function: &GpuFunction) -> Result<(), GpuRenderError> {
-    output.push_str(&signature(function));
+    output.push_str(&signature(function, placement(function)));
     output.push_str(" {\n");
     let mut declared = function
         .sources
         .iter()
         .map(|var| var.name.clone())
         .collect::<BTreeSet<_>>();
-    for assignment in &function.assignments {
+    for (assignment_index, assignment) in function.assignments.iter().enumerate() {
         for var in &assignment.outputs {
             if declared.insert(var.name.clone()) {
                 output.push_str(&format!(
@@ -90,7 +178,7 @@ fn render_function(output: &mut String, function: &GpuFunction) -> Result<(), Gp
                 ));
             }
         }
-        render_assignment(output, assignment)?;
+        render_assignment(output, function, assignment_index, assignment)?;
     }
     for (index, target) in function.targets.iter().enumerate() {
         output.push_str(&format!("    *out_{index} = {};\n", target.name));
@@ -99,7 +187,12 @@ fn render_function(output: &mut String, function: &GpuFunction) -> Result<(), Gp
     Ok(())
 }
 
-fn render_assignment(output: &mut String, assignment: &GpuAssign) -> Result<(), GpuRenderError> {
+fn render_assignment(
+    output: &mut String,
+    function: &GpuFunction,
+    assignment_index: usize,
+    assignment: &GpuAssign,
+) -> Result<(), GpuRenderError> {
     if let Some(symbol) = &assignment.call_symbol {
         let mut args = assignment.inputs.iter().map(value_expr).collect::<Vec<_>>();
         args.extend(
@@ -109,6 +202,12 @@ fn render_assignment(output: &mut String, assignment: &GpuAssign) -> Result<(), 
                 .map(|var| format!("&{}", var.name)),
         );
         output.push_str(&format!("    {symbol}({});\n", args.join(", ")));
+        return Ok(());
+    }
+    if ops::memory::render(output, assignment)?
+        || ops::indexing::render(output, assignment)?
+        || ops::scheduling::render(output, assignment)?
+    {
         return Ok(());
     }
     let op = assignment.op.as_str();
@@ -123,10 +222,13 @@ fn render_assignment(output: &mut String, assignment: &GpuAssign) -> Result<(), 
             ));
             Ok(())
         }
+        ":.param" => Ok(()),
         ":.ty" | ":.forget" | "u64.name" => identity(output, assignment),
+        "u64.copies2" | "bool.copies2" => copy_two(output, assignment),
         "gpu.grid.1d.intro" => render_grid_intro(output, assignment, 1),
         "gpu.grid.2d.intro" => render_grid_intro(output, assignment, 2),
         "gpu.grid.3d.intro" => render_grid_intro(output, assignment, 3),
+        "gpu.launch" => ops::launch::render_call(output, function, assignment_index, assignment),
         "bool.ifc" => render_ifc(output, assignment),
         "bool.t" => unary_output(output, assignment, "1", 0),
         "bool.f" | "u64.zero" | "u32.zero" => unary_output(output, assignment, "0", 0),
@@ -192,6 +294,18 @@ fn render_grid_intro(
 
 fn identity(output: &mut String, a: &GpuAssign) -> Result<(), GpuRenderError> {
     unary_output(output, a, &input(a, 0)?, 1)
+}
+
+fn copy_two(output: &mut String, a: &GpuAssign) -> Result<(), GpuRenderError> {
+    if a.inputs.len() != 1 || a.outputs.len() != 2 {
+        return Err(arity(a, 1));
+    }
+    let value = input(a, 0)?;
+    output.push_str(&format!(
+        "    {} = {value};\n    {} = {value};\n",
+        a.outputs[0].name, a.outputs[1].name,
+    ));
+    Ok(())
 }
 
 fn unary_output(
@@ -270,7 +384,7 @@ fn input(a: &GpuAssign, index: usize) -> Result<String, GpuRenderError> {
         .ok_or_else(|| arity(a, index + 1))
 }
 
-fn value_expr(value: &GpuValue) -> String {
+pub(super) fn value_expr(value: &GpuValue) -> String {
     match value {
         GpuValue::Var(var) => var.name.clone(),
         GpuValue::FnSymbol(target) => sanitize_ident(&format!("program.{target}")),
@@ -332,7 +446,7 @@ fn render_ifc_call<'a>(
     ));
 }
 
-fn sanitize_ident(name: &str) -> String {
+pub(super) fn sanitize_ident(name: &str) -> String {
     name.chars()
         .map(|character| {
             if character.is_ascii_alphanumeric() {
@@ -350,6 +464,14 @@ fn arity(a: &GpuAssign, expected: usize) -> GpuRenderError {
         expected,
         outputs: a.outputs.len(),
     }
+}
+
+pub(super) fn invalid_arity(
+    assignment: &GpuAssign,
+    expected_inputs: usize,
+    _expected_outputs: usize,
+) -> GpuRenderError {
+    arity(assignment, expected_inputs)
 }
 
 #[cfg(test)]

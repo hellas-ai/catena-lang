@@ -2,6 +2,7 @@
 
 pub mod gpu;
 pub mod lower_types;
+mod ops;
 
 use std::collections::{BTreeMap, HashMap};
 
@@ -9,6 +10,7 @@ use hexpr::Operation;
 use metacat::{
     ssa::{SSAError, ssa},
     theory::TheoryId,
+    tree::Tree,
 };
 use open_hypergraphs::lax::NodeId;
 use serde::{Deserialize, Serialize};
@@ -83,6 +85,10 @@ pub enum CodegenError {
     InvalidNameArity { operation: Operation, actual: usize },
     #[error("generated function name `{0}` has an invalid target")]
     InvalidNameTarget(String),
+    #[error("structural product operation `{operation}` has incompatible runtime components")]
+    InvalidProduct { operation: Operation },
+    #[error("a function symbol reached the runtime output of `{0}`")]
+    FunctionOutput(Operation),
 }
 
 pub fn codegen(terms: &TheoryTermMap) -> Result<GpuModuleMap, CodegenError> {
@@ -109,40 +115,65 @@ fn codegen_definition(
     let mut term = term.clone();
     term.quotient().map_err(CodegenError::Quotient)?;
     let function_symbols = direct_function_symbols(&term)?;
-    let sources = term
-        .sources
-        .iter()
-        .map(|node| var(*node, &term))
-        .filter_map(runtime_var)
-        .collect::<Result<Vec<_>, _>>()?;
-    let targets = term
-        .targets
-        .iter()
-        .map(|node| var(*node, &term))
-        .filter_map(runtime_var)
-        .collect::<Result<Vec<_>, _>>()?;
+    let mut aliases = HashMap::<NodeId, Vec<GpuValue>>::new();
+    let mut sources = Vec::new();
+    for node in &term.sources {
+        let components = vars(*node, &term)?;
+        sources.extend(components.iter().cloned());
+        aliases.insert(*node, components.into_iter().map(GpuValue::Var).collect());
+    }
     let mut assignments = Vec::new();
     for assignment in ssa(term.clone().to_strict())? {
         let op = assignment.op;
         if op.as_str().starts_with("name.") {
             continue;
         }
-        let inputs = assignment
-            .sources
-            .iter()
-            .filter_map(|(node, _)| {
-                if let Some(symbol) = function_symbols.get(node) {
-                    return Some(Ok(GpuValue::FnSymbol(symbol.clone())));
-                }
-                runtime_var(var(*node, &term)).map(|value| value.map(GpuValue::Var))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        let outputs = assignment
-            .targets
-            .iter()
-            .map(|(node, _)| var(*node, &term))
-            .filter_map(runtime_var)
-            .collect::<Result<Vec<_>, _>>()?;
+        if op.as_str() == "*.intro" {
+            let inputs = resolve_nodes(
+                assignment.sources.iter().map(|(node, _)| *node),
+                &aliases,
+                &function_symbols,
+                &term,
+            )?;
+            let [(target, _)] = assignment.targets.as_slice() else {
+                return Err(CodegenError::InvalidProduct { operation: op });
+            };
+            aliases.insert(*target, inputs);
+            continue;
+        }
+        if op.as_str() == "*.elim" {
+            let [(source, _)] = assignment.sources.as_slice() else {
+                return Err(CodegenError::InvalidProduct { operation: op });
+            };
+            let components = resolve_node(*source, &aliases, &function_symbols, &term)?;
+            let mut offset = 0;
+            for (target, _) in &assignment.targets {
+                let count = vars(*target, &term)?.len();
+                let Some(values) = components.get(offset..offset + count) else {
+                    return Err(CodegenError::InvalidProduct {
+                        operation: op.clone(),
+                    });
+                };
+                aliases.insert(*target, values.to_vec());
+                offset += count;
+            }
+            if offset != components.len() {
+                return Err(CodegenError::InvalidProduct { operation: op });
+            }
+            continue;
+        }
+        let inputs = resolve_nodes(
+            assignment.sources.iter().map(|(node, _)| *node),
+            &aliases,
+            &function_symbols,
+            &term,
+        )?;
+        let mut outputs = Vec::new();
+        for (node, _) in &assignment.targets {
+            let components = vars(*node, &term)?;
+            outputs.extend(components.iter().cloned());
+            aliases.insert(*node, components.into_iter().map(GpuValue::Var).collect());
+        }
         if inputs.is_empty() && outputs.is_empty() {
             continue;
         }
@@ -156,6 +187,18 @@ fn codegen_definition(
             outputs,
         });
     }
+    let targets = resolve_nodes(
+        term.targets.iter().copied(),
+        &aliases,
+        &function_symbols,
+        &term,
+    )?
+    .into_iter()
+    .map(|value| match value {
+        GpuValue::Var(var) => Ok(var),
+        GpuValue::FnSymbol(_) => Err(CodegenError::FunctionOutput(source_name.clone())),
+    })
+    .collect::<Result<Vec<_>, _>>()?;
     Ok(GpuModule {
         name: symbol.clone(),
         source_name: Some(source_name),
@@ -189,20 +232,68 @@ fn direct_function_symbols(term: &CodegenTerm) -> Result<HashMap<NodeId, Operati
     Ok(symbols)
 }
 
-fn var(node: NodeId, term: &CodegenTerm) -> Result<GpuVar, LowerTypeError> {
-    Ok(GpuVar {
+fn vars(node: NodeId, term: &CodegenTerm) -> Result<Vec<GpuVar>, LowerTypeError> {
+    let mut output = Vec::new();
+    lower_components(
         node,
-        name: format!("x{}", node.0),
-        lowered: lower_type(&term.hypergraph.nodes[node.0])?,
-    })
+        &term.hypergraph.nodes[node.0],
+        &format!("x{}", node.0),
+        &mut output,
+    )?;
+    Ok(output)
 }
 
-fn runtime_var(value: Result<GpuVar, LowerTypeError>) -> Option<Result<GpuVar, LowerTypeError>> {
-    match value {
-        Ok(var) if matches!(var.lowered, LoweredType::Runtime(_)) => Some(Ok(var)),
-        Ok(_) => None,
-        Err(error) => Some(Err(error)),
+fn lower_components(
+    node: NodeId,
+    ty: &Tree<(), Operation>,
+    name: &str,
+    output: &mut Vec<GpuVar>,
+) -> Result<(), LowerTypeError> {
+    if let Tree::Node(operation, _, children) = ty
+        && operation.as_str() == "*"
+    {
+        for (index, child) in children.iter().enumerate() {
+            lower_components(node, child, &format!("{name}_{index}"), output)?;
+        }
+        return Ok(());
     }
+    let lowered = lower_type(ty)?;
+    if let LoweredType::Runtime(_) = &lowered {
+        output.push(GpuVar {
+            node,
+            name: name.into(),
+            lowered,
+        });
+    }
+    Ok(())
+}
+
+fn resolve_nodes(
+    nodes: impl IntoIterator<Item = NodeId>,
+    aliases: &HashMap<NodeId, Vec<GpuValue>>,
+    function_symbols: &HashMap<NodeId, Operation>,
+    term: &CodegenTerm,
+) -> Result<Vec<GpuValue>, LowerTypeError> {
+    let mut output = Vec::new();
+    for node in nodes {
+        output.extend(resolve_node(node, aliases, function_symbols, term)?);
+    }
+    Ok(output)
+}
+
+fn resolve_node(
+    node: NodeId,
+    aliases: &HashMap<NodeId, Vec<GpuValue>>,
+    function_symbols: &HashMap<NodeId, Operation>,
+    term: &CodegenTerm,
+) -> Result<Vec<GpuValue>, LowerTypeError> {
+    if let Some(symbol) = function_symbols.get(&node) {
+        return Ok(vec![GpuValue::FnSymbol(symbol.clone())]);
+    }
+    if let Some(values) = aliases.get(&node) {
+        return Ok(values.clone());
+    }
+    Ok(vars(node, term)?.into_iter().map(GpuValue::Var).collect())
 }
 
 pub fn runtime_type(var: &GpuVar) -> Option<&CType> {

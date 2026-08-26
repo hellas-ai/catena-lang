@@ -32,7 +32,8 @@
 } = ([buffer-length buffer-name grid-shape block-shape global-shape global-size
   schedule-name buffer thread scheduling.]
   ([.buffer-length] :.forget [past-end-cell.])
-  ({[.scheduling thread past-end-cell]}
+  ([.thread] gpu.thread.name [named-thread.])
+  ({[.scheduling named-thread past-end-cell]}
     gpu.scheduling.can-own
     [scheduling-after _thread-after _cell-after _decision _owns _not-owns.])
   ([.buffer] gpu.global.forget)

@@ -2,8 +2,8 @@
 //!
 //! The included language surface is limited to name elaboration, products,
 //! scalar operations, and a small typed model of grids, scheduling, permissions,
-//! and global buffers. Closures/CMC, matrices, materialization, reduction, shared
-//! memory, and closure conversion are not part of [`stdlib`].
+//! and global buffers. Closures/CMC, matrices, materialization, closure-based
+//! reduction, shared memory, and closure conversion are not part of [`stdlib`].
 
 pub mod check;
 pub mod codegen;

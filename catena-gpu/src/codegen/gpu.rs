@@ -22,6 +22,8 @@ pub enum GpuRenderError {
     InvalidIfc(&'static str),
     #[error("invalid gpu.launch assignment: {0}")]
     InvalidLaunch(&'static str),
+    #[error("invalid fold assignment: {0}")]
+    InvalidFold(&'static str),
 }
 
 pub fn render_modules(
@@ -250,12 +252,13 @@ fn render_assignment(
             Ok(())
         }
         ":.param" => Ok(()),
-        ":.ty" | ":.forget" | "u64.name" => identity(output, assignment),
+        ":.ty" | ":.forget" | "u64.name" | "gpu.thread.name" => identity(output, assignment),
         "u64.copies2" | "bool.copies2" => copy_two(output, assignment),
         "gpu.grid.1d.intro" => render_grid_intro(output, assignment, 1),
         "gpu.grid.2d.intro" => render_grid_intro(output, assignment, 2),
         "gpu.grid.3d.intro" => render_grid_intro(output, assignment, 3),
         "gpu.launch" => ops::launch::render_call(output, function, assignment_index, assignment),
+        "fold" => ops::fold::render(output, assignment),
         "bool.ifc" => render_ifc(output, assignment),
         "bool.t" => unary_output(output, assignment, "1", 0),
         "bool.f" | "u64.zero" | "u32.zero" => unary_output(output, assignment, "0", 0),

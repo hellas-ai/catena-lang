@@ -52,13 +52,15 @@ pub fn render(output: &mut String, assignment: &GpuAssign) -> Result<bool, GpuRe
         }
         "gpu.global.read" => {
             let [buffer, cell] = assignment.inputs.as_slice() else {
-                return Err(invalid_arity(assignment, 2, 1));
+                return Err(invalid_arity(assignment, 2, 2));
             };
-            let [value] = assignment.outputs.as_slice() else {
-                return Err(invalid_arity(assignment, 2, 1));
+            let [buffer_after_read, value] = assignment.outputs.as_slice() else {
+                return Err(invalid_arity(assignment, 2, 2));
             };
             output.push_str(&format!(
-                "    {} = {}[{}];\n",
+                "    {} = {};\n    {} = {}[{}];\n",
+                buffer_after_read.name,
+                value_expr(buffer),
                 value.name,
                 value_expr(buffer),
                 value_expr(cell),

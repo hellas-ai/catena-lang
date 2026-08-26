@@ -44,3 +44,9 @@ The kernel computes a candidate cell and calls `gpu.scheduling.can-own` or `gpu.
 
 In the kernel, `gpu.thread.in-grid.index` obtains the current coordinate and `ix.to-u64` computes its row-major linear offset. `u64.lt` then checks the offset against the buffer size. The true branch uses `u64.to-ix` to construct a bounded cell before calling `can-own`; the false branch skips without asking for permission.
 The entry receives `grid-x` and `block-x`, so the same program covers exact tiling when `grid-x * block-x == buffer-size` and predication when the product is larger. If it is smaller, schedule construction fails its fit assertion.
+
+The example uses the finite `fold` primitive to visit every bounded source
+index. Its direct named body carries the source scheduling, current thread,
+source buffer, and running sum as loop state. Each iteration obtains a read
+grant from the same read-all scheduling, reads one cell, and adds it to the
+sum. No closure, loop variant, or type-changing invariant is needed.

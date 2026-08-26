@@ -97,6 +97,13 @@
     ([.block-shape] ix val)
   })
 
+  # Attach a fresh static name to the current thread so permissions can refer
+  # to its stable launch identity.
+  (arr gpu.thread.name : {[grid-topology thread-name.]
+    ([.grid-topology] gpu.thread val)
+  } -> ([grid-topology thread-name.]
+    ({[.thread-name] ([.grid-topology] gpu.thread)} :)))
+
   # Obtain the opaque block containing a thread. The block's own index is
   # available only through gpu.block.index.
   (arr gpu.thread.block : {[grid-topology block-name.]
@@ -180,7 +187,7 @@
   ]
     ({[.buffer-name buffer-size] [.grid-topology] [.schedule-name]}
       gpu.scheduling val)
-    ([.grid-topology] gpu.thread val)
+    ({[.thread-name] ([.grid-topology] gpu.thread)} :)
     ({({[.buffer-size]} shape.1d)} ix val)
   } -> {[
     buffer-name buffer-size grid-topology schedule-name thread-name cell-index
@@ -206,7 +213,7 @@
   ]
     ({[.buffer-name buffer-size] [.grid-topology] [.schedule-name]}
       gpu.scheduling val)
-    ([.grid-topology] gpu.thread val)
+    ({[.thread-name] ([.grid-topology] gpu.thread)} :)
     ({({[.buffer-size]} shape.1d)} ix val)
   } -> {[
     buffer-name buffer-size grid-topology schedule-name thread-name cell-index
@@ -274,6 +281,7 @@
   } -> {[
     buffer-name buffer-size schedule-name thread-name cell-index.
   ]
+    ({[.buffer-name] ({cap.own [.buffer-size] u64} gpu.global)} :)
     ([.buffer-name schedule-name thread-name cell-index] gpu.global.read-grant)
     (u64 val)
   })

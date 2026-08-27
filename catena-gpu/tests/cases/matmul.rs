@@ -58,8 +58,8 @@ fn check_naive_u64_matmul(
         anyhow::bail!("naive-u64-matmul returned a non-memory B buffer")
     };
 
-    assert_eq!(c.to_u64_vec()?, [58, 64, 139, 154]);
-    assert_eq!(a.to_u64_vec()?, a_values);
-    assert_eq!(b.to_u64_vec()?, b_values);
+    assert_eq!(c.try_to_u64_vec()?, [58, 64, 139, 154]);
+    assert_eq!(a.try_to_u64_vec()?, a_values);
+    assert_eq!(b.try_to_u64_vec()?, b_values);
     Ok(())
 }

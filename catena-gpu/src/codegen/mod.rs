@@ -13,29 +13,15 @@ use metacat::{
     tree::Tree,
 };
 use open_hypergraphs::lax::NodeId;
-use serde::{Deserialize, Serialize};
 use thiserror::Error;
+
+pub use catena_lang::codegen::GpuDialect;
 
 use crate::{check::AnnotatedTerm, report::TheoryTermMap};
 use lower_types::{CType, LowerTypeError, LoweredType, lower_type};
 
 pub type GpuModuleMap = BTreeMap<Operation, GpuModule>;
 type CodegenTerm = AnnotatedTerm<Operation>;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum GpuDialect {
-    Hip,
-    Cuda,
-}
-
-impl GpuDialect {
-    pub(crate) fn runtime_header(self) -> &'static str {
-        match self {
-            Self::Hip => "hip/hip_runtime.h",
-            Self::Cuda => "cuda_runtime.h",
-        }
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GpuModule {

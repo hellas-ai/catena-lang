@@ -14,7 +14,9 @@ use super::artifact::{Artifact, ArtifactError, RuntimeId, SharedObject};
 use super::executor::{AbiValue, Executor, ExecutorError};
 use super::mem::{MemError, MemOwn};
 use super::{
-    signature::{FunctionSignature, SignatureTable, signatures},
+    signature::{
+        FunctionSignature, GeneratedFunction, SignatureTable, generated_signatures, signatures,
+    },
     value::{Value, ValueKind},
 };
 use crate::codegen::{GpuDialect, gpu::GpuRenderError, gpu::render_modules};
@@ -129,6 +131,11 @@ impl Runtime {
         })
     }
 
+    /// The GPU dialect used by this runtime.
+    pub fn dialect(&self) -> GpuDialect {
+        self.gpu.dialect()
+    }
+
     /// Compile Catena programs from paths into a new artifact.
     pub fn load<I>(&mut self, paths: I) -> Result<Artifact, InitError>
     where
@@ -154,7 +161,29 @@ impl Runtime {
             .gpu_modules
             .as_ref()
             .ok_or(InitError::MissingGpuModules)?;
-        let signature_table = signatures(modules);
+        let rendered = render_modules(modules, dialect)
+            .map_err(|source| InitError::RenderGpu { dialect, source })?;
+        self.load_generated(&rendered, signatures(modules))
+    }
+
+    /// Compile and load generated GPU source with its public entry-point ABI.
+    ///
+    /// This lets another Catena compiler reuse the runtime without depending on
+    /// catena-lang's compiler or code-generation representation.
+    pub fn load_generated_source(
+        &mut self,
+        source: &str,
+        functions: impl IntoIterator<Item = GeneratedFunction>,
+    ) -> Result<Artifact, InitError> {
+        self.load_generated(source, generated_signatures(functions))
+    }
+
+    fn load_generated(
+        &mut self,
+        source: &str,
+        signature_table: SignatureTable,
+    ) -> Result<Artifact, InitError> {
+        let dialect = self.gpu.dialect();
         if let Some((name, index)) = ref_output(&signature_table) {
             return Err(InitError::UnsupportedRefOutput { name, index });
         }
@@ -167,9 +196,7 @@ impl Runtime {
                 source,
             })?;
         let cpp_path = report_dir.path().join("module.cpp");
-        let rendered = render_modules(modules, dialect)
-            .map_err(|source| InitError::RenderGpu { dialect, source })?;
-        fs::write(&cpp_path, rendered).map_err(|source| InitError::WriteGeneratedSource {
+        fs::write(&cpp_path, source).map_err(|source| InitError::WriteGeneratedSource {
             path: cpp_path.clone(),
             source,
         })?;

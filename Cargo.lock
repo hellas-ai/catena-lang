@@ -106,13 +106,10 @@ name = "catena-gpu"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "catena-lang",
  "hexpr",
- "libffi",
- "libloading",
  "metacat",
  "open-hypergraphs",
- "serde",
- "tempfile",
  "thiserror",
 ]
 

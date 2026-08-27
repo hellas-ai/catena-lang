@@ -35,7 +35,7 @@ fn check_readable_sum(destination_size: usize, grid_x: u64, block_x: u64) -> any
         anyhow::bail!("fill-with-readable-sum returned a non-memory source")
     };
 
-    assert_eq!(destination.to_u64_vec()?, vec![141; destination_size]);
-    assert_eq!(source.to_u64_vec()?, source_values);
+    assert_eq!(destination.try_to_u64_vec()?, vec![141; destination_size]);
+    assert_eq!(source.try_to_u64_vec()?, source_values);
     Ok(())
 }

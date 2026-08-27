@@ -16,7 +16,9 @@ pub enum CType {
     F32,
     Grid,
     MemOwn,
+    MemRef,
     Ptr(Box<CType>),
+    ConstPtr(Box<CType>),
     Generic(usize),
     Ix,
     Thread,
@@ -70,9 +72,34 @@ fn lower_runtime_type(ty: &Tree<(), Operation>) -> Result<CType, LowerTypeError>
         ("u64", []) => Ok(CType::U64),
         ("f32", []) => Ok(CType::F32),
         ("gpu.grid", [_grid_shape, _block_shape, _global_shape, _global_size]) => Ok(CType::Grid),
-        ("mem", [_capability]) => Ok(CType::MemOwn),
-        ("gpu.global", [_capability, _buffer_size, element]) => {
-            Ok(CType::Ptr(Box::new(lower_runtime_type(element)?)))
+        ("mem", [capability]) => match capability {
+            Tree::Node(operation, _, children)
+                if operation.as_str() == "cap.own" && children.is_empty() =>
+            {
+                Ok(CType::MemOwn)
+            }
+            Tree::Node(operation, _, children)
+                if operation.as_str() == "cap.ref" && children.is_empty() =>
+            {
+                Ok(CType::MemRef)
+            }
+            _ => Err(LowerTypeError::NoRuntimeRepresentation(ty.clone())),
+        },
+        ("gpu.global", [capability, _buffer_size, element]) => {
+            let element = Box::new(lower_runtime_type(element)?);
+            match capability {
+                Tree::Node(operation, _, children)
+                    if operation.as_str() == "cap.own" && children.is_empty() =>
+                {
+                    Ok(CType::Ptr(element))
+                }
+                Tree::Node(operation, _, children)
+                    if operation.as_str() == "cap.ref" && children.is_empty() =>
+                {
+                    Ok(CType::ConstPtr(element))
+                }
+                _ => Err(LowerTypeError::NoRuntimeRepresentation(ty.clone())),
+            }
         }
         ("gpu.thread", [_grid]) => Ok(CType::Thread),
         ("gpu.block", [_grid, _block_name]) => Ok(CType::Block),

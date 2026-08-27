@@ -108,7 +108,7 @@ fn collect_generic_types(ty: &CType, output: &mut BTreeSet<usize>) {
         CType::Generic(index) => {
             output.insert(*index);
         }
-        CType::Ptr(element) => collect_generic_types(element, output),
+        CType::Ptr(element) | CType::ConstPtr(element) => collect_generic_types(element, output),
         _ => {}
     }
 }
@@ -143,7 +143,9 @@ pub(super) fn c_type(ty: &CType) -> String {
         CType::F32 => "float".into(),
         CType::Grid => "catena_grid_t".into(),
         CType::MemOwn => "catena_mem_own_t".into(),
+        CType::MemRef => "catena_mem_ref_t".into(),
         CType::Ptr(element) => format!("{} *", c_type(element)),
+        CType::ConstPtr(element) => format!("const {} *", c_type(element)),
         CType::Generic(index) => format!("T{index}"),
         CType::Ix => "catena_ix_t".into(),
         CType::Thread => "catena_thread_t".into(),
@@ -176,6 +178,7 @@ fn render_prelude(dialect: GpuDialect) -> String {
 typedef struct {{ uint32_t x; uint32_t y; uint32_t z; }} catena_dim3_t;
 typedef struct {{ catena_dim3_t grid_dim; catena_dim3_t block_dim; }} catena_grid_t;
 typedef struct {{ void *data; uint64_t len; }} catena_mem_own_t;
+typedef struct {{ void *data; uint64_t len; }} catena_mem_ref_t;
 typedef struct {{ uint64_t first; uint64_t second; uint64_t third; uint64_t linear; }} catena_ix_t;
 typedef struct {{
     catena_ix_t global_index;
@@ -185,12 +188,10 @@ typedef struct {{
 typedef struct {{ catena_ix_t index; }} catena_block_t;
 typedef enum {{
     CATENA_CELL_INACCESSIBLE = 0,
-    CATENA_CELL_READABLE = 1,
     CATENA_CELL_OWNED = 2,
 }} catena_cell_access_t;
 typedef enum {{
     CATENA_SCHEDULING_OWN_EACH = 1,
-    CATENA_SCHEDULING_READ_ALL = 2,
     CATENA_SCHEDULING_2D_ROW_MAJOR_OWN = 3,
 }} catena_scheduling_kind_t;
 typedef struct {{ catena_scheduling_kind_t kind; uint64_t matrix_columns; }} catena_scheduling_t;
@@ -205,8 +206,6 @@ __host__ __device__ static inline catena_cell_access_t catena_scheduling_resolve
         return thread.global_index.linear == cell.linear
             ? CATENA_CELL_OWNED
             : CATENA_CELL_INACCESSIBLE;
-    case CATENA_SCHEDULING_READ_ALL:
-        return CATENA_CELL_READABLE;
     case CATENA_SCHEDULING_2D_ROW_MAJOR_OWN:
         if (scheduling.matrix_columns == 0) return CATENA_CELL_INACCESSIBLE;
         return thread.global_index.first == cell.linear % scheduling.matrix_columns

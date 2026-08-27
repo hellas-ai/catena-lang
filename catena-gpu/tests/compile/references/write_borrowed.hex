@@ -1,0 +1,15 @@
+(def program write-borrowed : {[
+  buffer-name buffer-size element-type
+  grid-topology schedule-name thread-name cell-index.
+]
+  ({[.thread-name] ([.grid-topology] gpu.thread)} :)
+  ({[.buffer-name] ({cap.ref [.buffer-size element-type]} gpu.global)} :)
+  ({[.cell-index] ({({[.buffer-size]} shape.1d)} ix)} :)
+  ([.element-type] val)
+  ([.buffer-name schedule-name thread-name cell-index] gpu.global.own)
+} -> {[
+  buffer-name buffer-size element-type
+  grid-topology schedule-name thread-name cell-index.
+]
+  ([.buffer-name schedule-name thread-name cell-index] gpu.global.own)
+} = gpu.global.write)

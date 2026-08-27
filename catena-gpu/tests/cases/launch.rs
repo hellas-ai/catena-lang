@@ -18,12 +18,12 @@ fn check_readable_sum(destination_size: usize, grid_x: u64, block_x: u64) -> any
     let source_values = [17_u64, 25, 99];
     let source = runtime.mem_u64(&source_values)?;
 
-    let [destination, source] = runtime.exec(
+    let [destination] = runtime.exec(
         &artifact,
         "fill-with-readable-sum",
         [
             destination.into(),
-            source.into(),
+            source.as_ref().into(),
             grid_x.into(),
             block_x.into(),
         ],
@@ -31,10 +31,6 @@ fn check_readable_sum(destination_size: usize, grid_x: u64, block_x: u64) -> any
     let Value::MemOwn(destination) = destination else {
         anyhow::bail!("fill-with-readable-sum returned a non-memory destination")
     };
-    let Value::MemOwn(source) = source else {
-        anyhow::bail!("fill-with-readable-sum returned a non-memory source")
-    };
-
     assert_eq!(destination.try_to_u64_vec()?, vec![141; destination_size]);
     assert_eq!(source.try_to_u64_vec()?, source_values);
     Ok(())

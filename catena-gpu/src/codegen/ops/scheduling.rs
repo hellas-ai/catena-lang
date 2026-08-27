@@ -8,19 +8,12 @@ pub fn render(output: &mut String, assignment: &GpuAssign) -> Result<bool, GpuRe
                 return Err(invalid_arity(assignment, 1, 0));
             }
         }
-        operation @ ("gpu.scheduling.own-each"
-        | "gpu.scheduling.read-all"
-        | "gpu.scheduling.2d.row-major.read-all") => {
+        "gpu.scheduling.own-each" => {
             if !assignment.inputs.is_empty() || assignment.outputs.len() != 1 {
                 return Err(invalid_arity(assignment, 0, 1));
             }
-            let kind = if operation == "gpu.scheduling.own-each" {
-                "CATENA_SCHEDULING_OWN_EACH"
-            } else {
-                "CATENA_SCHEDULING_READ_ALL"
-            };
             output.push_str(&format!(
-                "    {} = {{ {kind}, 0 }};\n",
+                "    {} = {{ CATENA_SCHEDULING_OWN_EACH, 0 }};\n",
                 assignment.outputs[0].name,
             ));
         }
@@ -37,7 +30,7 @@ pub fn render(output: &mut String, assignment: &GpuAssign) -> Result<bool, GpuRe
                 value_expr(column_count),
             ));
         }
-        operation @ ("gpu.scheduling.can-own" | "gpu.scheduling.can-read") => {
+        "gpu.scheduling.can-own" => {
             let [schedule, thread, cell] = assignment.inputs.as_slice() else {
                 return Err(invalid_arity(assignment, 3, 4));
             };
@@ -46,13 +39,8 @@ pub fn render(output: &mut String, assignment: &GpuAssign) -> Result<bool, GpuRe
             else {
                 return Err(invalid_arity(assignment, 3, 4));
             };
-            let permission_test = if operation == "gpu.scheduling.can-own" {
-                "== CATENA_CELL_OWNED"
-            } else {
-                ">= CATENA_CELL_READABLE"
-            };
             output.push_str(&format!(
-                "    {} = {};\n    {} = {};\n    {} = {};\n    {} = (catena_scheduling_resolve({}, {}, {}) {permission_test});\n",
+                "    {} = {};\n    {} = {};\n    {} = {};\n    {} = (catena_scheduling_resolve({}, {}, {}) == CATENA_CELL_OWNED);\n",
                 schedule_after.name,
                 value_expr(schedule),
                 thread_after.name,

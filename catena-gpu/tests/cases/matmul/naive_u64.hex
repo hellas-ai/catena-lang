@@ -1,8 +1,8 @@
 (def program naive-u64-matmul :
   {
     (cap.own mem)
-    (cap.own mem)
-    (cap.own mem)
+    (cap.ref mem)
+    (cap.ref mem)
     (u64 val)
     (u64 val)
     (u64 val)
@@ -12,7 +12,7 @@
     (u64 val)
   }
   ->
-  {(cap.own mem) (cap.own mem) (cap.own mem)}
+  (cap.own mem)
 = ([c-input a-input b-input output-rows-input shared-size-input
     output-columns-input grid-x-input grid-y-input block-x-input block-y-input.]
   ([.c-input] mem.cast.u64 [c-length named-c-buffer.])
@@ -41,14 +41,8 @@
 
   ([.a-length] u64.copies2 [a-length-for-kernel a-length-for-name.])
   ([.a-length-for-name] :.param [a-size.])
-  ({[.a-buffer-name a-size grid-shape block-shape global-shape global-size-name]}
-    gpu.scheduling.2d.row-major.read-all
-    [a-schedule-name a-scheduling.])
   ([.b-length] u64.copies2 [b-length-for-kernel b-length-for-name.])
   ([.b-length-for-name] :.param [b-size.])
-  ({[.b-buffer-name b-size grid-shape block-shape global-shape global-size-name]}
-    gpu.scheduling.2d.row-major.read-all
-    [b-schedule-name b-scheduling.])
 
   ([.output-rows-input] u64.name [named-output-rows.])
   ([.named-output-rows] :.ty [output-rows-value output-rows.])
@@ -69,16 +63,12 @@
   ({[.shared-size-value output-columns-value]} *.intro [shared-and-columns.])
   ({[.output-rows-value shared-and-columns]} *.intro [dimensions.])
 
-  ({[.a-size a-schedule-name]} *.intro [a-size-and-schedule.])
-  ({[.a-buffer-name a-size-and-schedule]} *.intro [a-context.])
-  ({[.a-scheduling a-context]} *.intro [a-schedule-and-context.])
-  ({[.a-buffer a-schedule-and-context]} *.intro [a-tail.])
+  ({[.a-buffer-name a-size]} *.intro [a-context.])
+  ({[.a-buffer a-context]} *.intro [a-tail.])
   ({[.a-length-for-kernel a-tail]} *.intro [a-arguments.])
 
-  ({[.b-size b-schedule-name]} *.intro [b-size-and-schedule.])
-  ({[.b-buffer-name b-size-and-schedule]} *.intro [b-context.])
-  ({[.b-scheduling b-context]} *.intro [b-schedule-and-context.])
-  ({[.b-buffer b-schedule-and-context]} *.intro [b-tail.])
+  ({[.b-buffer-name b-size]} *.intro [b-context.])
+  ({[.b-buffer b-context]} *.intro [b-tail.])
   ({[.b-length-for-kernel b-tail]} *.intro [b-arguments.])
 
   ({[.global-size-name c-schedule-name]} *.intro [global-size-and-c-schedule.])
@@ -99,7 +89,7 @@
   ({[
     .element-type c-buffer-name c-size a-buffer-name a-size b-buffer-name b-size
     grid-shape block-shape global-columns global-rows global-size-name
-    c-schedule-name a-schedule-name b-schedule-name
+    c-schedule-name
     output-rows shared-size output-columns
   ]} name.gpu.global.matrix.matmul.kernel [kernel.])
   ({[.grid kernel-arguments kernel]} gpu.launch [returned-kernel-arguments.])
@@ -120,27 +110,8 @@
   ([.returned-c-tail]
     *.elim
     [c-buffer-after-launch _returned-c-schedule-and-context.])
-  ([.returned-a-arguments]
-    *.elim
-    [a-length-after-launch returned-a-tail.])
-  ([.returned-a-tail]
-    *.elim
-    [a-buffer-after-launch _returned-a-schedule-and-context.])
-  ([.returned-b-arguments]
-    *.elim
-    [b-length-after-launch returned-b-tail.])
-  ([.returned-b-tail]
-    *.elim
-    [b-buffer-after-launch _returned-b-schedule-and-context.])
-
   ({[.c-length-after-launch c-buffer-after-launch]}
     gpu.global.to-mem
     [c-output.])
-  ({[.a-length-after-launch a-buffer-after-launch]}
-    gpu.global.to-mem
-    [a-output.])
-  ({[.b-length-after-launch b-buffer-after-launch]}
-    gpu.global.to-mem
-    [b-output.])
-  {[.c-output a-output b-output]}
+  [.c-output]
 ))

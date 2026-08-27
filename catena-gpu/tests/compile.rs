@@ -12,3 +12,5 @@ mod basic;
 mod numeric;
 #[path = "compile/permissions.rs"]
 mod permissions;
+#[path = "compile/references.rs"]
+mod references;

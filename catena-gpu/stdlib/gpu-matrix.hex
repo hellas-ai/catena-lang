@@ -1,28 +1,19 @@
-# Generic row-major matrix access over a global buffer. Matrix indexing and
-# permission handling do not depend on the buffer's element type.
+# Generic row-major matrix access over borrowed global memory.
 (def program gpu.global.matrix.2d.row-major.read : {[
-  buffer-name buffer-size element-type row-count column-count
-  grid-topology schedule-name thread-name.
+  buffer-name buffer-size element-type row-count column-count.
 ]
-  ({[.buffer-name buffer-size] [.grid-topology] [.schedule-name]}
-    gpu.scheduling val)
-  ({[.thread-name] ([.grid-topology] gpu.thread)} :)
-  ({[.buffer-name] ({cap.own [.buffer-size element-type]} gpu.global)} :)
+  ({[.buffer-name] ({cap.ref [.buffer-size element-type]} gpu.global)} :)
   ({[.buffer-size] u64} :)
   ({[.column-count] u64} :)
   ({({[.row-count column-count]} shape.2d)} ix val)
 } -> {[
-  buffer-name buffer-size element-type row-count column-count
-  grid-topology schedule-name thread-name.
+  buffer-name buffer-size element-type row-count column-count.
 ]
-  ({[.buffer-name buffer-size] [.grid-topology] [.schedule-name]}
-    gpu.scheduling val)
-  ({[.thread-name] ([.grid-topology] gpu.thread)} :)
-  ({[.buffer-name] ({cap.own [.buffer-size element-type]} gpu.global)} :)
+  ({[.buffer-name] ({cap.ref [.buffer-size element-type]} gpu.global)} :)
   ({[.buffer-size] u64} :)
   ({[.column-count] u64} :)
   ([.element-type] val)
-} = ([scheduling thread buffer buffer-length column-count-value matrix-index.]
+} = ([buffer buffer-length column-count-value matrix-index.]
   ([.column-count-value]
     u64.copies2
     [column-count-for-flatten column-count-after-read.])
@@ -47,18 +38,8 @@
     u64.to-ix
     [named-cell.])
   ([.named-cell] :.forget [cell.])
-  ({[.scheduling thread cell]}
-    gpu.scheduling.can-read
-    [scheduling-after-query thread-after-query cell-after-query
-      can-read reads-if-allowed _not-readable-if-denied.])
-  ({[.can-read reads-if-allowed]} assert-then [reads-cell.])
-  ([.reads-cell] gpu.permissions.grant-read [read-grant.])
-  ({[.buffer cell-after-query read-grant]}
-    gpu.global.read
-    [buffer-after-read read-grant-after-read value.])
-  ([.read-grant-after-read] gpu.global.read.forget)
-  {[.scheduling-after-query thread-after-query buffer-after-read
-    buffer-length-after-read column-count-after-read value]}
+  ({[.buffer cell]} gpu.global.read [buffer-after-read value.])
+  {[.buffer-after-read buffer-length-after-read column-count-after-read value]}
 ))
 
 # Write a two-dimensional row-major matrix cell after proving that the current

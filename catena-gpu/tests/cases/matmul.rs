@@ -32,13 +32,13 @@ fn check_naive_u64_matmul(
     let a = runtime.mem_u64(&a_values)?;
     let b = runtime.mem_u64(&b_values)?;
 
-    let [c, a, b] = runtime.exec(
+    let [c] = runtime.exec(
         &artifact,
         "naive-u64-matmul",
         [
             c.into(),
-            a.into(),
-            b.into(),
+            a.as_ref().into(),
+            b.as_ref().into(),
             2_u64.into(),
             3_u64.into(),
             2_u64.into(),
@@ -50,12 +50,6 @@ fn check_naive_u64_matmul(
     )?;
     let Value::MemOwn(c) = c else {
         anyhow::bail!("naive-u64-matmul returned a non-memory C buffer")
-    };
-    let Value::MemOwn(a) = a else {
-        anyhow::bail!("naive-u64-matmul returned a non-memory A buffer")
-    };
-    let Value::MemOwn(b) = b else {
-        anyhow::bail!("naive-u64-matmul returned a non-memory B buffer")
     };
 
     assert_eq!(c.try_to_u64_vec()?, [58, 64, 139, 154]);

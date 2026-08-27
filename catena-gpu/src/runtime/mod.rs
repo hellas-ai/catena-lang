@@ -79,8 +79,10 @@ fn value_kind(ty: &CType) -> Option<ValueKind> {
         CType::U64 => Some(ValueKind::U64),
         CType::F32 => Some(ValueKind::F32),
         CType::MemOwn => Some(ValueKind::MemOwn),
+        CType::MemRef => Some(ValueKind::MemRef),
         CType::Grid
         | CType::Ptr(_)
+        | CType::ConstPtr(_)
         | CType::Generic(_)
         | CType::Ix
         | CType::Thread

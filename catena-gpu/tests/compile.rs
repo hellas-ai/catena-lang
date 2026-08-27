@@ -8,5 +8,7 @@ use metacat::theory::RawTheorySet;
 
 #[path = "compile/basic.rs"]
 mod basic;
+#[path = "compile/numeric.rs"]
+mod numeric;
 #[path = "compile/permissions.rs"]
 mod permissions;

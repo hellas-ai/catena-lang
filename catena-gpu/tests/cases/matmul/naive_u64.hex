@@ -20,6 +20,7 @@
   ([.c-buffer-before-type]
     gpu.global.element-type
     [c-buffer element-type.])
+  gpu.numeric.u64 [numeric-proof.]
   ([.a-input] mem.cast.u64 [a-length named-a-buffer.])
   ([.named-a-buffer] :.ty [a-buffer a-buffer-name.])
   ([.b-input] mem.cast.u64 [b-length named-b-buffer.])
@@ -84,7 +85,8 @@
   ({[.global-shape global-size-and-c-schedule]} *.intro [global-context.])
   ({[.block-shape global-context]} *.intro [block-context.])
   ({[.grid-shape block-context]} *.intro [grid-context.])
-  ({[.element-type grid-context]} *.intro [element-and-grid-context.])
+  ({[.numeric-proof grid-context]} *.intro [numeric-and-grid-context.])
+  ({[.element-type numeric-and-grid-context]} *.intro [element-and-grid-context.])
   ({[.c-buffer-name element-and-grid-context]} *.intro [c-context.])
   ({[.c-scheduling c-context]} *.intro [c-schedule-and-context.])
   ({[.c-buffer c-schedule-and-context]} *.intro [c-tail.])

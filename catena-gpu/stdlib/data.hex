@@ -7,6 +7,7 @@
   (arr u64.lte : 2 -> 1)
   (arr u32 : 0 -> 1)
   (arr f32 : 0 -> 1)
+  (arr gpu.numeric : 1 -> 1)
 })
 
 (theory program type {
@@ -27,15 +28,26 @@
   (arr bool.select : {(bool val) (bool val) (bool val)} -> (bool val))
   (arr bool.name : {[x.] (bool val)} -> ([x.] ({[.x] bool} :)))
 
+  # Trusted, erased evidence for the element types supported by generic GPU
+  # arithmetic. Requiring this proof prevents arbitrary types from reaching
+  # the generated C++ zero, addition, and multiplication operators.
+  (arr gpu.numeric.u32 : [] -> (u32 gpu.numeric |-))
+  (arr gpu.numeric.u64 : [] -> (u64 gpu.numeric |-))
+  (arr gpu.numeric.f32 : [] -> (f32 gpu.numeric |-))
+
   # Arithmetic used by element-polymorphic definitions. Concrete generated
-  # code instantiates these operations for the selected element type.
-  (arr scalar.zero : {[element-type.] [.element-type]}
+  # code instantiates these operations for the selected numeric element type.
+  (arr scalar.zero : {[element-type.]
+    ([.element-type] gpu.numeric |-)
+  }
     -> ([element-type.] [.element-type] val))
   (arr scalar.add : {[element-type.]
+    ([.element-type] gpu.numeric |-)
     ([.element-type] val)
     ([.element-type] val)
   } -> ([element-type.] [.element-type] val))
   (arr scalar.mul : {[element-type.]
+    ([.element-type] gpu.numeric |-)
     ([.element-type] val)
     ([.element-type] val)
   } -> ([element-type.] [.element-type] val))

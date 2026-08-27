@@ -1,0 +1,5 @@
+# A bare element type is not the `|- gpu.numeric(t)` evidence required by
+# `scalar.zero`.
+(def program unsupported-without-numeric-proof : {[element-type.] [.element-type]}
+  -> ([element-type.] [.element-type] val)
+  = scalar.zero)

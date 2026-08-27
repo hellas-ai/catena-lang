@@ -86,10 +86,7 @@
     [scheduling-after-query thread-after-query cell-after-query
       can-own owns-if-allowed _not-owned-if-denied.])
   ({[.can-own owns-if-allowed]} assert-then [owns-cell.])
-  ([.owns-cell] gpu.permissions.grant-own [ownership.])
-  ({[.thread-after-query buffer cell-after-query value ownership]}
-    gpu.global.write
-    [ownership-after-write.])
-  ([.ownership-after-write] gpu.global.own.forget)
+  ({[.thread-after-query buffer cell-after-query value owns-cell]}
+    gpu.global.write)
   [.scheduling-after-query]
 ))

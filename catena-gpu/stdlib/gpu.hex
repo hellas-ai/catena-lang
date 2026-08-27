@@ -11,7 +11,6 @@
   # The scheduling relates buffer cells to global thread indices.
   (arr gpu.scheduling : 4 -> 1)
   (arr gpu.schedule.owns : 4 -> 1)
-  (arr gpu.global.own : 4 -> 1)
 })
 
 (theory program type {
@@ -228,16 +227,9 @@
       gpu.scheduling val)
   } -> ([buffer-name buffer-size grid-topology schedule-name.] []))
 
-  (arr gpu.permissions.grant-own : {[
-    buffer-name schedule-name thread-name cell-index.
-  ]
-    ([.buffer-name schedule-name thread-name cell-index] gpu.schedule.owns |-)
-  } -> {[buffer-name schedule-name thread-name cell-index.]
-    ([.buffer-name schedule-name thread-name cell-index] gpu.global.own)
-  })
-
-  # Matching names ensure that the grant belongs to the executing thread and
-  # to the exact buffer being written.
+  # Matching names ensure that the proof belongs to the executing thread and
+  # to the exact buffer and cell being written. The proof is consumed directly;
+  # no separate runtime permission token is needed.
   (arr gpu.global.write : {[
     buffer-name buffer-size element-type
     grid-topology schedule-name thread-name cell-index.
@@ -246,13 +238,11 @@
     ({[.buffer-name] ({cap.own [.buffer-size element-type]} gpu.global)} :)
     ({[.cell-index] ({({[.buffer-size]} shape.1d)} ix)} :)
     ([.element-type] val)
-    ([.buffer-name schedule-name thread-name cell-index] gpu.global.own)
-  } -> {[
+    ([.buffer-name schedule-name thread-name cell-index] gpu.schedule.owns |-)
+  } -> ([
     buffer-name buffer-size element-type
     grid-topology schedule-name thread-name cell-index.
-  ]
-    ([.buffer-name schedule-name thread-name cell-index] gpu.global.own)
-  })
+  ] []))
 
   # Borrowed global memory is read-only, so a bounded cell is sufficient to
   # read it. No per-thread scheduling permission is required.
@@ -281,12 +271,6 @@
       ({[.allocation-mode buffer-size element-type]} gpu.global)} :)
     [.element-type]
   })
-
-  (arr gpu.global.own.forget : {[
-    buffer-name schedule-name thread-name cell-index.
-  ]
-    ([.buffer-name schedule-name thread-name cell-index] gpu.global.own)
-  } -> ([buffer-name schedule-name thread-name cell-index.] []))
 
   # Launch is generic over the kernel arguments. Their specific structure,
   # including all buffers, lengths, and schedules, is declared by the kernel.

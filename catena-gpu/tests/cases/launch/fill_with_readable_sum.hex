@@ -61,11 +61,8 @@
     [scheduling-after-decision thread-after-decision cell-after-decision
       allowed owns-if-allowed _not-owns-if-denied.])
   ({[.allowed owns-if-allowed]} assert-then [owns-cell.])
-  ([.owns-cell] gpu.permissions.grant-own [ownership.])
-  ({[.thread-after-decision buffer cell-after-decision value ownership]}
-    gpu.global.write
-    [ownership-after-write.])
-  ([.ownership-after-write] gpu.global.own.forget)
+  ({[.thread-after-decision buffer cell-after-decision value owns-cell]}
+    gpu.global.write)
   [.scheduling-after-decision]
 ))
 

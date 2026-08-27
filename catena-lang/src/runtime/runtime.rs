@@ -161,9 +161,40 @@ impl Runtime {
             .gpu_modules
             .as_ref()
             .ok_or(InitError::MissingGpuModules)?;
+        let signature_table = signatures(modules);
+        if let Some((name, index)) = ref_output(&signature_table) {
+            return Err(InitError::UnsupportedRefOutput { name, index });
+        }
+
+        let report_dir = tempfile::Builder::new()
+            .prefix("catena-report-")
+            .tempdir()
+            .map_err(|source| InitError::CreateBuildDir {
+                path: std::env::temp_dir(),
+                source,
+            })?;
+        let cpp_path = report_dir.path().join("module.cpp");
         let rendered = render_modules(modules, dialect)
             .map_err(|source| InitError::RenderGpu { dialect, source })?;
-        self.load_generated(&rendered, signatures(modules))
+        fs::write(&cpp_path, rendered).map_err(|source| InitError::WriteGeneratedSource {
+            path: cpp_path.clone(),
+            source,
+        })?;
+        let shared_object = super::artifact::compile(&cpp_path, dialect)?;
+
+        let library = load_generated_library(shared_object.path())?;
+        let executor = Executor::new(library, &signature_table).map_err(|error| match error {
+            ExecutorError::LoadSymbol { symbol, source } => {
+                InitError::LoadSymbol { symbol, source }
+            }
+        })?;
+        let artifact = Artifact::new(self.runtime_id, self.artifacts.len());
+        self.artifacts.push(LoadedArtifact {
+            _shared_object: shared_object,
+            executor,
+            signatures: signature_table,
+        });
+        Ok(artifact)
     }
 
     /// Compile and load generated GPU source with its public entry-point ABI.

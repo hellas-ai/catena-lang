@@ -83,6 +83,54 @@ known race-free policies.
 
 `gpu.scheduling.own-each` assigns 1D buffer cell `i` to global thread `i`. It requires `buffer-size <= global-size`; excess threads own no cell.
 
-`gpu.scheduling.2d.row-major.own-each` applies the same idea to a row-major 2D buffer and a 2D grid.
+`gpu.scheduling.2d.row-major.own-each` is needed for predicated 2D launches.
+
+Suppose the matrix has 2 rows and 3 columns:
+
+```text
+matrix coordinates and linear cells
+
+(0,0)=0  (1,0)=1  (2,0)=2
+(0,1)=3  (1,1)=4  (2,1)=5
+```
+
+We launch a grid with 4 threads per row, perhaps because of the block size:
+
+```text
+thread coordinates and flattened thread IDs
+
+(0,0)=0  (1,0)=1  (2,0)=2  (3,0)=3
+(0,1)=4  (1,1)=5  (2,1)=6  (3,1)=7
+```
+
+Threads with `x = 3` are outside the matrix, so the kernel predicates them out.
+
+The kernel wants thread `(0,1)` to process matrix cell `(0,1)`, which has linear buffer index:
+
+```text
+y * matrix_width + x
+= 1 * 3 + 0
+= 3
+```
+
+But the 1D `own-each` schedule uses the flattened thread ID. For thread
+`(0,1)`, that is:
+
+```text
+y * grid_width + x
+= 1 * 4 + 0
+= 4
+```
+
+Therefore, the 1D schedule says that thread `(0,1)` owns cell `4`, while the kernel wants it to write cell `3`. Its `can-own` query for cell `3` fails.
+
+According to the 1D schedule, cell `3` belongs to thread `(3,0)`. But `(3,0)` is an excess thread and is predicated out, so cell `3` is never written.
+
+The 2D schedule avoids flattening the thread with the padded grid width. It directly establishes that thread `(x,y)` owns matrix cell `(x,y)`. Thus thread `(0,1)` owns cell `1 * 3 + 0 = 3`, and threads with `x = 3` own no matrix cell.
+
+For perfect tiling, the matrix width and grid width are both `3`, so the 1D and 2D formulas happen to agree. The 2D policy becomes necessary when predication
+adds padding within each row.
+
+### Race free by construction
 
 Both policies are race-free by construction. Kernel code still checks bounds before constructing an `ix` and queries `can-own` before every write.

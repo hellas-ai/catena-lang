@@ -27,7 +27,6 @@ pub const FILES: &[StdlibFile] = stdlib_files![
     "product.hex",
     "combinators.hex",
     "gpu.hex",
-    "math.hex",
     "matrix.hex",
     "gpu-matrix.hex",
     "gpu-matmul.hex",

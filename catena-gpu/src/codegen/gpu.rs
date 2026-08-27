@@ -172,7 +172,6 @@ fn render_prelude(dialect: GpuDialect) -> String {
     format!(
         r#"#include <{runtime_header}>
 #include <stdint.h>
-#include <math.h>
 #include <stdio.h>
 
 typedef struct {{ uint32_t x; uint32_t y; uint32_t z; }} catena_dim3_t;
@@ -310,39 +309,13 @@ fn render_assignment(
         "gpu.launch" => ops::launch::render_call(output, function, assignment_index, assignment),
         "fold" => ops::fold::render(output, assignment),
         "bool.ifc" => render_ifc(output, assignment),
-        "bool.t" => unary_output(output, assignment, "1", 0),
-        "bool.f" | "u64.zero" | "u32.zero" | "scalar.zero" => {
-            unary_output(output, assignment, "0", 0)
-        }
-        "u64.one" | "u32.one" | "f32.one" => unary_output(output, assignment, "1", 0),
-        "bool.not" => unary(output, assignment, "!"),
-        "u32.not" => unary(output, assignment, "~"),
-        "f32.neg" => unary(output, assignment, "-"),
+        "u64.zero" | "scalar.zero" => unary_output(output, assignment, "0", 0),
         "bool.and" => binary(output, assignment, "&&"),
-        "bool.or" => binary(output, assignment, "||"),
-        "u64.add" | "u32.add" | "f32.add" | "scalar.add" => binary(output, assignment, "+"),
-        "u64.sub" | "u32.sub" | "f32.sub" => binary(output, assignment, "-"),
-        "u64.mul" | "u32.mul" | "f32.mul" | "scalar.mul" => binary(output, assignment, "*"),
-        "u64.div" | "f32.div" => binary(output, assignment, "/"),
-        "u64.rem" => binary(output, assignment, "%"),
-        "u32.and" => binary(output, assignment, "&"),
-        "u32.or" => binary(output, assignment, "|"),
-        "u32.xor" => binary(output, assignment, "^"),
-        "u32.shl" => binary(output, assignment, "<<"),
-        "u32.shr" => binary(output, assignment, ">>"),
-        "u64.ne" | "u32.ne" | "f32.ne" => binary(output, assignment, "!="),
-        "u32.eq" | "f32.eq" => binary(output, assignment, "=="),
-        "u64.lt" | "u32.lt" | "f32.lt" => binary(output, assignment, "<"),
-        "u32.gt" | "f32.gt" => binary(output, assignment, ">"),
-        "u64.lte" | "u32.lte" | "f32.lte" => binary(output, assignment, "<="),
-        "u64.gte" | "u32.gte" | "f32.gte" => binary(output, assignment, ">="),
-        "bool.select" | "u64.select" | "u32.select" | "f32.select" => select(output, assignment),
-        "u32.to-f32" => cast(output, assignment, "float"),
-        "u64.to-f32" => cast(output, assignment, "float"),
-        "u32.bitcast-f32" => bitcast(output, assignment, "float", "uint32_t"),
-        "f32.bitcast-u32" => bitcast(output, assignment, "uint32_t", "float"),
-        "f32.round-to-u32" => call1(output, assignment, "(uint32_t)roundf"),
-        "f32.fma" => call3(output, assignment, "fmaf"),
+        "u64.add" | "scalar.add" => binary(output, assignment, "+"),
+        "u64.mul" | "scalar.mul" => binary(output, assignment, "*"),
+        "u64.lt" => binary(output, assignment, "<"),
+        "u64.lte" => binary(output, assignment, "<="),
+        "u64.select" => select(output, assignment),
         _ => Err(GpuRenderError::UnsupportedOp(assignment.op.clone())),
     }
 }
@@ -403,10 +376,6 @@ fn unary_output(
     Ok(())
 }
 
-fn unary(output: &mut String, a: &GpuAssign, operator: &str) -> Result<(), GpuRenderError> {
-    unary_output(output, a, &format!("{operator}{}", input(a, 0)?), 1)
-}
-
 fn binary(output: &mut String, a: &GpuAssign, operator: &str) -> Result<(), GpuRenderError> {
     unary_output(
         output,
@@ -423,40 +392,6 @@ fn select(output: &mut String, a: &GpuAssign) -> Result<(), GpuRenderError> {
         &format!("{} ? {} : {}", input(a, 0)?, input(a, 1)?, input(a, 2)?),
         3,
     )
-}
-
-fn cast(output: &mut String, a: &GpuAssign, ty: &str) -> Result<(), GpuRenderError> {
-    unary_output(output, a, &format!("({ty}){}", input(a, 0)?), 1)
-}
-
-fn call1(output: &mut String, a: &GpuAssign, function: &str) -> Result<(), GpuRenderError> {
-    unary_output(output, a, &format!("{function}({})", input(a, 0)?), 1)
-}
-
-fn call3(output: &mut String, a: &GpuAssign, function: &str) -> Result<(), GpuRenderError> {
-    unary_output(
-        output,
-        a,
-        &format!(
-            "{function}({}, {}, {})",
-            input(a, 0)?,
-            input(a, 1)?,
-            input(a, 2)?
-        ),
-        3,
-    )
-}
-
-fn bitcast(output: &mut String, a: &GpuAssign, to: &str, from: &str) -> Result<(), GpuRenderError> {
-    if a.inputs.len() != 1 || a.outputs.len() != 1 {
-        return Err(arity(a, 1));
-    }
-    output.push_str(&format!(
-        "    {{ union {{ {from} from; {to} to; }} bits = {{ {} }}; {} = bits.to; }}\n",
-        value_expr(&a.inputs[0]),
-        a.outputs[0].name
-    ));
-    Ok(())
 }
 
 fn input(a: &GpuAssign, index: usize) -> Result<String, GpuRenderError> {

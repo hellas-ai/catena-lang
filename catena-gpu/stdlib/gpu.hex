@@ -112,10 +112,6 @@
     ({[.block-name] ({[.grid-topology block-name]} gpu.block)} :)
   })
 
-  (arr gpu.thread.forget : {[grid-topology thread-name.]
-    ({[.thread-name] ([.grid-topology] gpu.thread)} :)
-  } -> ([grid-topology thread-name.] []))
-
   (arr gpu.block.index : {[
     grid-shape block-shape global-shape global-size block-name.
   ]
@@ -219,13 +215,6 @@
     ([.decision-true owns] ==> |-)
     ([.owns] {[.decision-false] not} ==> |-)
   })
-
-  (arr gpu.scheduling.forget : {[
-    buffer-name buffer-size grid-topology schedule-name.
-  ]
-    ({[.buffer-name buffer-size] [.grid-topology] [.schedule-name]}
-      gpu.scheduling val)
-  } -> ([buffer-name buffer-size grid-topology schedule-name.] []))
 
   # Matching names ensure that the proof belongs to the executing thread and
   # to the exact buffer and cell being written. The proof is consumed directly;

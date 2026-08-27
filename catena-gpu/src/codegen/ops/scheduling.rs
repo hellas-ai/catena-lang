@@ -3,11 +3,6 @@ use crate::codegen::GpuAssign;
 
 pub fn render(output: &mut String, assignment: &GpuAssign) -> Result<bool, GpuRenderError> {
     match assignment.op.as_str() {
-        "gpu.scheduling.forget" => {
-            if assignment.inputs.len() != 1 || !assignment.outputs.is_empty() {
-                return Err(invalid_arity(assignment, 1, 0));
-            }
-        }
         "gpu.scheduling.own-each" => {
             if !assignment.inputs.is_empty() || assignment.outputs.len() != 1 {
                 return Err(invalid_arity(assignment, 0, 1));

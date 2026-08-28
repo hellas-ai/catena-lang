@@ -68,20 +68,20 @@ pub fn render(output: &mut String, assignment: &GpuAssign) -> Result<bool, GpuRe
                 value_expr(block),
             ));
         }
-        "ix.to-u64" => {
+        "ix.1d.value" => {
             let [index] = assignment.inputs.as_slice() else {
-                return Err(invalid_arity(assignment, 1, 2));
+                return Err(invalid_arity(assignment, 1, 1));
             };
-            let [index_after, offset] = assignment.outputs.as_slice() else {
-                return Err(invalid_arity(assignment, 1, 2));
+            let [coordinate] = assignment.outputs.as_slice() else {
+                return Err(invalid_arity(assignment, 1, 1));
             };
-            let index = value_expr(index);
             output.push_str(&format!(
-                "    {} = {index};\n    {} = {index}.linear;\n",
-                index_after.name, offset.name,
+                "    {} = {}.first;\n",
+                coordinate.name,
+                value_expr(index),
             ));
         }
-        "ix.2d.intro" => {
+        "ix.2d.from-components" => {
             let [first, second] = assignment.inputs.as_slice() else {
                 return Err(invalid_arity(assignment, 2, 1));
             };
@@ -89,13 +89,13 @@ pub fn render(output: &mut String, assignment: &GpuAssign) -> Result<bool, GpuRe
                 return Err(invalid_arity(assignment, 2, 1));
             };
             output.push_str(&format!(
-                "    {} = {{ {}.linear, {}.linear, 0, 0 }};\n",
+                "    {} = {{ {}.first, {}.first, 0 }};\n",
                 index.name,
                 value_expr(first),
                 value_expr(second),
             ));
         }
-        "ix.2d.elim" => {
+        "ix.2d.split" => {
             let [index] = assignment.inputs.as_slice() else {
                 return Err(invalid_arity(assignment, 1, 2));
             };
@@ -104,7 +104,7 @@ pub fn render(output: &mut String, assignment: &GpuAssign) -> Result<bool, GpuRe
             };
             let index = value_expr(index);
             output.push_str(&format!(
-                "    {} = {{ {index}.first, 0, 0, {index}.first }};\n    {} = {{ {index}.second, 0, 0, {index}.second }};\n",
+                "    {} = {{ {index}.first, 0, 0 }};\n    {} = {{ {index}.second, 0, 0 }};\n",
                 first.name, second.name,
             ));
         }
@@ -116,9 +116,8 @@ pub fn render(output: &mut String, assignment: &GpuAssign) -> Result<bool, GpuRe
                 return Err(invalid_arity(assignment, 2, 1));
             };
             output.push_str(&format!(
-                "    {} = {{ {}, 0, 0, {} }};\n",
+                "    {} = {{ {}, 0, 0 }};\n",
                 index.name,
-                value_expr(candidate),
                 value_expr(candidate),
             ));
         }

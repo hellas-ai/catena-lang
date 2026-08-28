@@ -48,16 +48,9 @@ pub fn render_kernel(
     output.push_str("    uint64_t global_x = (uint64_t)blockIdx.x * blockDim.x + threadIdx.x;\n");
     output.push_str("    uint64_t global_y = (uint64_t)blockIdx.y * blockDim.y + threadIdx.y;\n");
     output.push_str("    uint64_t global_z = (uint64_t)blockIdx.z * blockDim.z + threadIdx.z;\n");
-    output.push_str("    uint64_t global_width = (uint64_t)gridDim.x * blockDim.x;\n");
-    output.push_str("    uint64_t global_height = (uint64_t)gridDim.y * blockDim.y;\n");
-    output.push_str("    uint64_t global_linear_id = (global_z * global_height + global_y) * global_width + global_x;\n");
-    output.push_str("    uint64_t in_block_linear_id = ((uint64_t)threadIdx.z * blockDim.y + threadIdx.y) * blockDim.x + threadIdx.x;\n");
-    output.push_str("    uint64_t block_linear_id = ((uint64_t)blockIdx.z * gridDim.y + blockIdx.y) * gridDim.x + blockIdx.x;\n");
-    output.push_str(
-        "    catena_ix_t global_index = { global_x, global_y, global_z, global_linear_id };\n",
-    );
-    output.push_str("    catena_ix_t in_block_index = { (uint64_t)threadIdx.x, (uint64_t)threadIdx.y, (uint64_t)threadIdx.z, in_block_linear_id };\n");
-    output.push_str("    catena_ix_t block_index = { (uint64_t)blockIdx.x, (uint64_t)blockIdx.y, (uint64_t)blockIdx.z, block_linear_id };\n");
+    output.push_str("    catena_ix_t global_index = { global_x, global_y, global_z };\n");
+    output.push_str("    catena_ix_t in_block_index = { (uint64_t)threadIdx.x, (uint64_t)threadIdx.y, (uint64_t)threadIdx.z };\n");
+    output.push_str("    catena_ix_t block_index = { (uint64_t)blockIdx.x, (uint64_t)blockIdx.y, (uint64_t)blockIdx.z };\n");
     output
         .push_str("    catena_thread_t thread = { global_index, in_block_index, block_index };\n");
     for (index, result) in kernel_function.targets.iter().enumerate() {

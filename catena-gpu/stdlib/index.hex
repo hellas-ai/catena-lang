@@ -7,6 +7,14 @@
 })
 
 (theory program type {
+  # Reveal the bound carried by a one-dimensional shape. This is type-level
+  # information and is erased before code generation.
+  (arr shape.1d.size : {[size.]
+    ({[.size]} shape.1d)
+  } -> {[size.]
+    [.size]
+  })
+
   (arr ix.copies2 : {[index-shape.]
     ([.index-shape] ix val)
   } -> {[index-shape.]
@@ -18,25 +26,25 @@
     ([.index-shape] ix val)
   } -> ([index-shape.] []))
 
-  (arr ix.2d.intro : {[first-size second-size.]
+  (arr ix.2d.from-components : {[first-size second-size.]
     ({({[.first-size]} shape.1d)} ix val)
     ({({[.second-size]} shape.1d)} ix val)
   } -> {[first-size second-size.]
     ({({[.first-size second-size]} shape.2d)} ix val)
   })
 
-  (arr ix.2d.elim : {[first-size second-size.]
+  (arr ix.2d.split : {[first-size second-size.]
     ({({[.first-size second-size]} shape.2d)} ix val)
   } -> {[first-size second-size.]
     ({({[.first-size]} shape.1d)} ix val)
     ({({[.second-size]} shape.1d)} ix val)
   })
 
-  # Return the row-major linear offset of an index, independently of rank.
-  (arr ix.to-u64 : {[index-shape.]
-    ([.index-shape] ix val)
-  } -> {[index-shape.]
-    ([.index-shape] ix val)
+  # A one-dimensional index is already a scalar coordinate. Higher-rank
+  # indices require an explicit layout operation before becoming an offset.
+  (arr ix.1d.value : {[index-size.]
+    ({({[.index-size]} shape.1d)} ix val)
+  } -> {[index-size.]
     (u64 val)
   })
 

@@ -8,9 +8,9 @@
   ({({[.row-count column-count]} shape.2d)} ix val)
 } -> ([row-count column-count.] (u64 val))
 = ([column-count-value matrix-index.]
-  ([.matrix-index] ix.2d.elim [row-index column-index.])
-  ([.row-index] ix.to-u64 [_row-index-after row.])
-  ([.column-index] ix.to-u64 [_column-index-after column.])
+  ([.matrix-index] ix.2d.split [row-index column-index.])
+  ([.row-index] ix.1d.value [row.])
+  ([.column-index] ix.1d.value [column.])
   ([.column-count-value] :.forget [column-count.])
   ({[.row column-count column]} matrix.row-major.index [flat-index.])
   [.flat-index]
@@ -34,9 +34,9 @@
 ]
   ({({[.row-count shared-size]} shape.2d)} ix val)
 } = ([output-index inner-index.]
-  ([.output-index] ix.2d.elim [row-index unused-column-index.])
+  ([.output-index] ix.2d.split [row-index unused-column-index.])
   ([.unused-column-index] ix.forget)
-  ({[.row-index inner-index]} ix.2d.intro [left-index.])
+  ({[.row-index inner-index]} ix.2d.from-components [left-index.])
   [.left-index]
 ))
 
@@ -51,8 +51,8 @@
 ]
   ({({[.shared-size column-count]} shape.2d)} ix val)
 } = ([output-index inner-index.]
-  ([.output-index] ix.2d.elim [unused-row-index column-index.])
+  ([.output-index] ix.2d.split [unused-row-index column-index.])
   ([.unused-row-index] ix.forget)
-  ({[.inner-index column-index]} ix.2d.intro [right-index.])
+  ({[.inner-index column-index]} ix.2d.from-components [right-index.])
   [.right-index]
 ))

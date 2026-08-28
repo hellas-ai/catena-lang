@@ -44,7 +44,7 @@ pub fn render(output: &mut String, assignment: &GpuAssign) -> Result<bool, GpuRe
                 return Err(invalid_arity(assignment, 4, 0));
             }
             output.push_str(&format!(
-                "    {}[{}.linear] = {};\n",
+                "    {}[{}.first] = {};\n",
                 value_expr(buffer),
                 value_expr(cell),
                 value_expr(value),
@@ -58,7 +58,7 @@ pub fn render(output: &mut String, assignment: &GpuAssign) -> Result<bool, GpuRe
                 return Err(invalid_arity(assignment, 2, 2));
             };
             output.push_str(&format!(
-                "    {} = {};\n    {} = {}[{}.linear];\n",
+                "    {} = {};\n    {} = {}[{}.first];\n",
                 buffer_after_read.name,
                 value_expr(buffer),
                 value.name,

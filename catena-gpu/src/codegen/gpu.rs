@@ -178,7 +178,7 @@ typedef struct {{ uint32_t x; uint32_t y; uint32_t z; }} catena_dim3_t;
 typedef struct {{ catena_dim3_t grid_dim; catena_dim3_t block_dim; }} catena_grid_t;
 typedef struct {{ void *data; uint64_t len; }} catena_mem_own_t;
 typedef struct {{ void *data; uint64_t len; }} catena_mem_ref_t;
-typedef struct {{ uint64_t first; uint64_t second; uint64_t third; uint64_t linear; }} catena_ix_t;
+typedef struct {{ uint64_t first; uint64_t second; uint64_t third; }} catena_ix_t;
 typedef struct {{
     catena_ix_t global_index;
     catena_ix_t in_block_index;
@@ -202,13 +202,13 @@ __host__ __device__ static inline catena_cell_access_t catena_scheduling_resolve
 ) {{
     switch (scheduling.kind) {{
     case CATENA_SCHEDULING_OWN_EACH:
-        return thread.global_index.linear == cell.linear
+        return thread.global_index.first == cell.first
             ? CATENA_CELL_OWNED
             : CATENA_CELL_INACCESSIBLE;
     case CATENA_SCHEDULING_2D_ROW_MAJOR_OWN:
         if (scheduling.matrix_columns == 0) return CATENA_CELL_INACCESSIBLE;
-        return thread.global_index.first == cell.linear % scheduling.matrix_columns
-            && thread.global_index.second == cell.linear / scheduling.matrix_columns
+        return thread.global_index.first == cell.first % scheduling.matrix_columns
+            && thread.global_index.second == cell.first / scheduling.matrix_columns
             ? CATENA_CELL_OWNED
             : CATENA_CELL_INACCESSIBLE;
     default:

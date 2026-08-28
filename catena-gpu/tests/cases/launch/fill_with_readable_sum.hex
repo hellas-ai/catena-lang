@@ -142,7 +142,7 @@
 
 (def program fill-with-readable-sum-kernel : {[
   destination-buffer-name destination-size source-buffer-name source-size
-  grid-shape block-shape global-shape global-size
+  grid-count block-count global-count global-size
   destination-schedule-name.
 ]
   ({
@@ -154,17 +154,22 @@
         ({
           ({
             [.destination-buffer-name destination-size]
-            ({[.grid-shape block-shape global-shape global-size]} gpu.grid)
+            ({
+              ({[.grid-count]} shape.1d)
+              ({[.block-count]} shape.1d)
+              ({[.global-count]} shape.1d)
+              [.global-size]
+            } gpu.grid)
             [.destination-schedule-name]
           } gpu.scheduling val)
           ({
             [.destination-buffer-name]
             ({
-              [.grid-shape]
+              ({[.grid-count]} shape.1d)
               ({
-                [.block-shape]
+                ({[.block-count]} shape.1d)
                 ({
-                  [.global-shape]
+                  ({[.global-count]} shape.1d)
                   ({[.global-size destination-schedule-name]} *)
                 } *)
               } *)
@@ -181,16 +186,26 @@
       } *)
     } *)
   } *)
-  ({({[.grid-shape block-shape global-shape global-size]} gpu.grid)}
+  ({({
+      ({[.grid-count]} shape.1d)
+      ({[.block-count]} shape.1d)
+      ({[.global-count]} shape.1d)
+      [.global-size]
+    } gpu.grid)}
     gpu.thread val)
 } -> {[
   destination-buffer-name destination-size source-buffer-name source-size
-  grid-shape block-shape global-shape global-size
+  grid-count block-count global-count global-size
   destination-schedule-name.
 ]
   ({
     [.destination-buffer-name destination-size]
-    ({[.grid-shape block-shape global-shape global-size]} gpu.grid)
+    ({
+      ({[.grid-count]} shape.1d)
+      ({[.block-count]} shape.1d)
+      ({[.global-count]} shape.1d)
+      [.global-size]
+    } gpu.grid)
     [.destination-schedule-name]
   } gpu.scheduling val)
 } = ([kernel-arguments thread.]
@@ -229,7 +244,7 @@
     [destination-length-for-cell destination-length-for-name.])
   ([.destination-length-for-name] :.param [destination-size-name.])
   ([.thread] gpu.thread.in-grid.index [thread-for-own grid-index.])
-  ([.grid-index] ix.to-u64 [_grid-index-after candidate.])
+  ([.grid-index] ix.1d.value [candidate.])
   ([.candidate] u64.name [named-candidate.])
   ([.named-candidate]
     u64.copies2
@@ -370,8 +385,11 @@
     *.intro
     [kernel-arguments.])
 
-  ({[.destination-buffer-name destination-size source-buffer-name source-size grid-shape block-shape
-      global-shape global-size-name destination-schedule-name]}
+  ([.grid-shape] shape.1d.size [grid-count.])
+  ([.block-shape] shape.1d.size [block-count.])
+  ([.global-shape] shape.1d.size [global-count.])
+  ({[.destination-buffer-name destination-size source-buffer-name source-size grid-count block-count
+      global-count global-size-name destination-schedule-name]}
     name.fill-with-readable-sum-kernel
     [kernel.])
   ({[.grid kernel-arguments kernel]}

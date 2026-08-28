@@ -350,9 +350,9 @@
   ([.b-context] *.elim [b-buffer-name-value b-size-value.])
 
   ([.thread] gpu.thread.in-grid.index [thread-for-own grid-index.])
-  ([.grid-index] ix.2d.elim [grid-column-index grid-row-index.])
-  ([.grid-column-index] ix.to-u64 [_grid-column-after grid-column-value.])
-  ([.grid-row-index] ix.to-u64 [_grid-row-after grid-row-value.])
+  ([.grid-index] ix.2d.split [grid-column-index grid-row-index.])
+  ([.grid-column-index] ix.1d.value [grid-column-value.])
+  ([.grid-row-index] ix.1d.value [grid-row-value.])
   ([.grid-column-value] u64.name [named-grid-column.])
   ([.grid-row-value] u64.name [named-grid-row.])
 
@@ -449,7 +449,7 @@
   ([.safe-row-index] :.forget [safe-row-index-value.])
   ([.named-safe-column-index] :.forget [safe-column-index-value.])
   ({[.safe-row-index-value safe-column-index-value]}
-    ix.2d.intro
+    ix.2d.from-components
     [output-index.])
 
   ([.grid-row-for-flat] :.forget [grid-row-flat-value.])

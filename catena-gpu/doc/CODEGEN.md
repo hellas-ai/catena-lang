@@ -2,6 +2,12 @@
 
 Catena GPU keeps the Hex language small and typed, then lowers it to simple CUDA or HIP C++.
 
+## Specialization
+
+Hex definitions may be generic, but generated CUDA/HIP functions are always concrete. Code generation starts from concrete program entrypoints and processes a small specialization queue. A direct call or `name.*` function value adds the required concrete instance; an existing instance with the same runtime input and output types is reused.
+
+Generic definitions that are never used are not emitted. The generated source therefore uses ordinary concrete function signatures and does not rely on C++ templates.
+
 ## Logical dimensions and backend representation
 
 Hex distinguishes one-, two-, and three-dimensional shapes:

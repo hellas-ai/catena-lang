@@ -70,47 +70,11 @@ fn signature(function: &GpuFunction, placement: Placement) -> String {
         Placement::HostOnly => "__host__",
         Placement::HostAndDevice => "__host__ __device__",
     };
-    let generic_types = generic_types(function);
-    let template = if generic_types.is_empty() {
-        String::new()
-    } else {
-        format!(
-            "template<{}>\n",
-            generic_types
-                .iter()
-                .map(|index| format!("typename T{index}"))
-                .collect::<Vec<_>>()
-                .join(", ")
-        )
-    };
-    let linkage = if generic_types.is_empty() {
-        "extern \"C\" "
-    } else {
-        ""
-    };
     format!(
-        "{template}{linkage}{qualifiers} void {}({})",
+        "extern \"C\" {qualifiers} void {}({})",
         function.name,
         params.join(", ")
     )
-}
-
-fn generic_types(function: &GpuFunction) -> BTreeSet<usize> {
-    let mut output = BTreeSet::new();
-    for var in function.sources.iter().chain(&function.targets) {
-        collect_generic_types(runtime_type(var).unwrap(), &mut output);
-    }
-    output
-}
-
-fn collect_generic_types(ty: &CType, output: &mut BTreeSet<usize>) {
-    match ty {
-        CType::Generic(index) => {
-            output.insert(*index);
-        }
-        CType::Ptr(element) | CType::ConstPtr(element) => collect_generic_types(element, output),
-        _ => {}
-    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -146,7 +110,6 @@ pub(super) fn c_type(ty: &CType) -> String {
         CType::MemRef => "catena_mem_ref_t".into(),
         CType::Ptr(element) => format!("{} *", c_type(element)),
         CType::ConstPtr(element) => format!("const {} *", c_type(element)),
-        CType::Generic(index) => format!("T{index}"),
         CType::Ix => "catena_ix_t".into(),
         CType::Thread => "catena_thread_t".into(),
         CType::Block => "catena_block_t".into(),

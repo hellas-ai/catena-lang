@@ -13,6 +13,9 @@ fn numeric_evidence_specializes_generic_matmul() {
     assert!(generated.contains(" * "));
     assert!(generated.contains(" + "));
     assert!(!generated.contains("gpu_numeric"));
+    assert!(!generated.contains("template<"));
+    assert!(!generated.contains("typename T"));
+    assert!(generated.contains("program_gpu_global_matrix_matmul_kernel__"));
 }
 
 #[test]

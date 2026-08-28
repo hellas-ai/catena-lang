@@ -83,7 +83,6 @@ fn value_kind(ty: &CType) -> Option<ValueKind> {
         CType::Grid
         | CType::Ptr(_)
         | CType::ConstPtr(_)
-        | CType::Generic(_)
         | CType::Ix
         | CType::Thread
         | CType::Block

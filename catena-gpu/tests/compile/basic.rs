@@ -30,11 +30,8 @@ fn minimal_stdlib_elaborates_names_and_generates_gpu_modules() {
     ));
     assert!(!generated.contains("uint64_t linear"));
     assert!(!generated.contains(".linear"));
-    assert!(generated.contains("template<typename T"));
-    assert!(generated.contains("void program_gpu_global_matrix_2d_row_major_read("));
-    assert!(generated.contains("void program_gpu_global_matrix_2d_row_major_write("));
-    let kernel = generated
-        .find("void program_gpu_global_matrix_matmul_kernel(")
-        .unwrap();
-    assert!(generated[kernel.saturating_sub(100)..kernel].contains("template<"));
+    assert!(!generated.contains("template<"));
+    assert!(!generated.contains("typename T"));
+    assert!(!generated.contains("program_gpu_global_matrix_2d_row_major_read"));
+    assert!(!generated.contains("program_gpu_global_matrix_matmul_kernel"));
 }

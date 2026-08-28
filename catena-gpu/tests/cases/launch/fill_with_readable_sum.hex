@@ -2,7 +2,7 @@
 # read-only source buffer.
 
 (def program write-readable-sum-in-bounds-branch : {[
-  buffer-name buffer-size grid-shape block-shape global-shape global-size
+  buffer-name buffer-size grid-shape block-shape global-shape
   schedule-name thread-name candidate-index bounds-decision.
 ]
   ({[.bounds-decision] bool.t} = [bounds-true.])
@@ -13,7 +13,7 @@
     ({
       ({
         [.buffer-name buffer-size]
-        ({[.grid-shape block-shape global-shape global-size]} gpu.grid)
+        ({[.grid-shape block-shape global-shape]} gpu.grid)
         [.schedule-name]
       } gpu.scheduling val)
       ({
@@ -24,7 +24,7 @@
             ({[.bounds-decision] bool} :)
             ({
               ({[.thread-name]
-                ({({[.grid-shape block-shape global-shape global-size]} gpu.grid)}
+                ({({[.grid-shape block-shape global-shape]} gpu.grid)}
                   gpu.thread)} :)
               ({
                 ({[.buffer-name] ({cap.own [.buffer-size] u64} gpu.global)} :)
@@ -37,12 +37,12 @@
     } *)
   } *)
 } -> {[
-  buffer-name buffer-size grid-shape block-shape global-shape global-size
+  buffer-name buffer-size grid-shape block-shape global-shape
   schedule-name thread-name candidate-index bounds-decision.
 ]
   ({
     [.buffer-name buffer-size]
-    ({[.grid-shape block-shape global-shape global-size]} gpu.grid)
+    ({[.grid-shape block-shape global-shape]} gpu.grid)
     [.schedule-name]
   } gpu.scheduling val)
 } = ([branch-input.]
@@ -67,7 +67,7 @@
 ))
 
 (def program skip-readable-sum-out-of-bounds-branch : {[
-  buffer-name buffer-size grid-shape block-shape global-shape global-size
+  buffer-name buffer-size grid-shape block-shape global-shape
   schedule-name thread-name candidate-index bounds-decision.
 ]
   ({[.bounds-decision] bool.t} = [bounds-true.])
@@ -78,7 +78,7 @@
     ({
       ({
         [.buffer-name buffer-size]
-        ({[.grid-shape block-shape global-shape global-size]} gpu.grid)
+        ({[.grid-shape block-shape global-shape]} gpu.grid)
         [.schedule-name]
       } gpu.scheduling val)
       ({
@@ -89,7 +89,7 @@
             ({[.bounds-decision] bool} :)
             ({
               ({[.thread-name]
-                ({({[.grid-shape block-shape global-shape global-size]} gpu.grid)}
+                ({({[.grid-shape block-shape global-shape]} gpu.grid)}
                   gpu.thread)} :)
               ({
                 ({[.buffer-name] ({cap.own [.buffer-size] u64} gpu.global)} :)
@@ -102,12 +102,12 @@
     } *)
   } *)
 } -> {[
-  buffer-name buffer-size grid-shape block-shape global-shape global-size
+  buffer-name buffer-size grid-shape block-shape global-shape
   schedule-name thread-name candidate-index bounds-decision.
 ]
   ({
     [.buffer-name buffer-size]
-    ({[.grid-shape block-shape global-shape global-size]} gpu.grid)
+    ({[.grid-shape block-shape global-shape]} gpu.grid)
     [.schedule-name]
   } gpu.scheduling val)
 } = ([branch-input.]
@@ -142,7 +142,7 @@
 
 (def program fill-with-readable-sum-kernel : {[
   destination-buffer-name destination-size source-buffer-name source-size
-  grid-count block-count global-count global-size
+  grid-count block-count global-count
   destination-schedule-name.
 ]
   ({
@@ -158,7 +158,6 @@
               ({[.grid-count]} shape.1d)
               ({[.block-count]} shape.1d)
               ({[.global-count]} shape.1d)
-              [.global-size]
             } gpu.grid)
             [.destination-schedule-name]
           } gpu.scheduling val)
@@ -170,7 +169,7 @@
                 ({[.block-count]} shape.1d)
                 ({
                   ({[.global-count]} shape.1d)
-                  ({[.global-size destination-schedule-name]} *)
+                  [.destination-schedule-name]
                 } *)
               } *)
             } *)
@@ -190,12 +189,11 @@
       ({[.grid-count]} shape.1d)
       ({[.block-count]} shape.1d)
       ({[.global-count]} shape.1d)
-      [.global-size]
     } gpu.grid)}
     gpu.thread val)
 } -> {[
   destination-buffer-name destination-size source-buffer-name source-size
-  grid-count block-count global-count global-size
+  grid-count block-count global-count
   destination-schedule-name.
 ]
   ({
@@ -204,7 +202,6 @@
       ({[.grid-count]} shape.1d)
       ({[.block-count]} shape.1d)
       ({[.global-count]} shape.1d)
-      [.global-size]
     } gpu.grid)
     [.destination-schedule-name]
   } gpu.scheduling val)
@@ -228,10 +225,7 @@
   ([.block-context] *.elim [block-shape global-shape-context.])
   ([.global-shape-context]
     *.elim
-    [global-shape global-size-and-schedule.])
-  ([.global-size-and-schedule]
-    *.elim
-    [global-size destination-schedule-name.])
+    [global-shape destination-schedule-name.])
   ([.source-arguments] *.elim [source-length source-tail.])
   ([.source-tail] *.elim [source-buffer source-context.])
   ([.source-context] *.elim [source-buffer-name source-size.])
@@ -297,11 +291,11 @@
     [destination-branch-state.])
 
   ({[.destination-buffer-name destination-size-name grid-shape block-shape global-shape
-      global-size destination-schedule-name thread-name candidate-index bounds-decision]}
+      destination-schedule-name thread-name candidate-index bounds-decision]}
     name.write-readable-sum-in-bounds-branch
     [destination-true-branch.])
   ({[.destination-buffer-name destination-size-name grid-shape block-shape global-shape
-      global-size destination-schedule-name thread-name candidate-index bounds-decision]}
+      destination-schedule-name thread-name candidate-index bounds-decision]}
     name.skip-readable-sum-out-of-bounds-branch
     [destination-false-branch.])
   ({[.destination-bounds-true destination-true-branch
@@ -362,11 +356,7 @@
     u64.copies2
     [destination-length-for-fit destination-length-for-name.])
   ([.destination-length-for-name] :.param [destination-size.])
-  ([.global-size]
-    u64.copies2
-    [global-size-for-fit global-size-for-name.])
-  ([.global-size-for-name] :.param [global-size-name.])
-  ({[.destination-length-for-fit global-size-for-fit]}
+  ({[.destination-length-for-fit global-size]}
     u64.lte
     [fits-decision fits-if-true.])
   ([.fits-decision] assert [fits-is-true.])
@@ -383,10 +373,7 @@
   ({[.source-buffer source-context]} *.intro [source-tail.])
   ({[.source-length-for-kernel source-tail]} *.intro [source-arguments.])
 
-  ({[.global-size-name destination-schedule-name]}
-    *.intro
-    [global-size-and-destination-schedule.])
-  ({[.global-shape global-size-and-destination-schedule]}
+  ({[.global-shape destination-schedule-name]}
     *.intro
     [global-shape-context.])
   ({[.block-shape global-shape-context]} *.intro [block-context.])
@@ -409,7 +396,7 @@
   ([.block-shape] shape.1d.size [block-count.])
   ([.global-shape] shape.1d.size [global-count.])
   ({[.destination-buffer-name destination-size source-buffer-name source-size grid-count block-count
-      global-count global-size-name destination-schedule-name]}
+      global-count destination-schedule-name]}
     name.fill-with-readable-sum-kernel
     [kernel.])
   ({[.grid kernel-arguments kernel]}

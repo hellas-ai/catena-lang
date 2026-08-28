@@ -1,7 +1,7 @@
 # Minimal launch, scheduling, and permission model.
 
 (theory type nat {
-  (arr gpu.grid : 4 -> 1)
+  (arr gpu.grid : 3 -> 1)
   (arr gpu.thread : 1 -> 1)
   (arr gpu.block : 2 -> 1)
 
@@ -27,7 +27,6 @@
       ({[.gx]} shape.1d)
       ({[.bx]} shape.1d)
       ({({[.gx bx]} *)} shape.1d)
-      ({[.gx bx]} *)
     } gpu.grid val)
     ({({[.gx bx]} *) u64} :)
   })
@@ -47,9 +46,7 @@
       ({[.gx gy]} shape.2d)
       ({[.bx by]} shape.2d)
       ({({[.gx bx]} *) ({[.gy by]} *)} shape.2d)
-      ({({[.gx bx]} *) ({[.gy by]} *)} *)
     } gpu.grid val)
-    ({({({[.gx bx]} *) ({[.gy by]} *)} *) u64} :)
   })
 
   (arr gpu.grid.3d.intro : {[gx gy gz bx by bz.]
@@ -63,35 +60,36 @@
     ({[.gx gy gz]} shape.3d)
     ({[.bx by bz]} shape.3d)
     ({({[.gx bx]} *) ({[.gy by]} *) ({[.gz bz]} *)} shape.3d)
+    ({[.gx bx]} *)
+    ({[.gy by]} *)
+    ({[.gz bz]} *)
     ({
       ({[.gx gy gz]} shape.3d)
       ({[.bx by bz]} shape.3d)
       ({({[.gx bx]} *) ({[.gy by]} *) ({[.gz bz]} *)} shape.3d)
-      ({({({[.gx bx]} *) ({[.gy by]} *)} *) ({[.gz bz]} *)} *)
     } gpu.grid val)
-    ({({({({[.gx bx]} *) ({[.gy by]} *)} *) ({[.gz bz]} *)} *) u64} :)
   })
 
   # Coordinates of the thread in the complete launch grid.
   (arr gpu.thread.in-grid.index : {[
-    grid-shape block-shape global-shape global-size.
+    grid-shape block-shape global-shape.
   ]
-    ({({[.grid-shape block-shape global-shape global-size]} gpu.grid)}
+    ({({[.grid-shape block-shape global-shape]} gpu.grid)}
       gpu.thread val)
-  } -> {[grid-shape block-shape global-shape global-size.]
-    ({({[.grid-shape block-shape global-shape global-size]} gpu.grid)}
+  } -> {[grid-shape block-shape global-shape.]
+    ({({[.grid-shape block-shape global-shape]} gpu.grid)}
       gpu.thread val)
     ([.global-shape] ix val)
   })
 
   # Coordinates of the same thread relative to its CUDA block.
   (arr gpu.thread.in-block.index : {[
-    grid-shape block-shape global-shape global-size.
+    grid-shape block-shape global-shape.
   ]
-    ({({[.grid-shape block-shape global-shape global-size]} gpu.grid)}
+    ({({[.grid-shape block-shape global-shape]} gpu.grid)}
       gpu.thread val)
-  } -> {[grid-shape block-shape global-shape global-size.]
-    ({({[.grid-shape block-shape global-shape global-size]} gpu.grid)}
+  } -> {[grid-shape block-shape global-shape.]
+    ({({[.grid-shape block-shape global-shape]} gpu.grid)}
       gpu.thread val)
     ([.block-shape] ix val)
   })
@@ -113,14 +111,14 @@
   })
 
   (arr gpu.block.index : {[
-    grid-shape block-shape global-shape global-size block-name.
+    grid-shape block-shape global-shape block-name.
   ]
     ({[.block-name]
-      ({({[.grid-shape block-shape global-shape global-size]} gpu.grid) [.block-name]}
+      ({({[.grid-shape block-shape global-shape]} gpu.grid) [.block-name]}
         gpu.block)} :)
-  } -> {[grid-shape block-shape global-shape global-size block-name.]
+  } -> {[grid-shape block-shape global-shape block-name.]
     ({[.block-name]
-      ({({[.grid-shape block-shape global-shape global-size]} gpu.grid) [.block-name]}
+      ({({[.grid-shape block-shape global-shape]} gpu.grid) [.block-name]}
         gpu.block)} :)
     ([.grid-shape] ix val)
   })
@@ -148,7 +146,6 @@
         ({[.grid-count]} shape.1d)
         ({[.block-count]} shape.1d)
         ({[.global-count]} shape.1d)
-        [.global-size]
       } gpu.grid)
       [.schedule-name]
     } gpu.scheduling val)
@@ -160,7 +157,7 @@
   (arr gpu.scheduling.2d.row-major.own-each : {[
     buffer-name buffer-size matrix-columns
     grid-columns grid-rows block-columns block-rows
-    global-columns global-rows global-size schedule-name.
+    global-columns global-rows schedule-name.
   ]
     [.buffer-name]
     [.buffer-size]
@@ -168,11 +165,10 @@
     ({[.grid-columns grid-rows]} shape.2d)
     ({[.block-columns block-rows]} shape.2d)
     ({[.global-columns global-rows]} shape.2d)
-    [.global-size]
   } -> {[
     buffer-name buffer-size matrix-columns
     grid-columns grid-rows block-columns block-rows
-    global-columns global-rows global-size schedule-name.
+    global-columns global-rows schedule-name.
   ]
     [.schedule-name]
     ({
@@ -181,7 +177,6 @@
         ({[.grid-columns grid-rows]} shape.2d)
         ({[.block-columns block-rows]} shape.2d)
         ({[.global-columns global-rows]} shape.2d)
-        [.global-size]
       } gpu.grid)
       [.schedule-name]
     } gpu.scheduling val)
@@ -264,20 +259,20 @@
   # Launch is generic over the kernel arguments. Their specific structure,
   # including all buffers, lengths, and schedules, is declared by the kernel.
   (arr gpu.launch : {[
-    grid-shape block-shape global-shape global-size kernel-arguments kernel-result.
+    grid-shape block-shape global-shape kernel-arguments kernel-result.
   ]
-    ({[.grid-shape block-shape global-shape global-size]} gpu.grid val)
+    ({[.grid-shape block-shape global-shape]} gpu.grid val)
     ([.kernel-arguments])
     ({
       ({
         ([.kernel-arguments])
-        ({({[.grid-shape block-shape global-shape global-size]} gpu.grid)}
+        ({({[.grid-shape block-shape global-shape]} gpu.grid)}
           gpu.thread val)
       } *)
       ([.kernel-result])
     } -> val)
   } -> {[
-    grid-shape block-shape global-shape global-size kernel-arguments kernel-result.
+    grid-shape block-shape global-shape kernel-arguments kernel-result.
   ]
     ([.kernel-arguments])
   })

@@ -9,7 +9,6 @@
     ({[.gx]} shape.1d)
     ({[.bx]} shape.1d)
     ({({[.gx bx]} *)} shape.1d)
-    ({[.gx bx]} *)
   } gpu.grid val)
   ({({[.gx bx]} *) u64} :)
 } = gpu.grid.1d.intro)

@@ -339,7 +339,8 @@ fn render_grid_intro(
     dimensions: usize,
 ) -> Result<(), GpuRenderError> {
     let expected = dimensions * 2;
-    if a.inputs.len() != expected || a.outputs.len() != 2 {
+    let expected_outputs = if dimensions == 1 { 2 } else { 1 };
+    if a.inputs.len() != expected || a.outputs.len() != expected_outputs {
         return Err(arity(a, expected));
     }
     let mut grid = ["1".to_string(), "1".to_string(), "1".to_string()];
@@ -352,11 +353,12 @@ fn render_grid_intro(
         "    {} = {{ {{ {}, {}, {} }}, {{ {}, {}, {} }} }};\n",
         a.outputs[0].name, grid[0], grid[1], grid[2], block[0], block[1], block[2],
     ));
-    output.push_str(&format!(
-        "    {} = ((uint64_t){} * (uint64_t){}) * ((uint64_t){} * (uint64_t){}) * ((uint64_t){} * (uint64_t){});\n",
-        a.outputs[1].name,
-        grid[0], block[0], grid[1], block[1], grid[2], block[2],
-    ));
+    if dimensions == 1 {
+        output.push_str(&format!(
+            "    {} = (uint64_t){} * (uint64_t){};\n",
+            a.outputs[1].name, grid[0], block[0],
+        ));
+    }
     Ok(())
 }
 
@@ -525,6 +527,7 @@ mod tests {
         render_grid_intro(&mut generated, &two_d, 2).unwrap();
         assert!(generated.contains("{ gx, gy, 1 }"));
         assert!(generated.contains("{ bx, by, 1 }"));
+        assert!(!generated.contains("uint64_t"));
     }
 
     fn grid_assignment(operation: &str, inputs: &[&str]) -> GpuAssign {
@@ -536,10 +539,14 @@ mod tests {
                 .enumerate()
                 .map(|(node, name)| GpuValue::Var(var(node, name, CType::U32)))
                 .collect(),
-            outputs: vec![
-                var(inputs.len(), "grid", CType::Grid),
-                var(inputs.len() + 1, "size", CType::U64),
-            ],
+            outputs: if inputs.len() == 2 {
+                vec![
+                    var(inputs.len(), "grid", CType::Grid),
+                    var(inputs.len() + 1, "size", CType::U64),
+                ]
+            } else {
+                vec![var(inputs.len(), "grid", CType::Grid)]
+            },
         }
     }
 

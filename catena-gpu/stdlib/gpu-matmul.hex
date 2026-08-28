@@ -2,7 +2,7 @@
 # arithmetic remains u64; matrix elements use element-type throughout.
 
 (def program gpu.global.matrix.write-in-bounds-branch : {[
-  buffer-name buffer-size element-type grid-shape block-shape global-shape global-size
+  buffer-name buffer-size element-type grid-shape block-shape global-shape
   schedule-name thread-name candidate-index bounds-decision.
 ]
   ({[.bounds-decision] bool.t} = [bounds-true.])
@@ -13,7 +13,7 @@
     ({
       ({
         [.buffer-name buffer-size]
-        ({[.grid-shape block-shape global-shape global-size]} gpu.grid)
+        ({[.grid-shape block-shape global-shape]} gpu.grid)
         [.schedule-name]
       } gpu.scheduling val)
       ({
@@ -24,7 +24,7 @@
             ({[.bounds-decision] bool} :)
             ({
               ({[.thread-name]
-                ({({[.grid-shape block-shape global-shape global-size]} gpu.grid)}
+                ({({[.grid-shape block-shape global-shape]} gpu.grid)}
                   gpu.thread)} :)
               ({
                 ({[.buffer-name]
@@ -38,12 +38,12 @@
     } *)
   } *)
 } -> {[
-  buffer-name buffer-size element-type grid-shape block-shape global-shape global-size
+  buffer-name buffer-size element-type grid-shape block-shape global-shape
   schedule-name thread-name candidate-index bounds-decision.
 ]
   ({
     [.buffer-name buffer-size]
-    ({[.grid-shape block-shape global-shape global-size]} gpu.grid)
+    ({[.grid-shape block-shape global-shape]} gpu.grid)
     [.schedule-name]
   } gpu.scheduling val)
 } = ([branch-input.]
@@ -68,7 +68,7 @@
 ))
 
 (def program gpu.global.matrix.skip-out-of-bounds-branch : {[
-  buffer-name buffer-size element-type grid-shape block-shape global-shape global-size
+  buffer-name buffer-size element-type grid-shape block-shape global-shape
   schedule-name thread-name candidate-index bounds-decision.
 ]
   ({[.bounds-decision] bool.t} = [bounds-true.])
@@ -79,7 +79,7 @@
     ({
       ({
         [.buffer-name buffer-size]
-        ({[.grid-shape block-shape global-shape global-size]} gpu.grid)
+        ({[.grid-shape block-shape global-shape]} gpu.grid)
         [.schedule-name]
       } gpu.scheduling val)
       ({
@@ -90,7 +90,7 @@
             ({[.bounds-decision] bool} :)
             ({
               ({[.thread-name]
-                ({({[.grid-shape block-shape global-shape global-size]} gpu.grid)}
+                ({({[.grid-shape block-shape global-shape]} gpu.grid)}
                   gpu.thread)} :)
               ({
                 ({[.buffer-name]
@@ -104,12 +104,12 @@
     } *)
   } *)
 } -> {[
-  buffer-name buffer-size element-type grid-shape block-shape global-shape global-size
+  buffer-name buffer-size element-type grid-shape block-shape global-shape
   schedule-name thread-name candidate-index bounds-decision.
 ]
   ({
     [.buffer-name buffer-size]
-    ({[.grid-shape block-shape global-shape global-size]} gpu.grid)
+    ({[.grid-shape block-shape global-shape]} gpu.grid)
     [.schedule-name]
   } gpu.scheduling val)
 } = ([branch-input.]
@@ -126,13 +126,13 @@
 (def program gpu.global.matrix.matmul.fold-step : {[
   element-type a-buffer-name a-size b-buffer-name b-size
   output-rows output-columns shared-size
-  grid-shape block-shape global-shape global-size thread-name.
+  grid-shape block-shape global-shape thread-name.
 ]
   ({
     ({({[.shared-size]} shape.1d)} ix val)
     ({
       ({[.thread-name]
-        ({({[.grid-shape block-shape global-shape global-size]} gpu.grid)}
+        ({({[.grid-shape block-shape global-shape]} gpu.grid)}
           gpu.thread)} :)
       ({
         ({[.a-buffer-name]
@@ -166,11 +166,11 @@
 } -> {[
   element-type a-buffer-name a-size b-buffer-name b-size
   output-rows output-columns shared-size
-  grid-shape block-shape global-shape global-size thread-name.
+  grid-shape block-shape global-shape thread-name.
 ]
   ({
     ({[.thread-name]
-      ({({[.grid-shape block-shape global-shape global-size]} gpu.grid)}
+      ({({[.grid-shape block-shape global-shape]} gpu.grid)}
         gpu.thread)} :)
     ({
       ({[.a-buffer-name]
@@ -241,7 +241,7 @@
 
 (def program gpu.global.matrix.matmul.kernel : {[
   element-type c-buffer-name c-size a-buffer-name a-size b-buffer-name b-size
-  grid-shape block-shape global-columns global-rows global-size
+  grid-shape block-shape global-columns global-rows
   c-schedule-name
   output-rows shared-size output-columns.
 ]
@@ -258,7 +258,6 @@
               [.grid-shape]
               [.block-shape]
               ({[.global-columns global-rows]} shape.2d)
-              [.global-size]
             } gpu.grid)
             [.c-schedule-name]
           } gpu.scheduling val)
@@ -270,7 +269,7 @@
                 ({[.grid-shape]
                   ({[.block-shape]
                     ({({[.global-columns global-rows]} shape.2d)
-                      ({[.global-size c-schedule-name]} *)} *)} *)} *)
+                      [.c-schedule-name]} *)} *)} *)
               } *)} *)
           } *)
         } *)
@@ -305,11 +304,10 @@
     [.grid-shape]
     [.block-shape]
     ({[.global-columns global-rows]} shape.2d)
-    [.global-size]
   } gpu.grid)} gpu.thread val)
 } -> {[
   element-type c-buffer-name c-size a-buffer-name a-size b-buffer-name b-size
-  grid-shape block-shape global-columns global-rows global-size
+  grid-shape block-shape global-columns global-rows
   c-schedule-name
   output-rows shared-size output-columns.
 ]
@@ -319,7 +317,6 @@
       [.grid-shape]
       [.block-shape]
       ({[.global-columns global-rows]} shape.2d)
-      [.global-size]
     } gpu.grid)
     [.c-schedule-name]
   } gpu.scheduling val)
@@ -338,8 +335,7 @@
   ([.numeric-and-grid-context] *.elim [numeric-proof grid-context.])
   ([.grid-context] *.elim [grid-shape-value block-context.])
   ([.block-context] *.elim [block-shape-value global-context.])
-  ([.global-context] *.elim [global-shape-value global-size-and-schedule.])
-  ([.global-size-and-schedule] *.elim [global-size-value c-schedule-name-value.])
+  ([.global-context] *.elim [global-shape-value c-schedule-name-value.])
 
   ([.a-arguments] *.elim [a-length a-tail.])
   ([.a-tail] *.elim [a-buffer a-context.])
@@ -507,7 +503,7 @@
       .element-type-value
       a-buffer-name-value a-size-value b-buffer-name-value b-size-value
       output-rows-name output-columns-name shared-size-name
-      grid-shape-value block-shape-value global-shape-value global-size-value
+      grid-shape-value block-shape-value global-shape-value
       thread-name
     ]} name.gpu.global.matrix.matmul.fold-step)
   } fold [final-fold-state.])
@@ -534,13 +530,13 @@
 
   ({[.c-buffer-name-value c-size-name element-type-value
       grid-shape-value block-shape-value
-      global-shape-value global-size-value c-schedule-name-value thread-name
+      global-shape-value c-schedule-name-value thread-name
       candidate-index bounds-decision]}
     name.gpu.global.matrix.write-in-bounds-branch
     [c-true-branch.])
   ({[.c-buffer-name-value c-size-name element-type-value
       grid-shape-value block-shape-value
-      global-shape-value global-size-value c-schedule-name-value thread-name
+      global-shape-value c-schedule-name-value thread-name
       candidate-index bounds-decision]}
     name.gpu.global.matrix.skip-out-of-bounds-branch
     [c-false-branch.])

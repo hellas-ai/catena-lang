@@ -72,7 +72,7 @@ fn lower_runtime_type(ty: &Tree<(), Operation>) -> Result<CType, LowerTypeError>
         ("positive-u32", []) => Ok(CType::U32),
         ("u64", []) => Ok(CType::U64),
         ("f32", []) => Ok(CType::F32),
-        ("gpu.grid", [_grid_shape, _block_shape, _global_shape, _global_size]) => Ok(CType::Grid),
+        ("gpu.grid", [_grid_shape, _block_shape, _global_shape]) => Ok(CType::Grid),
         ("mem", [capability]) => match capability {
             Tree::Node(operation, _, children)
                 if operation.as_str() == "cap.own" && children.is_empty() =>

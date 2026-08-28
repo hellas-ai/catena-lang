@@ -73,11 +73,10 @@
   ({[.grid-x grid-y block-x block-y]}
     gpu.grid.2d.intro
     [grid-shape block-shape global-shape global-columns global-rows
-      grid global-size.])
+      grid.])
 
   ([.c-length] u64.copies2 [c-length-for-launch c-length-for-name.])
   ([.c-length-for-name] :.param [c-size.])
-  ([.global-size] :.param [global-size-name.])
 
   ([.a-length] u64.copies2 [a-length-for-kernel a-length-for-name.])
   ([.a-length-for-name] :.param [a-size.])
@@ -96,7 +95,7 @@
     :.ty
     [output-columns-value output-columns.])
   ({[.c-buffer-name c-size output-columns-for-schedule
-      grid-shape block-shape global-shape global-size-name]}
+      grid-shape block-shape global-shape]}
     gpu.scheduling.2d.row-major.own-each
     [c-schedule-name c-scheduling.])
 
@@ -111,8 +110,7 @@
   ({[.b-buffer b-context]} *.intro [b-tail.])
   ({[.b-length-for-kernel b-tail]} *.intro [b-arguments.])
 
-  ({[.global-size-name c-schedule-name]} *.intro [global-size-and-c-schedule.])
-  ({[.global-shape global-size-and-c-schedule]} *.intro [global-context.])
+  ({[.global-shape c-schedule-name]} *.intro [global-context.])
   ({[.block-shape global-context]} *.intro [block-context.])
   ({[.grid-shape block-context]} *.intro [grid-context.])
   ({[.numeric-proof grid-context]} *.intro [numeric-and-grid-context.])
@@ -128,7 +126,7 @@
 
   ({[
     .element-type c-buffer-name c-size a-buffer-name a-size b-buffer-name b-size
-    grid-shape block-shape global-columns global-rows global-size-name
+    grid-shape block-shape global-columns global-rows
     c-schedule-name
     output-rows shared-size output-columns
   ]} name.gpu.global.matrix.matmul.kernel [kernel.])

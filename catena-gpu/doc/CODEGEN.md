@@ -35,7 +35,9 @@ Hex grid.1d(gx, bx) -> dim3(gx, 1, 1), dim3(bx, 1, 1)
 Hex grid.2d(...)    -> dim3(gx, gy, 1), dim3(bx, by, 1)
 ```
 
-Every supplied launch extent has type `positive-u32`. Hex obtains it from a `u32` value and a proof that the value is positive. This rules out zero dimensions and matches the backend representation without a narrowing conversion. The total number of global threads remains `u64`; code generation widens every extent before multiplying them.
+Every supplied launch extent has type `positive-u32`. Hex obtains it from a `u32` value and a proof that the value is positive. This rules out zero dimensions and matches the backend representation without a narrowing conversion.
+
+A 1D grid also produces its total global extent as `u64`, after widening both factors. The 1D ownership policy needs that value to prove that every buffer cell has a corresponding thread. A 2D or 3D grid does not flatten its extents into one total: its global shape already retains the separate axis bounds.
 
 ## Common shape and index transformations
 
@@ -134,13 +136,21 @@ launch_wrapper<<<grid_dim, block_dim>>>(kernel_arguments...);
 catena_gpu_synchronize();
 ```
 
-Each explicit dimension is already a positive `uint32_t`. The global thread count is calculated separately with 64-bit multiplication:
+Each explicit dimension is already a positive `uint32_t`. For a 1D grid, the required global extent is calculated separately with 64-bit multiplication:
 
 ```text
 global-size = u64(grid.x) * u64(block.x)
-            * u64(grid.y) * u64(block.y)
-            * u64(grid.z) * u64(block.z)
 ```
+
+For 2D and 3D grids, each global axis remains separate:
+
+```text
+global-x = grid.x * block.x
+global-y = grid.y * block.y
+global-z = grid.z * block.z
+```
+
+Each per-axis product fits in `u64` because it multiplies two `u32` values. Codegen does not multiply the axes together, avoiding overflow in an unnecessary flattened thread count.
 
 Logical 1D and 2D launch dimensions have already been padded for the backend: unused extents are one. Kernel code therefore receives a uniform 3D thread object while its Hex type still exposes the original logical shape.
 

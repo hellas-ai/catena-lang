@@ -65,6 +65,43 @@ linear = row * columns + column
 
 This keeps logical coordinates independent from the memory layout selected by the program.
 
+## Global reads and writes
+
+Global buffers are always linear allocations. Their cells are addressed by a bounded 1D index, regardless of whether the program interprets the contents as a vector, matrix, or higher-dimensional object:
+
+```text
+buffer : gpu.global(capability, length, element-type)
+cell   : ix(shape.1d(length))
+```
+
+Consequently, the primitive operations are linear:
+
+```text
+gpu.global.read(buffer, cell)
+gpu.global.write(thread, buffer, cell, value, ownership-proof)
+```
+
+Reads use `cap.ref`, so they need no scheduling proof. Writes use `cap.own` and require evidence that the current thread owns the selected cell.
+
+Code generation uses `cell.first` as the physical offset:
+
+```cpp
+value = buffer[cell.first];
+buffer[cell.first] = value;
+```
+
+A multidimensional index cannot be passed directly to these operations. A storage adapter first chooses a layout and produces a linear offset. For a 2D row-major matrix:
+
+```text
+matrix-index : ix(shape.2d(rows, columns))
+offset       = row * columns + column
+cell         : ix(shape.1d(buffer-length))
+```
+
+The adapter checks that the offset fits the allocation before constructing `cell`. `gpu.global.matrix.2d.row-major.read` and `gpu.global.matrix.2d.row-major.write` are such adapters; they do not introduce a different kind of buffer.
+
+This separation keeps global memory simple and makes layout a visible program choice. The same linear buffer can be interpreted through a different layout adapter without changing its runtime representation.
+
 ## Scheduling and ownership
 
 Scheduling is checked by Hex types but remains a small runtime value because the kernel must query the policy selected for each owned buffer:

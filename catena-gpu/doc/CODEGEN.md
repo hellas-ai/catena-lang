@@ -102,6 +102,41 @@ The adapter checks that the offset fits the allocation before constructing `cell
 
 This separation keeps global memory simple and makes layout a visible program choice. The same linear buffer can be interpreted through a different layout adapter without changing its runtime representation.
 
+## Kernel launch
+
+`gpu.launch` is generic over the kernel arguments. A particular kernel definition decides which buffers, lengths, schedules, and scalar values it receives. The kernel itself is passed as a direct `name.*` function value.
+
+Code generation creates a GPU wrapper for each launch. In simplified form:
+
+```cpp
+__global__ void launch_wrapper(kernel_arguments...) {
+    global_index = {
+        blockIdx.x * blockDim.x + threadIdx.x,
+        blockIdx.y * blockDim.y + threadIdx.y,
+        blockIdx.z * blockDim.z + threadIdx.z
+    };
+
+    in_block_index = {threadIdx.x, threadIdx.y, threadIdx.z};
+    block_index = {blockIdx.x, blockIdx.y, blockIdx.z};
+    thread = {global_index, in_block_index, block_index};
+
+    hex_kernel(kernel_arguments..., thread);
+}
+```
+
+The host function launches this wrapper using the grid and block dimensions produced by `gpu.grid.*.intro`:
+
+```cpp
+launch_wrapper<<<grid_dim, block_dim>>>(kernel_arguments...);
+catena_gpu_synchronize();
+```
+
+Logical 1D and 2D launch dimensions have already been padded for the backend: unused extents are one. Kernel code therefore receives a uniform 3D thread object while its Hex type still exposes the original logical shape.
+
+Kernel arguments are forwarded as ordinary runtime parameters. Type-only information, static names, and proofs are erased. After synchronization, `gpu.launch` returns the runtime arguments unchanged; mutations to owned global buffers are visible through those same handles.
+
+A launched kernel must be a direct function definition and must not reach another `gpu.launch`, including through helper functions or folds. Code generation checks this restriction before rendering the module.
+
 ## Scheduling and ownership
 
 Scheduling is checked by Hex types but remains a small runtime value because the kernel must query the policy selected for each owned buffer:

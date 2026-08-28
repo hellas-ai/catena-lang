@@ -314,7 +314,7 @@
 ))
 
 (def program fill-with-readable-sum :
-  {(cap.own mem) (cap.ref mem) (u64 val) (u64 val)}
+  {(cap.own mem) (cap.ref mem) (u32 val) (u32 val)}
   ->
   (cap.own mem)
 = ([destination-input source-input grid-x-value block-x-value.]
@@ -329,8 +329,28 @@
     :.ty
     [source-buffer source-buffer-name.])
 
-  ([.grid-x-value] u64.name [grid-x.])
-  ([.block-x-value] u64.name [block-x.])
+  ([.grid-x-value] u32.name [named-grid-x.])
+  ([.named-grid-x]
+    u32.is-positive
+    [grid-x-before-refinement grid-x-positive-decision grid-x-positive-if-true.])
+  ({[.grid-x-positive-decision grid-x-positive-if-true]}
+    assert-then
+    [grid-x-is-positive.])
+  ({[.grid-x-before-refinement grid-x-is-positive]}
+    positive-u32.intro
+    [grid-x.])
+
+  ([.block-x-value] u32.name [named-block-x.])
+  ([.named-block-x]
+    u32.is-positive
+    [block-x-before-refinement block-x-positive-decision block-x-positive-if-true.])
+  ({[.block-x-positive-decision block-x-positive-if-true]}
+    assert-then
+    [block-x-is-positive.])
+  ({[.block-x-before-refinement block-x-is-positive]}
+    positive-u32.intro
+    [block-x.])
+
   ({[.grid-x block-x]}
     gpu.grid.1d.intro
     [grid-shape block-shape global-shape grid global-size.])

@@ -17,8 +17,8 @@
   # Logical dimensionality is preserved in shapes. CUDA's three-dimensional
   # launch values remain a backend detail.
   (arr gpu.grid.1d.intro : {[gx bx.]
-    ({[.gx] u64} :)
-    ({[.bx] u64} :)
+    ({[.gx] positive-u32} :)
+    ({[.bx] positive-u32} :)
   } -> {[gx bx.]
     ({[.gx]} shape.1d)
     ({[.bx]} shape.1d)
@@ -33,10 +33,10 @@
   })
 
   (arr gpu.grid.2d.intro : {[gx gy bx by.]
-    ({[.gx] u64} :)
-    ({[.gy] u64} :)
-    ({[.bx] u64} :)
-    ({[.by] u64} :)
+    ({[.gx] positive-u32} :)
+    ({[.gy] positive-u32} :)
+    ({[.bx] positive-u32} :)
+    ({[.by] positive-u32} :)
   } -> {[gx gy bx by.]
     ({[.gx gy]} shape.2d)
     ({[.bx by]} shape.2d)
@@ -53,12 +53,12 @@
   })
 
   (arr gpu.grid.3d.intro : {[gx gy gz bx by bz.]
-    ({[.gx] u64} :)
-    ({[.gy] u64} :)
-    ({[.gz] u64} :)
-    ({[.bx] u64} :)
-    ({[.by] u64} :)
-    ({[.bz] u64} :)
+    ({[.gx] positive-u32} :)
+    ({[.gy] positive-u32} :)
+    ({[.gz] positive-u32} :)
+    ({[.bx] positive-u32} :)
+    ({[.by] positive-u32} :)
+    ({[.bz] positive-u32} :)
   } -> {[gx gy gz bx by bz.]
     ({[.gx gy gz]} shape.3d)
     ({[.bx by bz]} shape.3d)

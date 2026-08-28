@@ -6,6 +6,8 @@
   (arr u64.lt : 2 -> 1)
   (arr u64.lte : 2 -> 1)
   (arr u32 : 0 -> 1)
+  (arr positive-u32 : 0 -> 1)
+  (arr u32.positive : 1 -> 1)
   (arr f32 : 0 -> 1)
   (arr gpu.numeric : 1 -> 1)
 })
@@ -22,6 +24,25 @@
 
   (arr bool.and : {(bool val) (bool val)} -> (bool val))
   (arr bool.name : {[x.] (bool val)} -> ([x.] ({[.x] bool} :)))
+
+  # A launch extent is represented as u32 and refined by an explicit
+  # positivity decision. The proof is erased; positive-u32 remains uint32_t.
+  (arr u32.name : {[x.] (u32 val)} -> ([x.] ({[.x] u32} :)))
+  (arr u32.is-positive : {[x decision.]
+    ({[.x] u32} :)
+  } -> {[x decision.]
+    ({[.decision] bool.t} = [decision-true.])
+    ([.x] u32.positive [is-positive.])
+    ({[.x] u32} :)
+    ({[.decision] bool} :)
+    ([.decision-true is-positive] ==> |-)
+  })
+  (arr positive-u32.intro : {[x.]
+    ({[.x] u32} :)
+    ([.x] u32.positive |-)
+  } -> {[x.]
+    ({[.x] positive-u32} :)
+  })
 
   # Trusted, erased evidence for the element types supported by generic GPU
   # arithmetic. Requiring this proof prevents arbitrary types from reaching

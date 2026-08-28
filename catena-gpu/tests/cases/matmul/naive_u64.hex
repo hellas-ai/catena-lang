@@ -6,10 +6,10 @@
     (u64 val)
     (u64 val)
     (u64 val)
-    (u64 val)
-    (u64 val)
-    (u64 val)
-    (u64 val)
+    (u32 val)
+    (u32 val)
+    (u32 val)
+    (u32 val)
   }
   ->
   (cap.own mem)
@@ -26,10 +26,50 @@
   ([.b-input] mem.cast.u64 [b-length named-b-buffer.])
   ([.named-b-buffer] :.ty [b-buffer b-buffer-name.])
 
-  ([.grid-x-input] u64.name [grid-x.])
-  ([.grid-y-input] u64.name [grid-y.])
-  ([.block-x-input] u64.name [block-x.])
-  ([.block-y-input] u64.name [block-y.])
+  ([.grid-x-input] u32.name [named-grid-x.])
+  ([.named-grid-x]
+    u32.is-positive
+    [grid-x-before-refinement grid-x-positive-decision grid-x-positive-if-true.])
+  ({[.grid-x-positive-decision grid-x-positive-if-true]}
+    assert-then
+    [grid-x-is-positive.])
+  ({[.grid-x-before-refinement grid-x-is-positive]}
+    positive-u32.intro
+    [grid-x.])
+
+  ([.grid-y-input] u32.name [named-grid-y.])
+  ([.named-grid-y]
+    u32.is-positive
+    [grid-y-before-refinement grid-y-positive-decision grid-y-positive-if-true.])
+  ({[.grid-y-positive-decision grid-y-positive-if-true]}
+    assert-then
+    [grid-y-is-positive.])
+  ({[.grid-y-before-refinement grid-y-is-positive]}
+    positive-u32.intro
+    [grid-y.])
+
+  ([.block-x-input] u32.name [named-block-x.])
+  ([.named-block-x]
+    u32.is-positive
+    [block-x-before-refinement block-x-positive-decision block-x-positive-if-true.])
+  ({[.block-x-positive-decision block-x-positive-if-true]}
+    assert-then
+    [block-x-is-positive.])
+  ({[.block-x-before-refinement block-x-is-positive]}
+    positive-u32.intro
+    [block-x.])
+
+  ([.block-y-input] u32.name [named-block-y.])
+  ([.named-block-y]
+    u32.is-positive
+    [block-y-before-refinement block-y-positive-decision block-y-positive-if-true.])
+  ({[.block-y-positive-decision block-y-positive-if-true]}
+    assert-then
+    [block-y-is-positive.])
+  ({[.block-y-before-refinement block-y-is-positive]}
+    positive-u32.intro
+    [block-y.])
+
   ({[.grid-x grid-y block-x block-y]}
     gpu.grid.2d.intro
     [grid-shape block-shape global-shape global-columns global-rows

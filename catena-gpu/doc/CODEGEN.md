@@ -35,6 +35,8 @@ Hex grid.1d(gx, bx) -> dim3(gx, 1, 1), dim3(bx, 1, 1)
 Hex grid.2d(...)    -> dim3(gx, gy, 1), dim3(bx, by, 1)
 ```
 
+Every supplied launch extent has type `positive-u32`. Hex obtains it from a `u32` value and a proof that the value is positive. This rules out zero dimensions and matches the backend representation without a narrowing conversion. The total number of global threads remains `u64`; code generation widens every extent before multiplying them.
+
 ## Common shape and index transformations
 
 | Hex value | Generated representation |
@@ -49,6 +51,7 @@ Hex grid.2d(...)    -> dim3(gx, gy, 1), dim3(bx, by, 1)
 The corresponding operations lower as follows:
 
 - `shape.1d.size(shape)` exposes the static bound to Hex and produces no runtime code.
+- `positive-u32.intro(value, proof)` keeps `value` as `uint32_t`; the positivity proof is erased.
 - `ix.2d.from-components(x, y)` copies the coordinates into `{x, y, 0}`.
 - `ix.2d.split(index)` projects `first` and `second`, producing two bounded 1D indices.
 - `ix.1d.value(index)` projects `first` as a `u64`.
@@ -129,6 +132,14 @@ The host function launches this wrapper using the grid and block dimensions prod
 ```cpp
 launch_wrapper<<<grid_dim, block_dim>>>(kernel_arguments...);
 catena_gpu_synchronize();
+```
+
+Each explicit dimension is already a positive `uint32_t`. The global thread count is calculated separately with 64-bit multiplication:
+
+```text
+global-size = u64(grid.x) * u64(block.x)
+            * u64(grid.y) * u64(block.y)
+            * u64(grid.z) * u64(block.z)
 ```
 
 Logical 1D and 2D launch dimensions have already been padded for the backend: unused extents are one. Kernel code therefore receives a uniform 3D thread object while its Hex type still exposes the original logical shape.

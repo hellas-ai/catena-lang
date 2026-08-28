@@ -299,9 +299,22 @@ fn render_assignment(
         ":.ty"
         | ":.forget"
         | "bool.name"
+        | "u32.name"
         | "u64.name"
         | "gpu.thread.name"
         | "gpu.global.element-type" => identity(output, assignment),
+        "positive-u32.intro" => identity(output, assignment),
+        "u32.is-positive" => {
+            if assignment.inputs.len() != 1 || assignment.outputs.len() != 2 {
+                return Err(arity(assignment, 1));
+            }
+            let value = input(assignment, 0)?;
+            output.push_str(&format!(
+                "    {} = {value};\n    {} = ({value} != 0U);\n",
+                assignment.outputs[0].name, assignment.outputs[1].name,
+            ));
+            Ok(())
+        }
         "u64.copies2" | "bool.copies2" | "ix.copies2" => copy_two(output, assignment),
         "gpu.grid.1d.intro" => render_grid_intro(output, assignment, 1),
         "gpu.grid.2d.intro" => render_grid_intro(output, assignment, 2),
@@ -336,13 +349,13 @@ fn render_grid_intro(
         block[axis] = input(a, dimensions + axis)?;
     }
     output.push_str(&format!(
-        "    {} = {{ {{ (uint32_t){}, (uint32_t){}, (uint32_t){} }}, {{ (uint32_t){}, (uint32_t){}, (uint32_t){} }} }};\n",
-        a.outputs[0].name,
-        grid[0], grid[1], grid[2], block[0], block[1], block[2],
+        "    {} = {{ {{ {}, {}, {} }}, {{ {}, {}, {} }} }};\n",
+        a.outputs[0].name, grid[0], grid[1], grid[2], block[0], block[1], block[2],
     ));
     output.push_str(&format!(
-        "    {} = ({} * {}) * ({} * {}) * ({} * {});\n",
-        a.outputs[1].name, grid[0], block[0], grid[1], block[1], grid[2], block[2],
+        "    {} = ((uint64_t){} * (uint64_t){}) * ((uint64_t){} * (uint64_t){}) * ((uint64_t){} * (uint64_t){});\n",
+        a.outputs[1].name,
+        grid[0], block[0], grid[1], block[1], grid[2], block[2],
     ));
     Ok(())
 }
@@ -503,14 +516,15 @@ mod tests {
         let one_d = grid_assignment("gpu.grid.1d.intro", &["gx", "bx"]);
         let mut generated = String::new();
         render_grid_intro(&mut generated, &one_d, 1).unwrap();
-        assert!(generated.contains("{ (uint32_t)gx, (uint32_t)1, (uint32_t)1 }"));
-        assert!(generated.contains("{ (uint32_t)bx, (uint32_t)1, (uint32_t)1 }"));
+        assert!(generated.contains("{ gx, 1, 1 }"));
+        assert!(generated.contains("{ bx, 1, 1 }"));
+        assert!(generated.contains("(uint64_t)gx * (uint64_t)bx"));
 
         let two_d = grid_assignment("gpu.grid.2d.intro", &["gx", "gy", "bx", "by"]);
         generated.clear();
         render_grid_intro(&mut generated, &two_d, 2).unwrap();
-        assert!(generated.contains("{ (uint32_t)gx, (uint32_t)gy, (uint32_t)1 }"));
-        assert!(generated.contains("{ (uint32_t)bx, (uint32_t)by, (uint32_t)1 }"));
+        assert!(generated.contains("{ gx, gy, 1 }"));
+        assert!(generated.contains("{ bx, by, 1 }"));
     }
 
     fn grid_assignment(operation: &str, inputs: &[&str]) -> GpuAssign {
@@ -520,7 +534,7 @@ mod tests {
             inputs: inputs
                 .iter()
                 .enumerate()
-                .map(|(node, name)| GpuValue::Var(var(node, name, CType::U64)))
+                .map(|(node, name)| GpuValue::Var(var(node, name, CType::U32)))
                 .collect(),
             outputs: vec![
                 var(inputs.len(), "grid", CType::Grid),

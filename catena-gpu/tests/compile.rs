@@ -10,6 +10,8 @@ use metacat::theory::RawTheorySet;
 mod basic;
 #[path = "compile/indexing.rs"]
 mod indexing;
+#[path = "compile/launch.rs"]
+mod launch;
 #[path = "compile/numeric.rs"]
 mod numeric;
 #[path = "compile/permissions.rs"]

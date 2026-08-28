@@ -12,7 +12,7 @@ fn predicated_tiling_fills_with_readable_sum() -> anyhow::Result<()> {
     check_readable_sum(7, 2, 4)
 }
 
-fn check_readable_sum(destination_size: usize, grid_x: u64, block_x: u64) -> anyhow::Result<()> {
+fn check_readable_sum(destination_size: usize, grid_x: u32, block_x: u32) -> anyhow::Result<()> {
     let (runtime, artifact) = runtime_with(FILL_WITH_READABLE_SUM)?;
     let destination = runtime.mem_u64(&vec![u64::MAX; destination_size])?;
     let source_values = [17_u64, 25, 99];

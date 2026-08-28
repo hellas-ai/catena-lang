@@ -13,10 +13,10 @@ fn predicated_tiling_computes_naive_u64_matmul() -> anyhow::Result<()> {
 }
 
 fn check_naive_u64_matmul(
-    grid_x: u64,
-    grid_y: u64,
-    block_x: u64,
-    block_y: u64,
+    grid_x: u32,
+    grid_y: u32,
+    block_x: u32,
+    block_y: u32,
 ) -> anyhow::Result<()> {
     let (runtime, artifact) = runtime_with(NAIVE_U64)?;
     let c = runtime.mem_u64(&[u64::MAX; 4])?;

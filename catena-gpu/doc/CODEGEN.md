@@ -64,3 +64,43 @@ linear = row * columns + column
 ```
 
 This keeps logical coordinates independent from the memory layout selected by the program.
+
+## Scheduling and ownership
+
+Scheduling is checked by Hex types but remains a small runtime value because the kernel must query the policy selected for each owned buffer:
+
+```cpp
+typedef struct {
+    catena_scheduling_kind_t kind;
+    uint64_t matrix_columns;
+} catena_scheduling_t;
+```
+
+The current schedule constructors lower as follows:
+
+- `gpu.scheduling.own-each` stores the 1D `OWN_EACH` policy.
+- `gpu.scheduling.2d.row-major.own-each(columns)` stores the 2D row-major policy and its column count.
+- Static buffer, grid, and schedule names are erased. Their role is to prevent mixing unrelated values during type checking.
+
+`gpu.scheduling.can-own(schedule, thread, cell)` becomes a runtime policy query. For the current policies, the generated checks are equivalent to:
+
+```text
+own-each:
+    thread.x == cell.first
+
+2d row-major own-each:
+    thread.x == cell.first % columns
+    and thread.y == cell.first / columns
+```
+
+The Boolean decision remains at runtime. The positive ownership proof exists only in Hex and is erased. An `assert` on a false decision becomes a GPU trap; a predicated kernel can instead handle the false branch and skip the write.
+
+After Hex has established ownership, `gpu.global.write(thread, buffer, cell, value, proof)` becomes the direct memory operation:
+
+```cpp
+buffer[cell.first] = value;
+```
+
+The thread and proof are not needed by that final instruction: they were needed to make the write type-check. A `cap.ref` buffer is read-only, so `gpu.global.read` needs no schedule or ownership query and becomes a direct indexed load.
+
+Code generation does not prove race freedom again. It relies on schedules being constructible only through policies that are race-free by construction, while retaining the selected policy at runtime so the kernel cannot query a different resolver accidentally.

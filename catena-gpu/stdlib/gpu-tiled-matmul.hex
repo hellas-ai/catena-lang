@@ -1,0 +1,170 @@
+# Tiled matrix multiplication kernel scaffold. The stub remains executable by
+# forwarding to the naive kernel until the tiled implementation is introduced.
+
+(def program gpu.global.matrix.tiled-matmul.kernel.stub : {[
+  element-type c-buffer-name c-size a-buffer-name a-size b-buffer-name b-size
+  grid-shape block-shape global-columns global-rows
+  c-schedule-name
+  output-rows shared-size output-columns.
+]
+  ({
+    ({
+      ({[.c-size] u64} :)
+      ({
+        ({[.c-buffer-name]
+          ({cap.own [.c-size element-type]} gpu.global)} :)
+        ({
+          ({
+            [.c-buffer-name c-size]
+            ({
+              [.grid-shape]
+              [.block-shape]
+              ({[.global-columns global-rows]} shape.2d)
+            } gpu.grid)
+            [.c-schedule-name]
+          } gpu.scheduling val)
+          ({
+            [.c-buffer-name]
+            ({[.element-type]
+              ({
+                ([.element-type] gpu.numeric |-)
+                ({[.grid-shape]
+                  ({[.block-shape]
+                    ({({[.global-columns global-rows]} shape.2d)
+                      [.c-schedule-name]} *)} *)} *)
+              } *)} *)
+          } *)
+        } *)
+      } *)
+    } *)
+    ({
+      ({
+        ({[.a-size] u64} :)
+        ({
+          ({[.a-buffer-name]
+            ({cap.ref [.a-size element-type]} gpu.global)} :)
+          ({[.a-buffer-name] [.a-size]} *)
+        } *)
+      } *)
+      ({
+        ({
+          ({[.b-size] u64} :)
+          ({
+            ({[.b-buffer-name]
+              ({cap.ref [.b-size element-type]} gpu.global)} :)
+            ({[.b-buffer-name] [.b-size]} *)
+          } *)
+        } *)
+        ({
+          ({[.output-rows] u64} :)
+          ({({[.shared-size] u64} :) ({[.output-columns] u64} :)} *)
+        } *)
+      } *)
+    } *)
+  } *)
+  ({({
+    [.grid-shape]
+    [.block-shape]
+    ({[.global-columns global-rows]} shape.2d)
+  } gpu.grid)} gpu.thread val)
+} -> {[
+  element-type c-buffer-name c-size a-buffer-name a-size b-buffer-name b-size
+  grid-shape block-shape global-columns global-rows
+  c-schedule-name
+  output-rows shared-size output-columns.
+]
+  ({
+    [.c-buffer-name c-size]
+    ({
+      [.grid-shape]
+      [.block-shape]
+      ({[.global-columns global-rows]} shape.2d)
+    } gpu.grid)
+    [.c-schedule-name]
+  } gpu.scheduling val)
+} = gpu.global.matrix.matmul.kernel)
+
+# Public tiled kernel boundary. Its type is independent from the temporary
+# implementation selected by the stub arrow above.
+(def program gpu.global.matrix.tiled-matmul.kernel : {[
+  element-type c-buffer-name c-size a-buffer-name a-size b-buffer-name b-size
+  grid-shape block-shape global-columns global-rows
+  c-schedule-name
+  output-rows shared-size output-columns.
+]
+  ({
+    ({
+      ({[.c-size] u64} :)
+      ({
+        ({[.c-buffer-name]
+          ({cap.own [.c-size element-type]} gpu.global)} :)
+        ({
+          ({
+            [.c-buffer-name c-size]
+            ({
+              [.grid-shape]
+              [.block-shape]
+              ({[.global-columns global-rows]} shape.2d)
+            } gpu.grid)
+            [.c-schedule-name]
+          } gpu.scheduling val)
+          ({
+            [.c-buffer-name]
+            ({[.element-type]
+              ({
+                ([.element-type] gpu.numeric |-)
+                ({[.grid-shape]
+                  ({[.block-shape]
+                    ({({[.global-columns global-rows]} shape.2d)
+                      [.c-schedule-name]} *)} *)} *)
+              } *)} *)
+          } *)
+        } *)
+      } *)
+    } *)
+    ({
+      ({
+        ({[.a-size] u64} :)
+        ({
+          ({[.a-buffer-name]
+            ({cap.ref [.a-size element-type]} gpu.global)} :)
+          ({[.a-buffer-name] [.a-size]} *)
+        } *)
+      } *)
+      ({
+        ({
+          ({[.b-size] u64} :)
+          ({
+            ({[.b-buffer-name]
+              ({cap.ref [.b-size element-type]} gpu.global)} :)
+            ({[.b-buffer-name] [.b-size]} *)
+          } *)
+        } *)
+        ({
+          ({[.output-rows] u64} :)
+          ({({[.shared-size] u64} :) ({[.output-columns] u64} :)} *)
+        } *)
+      } *)
+    } *)
+  } *)
+  ({({
+    [.grid-shape]
+    [.block-shape]
+    ({[.global-columns global-rows]} shape.2d)
+  } gpu.grid)} gpu.thread val)
+} -> {[
+  element-type c-buffer-name c-size a-buffer-name a-size b-buffer-name b-size
+  grid-shape block-shape global-columns global-rows
+  c-schedule-name
+  output-rows shared-size output-columns.
+]
+  ({
+    [.c-buffer-name c-size]
+    ({
+      [.grid-shape]
+      [.block-shape]
+      ({[.global-columns global-rows]} shape.2d)
+    } gpu.grid)
+    [.c-schedule-name]
+  } gpu.scheduling val)
+} = gpu.global.matrix.tiled-matmul.kernel.stub)

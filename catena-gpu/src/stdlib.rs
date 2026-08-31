@@ -30,6 +30,7 @@ pub const FILES: &[StdlibFile] = stdlib_files![
     "matrix.hex",
     "gpu-matrix.hex",
     "gpu-matmul.hex",
+    "gpu-tiled-matmul.hex",
 ];
 
 pub fn sources() -> impl ExactSizeIterator<Item = &'static str> {

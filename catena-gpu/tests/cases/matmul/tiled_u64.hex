@@ -1,0 +1,156 @@
+(def program tiled-u64-matmul :
+  {
+    (cap.own mem)
+    (cap.ref mem)
+    (cap.ref mem)
+    (u64 val)
+    (u64 val)
+    (u64 val)
+    (u32 val)
+    (u32 val)
+    (u32 val)
+    (u32 val)
+  }
+  ->
+  (cap.own mem)
+= ([c-input a-input b-input output-rows-input shared-size-input
+    output-columns-input grid-x-input grid-y-input block-x-input block-y-input.]
+  ([.c-input] mem.cast.u64 [c-length named-c-buffer.])
+  ([.named-c-buffer] :.ty [c-buffer-before-type c-buffer-name.])
+  ([.c-buffer-before-type]
+    gpu.global.element-type
+    [c-buffer element-type.])
+  gpu.numeric.u64 [numeric-proof.]
+  ([.a-input] mem.cast.u64 [a-length named-a-buffer.])
+  ([.named-a-buffer] :.ty [a-buffer a-buffer-name.])
+  ([.b-input] mem.cast.u64 [b-length named-b-buffer.])
+  ([.named-b-buffer] :.ty [b-buffer b-buffer-name.])
+
+  ([.grid-x-input] u32.name [named-grid-x.])
+  ([.named-grid-x]
+    u32.is-positive
+    [grid-x-before-refinement grid-x-positive-decision grid-x-positive-if-true.])
+  ({[.grid-x-positive-decision grid-x-positive-if-true]}
+    assert-then
+    [grid-x-is-positive.])
+  ({[.grid-x-before-refinement grid-x-is-positive]}
+    positive-u32.intro
+    [grid-x.])
+
+  ([.grid-y-input] u32.name [named-grid-y.])
+  ([.named-grid-y]
+    u32.is-positive
+    [grid-y-before-refinement grid-y-positive-decision grid-y-positive-if-true.])
+  ({[.grid-y-positive-decision grid-y-positive-if-true]}
+    assert-then
+    [grid-y-is-positive.])
+  ({[.grid-y-before-refinement grid-y-is-positive]}
+    positive-u32.intro
+    [grid-y.])
+
+  ([.block-x-input] u32.name [named-block-x.])
+  ([.named-block-x]
+    u32.is-positive
+    [block-x-before-refinement block-x-positive-decision block-x-positive-if-true.])
+  ({[.block-x-positive-decision block-x-positive-if-true]}
+    assert-then
+    [block-x-is-positive.])
+  ({[.block-x-before-refinement block-x-is-positive]}
+    positive-u32.intro
+    [block-x.])
+
+  ([.block-y-input] u32.name [named-block-y.])
+  ([.named-block-y]
+    u32.is-positive
+    [block-y-before-refinement block-y-positive-decision block-y-positive-if-true.])
+  ({[.block-y-positive-decision block-y-positive-if-true]}
+    assert-then
+    [block-y-is-positive.])
+  ({[.block-y-before-refinement block-y-is-positive]}
+    positive-u32.intro
+    [block-y.])
+
+  ({[.grid-x grid-y block-x block-y]}
+    gpu.grid.2d.intro
+    [grid-shape block-shape global-shape global-columns global-rows
+      grid.])
+
+  ([.c-length] u64.copies2 [c-length-for-launch c-length-for-name.])
+  ([.c-length-for-name] :.param [c-size.])
+
+  ([.a-length] u64.copies2 [a-length-for-kernel a-length-for-name.])
+  ([.a-length-for-name] :.param [a-size.])
+  ([.b-length] u64.copies2 [b-length-for-kernel b-length-for-name.])
+  ([.b-length-for-name] :.param [b-size.])
+
+  ([.output-rows-input] u64.name [named-output-rows.])
+  ([.named-output-rows] :.ty [output-rows-value output-rows.])
+  ([.shared-size-input] u64.name [named-shared-size.])
+  ([.named-shared-size] :.ty [shared-size-value shared-size.])
+  ([.output-columns-input] u64.name [named-output-columns.])
+  ([.named-output-columns]
+    u64.copies2
+    [output-columns-for-schedule named-output-columns-for-kernel.])
+  ([.named-output-columns-for-kernel]
+    :.ty
+    [output-columns-value output-columns.])
+  ({[.c-buffer-name c-size output-columns-for-schedule
+      grid-shape block-shape global-shape]}
+    gpu.scheduling.2d.row-major.own-each
+    [c-schedule-name c-scheduling.])
+
+  ({[.shared-size-value output-columns-value]} *.intro [shared-and-columns.])
+  ({[.output-rows-value shared-and-columns]} *.intro [dimensions.])
+
+  ({[.a-buffer-name a-size]} *.intro [a-context.])
+  ({[.a-buffer a-context]} *.intro [a-tail.])
+  ({[.a-length-for-kernel a-tail]} *.intro [a-arguments.])
+
+  ({[.b-buffer-name b-size]} *.intro [b-context.])
+  ({[.b-buffer b-context]} *.intro [b-tail.])
+  ({[.b-length-for-kernel b-tail]} *.intro [b-arguments.])
+
+  ({[.global-shape c-schedule-name]} *.intro [global-context.])
+  ({[.block-shape global-context]} *.intro [block-context.])
+  ({[.grid-shape block-context]} *.intro [grid-context.])
+  ({[.numeric-proof grid-context]} *.intro [numeric-and-grid-context.])
+  ({[.element-type numeric-and-grid-context]} *.intro [element-and-grid-context.])
+  ({[.c-buffer-name element-and-grid-context]} *.intro [c-context.])
+  ({[.c-scheduling c-context]} *.intro [c-schedule-and-context.])
+  ({[.c-buffer c-schedule-and-context]} *.intro [c-tail.])
+  ({[.c-length-for-launch c-tail]} *.intro [c-arguments.])
+
+  ({[.b-arguments dimensions]} *.intro [b-and-dimensions.])
+  ({[.a-arguments b-and-dimensions]} *.intro [a-b-and-dimensions.])
+  ({[.c-arguments a-b-and-dimensions]} *.intro [kernel-arguments.])
+
+  ({[
+    .element-type c-buffer-name c-size a-buffer-name a-size b-buffer-name b-size
+    grid-shape block-shape global-columns global-rows
+    c-schedule-name
+    output-rows shared-size output-columns
+  ]} name.gpu.global.matrix.tiled-matmul.kernel [kernel.])
+  ({[.grid kernel-arguments kernel]} gpu.launch [returned-kernel-arguments.])
+
+  ([.returned-kernel-arguments]
+    *.elim
+    [returned-c-arguments returned-a-b-and-dimensions.])
+  ([.returned-a-b-and-dimensions]
+    *.elim
+    [returned-a-arguments returned-b-and-dimensions.])
+  ([.returned-b-and-dimensions]
+    *.elim
+    [returned-b-arguments _returned-dimensions.])
+
+  ([.returned-c-arguments]
+    *.elim
+    [c-length-after-launch returned-c-tail.])
+  ([.returned-c-tail]
+    *.elim
+    [c-buffer-after-launch _returned-c-schedule-and-context.])
+  ({[.c-length-after-launch c-buffer-after-launch]}
+    gpu.global.to-mem
+    [c-output.])
+  [.c-output]
+))
+

@@ -125,6 +125,9 @@ fn lower_runtime_type(
                 _ => Err(LowerTypeError::NoRuntimeRepresentation(ty.clone())),
             }
         }
+        ("gpu.shared", [_block_name, _buffer_size, element]) => Ok(CType::Ptr(Box::new(
+            lower_runtime_type(element, substitutions)?,
+        ))),
         ("gpu.thread", [_grid]) => Ok(CType::Thread),
         ("gpu.block", [_grid, _block_name]) => Ok(CType::Block),
         ("gpu.scheduling", [_buffer_name, _buffer_size, _grid, _schedule_name]) => {
@@ -199,6 +202,9 @@ fn infer_runtime_type(
         ("gpu.global", [capability, _size, element], CType::ConstPtr(actual))
             if is_capability(capability, "cap.ref") =>
         {
+            infer_runtime_type(element, actual, substitutions)
+        }
+        ("gpu.shared", [_block_name, _size, element], CType::Ptr(actual)) => {
             infer_runtime_type(element, actual, substitutions)
         }
         _ => match lower_runtime_type(ty, substitutions) {

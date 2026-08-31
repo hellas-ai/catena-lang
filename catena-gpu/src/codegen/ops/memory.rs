@@ -66,6 +66,57 @@ pub fn render(output: &mut String, assignment: &GpuAssign) -> Result<bool, GpuRe
                 value_expr(cell),
             ));
         }
+        "gpu.shared.write" => {
+            let [thread, block, buffer, cell, value] = assignment.inputs.as_slice() else {
+                return Err(invalid_arity(assignment, 5, 3));
+            };
+            let [thread_after, block_after, buffer_after] = assignment.outputs.as_slice() else {
+                return Err(invalid_arity(assignment, 5, 3));
+            };
+            output.push_str(&format!(
+                "    {} = {};\n    {} = {};\n    {}[{}.first] = {};\n    {} = {};\n",
+                thread_after.name,
+                value_expr(thread),
+                block_after.name,
+                value_expr(block),
+                value_expr(buffer),
+                value_expr(cell),
+                value_expr(value),
+                buffer_after.name,
+                value_expr(buffer),
+            ));
+        }
+        "gpu.shared.read" => {
+            let [block, buffer, cell] = assignment.inputs.as_slice() else {
+                return Err(invalid_arity(assignment, 3, 3));
+            };
+            let [block_after, buffer_after, value] = assignment.outputs.as_slice() else {
+                return Err(invalid_arity(assignment, 3, 3));
+            };
+            output.push_str(&format!(
+                "    {} = {};\n    {} = {};\n    {} = {}[{}.first];\n",
+                block_after.name,
+                value_expr(block),
+                buffer_after.name,
+                value_expr(buffer),
+                value.name,
+                value_expr(buffer),
+                value_expr(cell),
+            ));
+        }
+        "gpu.shared.sync" => {
+            let [block] = assignment.inputs.as_slice() else {
+                return Err(invalid_arity(assignment, 1, 1));
+            };
+            let [block_after] = assignment.outputs.as_slice() else {
+                return Err(invalid_arity(assignment, 1, 1));
+            };
+            output.push_str(&format!(
+                "    catena_block_sync();\n    {} = {};\n",
+                block_after.name,
+                value_expr(block),
+            ));
+        }
         _ => return Ok(false),
     }
     Ok(true)

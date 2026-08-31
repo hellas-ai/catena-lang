@@ -191,6 +191,12 @@ __host__ static inline void catena_gpu_synchronize(void) {{
     catena_gpu_check({synchronize}());
 }}
 
+__host__ __device__ static inline void catena_block_sync(void) {{
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
+    __syncthreads();
+#endif
+}}
+
 "#,
         runtime_header = dialect.runtime_header(),
     )

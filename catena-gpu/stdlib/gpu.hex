@@ -5,6 +5,10 @@
   (arr gpu.thread : 1 -> 1)
   (arr gpu.block : 2 -> 1)
 
+  # A block-local shared handle. Its block name prevents the handle from being
+  # used by a thread from another block.
+  (arr gpu.shared : 3 -> 1)
+
   # A global handle is independent of the thread layout.
   (arr gpu.global : 3 -> 1)
 
@@ -121,6 +125,62 @@
       ({({[.grid-shape block-shape global-shape]} gpu.grid) [.block-name]}
         gpu.block)} :)
     ([.grid-shape] ix val)
+  })
+
+  # Read one bounded cell from block-local shared memory. Threading both the
+  # block and handle through the result keeps shared operations ordered while
+  # preserving the stable names used by later accesses.
+  (arr gpu.shared.read : {[
+    grid-topology block-name buffer-name buffer-size element-type.
+  ]
+    ({[.block-name]
+      ({[.grid-topology block-name]} gpu.block)} :)
+    ({[.buffer-name]
+      ({[.block-name buffer-size element-type]} gpu.shared)} :)
+    ({({[.buffer-size]} shape.1d)} ix val)
+  } -> {[
+    grid-topology block-name buffer-name buffer-size element-type.
+  ]
+    ({[.block-name]
+      ({[.grid-topology block-name]} gpu.block)} :)
+    ({[.buffer-name]
+      ({[.block-name buffer-size element-type]} gpu.shared)} :)
+    ([.element-type] val)
+  })
+
+  # Write one bounded shared-memory cell owned by the current named thread.
+  # The ownership proposition is the same one used by gpu.global.write, so
+  # scheduling policy remains separate from the memory space being accessed.
+  (arr gpu.shared.write : {[
+    grid-topology block-name buffer-name buffer-size element-type
+    schedule-name thread-name cell-index.
+  ]
+    ({[.thread-name] ([.grid-topology] gpu.thread)} :)
+    ({[.block-name]
+      ({[.grid-topology block-name]} gpu.block)} :)
+    ({[.buffer-name]
+      ({[.block-name buffer-size element-type]} gpu.shared)} :)
+    ({[.cell-index] ({({[.buffer-size]} shape.1d)} ix)} :)
+    ([.element-type] val)
+    ([.buffer-name schedule-name thread-name cell-index] gpu.schedule.owns |-)
+  } -> {[
+    grid-topology block-name buffer-name buffer-size element-type
+    schedule-name thread-name cell-index.
+  ]
+    ({[.thread-name] ([.grid-topology] gpu.thread)} :)
+    ({[.block-name]
+      ({[.grid-topology block-name]} gpu.block)} :)
+    ({[.buffer-name]
+      ({[.block-name buffer-size element-type]} gpu.shared)} :)
+  })
+
+  # Synchronize all threads in the exact block represented by this token.
+  (arr gpu.shared.sync : {[grid-topology block-name.]
+    ({[.block-name]
+      ({[.grid-topology block-name]} gpu.block)} :)
+  } -> {[grid-topology block-name.]
+    ({[.block-name]
+      ({[.grid-topology block-name]} gpu.block)} :)
   })
 
   # The fixed linear policy assigns buffer cell i to global thread i. It is

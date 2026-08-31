@@ -18,3 +18,5 @@ mod numeric;
 mod permissions;
 #[path = "compile/references.rs"]
 mod references;
+#[path = "compile/shared.rs"]
+mod shared;

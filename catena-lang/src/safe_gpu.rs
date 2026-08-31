@@ -10,7 +10,7 @@
 //! lower-level [`crate::safe_runtime`] remains available for existing
 //! transient-value users.
 
-use std::{fs::File, sync::Arc};
+use std::{fs::File, sync::Arc, time::Duration};
 
 use crate::{
     runtime::{Artifact, RuntimeId},
@@ -20,7 +20,7 @@ use crate::{
 pub use crate::{
     codegen::GpuDialect,
     runtime::{EntryPoint, ValueKind},
-    safe_runtime::{AssetError, ChildMainError, SafeInitError},
+    safe_runtime::{AssetError, ChildMainError, DEFAULT_COMPILE_TIMEOUT, SafeInitError},
 };
 
 pub mod causal_lm;
@@ -71,6 +71,17 @@ impl Session {
     /// Start a worker for the selected provider-local GPU dialect.
     pub fn new(dialect: GpuDialect) -> Result<Self, SafeInitError> {
         SafeRuntime::new(dialect).map(|runtime| Self {
+            runtime: Arc::new(runtime),
+        })
+    }
+
+    /// Start a worker with a provider-selected deadline for complete Catena
+    /// source loading and GPU compilation.
+    pub fn with_compile_timeout(
+        dialect: GpuDialect,
+        compile_timeout: Duration,
+    ) -> Result<Self, SafeInitError> {
+        SafeRuntime::with_compile_timeout(dialect, compile_timeout).map(|runtime| Self {
             runtime: Arc::new(runtime),
         })
     }

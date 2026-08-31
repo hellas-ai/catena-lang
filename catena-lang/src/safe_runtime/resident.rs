@@ -487,6 +487,17 @@ mod tests {
         invalid_state.state_byte_multipliers = vec![3];
         assert!(validate_model_binding(&entry(ValueKind::MemOwn), &invalid_state).is_err());
 
+        let mut excessive_state = binding();
+        excessive_state.maximum_capacity = MAXIMUM_CAPACITY;
+        excessive_state.state_byte_multipliers =
+            vec![MAX_MODEL_STATE_BYTES.checked_div(MAXIMUM_CAPACITY).unwrap() + 4];
+        assert!(validate_model_binding(&entry(ValueKind::MemOwn), &excessive_state).is_err());
+
+        let mut overflowing_state = binding();
+        overflowing_state.maximum_capacity = MAXIMUM_CAPACITY;
+        overflowing_state.state_byte_multipliers = vec![u64::MAX - 3];
+        assert!(validate_model_binding(&entry(ValueKind::MemOwn), &overflowing_state).is_err());
+
         let mut excessive_static = binding();
         excessive_static.assets[0].byte_len = MAX_MODEL_STATIC_BYTES;
         excessive_static.assets.push(WireAssetSlice {

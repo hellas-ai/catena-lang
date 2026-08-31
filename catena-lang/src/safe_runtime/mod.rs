@@ -16,8 +16,9 @@ use std::{
     os::unix::{net::UnixStream, process::CommandExt},
     path::{Path, PathBuf},
     process::{Child, ChildStdin, ChildStdout, Command, ExitStatus, Stdio},
-    sync::Mutex,
+    sync::{Mutex, mpsc},
     thread::{self, JoinHandle},
+    time::Duration,
 };
 
 use thiserror::Error;
@@ -45,6 +46,9 @@ use crate::{
 
 const CHILD_MODE_ENV: &str = "CATENA_SAFE_RUNTIME_CHILD";
 const CHILD_ASSET_SOCKET_FD: RawFd = 3;
+
+/// Default wall-clock limit for one isolated source-load and GPU compilation.
+pub const DEFAULT_COMPILE_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 
 /// Failures while attaching or slicing a session-resident asset.
 #[derive(Debug, Error)]
@@ -162,6 +166,10 @@ pub enum SafeInitError {
     RemoteInitialization(String),
     #[error("SafeRuntime child failed to load sources: {0}")]
     RemoteLoad(String),
+    #[error("SafeRuntime source loading and GPU compilation exceeded {timeout:?}")]
+    CompileTimedOut { timeout: Duration },
+    #[error("SafeRuntime compile timeout must be greater than zero")]
+    InvalidCompileTimeout,
     #[error("SafeRuntime child returned an unexpected setup response")]
     UnexpectedResponse,
     #[error(
@@ -225,11 +233,27 @@ pub struct SafeRuntime {
     worker: Mutex<WorkerProcess>,
     ipc: IpcTransport,
     runtime_id: RuntimeId,
+    compile_timeout: Duration,
 }
 
 impl SafeRuntime {
     /// Construct an empty process-isolated runtime.
     pub fn new(dialect: GpuDialect) -> Result<Self, SafeInitError> {
+        Self::with_compile_timeout(dialect, DEFAULT_COMPILE_TIMEOUT)
+    }
+
+    /// Construct a runtime whose complete source-load and GPU-compile step is
+    /// bounded by `compile_timeout`.
+    ///
+    /// A timeout kills the isolated worker and its compiler process group. The
+    /// runtime must not be reused after [`SafeInitError::CompileTimedOut`].
+    pub fn with_compile_timeout(
+        dialect: GpuDialect,
+        compile_timeout: Duration,
+    ) -> Result<Self, SafeInitError> {
+        if compile_timeout.is_zero() {
+            return Err(SafeInitError::InvalidCompileTimeout);
+        }
         let executable = env::current_exe().map_err(SafeInitError::CurrentExecutable)?;
         let ipc = IpcTransport::load(dialect)?;
         let mut worker = WorkerProcess::spawn(&executable)?;
@@ -242,6 +266,7 @@ impl SafeRuntime {
                 worker: Mutex::new(worker),
                 ipc,
                 runtime_id: RuntimeId::new(),
+                compile_timeout,
             }),
             Response::Initialized(Err(error)) => Err(SafeInitError::RemoteInitialization(error)),
             Response::Loaded(_)
@@ -284,7 +309,10 @@ impl SafeRuntime {
             .send(&Request::LoadSources { sources })
             .map_err(map_init_worker_error)?;
 
-        match worker.receive().map_err(map_init_worker_error)? {
+        match worker
+            .receive_with_timeout(self.compile_timeout)
+            .map_err(map_init_worker_error)?
+        {
             Response::Loaded(Ok((index, entry_points))) => {
                 Ok(Artifact::new(self.runtime_id, index, entry_points.into()))
             }
@@ -923,6 +951,8 @@ enum WorkerError {
     Wait(#[source] io::Error),
     #[error("SafeRuntime child terminated")]
     Terminated(Termination),
+    #[error("SafeRuntime source loading and GPU compilation exceeded {0:?}")]
+    CompileTimedOut(Duration),
 }
 
 impl WorkerProcess {
@@ -936,6 +966,10 @@ impl WorkerProcess {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        // The worker and every compiler it spawns live in a private process
+        // group. A compile deadline can therefore stop hipcc/clang descendants
+        // as well as the protocol child that is blocked waiting for them.
+        command.process_group(0);
         unsafe {
             command.pre_exec(move || {
                 if libc::dup2(child_asset_fd, CHILD_ASSET_SOCKET_FD) == -1 {
@@ -998,6 +1032,16 @@ impl WorkerProcess {
         }
     }
 
+    fn receive_with_timeout(&mut self, timeout: Duration) -> Result<Response, WorkerError> {
+        let deadline = ProcessGroupDeadline::arm(self.child.id(), timeout);
+        let response = self.receive();
+        if deadline.finish() {
+            Err(WorkerError::CompileTimedOut(timeout))
+        } else {
+            response
+        }
+    }
+
     fn send_file(&mut self, file: &File) -> Result<(), WorkerError> {
         if let Err(error) = send_file(&self.asset_socket, file) {
             let _ = self.asset_socket.shutdown(Shutdown::Both);
@@ -1032,6 +1076,30 @@ impl WorkerProcess {
     }
 }
 
+struct ProcessGroupDeadline {
+    cancel: mpsc::Sender<()>,
+    watchdog: JoinHandle<bool>,
+}
+
+impl ProcessGroupDeadline {
+    fn arm(process_group: u32, timeout: Duration) -> Self {
+        let (cancel, cancelled) = mpsc::channel();
+        let watchdog = thread::spawn(move || match cancelled.recv_timeout(timeout) {
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                kill_process_group(process_group);
+                true
+            }
+            Ok(()) | Err(mpsc::RecvTimeoutError::Disconnected) => false,
+        });
+        Self { cancel, watchdog }
+    }
+
+    fn finish(self) -> bool {
+        let _ = self.cancel.send(());
+        self.watchdog.join().unwrap_or(true)
+    }
+}
+
 impl Drop for WorkerProcess {
     fn drop(&mut self) {
         if self.termination.is_none() {
@@ -1049,11 +1117,24 @@ impl Drop for WorkerProcess {
 
 fn map_init_worker_error(error: WorkerError) -> SafeInitError {
     match error {
+        WorkerError::CompileTimedOut(timeout) => SafeInitError::CompileTimedOut { timeout },
         WorkerError::Terminated(termination) => SafeInitError::ChildTerminated {
             status: termination.status,
             stderr: termination.stderr,
         },
         other => SafeInitError::Transport(other.to_string()),
+    }
+}
+
+fn kill_process_group(process_group: u32) {
+    let Ok(process_group) = i32::try_from(process_group) else {
+        return;
+    };
+    // WorkerProcess::spawn makes the child PID its process-group ID. Killing
+    // the negative ID stops that child and all compiler descendants. ESRCH is
+    // benign: the process may have exited at the deadline boundary.
+    unsafe {
+        libc::kill(-process_group, libc::SIGKILL);
     }
 }
 
@@ -1091,6 +1172,8 @@ fn map_resident_worker_error(error: WorkerError) -> ResidentError {
 mod error_tests {
     use super::*;
 
+    const TIMEOUT_FIXTURE_ENV: &str = "CATENA_TEST_PROCESS_GROUP_TIMEOUT_FIXTURE";
+
     #[test]
     fn structured_rejections_preserve_the_session() {
         assert!(!SafeInitError::RemoteLoad("invalid source".into()).invalidates_session());
@@ -1101,7 +1184,53 @@ mod error_tests {
     #[test]
     fn protocol_failures_invalidate_the_session() {
         assert!(SafeInitError::UnexpectedResponse.invalidates_session());
+        assert!(
+            SafeInitError::CompileTimedOut {
+                timeout: Duration::from_secs(1)
+            }
+            .invalidates_session()
+        );
         assert!(AssetError::Transport("closed".into()).invalidates_session());
         assert!(ResidentError::UnexpectedResponse.invalidates_session());
+    }
+
+    #[test]
+    fn zero_compile_timeout_is_rejected_before_spawning() {
+        assert!(matches!(
+            SafeRuntime::with_compile_timeout(GpuDialect::Hip, Duration::ZERO),
+            Err(SafeInitError::InvalidCompileTimeout)
+        ));
+    }
+
+    #[test]
+    fn compile_deadline_kills_the_worker_process_group() {
+        let executable = env::current_exe().expect("test executable path");
+        let mut command = Command::new(executable);
+        command
+            .args([
+                "--ignored",
+                "--exact",
+                "safe_runtime::error_tests::compile_deadline_process_fixture",
+            ])
+            .env(TIMEOUT_FIXTURE_ENV, "1")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .process_group(0);
+        let mut child = command.spawn().expect("spawn timeout fixture");
+        let deadline = ProcessGroupDeadline::arm(child.id(), Duration::from_millis(50));
+        let status = child.wait().expect("reap timeout fixture");
+        assert!(deadline.finish(), "fixture exited before its deadline");
+        assert!(!status.success(), "deadline did not kill the fixture");
+    }
+
+    #[test]
+    #[ignore = "spawned only by compile_deadline_kills_the_worker_process_group"]
+    fn compile_deadline_process_fixture() {
+        assert_eq!(
+            env::var_os(TIMEOUT_FIXTURE_ENV).as_deref(),
+            Some(std::ffi::OsStr::new("1"))
+        );
+        thread::sleep(Duration::from_secs(60));
     }
 }

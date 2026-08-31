@@ -46,8 +46,7 @@ fn main() -> anyhow::Result<()> {
     let owned = runtime.mem_u64(&[3, 5])?;
     let borrowed = runtime.mem_u64(&[8, 13])?;
 
-    let [returned, sum] = runtime.exec(
-        &artifact,
+    let [returned, sum] = artifact.exec(
         "add-first-and-return-owned",
         [owned.into(), borrowed.as_ref().into()],
     )?;

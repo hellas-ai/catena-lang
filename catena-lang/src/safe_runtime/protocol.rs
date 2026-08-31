@@ -21,6 +21,9 @@ pub(super) enum Request {
         buffers: Vec<WireIpcBuffer>,
         args: Vec<WireValue>,
     },
+    ReleaseArtifact {
+        artifact: usize,
+    },
     ReleaseOutputs,
     Shutdown,
 }
@@ -41,6 +44,7 @@ pub(super) struct WireExecution {
 #[derive(Debug, Serialize, Deserialize)]
 pub(super) enum RemoteExecError {
     Runtime(ExecError),
+    UnknownArtifact,
     Memory(String),
 }
 
@@ -178,6 +182,18 @@ mod tests {
         assert!(matches!(
             read_frame(&mut bytes.as_slice()).unwrap(),
             Some(Response::Loaded(Ok(actual))) if actual == expected
+        ));
+    }
+
+    #[test]
+    fn artifact_release_round_trips() {
+        let expected = artifact();
+        let mut bytes = Vec::new();
+        write_frame(&mut bytes, &Request::ReleaseArtifact { artifact: expected }).unwrap();
+
+        assert!(matches!(
+            read_frame(&mut bytes.as_slice()).unwrap(),
+            Some(Request::ReleaseArtifact { artifact }) if artifact == expected
         ));
     }
 

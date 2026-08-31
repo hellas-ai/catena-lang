@@ -75,6 +75,23 @@ pub enum AssetError {
     },
 }
 
+impl AssetError {
+    /// Whether the worker protocol can no longer be trusted after this error.
+    ///
+    /// Caller-side validation and a structured rejection from the worker leave
+    /// the session usable. Transport failures, termination, and an unexpected
+    /// response do not: the next operation must use a new session.
+    pub fn invalidates_session(&self) -> bool {
+        matches!(
+            self,
+            Self::Transport(_)
+                | Self::UnexpectedResponse
+                | Self::ChildTerminated { .. }
+                | Self::Unavailable { .. }
+        )
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct AttachedAsset {
     pub(crate) id: u64,
@@ -94,6 +111,13 @@ pub enum ResidentError {
     ChildTerminated { status: ExitStatus, stderr: String },
     #[error("SafeRuntime is unavailable because its child terminated with {status}: {stderr}")]
     Unavailable { status: ExitStatus, stderr: String },
+}
+
+impl ResidentError {
+    /// Whether the worker protocol can no longer be trusted after this error.
+    pub fn invalidates_session(&self) -> bool {
+        !matches!(self, Self::Remote(_))
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -146,6 +170,19 @@ pub enum SafeInitError {
     ChildTerminated { status: ExitStatus, stderr: String },
     #[error(transparent)]
     Memory(#[from] MemError),
+}
+
+impl SafeInitError {
+    /// Whether an existing worker protocol can no longer be trusted after this
+    /// error.
+    ///
+    /// Of these variants, only source reading and a structured load rejection
+    /// can occur without invalidating a live session. The construction-only
+    /// variants are conservatively classified as invalidating so callers never
+    /// retain a session whose health is uncertain.
+    pub fn invalidates_session(&self) -> bool {
+        !matches!(self, Self::ReadSource { .. } | Self::RemoteLoad(_))
+    }
 }
 
 /// Execution failures reported by [`SafeRuntime`].
@@ -1047,5 +1084,24 @@ fn map_resident_worker_error(error: WorkerError) -> ResidentError {
             stderr: termination.stderr,
         },
         other => ResidentError::Transport(other.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod error_tests {
+    use super::*;
+
+    #[test]
+    fn structured_rejections_preserve_the_session() {
+        assert!(!SafeInitError::RemoteLoad("invalid source".into()).invalidates_session());
+        assert!(!AssetError::Remote("invalid asset".into()).invalidates_session());
+        assert!(!ResidentError::Remote("invalid request".into()).invalidates_session());
+    }
+
+    #[test]
+    fn protocol_failures_invalidate_the_session() {
+        assert!(SafeInitError::UnexpectedResponse.invalidates_session());
+        assert!(AssetError::Transport("closed".into()).invalidates_session());
+        assert!(ResidentError::UnexpectedResponse.invalidates_session());
     }
 }

@@ -51,6 +51,13 @@ pub enum BindError {
     Resident(#[from] ResidentError),
 }
 
+impl BindError {
+    /// Whether the worker protocol can no longer be trusted after this error.
+    pub fn invalidates_session(&self) -> bool {
+        matches!(self, Self::Resident(error) if error.invalidates_session())
+    }
+}
+
 /// The caller's decision after receiving one generated token.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GenerationControl {
@@ -134,6 +141,13 @@ pub enum GenerationError {
     Resident(#[from] ResidentError),
     #[error("token callback failed: {0}")]
     Callback(#[source] anyhow::Error),
+}
+
+impl GenerationError {
+    /// Whether the worker protocol can no longer be trusted after this error.
+    pub fn invalidates_session(&self) -> bool {
+        matches!(self, Self::Resident(error) if error.invalidates_session())
+    }
 }
 
 /// Opaque child-resident causal-LM binding.
@@ -542,5 +556,15 @@ mod tests {
             validate_generation_request(&[1], &[], 0, 10, 10).unwrap(),
             None
         );
+    }
+
+    #[test]
+    fn typed_errors_preserve_only_healthy_sessions() {
+        assert!(!BindError::UnknownEntryPoint("missing".into()).invalidates_session());
+        assert!(
+            BindError::Resident(ResidentError::Transport("closed".into())).invalidates_session()
+        );
+        assert!(!GenerationError::InvalidRequest("invalid".into()).invalidates_session());
+        assert!(GenerationError::Resident(ResidentError::UnexpectedResponse).invalidates_session());
     }
 }

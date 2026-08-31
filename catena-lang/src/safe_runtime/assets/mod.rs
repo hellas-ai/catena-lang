@@ -10,8 +10,8 @@ mod memory;
 use memory::{LoadedAsset, validated_len};
 
 pub(super) const MAX_ASSET_BYTES: u64 = 1 << 40;
-const MAX_RESIDENT_ASSET_BYTES: u64 = 4 << 40;
-const MAX_RESIDENT_ASSETS: usize = 4096;
+pub(crate) const MAX_RESIDENT_ASSET_BYTES: u64 = 4 << 40;
+pub(crate) const MAX_RESIDENT_ASSETS: usize = 4096;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct ResidentAsset {

@@ -1,4 +1,6 @@
-use crate::codegen::GpuDialect;
+use crate::codegen::{
+    GENERATED_ALLOCATION_BUDGET_BEGIN_SYMBOL, GENERATED_ALLOCATION_BUDGET_END_SYMBOL, GpuDialect,
+};
 
 pub fn render_gpu_prelude(dialect: GpuDialect) -> String {
     let buffer_load = render_buffer_load(dialect);
@@ -6,6 +8,7 @@ pub fn render_gpu_prelude(dialect: GpuDialect) -> String {
     format!(
         r#"#include <{runtime_header}>
 #include <math.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 
@@ -63,6 +66,52 @@ __host__ static inline void catena_host_gpu_check({error_type} err) {{
     }}
 }}
 
+// Generated allocations are charged cumulatively within one entry-point
+// invocation. Freeing a buffer does not refund budget: this deliberately caps
+// allocation churn as well as peak live bytes.
+static thread_local uint64_t catena_host_allocation_budget = UINT64_MAX;
+static thread_local uint64_t catena_host_allocated_bytes = 0;
+
+extern "C" __host__ void {allocation_budget_begin_symbol}(uint64_t byte_limit) {{
+    catena_host_allocation_budget = byte_limit;
+    catena_host_allocated_bytes = 0;
+}}
+
+extern "C" __host__ void {allocation_budget_end_symbol}() {{
+    catena_host_allocation_budget = UINT64_MAX;
+    catena_host_allocated_bytes = 0;
+}}
+
+__host__ static inline void catena_host_allocation_rejected(const char *reason) {{
+    fprintf(stderr, "catena generated allocation rejected: %s\n", reason);
+    fflush(stderr);
+    __builtin_trap();
+}}
+
+__host__ static inline void catena_host_buffer_allocate(
+    void **data,
+    uint64_t element_count,
+    uint64_t element_size
+) {{
+    *data = nullptr;
+    if (element_size != 0 && element_count > UINT64_MAX / element_size) {{
+        catena_host_allocation_rejected("byte count overflowed");
+    }}
+    uint64_t byte_len = element_count * element_size;
+    if (byte_len > SIZE_MAX) {{
+        catena_host_allocation_rejected("byte count exceeds size_t");
+    }}
+    if (catena_host_allocated_bytes > catena_host_allocation_budget
+        || byte_len > catena_host_allocation_budget - catena_host_allocated_bytes) {{
+        catena_host_allocation_rejected("forward allocation budget exceeded");
+    }}
+    if (byte_len == 0) {{
+        return;
+    }}
+    catena_host_gpu_check({device_alloc_fn}(data, (size_t)byte_len));
+    catena_host_allocated_bytes += byte_len;
+}}
+
 __host__ static inline void catena_host_buffer_free(void *data) {{
     if (data != nullptr) {{
         catena_host_gpu_check({device_free_fn}(data));
@@ -71,9 +120,17 @@ __host__ static inline void catena_host_buffer_free(void *data) {{
 
 #endif
 
+__host__ __device__ static inline uint64_t catena_checked_mul_u64(uint64_t left, uint64_t right) {{
+    catena_assert(right == 0 || left <= UINT64_MAX / right);
+    return left * right;
+}}
+
 __host__ __device__ static inline uint64_t catena_launch_len(catena_launch_params_t params) {{
-    return (uint64_t)params.grid_dim.x * params.grid_dim.y * params.grid_dim.z
-        * params.block_dim.x * params.block_dim.y * params.block_dim.z;
+    uint64_t len = catena_checked_mul_u64(params.grid_dim.x, params.grid_dim.y);
+    len = catena_checked_mul_u64(len, params.grid_dim.z);
+    len = catena_checked_mul_u64(len, params.block_dim.x);
+    len = catena_checked_mul_u64(len, params.block_dim.y);
+    return catena_checked_mul_u64(len, params.block_dim.z);
 }}
 
 __host__ __device__ static inline float catena_u32_bitcast_f32(uint32_t bits) {{
@@ -102,6 +159,9 @@ __host__ __device__ static inline uint32_t catena_f32_bitcast_u32(float value) {
         error_type = dialect.error_type(),
         success_value = dialect.success_value(),
         error_string_fn = dialect.error_string_fn(),
+        allocation_budget_begin_symbol = GENERATED_ALLOCATION_BUDGET_BEGIN_SYMBOL,
+        allocation_budget_end_symbol = GENERATED_ALLOCATION_BUDGET_END_SYMBOL,
+        device_alloc_fn = dialect.device_alloc_fn(),
         device_free_fn = dialect.device_free_fn(),
         buffer_load = buffer_load,
         bf16_support = bf16_support,
@@ -198,6 +258,55 @@ mod tests {
         let cuda = render_gpu_prelude(GpuDialect::Cuda);
         assert!(cuda.contains("catena_host_gpu_check(cudaFree(data));"));
         assert!(!cuda.contains("cudaFreeAsync"));
+    }
+
+    #[test]
+    fn generated_allocations_are_checked_before_the_selected_runtime_allocator() {
+        for (dialect, allocator) in [
+            (GpuDialect::Hip, "hipMalloc(data, (size_t)byte_len)"),
+            (GpuDialect::Cuda, "cudaMalloc(data, (size_t)byte_len)"),
+        ] {
+            let prelude = render_gpu_prelude(dialect);
+            let overflow = prelude
+                .find("element_count > UINT64_MAX / element_size")
+                .unwrap();
+            let budget = prelude
+                .find("byte_len > catena_host_allocation_budget - catena_host_allocated_bytes")
+                .unwrap();
+            let allocation = prelude.find(allocator).unwrap();
+            assert!(overflow < allocation);
+            assert!(budget < allocation);
+            assert_eq!(prelude.matches(allocator).count(), 1);
+        }
+    }
+
+    #[test]
+    fn generated_allocation_budget_is_cumulative_and_reset_per_invocation() {
+        let prelude = render_gpu_prelude(GpuDialect::Hip);
+        assert!(
+            prelude.contains(
+                "static thread_local uint64_t catena_host_allocation_budget = UINT64_MAX;"
+            )
+        );
+        assert!(prelude.contains(
+            "extern \"C\" __host__ void catena_generated_allocation_budget_begin(uint64_t byte_limit)"
+        ));
+        assert!(
+            prelude.contains("extern \"C\" __host__ void catena_generated_allocation_budget_end()")
+        );
+        assert_eq!(
+            prelude.matches("catena_host_allocated_bytes = 0;").count(),
+            3
+        );
+        assert!(prelude.contains("catena_host_allocated_bytes += byte_len;"));
+        assert!(!prelude.contains("catena_host_allocated_bytes -= byte_len;"));
+    }
+
+    #[test]
+    fn launch_element_count_multiplication_is_checked() {
+        let prelude = render_gpu_prelude(GpuDialect::Hip);
+        assert!(prelude.contains("catena_assert(right == 0 || left <= UINT64_MAX / right);"));
+        assert_eq!(prelude.matches("catena_checked_mul_u64(").count(), 6);
     }
 
     #[test]

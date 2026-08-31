@@ -279,12 +279,47 @@ impl Runtime {
         self.exec_symbol(loaded, name, signature, args)
     }
 
+    /// Run a source-level program while conservatively bounding every device
+    /// allocation made by generated code during this invocation. Allocations
+    /// are charged cumulatively; generated frees do not refund the limit.
+    pub(crate) fn exec_values_with_generated_allocation_budget<'a>(
+        &self,
+        artifact: &Artifact,
+        name: &str,
+        args: Vec<Value<'a>>,
+        byte_limit: u64,
+    ) -> Result<Vec<Value<'static>>, ExecError> {
+        let loaded = self.loaded_artifact(artifact)?;
+        let signature = loaded
+            .signatures
+            .get(name)
+            .ok_or_else(|| ExecError::UnknownSourceFunction(name.to_string()))?;
+        self.exec_symbol_with_generated_allocation_budget(
+            loaded,
+            name,
+            signature,
+            args,
+            Some(byte_limit),
+        )
+    }
+
     fn exec_symbol<'a>(
         &self,
         loaded: &LoadedArtifact,
         name: &str,
         signature: &FunctionSignature,
         args: Vec<Value<'a>>,
+    ) -> Result<Vec<Value<'static>>, ExecError> {
+        self.exec_symbol_with_generated_allocation_budget(loaded, name, signature, args, None)
+    }
+
+    fn exec_symbol_with_generated_allocation_budget<'a>(
+        &self,
+        loaded: &LoadedArtifact,
+        name: &str,
+        signature: &FunctionSignature,
+        args: Vec<Value<'a>>,
+        allocation_budget: Option<u64>,
     ) -> Result<Vec<Value<'static>>, ExecError> {
         // Check input arity lines up with what's in the function signature.
         if signature.inputs.len() != args.len() {
@@ -338,9 +373,17 @@ impl Runtime {
             })
             .collect::<Vec<_>>();
 
-        loaded
-            .executor
-            .call(&signature.symbol, &raw_inputs, &mut raw_outputs);
+        match allocation_budget {
+            Some(byte_limit) => loaded.executor.call_with_generated_allocation_budget(
+                &signature.symbol,
+                &raw_inputs,
+                &mut raw_outputs,
+                byte_limit,
+            ),
+            None => loaded
+                .executor
+                .call(&signature.symbol, &raw_inputs, &mut raw_outputs),
+        }
 
         // Re-establish Rust ownership before the synchronization boundary. If
         // synchronization reports a device fault, dropping `outputs` still

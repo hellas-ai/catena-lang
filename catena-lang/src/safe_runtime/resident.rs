@@ -16,8 +16,79 @@ pub(crate) const MAXIMUM_CAPACITY: u64 = 8_388_608;
 pub(crate) const MAX_STOP_TOKEN_IDS: usize = 256;
 pub(crate) const MAX_ENTRY_POINT_BYTES: usize = 1024;
 
+const TOKEN_STAGING_ELEMENT_BYTES: u64 = std::mem::size_of::<u64>() as u64;
+const LOGIT_ELEMENT_BYTES: u64 = std::mem::size_of::<f32>() as u64;
+const NEXT_TOKEN_BYTES: u64 = std::mem::size_of::<u64>() as u64;
+
 const MAX_RESIDENT_MODELS: usize = 256;
 const MAX_RESIDENT_GENERATIONS: usize = 256;
+
+/// Arithmetic failures while calculating the causal-LM device-memory floor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum GenerationDeviceEnvelopeError {
+    #[error("generation state byte count overflowed")]
+    StateBytesOverflow,
+    #[error("generation state exceeds the {maximum}-byte limit")]
+    StateBytesLimit { maximum: u64 },
+    #[error("generation token-staging byte count overflowed")]
+    TokenStagingBytesOverflow,
+    #[error("generation logits byte count overflowed")]
+    LogitsBytesOverflow,
+    #[error("minimum generation device byte count overflowed")]
+    TotalBytesOverflow,
+}
+
+/// Return the conservative device-memory floor for one causal-LM generation.
+///
+/// The floor covers capacity-scaled resident state, a worst-case token batch of
+/// `capacity` u64 IDs, mandatory f32 logits, and one u64 next-token output.
+/// Replacement state may reuse its resident input allocation. Generated
+/// intermediates are deliberately not guessed here; the runtime continues to
+/// charge every generated allocation cumulatively against the configured
+/// envelope during each forward.
+pub fn minimum_generation_device_bytes(
+    state_byte_multipliers: &[u64],
+    capacity: u64,
+    vocabulary_size: u64,
+) -> std::result::Result<u64, GenerationDeviceEnvelopeError> {
+    let state_bytes = generation_state_bytes(state_byte_multipliers, capacity)?;
+    let token_staging_bytes = capacity
+        .checked_mul(TOKEN_STAGING_ELEMENT_BYTES)
+        .ok_or(GenerationDeviceEnvelopeError::TokenStagingBytesOverflow)?;
+    let logits_bytes = vocabulary_size
+        .checked_mul(LOGIT_ELEMENT_BYTES)
+        .ok_or(GenerationDeviceEnvelopeError::LogitsBytesOverflow)?;
+    state_bytes
+        .checked_add(token_staging_bytes)
+        .and_then(|bytes| bytes.checked_add(logits_bytes))
+        .and_then(|bytes| bytes.checked_add(NEXT_TOKEN_BYTES))
+        .ok_or(GenerationDeviceEnvelopeError::TotalBytesOverflow)
+}
+
+fn generation_state_bytes(
+    state_byte_multipliers: &[u64],
+    capacity: u64,
+) -> std::result::Result<u64, GenerationDeviceEnvelopeError> {
+    state_byte_multipliers
+        .iter()
+        .try_fold(0_u64, |total, &multiplier| {
+            let bytes = capacity
+                .checked_mul(multiplier)
+                .ok_or(GenerationDeviceEnvelopeError::StateBytesOverflow)?;
+            total
+                .checked_add(bytes)
+                .ok_or(GenerationDeviceEnvelopeError::StateBytesOverflow)
+                .and_then(|total| {
+                    if total <= MAX_MODEL_STATE_BYTES {
+                        Ok(total)
+                    } else {
+                        Err(GenerationDeviceEnvelopeError::StateBytesLimit {
+                            maximum: MAX_MODEL_STATE_BYTES,
+                        })
+                    }
+                })
+        })
+}
 
 struct BoundModel {
     artifact: usize,
@@ -26,11 +97,13 @@ struct BoundModel {
     state_byte_multipliers: Vec<u64>,
     vocabulary_size: u64,
     maximum_capacity: u64,
+    generation_device_allocation_budget_bytes: u64,
 }
 
 struct Generation {
     model: u64,
     states: Vec<MemOwn>,
+    state_byte_len: u64,
     capacity: u64,
     position: u64,
 }
@@ -83,6 +156,8 @@ impl ResidentStore {
                 state_byte_multipliers: binding.state_byte_multipliers,
                 vocabulary_size: binding.vocabulary_size,
                 maximum_capacity: binding.maximum_capacity,
+                generation_device_allocation_budget_bytes: binding
+                    .generation_device_allocation_budget_bytes,
             },
         );
         Ok(id)
@@ -109,16 +184,18 @@ impl ResidentStore {
             model_spec.maximum_capacity
         );
 
-        let mut states = Vec::with_capacity(model_spec.state_byte_multipliers.len());
-        let mut total_bytes = 0_u64;
-        for &multiplier in &model_spec.state_byte_multipliers {
-            let byte_len = capacity
-                .checked_mul(multiplier)
-                .context("generation state byte count overflowed")?;
-            total_bytes = total_bytes
-                .checked_add(byte_len)
-                .filter(|total| *total <= MAX_MODEL_STATE_BYTES)
-                .context("generation state exceeds the byte limit")?;
+        // This pure validation is deliberately complete before the first GPU
+        // allocation. A known-insufficient envelope is a structured request
+        // rejection and leaves the resident worker healthy.
+        let (state_byte_lens, state_byte_len) = checked_generation_layout(
+            &model_spec.state_byte_multipliers,
+            capacity,
+            model_spec.vocabulary_size,
+            model_spec.generation_device_allocation_budget_bytes,
+        )?;
+
+        let mut states = Vec::with_capacity(state_byte_lens.len());
+        for byte_len in state_byte_lens {
             states.push(runtime.mem_zeroed_bytes(byte_len)?);
         }
 
@@ -128,6 +205,7 @@ impl ResidentStore {
             Generation {
                 model,
                 states,
+                state_byte_len,
                 capacity,
                 position: 0,
             },
@@ -166,6 +244,55 @@ impl ResidentStore {
         self.generations
             .retain(|_, generation| generation.model != model);
     }
+}
+
+fn generation_state_layout(
+    state_byte_multipliers: &[u64],
+    capacity: u64,
+) -> Result<(Vec<u64>, u64)> {
+    let state_byte_lens = state_byte_multipliers
+        .iter()
+        .map(|&multiplier| {
+            capacity
+                .checked_mul(multiplier)
+                .context("generation state byte count overflowed")
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let state_byte_len = generation_state_bytes(state_byte_multipliers, capacity)?;
+    Ok((state_byte_lens, state_byte_len))
+}
+
+fn checked_generation_layout(
+    state_byte_multipliers: &[u64],
+    capacity: u64,
+    vocabulary_size: u64,
+    allocation_envelope: u64,
+) -> Result<(Vec<u64>, u64)> {
+    let minimum_device_bytes =
+        minimum_generation_device_bytes(state_byte_multipliers, capacity, vocabulary_size)?;
+    ensure!(
+        minimum_device_bytes <= allocation_envelope,
+        "causal-lm generation requires at least {minimum_device_bytes} device bytes at capacity {capacity}, exceeding its {allocation_envelope}-byte allocation envelope"
+    );
+    generation_state_layout(state_byte_multipliers, capacity)
+}
+
+fn remaining_generated_allocation_budget(
+    state_byte_len: u64,
+    token_count: u64,
+    allocation_envelope: u64,
+) -> Result<u64> {
+    let token_staging_byte_len = token_count
+        .checked_mul(TOKEN_STAGING_ELEMENT_BYTES)
+        .context("token staging byte count overflowed")?;
+    let resident_and_staging_bytes = state_byte_len
+        .checked_add(token_staging_byte_len)
+        .context("generation device byte count overflowed")?;
+    ensure!(
+        resident_and_staging_bytes <= allocation_envelope,
+        "resident state and token staging require {resident_and_staging_bytes} device bytes, exceeding the generation's {allocation_envelope}-byte allocation envelope"
+    );
+    Ok(allocation_envelope - resident_and_staging_bytes)
 }
 
 fn validate_model_binding(entry_point: &EntryPoint, binding: &WireModelBinding) -> Result<()> {
@@ -314,6 +441,11 @@ fn forward(
         "input contains a token outside the declared vocabulary"
     );
     let token_count = u64::try_from(tokens.len()).context("token count exceeds u64")?;
+    let generated_allocation_budget = remaining_generated_allocation_budget(
+        generation.state_byte_len,
+        token_count,
+        model.generation_device_allocation_budget_bytes,
+    )?;
     let end = generation
         .position
         .checked_add(token_count)
@@ -347,7 +479,12 @@ fn forward(
     }
 
     let artifact = runtime.artifact_at(model.artifact)?;
-    let outputs = match runtime.exec_values(artifact, &model.entry_point, inputs) {
+    let outputs = match runtime.exec_values_with_generated_allocation_budget(
+        artifact,
+        &model.entry_point,
+        inputs,
+        generated_allocation_budget,
+    ) {
         Ok(outputs) => outputs,
         Err(ExecError::GpuSynchronization(error)) => {
             return Err(FatalGpuSynchronization(error).into());
@@ -381,7 +518,7 @@ fn forward(
     };
     let logits_bytes = model
         .vocabulary_size
-        .checked_mul(4)
+        .checked_mul(LOGIT_ELEMENT_BYTES)
         .context("logits byte count overflowed")?;
     ensure!(
         logits.byte_len() == logits_bytes,
@@ -393,8 +530,8 @@ fn forward(
         bail!("next-token output is not MemOwn");
     };
     ensure!(
-        next_token.byte_len() == 8,
-        "next-token output is {} bytes, expected 8",
+        next_token.byte_len() == NEXT_TOKEN_BYTES,
+        "next-token output is {} bytes, expected {NEXT_TOKEN_BYTES}",
         next_token.byte_len()
     );
     ensure!(
@@ -453,6 +590,7 @@ mod tests {
             state_byte_multipliers: vec![4],
             vocabulary_size: 16,
             maximum_capacity: 8,
+            generation_device_allocation_budget_bytes: 1024,
         }
     }
 
@@ -518,5 +656,101 @@ mod tests {
             vec![ValueKind::MemOwn; 3],
         );
         assert!(validate_model_binding(&entry, &excessive_static).is_err());
+    }
+
+    #[test]
+    fn generation_envelope_is_checked_before_state_allocation() {
+        let minimum = minimum_generation_device_bytes(&[4, 8], 10, 16).unwrap();
+        assert_eq!(minimum, 272);
+        assert_eq!(
+            checked_generation_layout(&[4, 8], 10, 16, minimum).unwrap(),
+            (vec![40, 80], 120)
+        );
+        let error = checked_generation_layout(&[4, 8], 10, 16, minimum - 1).unwrap_err();
+        assert!(error.to_string().contains("allocation envelope"));
+        assert!(generation_state_layout(&[u64::MAX], 2).is_err());
+    }
+
+    #[test]
+    fn minimum_generation_device_bytes_reports_each_overflow_class() {
+        assert_eq!(
+            minimum_generation_device_bytes(&[u64::MAX], 2, 0),
+            Err(GenerationDeviceEnvelopeError::StateBytesOverflow)
+        );
+        assert_eq!(
+            minimum_generation_device_bytes(&[], u64::MAX, 0),
+            Err(GenerationDeviceEnvelopeError::TokenStagingBytesOverflow)
+        );
+        assert_eq!(
+            minimum_generation_device_bytes(&[], 0, u64::MAX),
+            Err(GenerationDeviceEnvelopeError::LogitsBytesOverflow)
+        );
+        assert_eq!(
+            minimum_generation_device_bytes(&[], u64::MAX / 8, 1),
+            Err(GenerationDeviceEnvelopeError::TotalBytesOverflow)
+        );
+        assert_eq!(
+            minimum_generation_device_bytes(&[MAX_MODEL_STATE_BYTES], 2, 0),
+            Err(GenerationDeviceEnvelopeError::StateBytesLimit {
+                maximum: MAX_MODEL_STATE_BYTES
+            })
+        );
+    }
+
+    #[test]
+    fn generated_budget_reserves_resident_state_and_token_staging() {
+        assert_eq!(
+            remaining_generated_allocation_budget(80, 5, 200).unwrap(),
+            80
+        );
+        let error = remaining_generated_allocation_budget(80, 5, 119).unwrap_err();
+        assert!(error.to_string().contains("allocation envelope"));
+        assert!(remaining_generated_allocation_budget(0, u64::MAX, u64::MAX).is_err());
+    }
+
+    #[test]
+    fn teardown_removes_state_before_returning_and_is_idempotent() {
+        let mut store = ResidentStore::new();
+        store.models.insert(
+            7,
+            BoundModel {
+                artifact: 0,
+                entry_point: "model".into(),
+                assets: Vec::new(),
+                state_byte_multipliers: Vec::new(),
+                vocabulary_size: 16,
+                maximum_capacity: 8,
+                generation_device_allocation_budget_bytes: 1024,
+            },
+        );
+        store.generations.insert(
+            11,
+            Generation {
+                model: 7,
+                states: Vec::new(),
+                state_byte_len: 0,
+                capacity: 8,
+                position: 0,
+            },
+        );
+
+        store.release_generation(11);
+        assert!(!store.generations.contains_key(&11));
+        store.release_generation(11);
+
+        store.generations.insert(
+            13,
+            Generation {
+                model: 7,
+                states: Vec::new(),
+                state_byte_len: 0,
+                capacity: 8,
+                position: 0,
+            },
+        );
+        store.release_model(7);
+        assert!(!store.models.contains_key(&7));
+        assert!(!store.generations.contains_key(&13));
+        store.release_model(7);
     }
 }

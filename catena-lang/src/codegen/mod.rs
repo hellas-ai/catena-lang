@@ -48,6 +48,11 @@ type CodegenTermMap = TheoryTermMap<CodegenOperation>;
 
 const PROGRAM_THEORY: &str = "program";
 
+pub(crate) const GENERATED_ALLOCATION_BUDGET_BEGIN_SYMBOL: &str =
+    "catena_generated_allocation_budget_begin";
+pub(crate) const GENERATED_ALLOCATION_BUDGET_END_SYMBOL: &str =
+    "catena_generated_allocation_budget_end";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum GpuDialect {
     Hip,

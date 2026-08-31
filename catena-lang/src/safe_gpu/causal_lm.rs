@@ -19,10 +19,37 @@ use super::{AssetSlice, Program, Session};
 use crate::{
     runtime::RuntimeId,
     safe_runtime::{
-        ResidentAssetSlice, ResidentError, ResidentGeneration, ResidentModel, SafeRuntime,
-        resident::{MAX_STOP_TOKEN_IDS, MAXIMUM_CAPACITY, validate_model_spec},
+        ResidentAssetSlice, ResidentError, ResidentGeneration, ResidentModel, ResidentModelBinding,
+        SafeRuntime, resident::validate_model_spec,
     },
 };
+
+pub use crate::safe_runtime::resident::{
+    GenerationDeviceEnvelopeError, minimum_generation_device_bytes,
+};
+
+/// Maximum number of mutable state buffers in one causal-LM binding.
+pub const MAX_MODEL_STATES: usize = crate::safe_runtime::resident::MAX_MODEL_STATES;
+
+/// Maximum number of ordered static asset slices in one causal-LM binding.
+pub const MAX_MODEL_ASSET_SLICES: usize = crate::safe_runtime::resident::MAX_MODEL_ASSET_SLICES;
+
+/// Maximum aggregate bytes across the ordered static slices of one model.
+/// Repeated and overlapping slices each count because each is a logical ABI
+/// input even when they borrow the same resident asset.
+pub const MAX_MODEL_STATIC_BYTES: u64 = crate::safe_runtime::resident::MAX_MODEL_STATIC_BYTES;
+
+/// Maximum aggregate capacity-scaled bytes across a model's mutable states.
+pub const MAX_MODEL_STATE_BYTES: u64 = crate::safe_runtime::resident::MAX_MODEL_STATE_BYTES;
+
+/// Maximum causal-LM generation capacity, including prompt and generated IDs.
+pub const MAXIMUM_CAPACITY: u64 = crate::safe_runtime::resident::MAXIMUM_CAPACITY;
+
+/// Maximum number of stop-token IDs accepted by one generation request.
+pub const MAX_STOP_TOKEN_IDS: usize = crate::safe_runtime::resident::MAX_STOP_TOKEN_IDS;
+
+/// Maximum UTF-8 byte length of a causal-LM entry-point name.
+pub const MAX_ENTRY_POINT_BYTES: usize = crate::safe_runtime::resident::MAX_ENTRY_POINT_BYTES;
 
 /// Complete, named configuration for one frozen causal-LM ABI binding.
 #[derive(Debug, Clone, Copy)]
@@ -34,6 +61,13 @@ pub struct ModelConfig<'a> {
     pub state_byte_multipliers: &'a [u64],
     pub vocabulary_size: u64,
     pub maximum_capacity: u64,
+    /// Aggregate requested device bytes for one active generation, excluding
+    /// attached read-only assets. It covers child-created generation state,
+    /// current token staging, and every allocation made by generated code in a
+    /// forward. Generated allocations are charged cumulatively within each
+    /// forward, so frees do not refund the envelope. GPU-driver allocation
+    /// granularity and runtime overhead require separate provider headroom.
+    pub generation_device_allocation_budget_bytes: u64,
 }
 
 /// A program or model description could not be bound to the causal-LM ABI.
@@ -141,12 +175,24 @@ pub enum GenerationError {
     Resident(#[from] ResidentError),
     #[error("token callback failed: {0}")]
     Callback(#[source] anyhow::Error),
+    #[error("token generation failed ({primary}); releasing its GPU state also failed ({release})")]
+    ReleaseAfterFailure {
+        #[source]
+        primary: Box<GenerationError>,
+        release: ResidentError,
+    },
 }
 
 impl GenerationError {
     /// Whether the worker protocol can no longer be trusted after this error.
     pub fn invalidates_session(&self) -> bool {
-        matches!(self, Self::Resident(error) if error.invalidates_session())
+        match self {
+            Self::Resident(error) => error.invalidates_session(),
+            Self::ReleaseAfterFailure { primary, release } => {
+                primary.invalidates_session() || release.invalidates_session()
+            }
+            Self::InvalidRequest(_) | Self::Callback(_) => false,
+        }
     }
 }
 
@@ -155,8 +201,10 @@ pub struct Model {
     runtime: Arc<SafeRuntime>,
     session: RuntimeId,
     resident: ResidentModel,
+    state_byte_multipliers: Vec<u64>,
     vocabulary_size: u64,
     maximum_capacity: u64,
+    generation_device_allocation_budget_bytes: u64,
 }
 
 impl fmt::Debug for Model {
@@ -212,18 +260,25 @@ impl Session {
             .collect();
         let resident = self.runtime.bind_resident_model(
             program,
-            config.entry_point.to_string(),
-            assets,
-            config.state_byte_multipliers.to_vec(),
-            config.vocabulary_size,
-            config.maximum_capacity,
+            ResidentModelBinding {
+                entry_point: config.entry_point.to_string(),
+                assets,
+                state_byte_multipliers: config.state_byte_multipliers.to_vec(),
+                vocabulary_size: config.vocabulary_size,
+                maximum_capacity: config.maximum_capacity,
+                generation_device_allocation_budget_bytes: config
+                    .generation_device_allocation_budget_bytes,
+            },
         )?;
         Ok(Model {
             runtime: self.runtime.clone(),
             session,
             resident,
+            state_byte_multipliers: config.state_byte_multipliers.to_vec(),
             vocabulary_size: config.vocabulary_size,
             maximum_capacity: config.maximum_capacity,
+            generation_device_allocation_budget_bytes: config
+                .generation_device_allocation_budget_bytes,
         })
     }
 }
@@ -254,6 +309,17 @@ impl Model {
     /// A stop token is checked before `emit` and is not collected. Cancellation
     /// retains the token already passed to `emit`. Callback errors remain
     /// errors, and every exit path releases the child-resident generation.
+    /// `emit` runs synchronously, must return promptly, and must not invoke
+    /// another operation on this model's [`Session`]. Same-thread re-entry is
+    /// rejected instead of deadlocking. Dropping another model from any thread
+    /// records its release for generation teardown without blocking that
+    /// destructor. The generation watchdog covers start through release,
+    /// including callbacks and inter-step gaps, but
+    /// cannot preempt callback code or bound when this call returns.
+    /// If a callback never returns, the watchdog can kill the worker but this
+    /// call cannot reap it; after that timeout, process-wide worker admission
+    /// remains closed until the callback returns and teardown proves leader
+    /// exit.
     pub fn generate_tokens_streaming(
         &self,
         prompt_tokens: &[u32],
@@ -271,45 +337,71 @@ impl Model {
         else {
             return Ok(empty_generation_result());
         };
+        validate_generation_device_envelope(
+            &self.state_byte_multipliers,
+            capacity,
+            self.vocabulary_size,
+            self.generation_device_allocation_budget_bytes,
+        )?;
         let handle = self
             .runtime
             .start_resident_generation(self.resident, capacity)?;
-        let generation = ActiveGeneration {
+        let mut generation = ActiveGeneration {
             runtime: &self.runtime,
-            handle,
+            handle: Some(handle),
         };
-        generate_tokens_with(
+        let result = generate_tokens_with(
             prompt_tokens,
             max_new_tokens as usize,
             |token| stop_tokens.contains(&token),
             |tokens| Ok(generation.forward(tokens)?),
             emit,
-        )
+        );
+        let released = generation.finish();
+        match (result, released) {
+            (Ok(_), Err(error)) => Err(error.into()),
+            (Err(primary), Err(release)) => Err(GenerationError::ReleaseAfterFailure {
+                primary: Box::new(primary),
+                release,
+            }),
+            (result, Ok(())) => result,
+        }
     }
 }
 
 impl Drop for Model {
     fn drop(&mut self) {
         debug_assert_eq!(self.session, self.runtime.id());
-        self.runtime.release_resident_model(self.resident);
+        let _ = self.runtime.release_resident_model(self.resident);
     }
 }
 
 struct ActiveGeneration<'a> {
     runtime: &'a SafeRuntime,
-    handle: ResidentGeneration,
+    handle: Option<ResidentGeneration>,
 }
 
 impl ActiveGeneration<'_> {
     fn forward(&self, tokens: &[u32]) -> Result<u32, ResidentError> {
+        let handle = self
+            .handle
+            .as_ref()
+            .expect("active generation must retain its resident handle");
         self.runtime
-            .step_resident_generation(self.handle, tokens.to_vec())
+            .step_resident_generation(handle, tokens.to_vec())
+    }
+
+    fn finish(&mut self) -> Result<(), ResidentError> {
+        let Some(handle) = self.handle.take() else {
+            return Ok(());
+        };
+        self.runtime.release_resident_generation(handle)
     }
 }
 
 impl Drop for ActiveGeneration<'_> {
     fn drop(&mut self) {
-        self.runtime.release_resident_generation(self.handle);
+        let _ = self.finish();
     }
 }
 
@@ -354,6 +446,27 @@ fn validate_generation_request(
         format!("requested capacity {capacity} exceeds model maximum {maximum_capacity}"),
     )?;
     Ok(Some(capacity))
+}
+
+fn validate_generation_device_envelope(
+    state_byte_multipliers: &[u64],
+    capacity: u64,
+    vocabulary_size: u64,
+    allocation_envelope: u64,
+) -> Result<(), GenerationError> {
+    let minimum =
+        minimum_generation_device_bytes(state_byte_multipliers, capacity, vocabulary_size)
+            .map_err(|error| {
+                GenerationError::InvalidRequest(format!(
+                    "causal-lm generation device envelope could not be calculated: {error}"
+                ))
+            })?;
+    invalid(
+        minimum <= allocation_envelope,
+        format!(
+            "causal-lm generation requires at least {minimum} device bytes at capacity {capacity}, exceeding its {allocation_envelope}-byte allocation envelope"
+        ),
+    )
 }
 
 fn generate_tokens_with(
@@ -559,6 +672,25 @@ mod tests {
     }
 
     #[test]
+    fn generation_device_envelope_accepts_exact_boundary_and_rejects_one_below() {
+        let minimum = minimum_generation_device_bytes(&[4, 8], 10, 16).unwrap();
+        assert_eq!(minimum, 272);
+        validate_generation_device_envelope(&[4, 8], 10, 16, minimum).unwrap();
+        let error = validate_generation_device_envelope(&[4, 8], 10, 16, minimum - 1).unwrap_err();
+        assert!(matches!(error, GenerationError::InvalidRequest(_)));
+        assert!(!error.invalidates_session());
+        assert!(error.to_string().contains("at least 272 device bytes"));
+    }
+
+    #[test]
+    fn generation_device_envelope_overflow_is_a_healthy_request_rejection() {
+        let error = validate_generation_device_envelope(&[], u64::MAX, 0, u64::MAX).unwrap_err();
+        assert!(matches!(error, GenerationError::InvalidRequest(_)));
+        assert!(!error.invalidates_session());
+        assert!(error.to_string().contains("token-staging"));
+    }
+
+    #[test]
     fn typed_errors_preserve_only_healthy_sessions() {
         assert!(!BindError::UnknownEntryPoint("missing".into()).invalidates_session());
         assert!(
@@ -566,5 +698,27 @@ mod tests {
         );
         assert!(!GenerationError::InvalidRequest("invalid".into()).invalidates_session());
         assert!(GenerationError::Resident(ResidentError::UnexpectedResponse).invalidates_session());
+
+        let combined = GenerationError::ReleaseAfterFailure {
+            primary: Box::new(GenerationError::Callback(anyhow::anyhow!("callback"))),
+            release: ResidentError::UnexpectedResponse,
+        };
+        assert!(combined.invalidates_session());
+
+        let combined = GenerationError::ReleaseAfterFailure {
+            primary: Box::new(GenerationError::Resident(ResidentError::UnexpectedResponse)),
+            release: ResidentError::Remote("already absent".into()),
+        };
+        assert!(combined.invalidates_session());
+
+        let combined = GenerationError::ReleaseAfterFailure {
+            primary: Box::new(GenerationError::Callback(anyhow::anyhow!("callback"))),
+            release: ResidentError::Teardown("missing acknowledgement".into()),
+        };
+        assert!(combined.invalidates_session());
+
+        let structured_execution_failure =
+            GenerationError::Resident(ResidentError::Remote("generation was rejected".into()));
+        assert!(!structured_execution_failure.invalidates_session());
     }
 }

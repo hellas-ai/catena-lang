@@ -6,7 +6,14 @@ use libffi::middle::{Arg, Cif, CodePtr, Type};
 use libloading::Library;
 use thiserror::Error;
 
+use crate::codegen::{
+    GENERATED_ALLOCATION_BUDGET_BEGIN_SYMBOL, GENERATED_ALLOCATION_BUDGET_END_SYMBOL,
+};
+
 use super::{signature::SignatureTable, value::ValueKind};
+
+type AllocationBudgetBegin = unsafe extern "C" fn(u64);
+type AllocationBudgetEnd = unsafe extern "C" fn();
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
@@ -54,12 +61,37 @@ struct PreparedFunction {
     cif: Cif,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct AllocationBudgetControl {
+    begin: AllocationBudgetBegin,
+    end: AllocationBudgetEnd,
+}
+
+impl AllocationBudgetControl {
+    fn under_limit<T>(&self, byte_limit: u64, invoke: impl FnOnce() -> T) -> T {
+        unsafe { (self.begin)(byte_limit) };
+        let _reset = AllocationBudgetReset { control: self };
+        invoke()
+    }
+}
+
+struct AllocationBudgetReset<'a> {
+    control: &'a AllocationBudgetControl,
+}
+
+impl Drop for AllocationBudgetReset<'_> {
+    fn drop(&mut self) {
+        unsafe { (self.control.end)() };
+    }
+}
+
 /// Loaded generated code and its prepared dynamic call interfaces.
 #[derive(Debug)]
 pub(super) struct Executor {
     // Keep the library loaded for as long as any cached code pointer can be used.
     _library: Library,
     functions: HashMap<String, PreparedFunction>,
+    allocation_budget: AllocationBudgetControl,
 }
 
 #[derive(Debug, Error)]
@@ -78,6 +110,10 @@ impl Executor {
         library: Library,
         signatures: &SignatureTable,
     ) -> Result<Self, ExecutorError> {
+        let allocation_budget = AllocationBudgetControl {
+            begin: load_control_symbol(&library, GENERATED_ALLOCATION_BUDGET_BEGIN_SYMBOL)?,
+            end: load_control_symbol(&library, GENERATED_ALLOCATION_BUDGET_END_SYMBOL)?,
+        };
         let mut functions = HashMap::with_capacity(signatures.len());
         for signature in signatures.values() {
             if functions.contains_key(&signature.symbol) {
@@ -111,11 +147,23 @@ impl Executor {
         Ok(Self {
             _library: library,
             functions,
+            allocation_budget,
         })
     }
 
     /// Invoke a prepared symbol. Runtime validation guarantees the value shapes and kinds.
     pub(super) fn call(&self, symbol: &str, inputs: &[AbiValue], outputs: &mut [AbiValue]) {
+        self.call_with_generated_allocation_budget(symbol, inputs, outputs, u64::MAX);
+    }
+
+    /// Invoke a prepared symbol with a cumulative generated-device-allocation limit.
+    pub(super) fn call_with_generated_allocation_budget(
+        &self,
+        symbol: &str,
+        inputs: &[AbiValue],
+        outputs: &mut [AbiValue],
+        byte_limit: u64,
+    ) {
         let function = self
             .functions
             .get(symbol)
@@ -130,10 +178,20 @@ impl Executor {
             .chain(output_pointers.iter().map(Arg::new))
             .collect::<Vec<_>>();
 
-        unsafe {
+        self.allocation_budget.under_limit(byte_limit, || unsafe {
             function.cif.call::<()>(function.code, &arguments);
-        }
+        });
     }
+}
+
+fn load_control_symbol<T: Copy>(library: &Library, symbol: &str) -> Result<T, ExecutorError> {
+    let symbol_name = format!("{symbol}\0");
+    unsafe { library.get::<T>(symbol_name.as_bytes()) }
+        .map(|loaded| *loaded)
+        .map_err(|source| ExecutorError::LoadSymbol {
+            symbol: symbol.to_string(),
+            source,
+        })
 }
 
 fn ffi_type(kind: ValueKind) -> Type {
@@ -166,5 +224,42 @@ fn output_pointer(value: &mut AbiValue) -> *mut c_void {
         AbiValue::U64(value) => (value as *mut u64).cast(),
         AbiValue::F32(value) => (value as *mut f32).cast(),
         AbiValue::Mem(value) => (value as *mut CatenaMem).cast(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    use super::*;
+
+    static ACTIVE_LIMIT: AtomicU64 = AtomicU64::new(u64::MAX);
+    static END_COUNT: AtomicU64 = AtomicU64::new(0);
+
+    unsafe extern "C" fn begin(byte_limit: u64) {
+        ACTIVE_LIMIT.store(byte_limit, Ordering::SeqCst);
+    }
+
+    unsafe extern "C" fn end() {
+        ACTIVE_LIMIT.store(u64::MAX, Ordering::SeqCst);
+        END_COUNT.fetch_add(1, Ordering::SeqCst);
+    }
+
+    #[test]
+    fn allocation_budget_is_reset_between_invocations_and_on_unwind() {
+        let control = AllocationBudgetControl { begin, end };
+        END_COUNT.store(0, Ordering::SeqCst);
+
+        control.under_limit(17, || {
+            assert_eq!(ACTIVE_LIMIT.load(Ordering::SeqCst), 17);
+        });
+        assert_eq!(ACTIVE_LIMIT.load(Ordering::SeqCst), u64::MAX);
+
+        let panic = std::panic::catch_unwind(|| {
+            control.under_limit(23, || panic!("fixture panic"));
+        });
+        assert!(panic.is_err());
+        assert_eq!(ACTIVE_LIMIT.load(Ordering::SeqCst), u64::MAX);
+        assert_eq!(END_COUNT.load(Ordering::SeqCst), 2);
     }
 }

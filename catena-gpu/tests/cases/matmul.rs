@@ -15,12 +15,12 @@ fn predicated_tiling_computes_naive_u64_matmul() -> anyhow::Result<()> {
 
 #[test]
 fn perfect_tiling_computes_tiled_u64_matmul() -> anyhow::Result<()> {
-    check_u64_matmul(TILED_U64, "tiled-u64-matmul", 1, 1, 2, 2)
+    check_u64_matmul(TILED_U64, "tiled-u64-matmul", Some(4), 1, 1, 2, 2)
 }
 
 #[test]
 fn predicated_tiling_computes_tiled_u64_matmul() -> anyhow::Result<()> {
-    check_u64_matmul(TILED_U64, "tiled-u64-matmul", 1, 1, 3, 2)
+    check_u64_matmul(TILED_U64, "tiled-u64-matmul", Some(6), 1, 1, 3, 2)
 }
 
 fn check_naive_u64_matmul(
@@ -32,6 +32,7 @@ fn check_naive_u64_matmul(
     check_u64_matmul(
         NAIVE_U64,
         "naive-u64-matmul",
+        None,
         grid_x,
         grid_y,
         block_x,
@@ -42,6 +43,7 @@ fn check_naive_u64_matmul(
 fn check_u64_matmul(
     source: &'static str,
     program: &str,
+    tile_elements: Option<u64>,
     grid_x: u32,
     grid_y: u32,
     block_x: u32,
@@ -61,22 +63,23 @@ fn check_u64_matmul(
     let a = runtime.mem_u64(&a_values)?;
     let b = runtime.mem_u64(&b_values)?;
 
-    let [c] = runtime.exec(
-        &artifact,
-        program,
-        [
-            c.into(),
-            a.as_ref().into(),
-            b.as_ref().into(),
-            2_u64.into(),
-            3_u64.into(),
-            2_u64.into(),
-            grid_x.into(),
-            grid_y.into(),
-            block_x.into(),
-            block_y.into(),
-        ],
-    )?;
+    let mut arguments = vec![
+        c.into(),
+        a.as_ref().into(),
+        b.as_ref().into(),
+        2_u64.into(),
+        3_u64.into(),
+        2_u64.into(),
+    ];
+    if let Some(tile_elements) = tile_elements {
+        arguments.push(tile_elements.into());
+    }
+    arguments.extend([grid_x.into(), grid_y.into(), block_x.into(), block_y.into()]);
+
+    let results = runtime.exec_values(&artifact, program, arguments)?;
+    let [c]: [Value<'static>; 1] = results.try_into().map_err(|results: Vec<_>| {
+        anyhow::anyhow!("{program} returned {} values", results.len())
+    })?;
     let Value::MemOwn(c) = c else {
         anyhow::bail!("{program} returned a non-memory C buffer")
     };

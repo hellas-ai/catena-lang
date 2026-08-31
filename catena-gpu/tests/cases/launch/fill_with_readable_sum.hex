@@ -146,6 +146,8 @@
   destination-schedule-name.
 ]
   ({
+    (gpu.shared.empty gpu.shared.layout val)
+    ({
     ({
       ({[.destination-size] u64} :)
       ({
@@ -184,6 +186,7 @@
         ({[.source-buffer-name] [.source-size]} *)
       } *)
     } *)
+    } *)
   } *)
   ({({
       ({[.grid-count]} shape.1d)
@@ -205,7 +208,10 @@
     } gpu.grid)
     [.destination-schedule-name]
   } gpu.scheduling val)
-} = ([kernel-arguments thread.]
+} = ([layout-and-kernel-arguments thread.]
+  ([.layout-and-kernel-arguments]
+    *.elim
+    [_shared-layout kernel-arguments.])
   ([.kernel-arguments]
     *.elim
     [destination-arguments source-arguments.])
@@ -399,7 +405,8 @@
       global-count destination-schedule-name]}
     name.fill-with-readable-sum-kernel
     [kernel.])
-  ({[.grid kernel-arguments kernel]}
+  (gpu.shared.layout.empty [shared-layout.])
+  ({[.shared-layout grid kernel-arguments kernel]}
     gpu.launch
     [returned-kernel-arguments.])
   ([.returned-kernel-arguments]

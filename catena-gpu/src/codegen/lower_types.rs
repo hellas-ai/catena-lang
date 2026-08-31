@@ -25,6 +25,7 @@ pub enum CType {
     Thread,
     Block,
     Scheduling,
+    SharedLayout(Vec<CType>),
 }
 
 #[derive(Debug, Error)]
@@ -95,6 +96,10 @@ fn lower_runtime_type(
         ("positive-u32", []) => Ok(CType::U32),
         ("u64", []) => Ok(CType::U64),
         ("f32", []) => Ok(CType::F32),
+        ("gpu.shared.layout", [slots]) => Ok(CType::SharedLayout(lower_shared_slots(
+            slots,
+            substitutions,
+        )?)),
         ("gpu.grid", [_grid_shape, _block_shape, _global_shape]) => Ok(CType::Grid),
         ("mem", [capability]) => match capability {
             Tree::Node(operation, _, children)
@@ -136,6 +141,24 @@ fn lower_runtime_type(
         ("ix", [_shape]) => Ok(CType::Ix),
         ("val", [inner]) => lower_runtime_type(inner, substitutions),
         _ => Err(LowerTypeError::NoRuntimeRepresentation(ty.clone())),
+    }
+}
+
+fn lower_shared_slots(
+    slots: &Tree<(), Operation>,
+    substitutions: &BTreeMap<usize, CType>,
+) -> Result<Vec<CType>, LowerTypeError> {
+    let Tree::Node(operation, _, children) = slots else {
+        return Err(LowerTypeError::NoRuntimeRepresentation(slots.clone()));
+    };
+    match (operation.as_str(), children.as_slice()) {
+        ("gpu.shared.empty", []) => Ok(Vec::new()),
+        ("gpu.shared.slot", [_length, element, rest]) => {
+            let mut lowered = vec![lower_runtime_type(element, substitutions)?];
+            lowered.extend(lower_shared_slots(rest, substitutions)?);
+            Ok(lowered)
+        }
+        _ => Err(LowerTypeError::NoRuntimeRepresentation(slots.clone())),
     }
 }
 
@@ -207,6 +230,9 @@ fn infer_runtime_type(
         ("gpu.shared", [_block_name, _size, element], CType::Ptr(actual)) => {
             infer_runtime_type(element, actual, substitutions)
         }
+        ("gpu.shared.layout", [slots], CType::SharedLayout(actual)) => {
+            infer_shared_slots(slots, actual, substitutions)
+        }
         _ => match lower_runtime_type(ty, substitutions) {
             Ok(actual) if &actual == concrete => Ok(()),
             _ => Err(LowerTypeError::SpecializationMismatch {
@@ -214,6 +240,34 @@ fn infer_runtime_type(
                 target: concrete.clone(),
             }),
         },
+    }
+}
+
+fn infer_shared_slots(
+    slots: &Tree<(), Operation>,
+    actual: &[CType],
+    substitutions: &mut BTreeMap<usize, CType>,
+) -> Result<(), LowerTypeError> {
+    let Tree::Node(operation, _, children) = slots else {
+        return Err(LowerTypeError::SpecializationMismatch {
+            declared: slots.clone(),
+            target: CType::SharedLayout(actual.to_vec()),
+        });
+    };
+    match (
+        operation.as_str(),
+        children.as_slice(),
+        actual.split_first(),
+    ) {
+        ("gpu.shared.empty", [], None) => Ok(()),
+        ("gpu.shared.slot", [_length, element, rest], Some((first, remaining))) => {
+            infer_runtime_type(element, first, substitutions)?;
+            infer_shared_slots(rest, remaining, substitutions)
+        }
+        _ => Err(LowerTypeError::SpecializationMismatch {
+            declared: slots.clone(),
+            target: CType::SharedLayout(actual.to_vec()),
+        }),
     }
 }
 

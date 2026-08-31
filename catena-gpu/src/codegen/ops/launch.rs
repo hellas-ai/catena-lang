@@ -13,6 +13,7 @@ pub fn render_kernel(
     assignment: &GpuAssign,
 ) -> Result<(), GpuRenderError> {
     let LaunchInputs {
+        shared_layout: _,
         grid: _,
         kernel_arguments,
         kernel,
@@ -29,7 +30,7 @@ pub fn render_kernel(
             "kernel definition is missing",
         ))?;
     let wrapper = kernel_name(function, assignment_index);
-    let mut parameters = Vec::new();
+    let mut parameters = vec!["uint64_t shared_layout".to_string()];
     for (index, argument) in kernel_arguments.iter().enumerate() {
         let GpuValue::Var(argument) = argument else {
             return Err(GpuRenderError::InvalidLaunch(
@@ -45,25 +46,28 @@ pub fn render_kernel(
         "extern \"C\" __global__ void {wrapper}({}) {{\n",
         parameters.join(", ")
     ));
+    output.push_str("    extern __shared__ unsigned char catena_shared[];\n");
     output.push_str("    uint64_t global_x = (uint64_t)blockIdx.x * blockDim.x + threadIdx.x;\n");
     output.push_str("    uint64_t global_y = (uint64_t)blockIdx.y * blockDim.y + threadIdx.y;\n");
     output.push_str("    uint64_t global_z = (uint64_t)blockIdx.z * blockDim.z + threadIdx.z;\n");
     output.push_str("    catena_ix_t global_index = { global_x, global_y, global_z };\n");
     output.push_str("    catena_ix_t in_block_index = { (uint64_t)threadIdx.x, (uint64_t)threadIdx.y, (uint64_t)threadIdx.z };\n");
     output.push_str("    catena_ix_t block_index = { (uint64_t)blockIdx.x, (uint64_t)blockIdx.y, (uint64_t)blockIdx.z };\n");
-    output
-        .push_str("    catena_thread_t thread = { global_index, in_block_index, block_index };\n");
+    output.push_str(
+        "    catena_thread_t thread = { global_index, in_block_index, block_index, catena_shared, shared_layout };\n",
+    );
     for (index, result) in kernel_function.targets.iter().enumerate() {
         output.push_str(&format!(
             "    {} kernel_result_{index};\n",
             c_type(runtime_type(result).expect("GPU variables have runtime types"))
         ));
     }
-    let mut arguments = kernel_arguments
+    let mut arguments = vec!["shared_layout".to_string()];
+    arguments.extend(kernel_arguments
         .iter()
         .enumerate()
         .map(|(index, _)| format!("kernel_argument_{index}"))
-        .collect::<Vec<_>>();
+    );
     arguments.push("thread".to_string());
     arguments.extend(
         kernel_function
@@ -88,6 +92,7 @@ pub fn render_call(
     assignment: &GpuAssign,
 ) -> Result<(), GpuRenderError> {
     let LaunchInputs {
+        shared_layout,
         grid,
         kernel_arguments,
         kernel: _,
@@ -99,9 +104,11 @@ pub fn render_call(
     }
     let wrapper = kernel_name(function, assignment_index);
     let grid = value_expr(grid);
-    let arguments = kernel_arguments.iter().map(value_expr).collect::<Vec<_>>();
+    let mut arguments = vec![value_expr(shared_layout)];
+    arguments.extend(kernel_arguments.iter().map(value_expr));
     output.push_str(&format!(
-        "    {wrapper}<<<dim3({grid}.grid_dim.x, {grid}.grid_dim.y, {grid}.grid_dim.z), dim3({grid}.block_dim.x, {grid}.block_dim.y, {grid}.block_dim.z)>>>(\n        {});\n",
+        "    {wrapper}<<<dim3({grid}.grid_dim.x, {grid}.grid_dim.y, {grid}.grid_dim.z), dim3({grid}.block_dim.x, {grid}.block_dim.y, {grid}.block_dim.z), {}>>>(\n        {});\n",
+        value_expr(shared_layout),
         arguments.join(", "),
     ));
     output.push_str("    catena_gpu_synchronize();\n");
@@ -116,15 +123,16 @@ pub fn render_call(
 }
 
 struct LaunchInputs<'a> {
+    shared_layout: &'a GpuValue,
     grid: &'a GpuValue,
     kernel_arguments: &'a [GpuValue],
     kernel: &'a GpuValue,
 }
 
 fn inputs(assignment: &GpuAssign) -> Result<LaunchInputs<'_>, GpuRenderError> {
-    let [grid, kernel_arguments @ .., kernel] = assignment.inputs.as_slice() else {
+    let [shared_layout, grid, kernel_arguments @ .., kernel] = assignment.inputs.as_slice() else {
         return Err(GpuRenderError::InvalidLaunch(
-            "expected grid, kernel arguments, and kernel",
+            "expected shared layout, grid, kernel arguments, and kernel",
         ));
     };
     if !matches!(kernel, GpuValue::FnSymbol(_)) {
@@ -133,6 +141,7 @@ fn inputs(assignment: &GpuAssign) -> Result<LaunchInputs<'_>, GpuRenderError> {
         ));
     }
     Ok(LaunchInputs {
+        shared_layout,
         grid,
         kernel_arguments,
         kernel,

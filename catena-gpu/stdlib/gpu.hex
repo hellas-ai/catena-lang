@@ -9,6 +9,12 @@
   # used by a thread from another block.
   (arr gpu.shared : 3 -> 1)
 
+  # A typed list of shared slots whose runtime value is the total byte size
+  # requested for each block at kernel launch.
+  (arr gpu.shared.layout : 1 -> 1)
+  (arr gpu.shared.empty : 0 -> 1)
+  (arr gpu.shared.slot : 3 -> 1)
+
   # A global handle is independent of the thread layout.
   (arr gpu.global : 3 -> 1)
 
@@ -18,6 +24,17 @@
 })
 
 (theory program type {
+  # Construct a dynamic shared-memory layout. Slots are added on the host;
+  # allocation and typed handles inside the kernel are intentionally separate.
+  (arr gpu.shared.layout.empty :
+    [] -> (gpu.shared.empty gpu.shared.layout val))
+  (arr gpu.shared.layout.add : {[n element-type rest.]
+    ({[.n] u64} :)
+    ([.element-type] gpu.numeric |-)
+    ([.rest] gpu.shared.layout val)
+  } -> ([n element-type rest.]
+    ({[.n element-type rest]} gpu.shared.slot gpu.shared.layout val)))
+
   # Logical dimensionality is preserved in shapes. CUDA's three-dimensional
   # launch values remain a backend detail.
   (arr gpu.grid.1d.intro : {[gx bx.]
@@ -319,20 +336,26 @@
   # Launch is generic over the kernel arguments. Their specific structure,
   # including all buffers, lengths, and schedules, is declared by the kernel.
   (arr gpu.launch : {[
-    grid-shape block-shape global-shape kernel-arguments kernel-result.
+    grid-shape block-shape global-shape kernel-arguments kernel-result
+    shared-slots.
   ]
+    ([.shared-slots] gpu.shared.layout val)
     ({[.grid-shape block-shape global-shape]} gpu.grid val)
     ([.kernel-arguments])
     ({
       ({
-        ([.kernel-arguments])
+        ({
+          ([.shared-slots] gpu.shared.layout val)
+          ([.kernel-arguments])
+        } *)
         ({({[.grid-shape block-shape global-shape]} gpu.grid)}
           gpu.thread val)
       } *)
       ([.kernel-result])
     } -> val)
   } -> {[
-    grid-shape block-shape global-shape kernel-arguments kernel-result.
+    grid-shape block-shape global-shape kernel-arguments kernel-result
+    shared-slots.
   ]
     ([.kernel-arguments])
   })

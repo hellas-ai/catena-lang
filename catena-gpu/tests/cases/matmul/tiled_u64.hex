@@ -6,6 +6,7 @@
     (u64 val)
     (u64 val)
     (u64 val)
+    (u64 val)
     (u32 val)
     (u32 val)
     (u32 val)
@@ -14,7 +15,8 @@
   ->
   (cap.own mem)
 = ([c-input a-input b-input output-rows-input shared-size-input
-    output-columns-input grid-x-input grid-y-input block-x-input block-y-input.]
+    output-columns-input tile-elements-input
+    grid-x-input grid-y-input block-x-input block-y-input.]
   ([.c-input] mem.cast.u64 [c-length named-c-buffer.])
   ([.named-c-buffer] :.ty [c-buffer-before-type c-buffer-name.])
   ([.c-buffer-before-type]
@@ -124,13 +126,25 @@
   ({[.a-arguments b-and-dimensions]} *.intro [a-b-and-dimensions.])
   ({[.c-arguments a-b-and-dimensions]} *.intro [kernel-arguments.])
 
+  ([.tile-elements-input] u64.name [named-tile-elements.])
+  ([.named-tile-elements] :.ty [tile-elements-value tile-elements.])
+  ([.tile-elements-value]
+    u64.copies2 [named-a-tile-elements named-b-tile-elements.])
   ({[
     .element-type c-buffer-name c-size a-buffer-name a-size b-buffer-name b-size
     grid-shape block-shape global-columns global-rows
     c-schedule-name
-    output-rows shared-size output-columns
+    output-rows shared-size output-columns tile-elements
   ]} name.gpu.global.matrix.tiled-matmul.kernel [kernel.])
-  ({[.grid kernel-arguments kernel]} gpu.launch [returned-kernel-arguments.])
+  gpu.numeric.u64 [a-shared-numeric-proof.]
+  gpu.numeric.u64 [b-shared-numeric-proof.]
+  (gpu.shared.layout.empty [empty-shared-layout.])
+  ({[.named-b-tile-elements b-shared-numeric-proof empty-shared-layout]}
+    gpu.shared.layout.add [b-shared-layout.])
+  ({[.named-a-tile-elements a-shared-numeric-proof b-shared-layout]}
+    gpu.shared.layout.add [shared-layout.])
+  ({[.shared-layout grid kernel-arguments kernel]}
+    gpu.launch [returned-kernel-arguments.])
 
   ([.returned-kernel-arguments]
     *.elim
@@ -153,4 +167,3 @@
     [c-output.])
   [.c-output]
 ))
-

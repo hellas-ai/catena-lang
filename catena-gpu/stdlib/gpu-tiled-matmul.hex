@@ -5,9 +5,14 @@
   element-type c-buffer-name c-size a-buffer-name a-size b-buffer-name b-size
   grid-shape block-shape global-columns global-rows
   c-schedule-name
-  output-rows shared-size output-columns.
+  output-rows shared-size output-columns tile-elements.
 ]
   ({
+    ({
+      [.tile-elements element-type]
+      ({[.tile-elements element-type] gpu.shared.empty} gpu.shared.slot)
+    } gpu.shared.slot gpu.shared.layout val)
+    ({
     ({
       ({[.c-size] u64} :)
       ({
@@ -61,6 +66,7 @@
         } *)
       } *)
     } *)
+    } *)
   } *)
   ({({
     [.grid-shape]
@@ -71,7 +77,7 @@
   element-type c-buffer-name c-size a-buffer-name a-size b-buffer-name b-size
   grid-shape block-shape global-columns global-rows
   c-schedule-name
-  output-rows shared-size output-columns.
+  output-rows shared-size output-columns tile-elements.
 ]
   ({
     [.c-buffer-name c-size]
@@ -82,7 +88,17 @@
     } gpu.grid)
     [.c-schedule-name]
   } gpu.scheduling val)
-} = gpu.global.matrix.matmul.kernel)
+} = ([layout-and-kernel-arguments thread.]
+  ([.layout-and-kernel-arguments]
+    *.elim
+    [_shared-layout kernel-arguments.])
+  (gpu.shared.layout.empty [empty-shared-layout.])
+  ({[.empty-shared-layout kernel-arguments]}
+    *.intro
+    [naive-layout-and-kernel-arguments.])
+  ({[.naive-layout-and-kernel-arguments thread]}
+    gpu.global.matrix.matmul.kernel)
+))
 
 # Public tiled kernel boundary. Its type is independent from the temporary
 # implementation selected by the stub arrow above.
@@ -90,9 +106,14 @@
   element-type c-buffer-name c-size a-buffer-name a-size b-buffer-name b-size
   grid-shape block-shape global-columns global-rows
   c-schedule-name
-  output-rows shared-size output-columns.
+  output-rows shared-size output-columns tile-elements.
 ]
   ({
+    ({
+      [.tile-elements element-type]
+      ({[.tile-elements element-type] gpu.shared.empty} gpu.shared.slot)
+    } gpu.shared.slot gpu.shared.layout val)
+    ({
     ({
       ({[.c-size] u64} :)
       ({
@@ -146,6 +167,7 @@
         } *)
       } *)
     } *)
+    } *)
   } *)
   ({({
     [.grid-shape]
@@ -156,7 +178,7 @@
   element-type c-buffer-name c-size a-buffer-name a-size b-buffer-name b-size
   grid-shape block-shape global-columns global-rows
   c-schedule-name
-  output-rows shared-size output-columns.
+  output-rows shared-size output-columns tile-elements.
 ]
   ({
     [.c-buffer-name c-size]

@@ -114,6 +114,7 @@ pub(super) fn c_type(ty: &CType) -> String {
         CType::Thread => "catena_thread_t".into(),
         CType::Block => "catena_block_t".into(),
         CType::Scheduling => "catena_scheduling_t".into(),
+        CType::SharedLayout(_) => "uint64_t".into(),
     }
 }
 
@@ -146,6 +147,8 @@ typedef struct {{
     catena_ix_t global_index;
     catena_ix_t in_block_index;
     catena_ix_t block_index;
+    unsigned char *shared;
+    uint64_t shared_layout;
 }} catena_thread_t;
 typedef struct {{ catena_ix_t index; }} catena_block_t;
 typedef enum {{
@@ -288,6 +291,26 @@ fn render_assignment(
         "gpu.grid.1d.intro" => render_grid_intro(output, assignment, 1),
         "gpu.grid.2d.intro" => render_grid_intro(output, assignment, 2),
         "gpu.grid.3d.intro" => render_grid_intro(output, assignment, 3),
+        "gpu.shared.layout.empty" => unary_output(output, assignment, "0", 0),
+        "gpu.shared.layout.add" => {
+            if assignment.inputs.len() != 2 || assignment.outputs.len() != 1 {
+                return Err(arity(assignment, 2));
+            }
+            let Some(CType::SharedLayout(slots)) = runtime_type(&assignment.outputs[0]) else {
+                return Err(GpuRenderError::UnsupportedOp(assignment.op.clone()));
+            };
+            let Some(element_type) = slots.first() else {
+                return Err(GpuRenderError::UnsupportedOp(assignment.op.clone()));
+            };
+            output.push_str(&format!(
+                "    {} = {} + {} * sizeof({});\n",
+                assignment.outputs[0].name,
+                input(assignment, 1)?,
+                input(assignment, 0)?,
+                c_type(element_type),
+            ));
+            Ok(())
+        }
         "gpu.launch" => ops::launch::render_call(output, function, assignment_index, assignment),
         "fold" => ops::fold::render(output, assignment),
         "bool.ifc" => render_ifc(output, assignment),

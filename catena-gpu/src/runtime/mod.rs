@@ -77,6 +77,7 @@ fn value_kind(ty: &CType) -> Option<ValueKind> {
         CType::Bool => Some(ValueKind::Bool),
         CType::U32 => Some(ValueKind::U32),
         CType::U64 => Some(ValueKind::U64),
+        CType::SharedLayout(_) => Some(ValueKind::U64),
         CType::F32 => Some(ValueKind::F32),
         CType::MemOwn => Some(ValueKind::MemOwn),
         CType::MemRef => Some(ValueKind::MemRef),

@@ -47,3 +47,14 @@
   ({[.block-name]
     ({[.grid-topology block-name]} gpu.block)} :)
 } = gpu.shared.sync)
+
+(def program shared-layout-f32 :
+  ([n.] ({[.n] u64} :))
+  ->
+  ([n.] ({[.n] f32 gpu.shared.empty}
+    gpu.shared.slot gpu.shared.layout val))
+= ([elements.]
+  gpu.numeric.f32 [numeric-proof.]
+  (gpu.shared.layout.empty [empty-layout.])
+  ({[.elements numeric-proof empty-layout]} gpu.shared.layout.add)
+))

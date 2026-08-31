@@ -108,6 +108,18 @@ impl GpuApi {
         )
     }
 
+    pub(crate) fn zero(&self, destination: *mut c_void, byte_len: usize) -> Result<(), MemError> {
+        if byte_len == 0 {
+            return Ok(());
+        }
+        let symbol = self.symbol("hipMemset", "cudaMemset");
+        let function: Symbol<'_, unsafe extern "C" fn(*mut c_void, c_int, usize) -> c_int> =
+            unsafe { self.load_symbol(symbol)? };
+        self.check("zero device memory", unsafe {
+            function(destination, 0, byte_len)
+        })
+    }
+
     pub(super) fn copy_device_to_host(
         &self,
         source: *const c_void,

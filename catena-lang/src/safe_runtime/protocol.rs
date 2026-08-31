@@ -3,7 +3,10 @@ use std::io::{self, Read, Write};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use thiserror::Error;
 
-use crate::{codegen::GpuDialect, runtime::ExecError};
+use crate::{
+    codegen::GpuDialect,
+    runtime::{EntryPoint, ExecError},
+};
 
 const MAX_FRAME_LEN: usize = 64 * 1024 * 1024;
 
@@ -14,6 +17,27 @@ pub(super) enum Request {
     },
     LoadSources {
         sources: Vec<String>,
+    },
+    AttachAsset {
+        key: [u8; 32],
+        byte_len: u64,
+    },
+    BindModel {
+        binding: WireModelBinding,
+    },
+    StartGeneration {
+        model: u64,
+        capacity: u64,
+    },
+    StepGeneration {
+        generation: u64,
+        tokens: Vec<u32>,
+    },
+    ReleaseGeneration {
+        generation: u64,
+    },
+    ReleaseModel {
+        model: u64,
     },
     Execute {
         artifact: usize,
@@ -28,8 +52,34 @@ pub(super) enum Request {
 #[derive(Debug, Serialize, Deserialize)]
 pub(super) enum Response {
     Initialized(Result<(), String>),
-    Loaded(Result<usize, String>),
+    Loaded(Result<(usize, Vec<EntryPoint>), String>),
+    Attached(Result<(u64, u64), String>),
+    Resident(Result<ResidentResponse, String>),
     Executed(Result<WireExecution, RemoteExecError>),
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub(super) enum ResidentResponse {
+    ModelBound(u64),
+    GenerationStarted(u64),
+    Token(u32),
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub(super) struct WireModelBinding {
+    pub(super) artifact: usize,
+    pub(super) entry_point: String,
+    pub(super) assets: Vec<WireAssetSlice>,
+    pub(super) state_byte_multipliers: Vec<u64>,
+    pub(super) vocabulary_size: u64,
+    pub(super) maximum_capacity: u64,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub(super) struct WireAssetSlice {
+    pub(super) asset: u64,
+    pub(super) offset: u64,
+    pub(super) byte_len: u64,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -136,6 +186,7 @@ fn read_first_byte(reader: &mut impl Read) -> Result<Option<u8>, io::Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::runtime::ValueKind;
 
     fn artifact() -> usize {
         7
@@ -172,12 +223,69 @@ mod tests {
     #[test]
     fn loaded_artifact_round_trips() {
         let expected = artifact();
+        let expected_entry = EntryPoint::new(
+            "step".to_string(),
+            vec![ValueKind::MemRef, ValueKind::MemOwn],
+            vec![ValueKind::MemOwn],
+        );
         let mut bytes = Vec::new();
-        write_frame(&mut bytes, &Response::Loaded(Ok(expected))).unwrap();
+        write_frame(
+            &mut bytes,
+            &Response::Loaded(Ok((expected, vec![expected_entry]))),
+        )
+        .unwrap();
+
+        let Some(Response::Loaded(Ok((actual, entries)))) =
+            read_frame(&mut bytes.as_slice()).unwrap()
+        else {
+            panic!("decoded the wrong response kind");
+        };
+        assert_eq!(actual, expected);
+        assert_eq!(entries[0].name(), "step");
+        assert_eq!(entries[0].inputs(), &[ValueKind::MemRef, ValueKind::MemOwn]);
+        assert_eq!(entries[0].outputs(), &[ValueKind::MemOwn]);
+    }
+
+    #[test]
+    fn asset_attachment_contains_only_fixed_identity_and_length() {
+        let key = [0x5a; 32];
+        let mut bytes = Vec::new();
+        write_frame(
+            &mut bytes,
+            &Request::AttachAsset {
+                key,
+                byte_len: 4096,
+            },
+        )
+        .unwrap();
 
         assert!(matches!(
             read_frame(&mut bytes.as_slice()).unwrap(),
-            Some(Response::Loaded(Ok(actual))) if actual == expected
+            Some(Request::AttachAsset {
+                key: actual_key,
+                byte_len: 4096,
+            }) if actual_key == key
+        ));
+    }
+
+    #[test]
+    fn resident_step_contains_only_generation_and_token_ids() {
+        let mut bytes = Vec::new();
+        write_frame(
+            &mut bytes,
+            &Request::StepGeneration {
+                generation: 17,
+                tokens: vec![3, u32::MAX],
+            },
+        )
+        .unwrap();
+
+        assert!(matches!(
+            read_frame(&mut bytes.as_slice()).unwrap(),
+            Some(Request::StepGeneration {
+                generation: 17,
+                tokens,
+            }) if tokens == [3, u32::MAX]
         ));
     }
 

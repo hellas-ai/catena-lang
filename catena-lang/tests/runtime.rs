@@ -872,6 +872,23 @@ fn mem_own_identity_transfers_and_returns_owned_memory_regression() -> anyhow::R
         "#,
     )?;
 
+    let borrowed = runtime
+        .artifact
+        .entry_points()
+        .iter()
+        .find(|entry| entry.name() == "array-head-u64-ref")
+        .expect("loaded entry point");
+    assert_eq!(borrowed.inputs(), &[ValueKind::MemRef]);
+    assert_eq!(borrowed.outputs(), &[ValueKind::U64]);
+    let owned = runtime
+        .artifact
+        .entry_points()
+        .iter()
+        .find(|entry| entry.name() == "mem-own-identity")
+        .expect("loaded entry point");
+    assert_eq!(owned.inputs(), &[ValueKind::MemOwn]);
+    assert_eq!(owned.outputs(), &[ValueKind::MemOwn]);
+
     let expected = [3_u64, 5, 8, 13];
     let input = runtime.mem_u64(&expected)?;
     let [output] = runtime.exec("mem-own-identity", [input.into()])?;

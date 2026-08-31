@@ -73,5 +73,6 @@ pub use mem::MemOwn;
 pub use mem::MemRef;
 pub use runtime::Runtime;
 pub use runtime::{ExecError, InitError};
+pub use signature::EntryPoint;
 pub use value::Value;
 pub use value::ValueKind;

@@ -2,7 +2,7 @@ use std::env;
 
 use catena_lang::{
     codegen::GpuDialect,
-    runtime::{MemOwn, Value},
+    runtime::{MemOwn, Value, ValueKind},
     safe_runtime::{SafeExecError, SafeRuntime, run_safe_runtime_child_if_requested},
     stdlib,
 };
@@ -21,13 +21,20 @@ fn main() -> anyhow::Result<()> {
     }
 
     let dialect = configured_gpu_dialect()?;
-    let mut runtime = SafeRuntime::new(dialect)?;
+    let runtime = SafeRuntime::new(dialect)?;
     let artifact = runtime.load_sources(stdlib::sources().chain([
         include_str!("example.hex"),
         include_str!("materializec.hex"),
         OWNED_SOURCE,
     ]))?;
     let add_one = runtime.load_sources(stdlib::sources().chain([ADD_ONE_SOURCE]))?;
+    let signature = add_one
+        .entry_points()
+        .iter()
+        .find(|entry| entry.name() == "add-one")
+        .ok_or_else(|| anyhow::anyhow!("add-one entry point is missing"))?;
+    anyhow::ensure!(signature.inputs() == [ValueKind::U64]);
+    anyhow::ensure!(signature.outputs() == [ValueKind::U64]);
 
     let [added] = runtime.exec(&add_one, "add-one", [41_u64.into()])?;
     anyhow::ensure!(matches!(added, Value::U64(42)));

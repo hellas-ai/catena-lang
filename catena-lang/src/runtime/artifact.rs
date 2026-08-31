@@ -2,14 +2,18 @@
 
 use std::{
     ffi::OsString,
+    hash::{Hash, Hasher},
     path::{Path, PathBuf},
     process::{Command, ExitStatus},
+    sync::Arc,
     sync::atomic::{AtomicU64, Ordering},
 };
 
 use thiserror::Error;
 
 use crate::codegen::GpuDialect;
+
+use super::signature::EntryPoint;
 
 #[derive(Debug, Error)]
 pub enum ArtifactError {
@@ -30,15 +34,39 @@ pub enum ArtifactError {
 }
 
 /// Identifies one compiled Catena artifact belonging to a runtime.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone)]
 pub struct Artifact {
     runtime_id: RuntimeId,
     index: usize,
+    entry_points: Arc<[EntryPoint]>,
+}
+
+impl PartialEq for Artifact {
+    fn eq(&self, other: &Self) -> bool {
+        self.runtime_id == other.runtime_id && self.index == other.index
+    }
+}
+
+impl Eq for Artifact {}
+
+impl Hash for Artifact {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.runtime_id.hash(state);
+        self.index.hash(state);
+    }
 }
 
 impl Artifact {
-    pub(crate) fn new(runtime_id: RuntimeId, index: usize) -> Self {
-        Self { runtime_id, index }
+    pub(crate) fn new(
+        runtime_id: RuntimeId,
+        index: usize,
+        entry_points: Arc<[EntryPoint]>,
+    ) -> Self {
+        Self {
+            runtime_id,
+            index,
+            entry_points,
+        }
     }
 
     pub(crate) fn belongs_to(&self, runtime_id: RuntimeId) -> bool {
@@ -47,6 +75,11 @@ impl Artifact {
 
     pub(crate) fn index(&self) -> usize {
         self.index
+    }
+
+    /// Source-level functions compiled into this artifact, sorted by name.
+    pub fn entry_points(&self) -> &[EntryPoint] {
+        &self.entry_points
     }
 }
 

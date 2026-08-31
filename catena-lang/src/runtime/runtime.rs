@@ -14,7 +14,7 @@ use super::artifact::{Artifact, ArtifactError, RuntimeId, SharedObject};
 use super::executor::{AbiValue, Executor, ExecutorError};
 use super::mem::{MemError, MemOwn};
 use super::{
-    signature::{FunctionSignature, SignatureTable, signatures},
+    signature::{FunctionSignature, SignatureTable, entry_points, signatures},
     value::{Value, ValueKind},
 };
 use crate::codegen::{GpuDialect, gpu::GpuRenderError, gpu::render_modules};
@@ -33,6 +33,7 @@ pub struct Runtime {
 
 #[derive(Debug)]
 struct LoadedArtifact {
+    artifact: Artifact,
     // Keep the tempdir-backed shared object alive for as long as the library is loaded.
     _shared_object: SharedObject,
     /// Prepared entry points in the loaded shared object.
@@ -113,6 +114,8 @@ pub enum ExecError {
     },
     #[error("Argument {index} contains device memory from a different GPU dialect")]
     IncompatibleDeviceMemory { index: usize },
+    #[error("GPU execution failed while synchronizing: {0}")]
+    GpuSynchronization(String),
 }
 
 impl Runtime {
@@ -181,8 +184,13 @@ impl Runtime {
                 InitError::LoadSymbol { symbol, source }
             }
         })?;
-        let artifact = Artifact::new(self.runtime_id, self.artifacts.len());
+        let artifact = Artifact::new(
+            self.runtime_id,
+            self.artifacts.len(),
+            entry_points(&signature_table).into(),
+        );
         self.artifacts.push(LoadedArtifact {
+            artifact: artifact.clone(),
             _shared_object: shared_object,
             executor,
             signatures: signature_table,
@@ -200,6 +208,18 @@ impl Runtime {
 
     pub fn mem_f32(&self, values: &[f32]) -> Result<MemOwn, MemError> {
         MemOwn::from_f32_slice(values, self.gpu.dialect())
+    }
+
+    pub(crate) fn mem_zeroed_bytes(&self, byte_len: u64) -> Result<MemOwn, MemError> {
+        let byte_len =
+            usize::try_from(byte_len).map_err(|_| MemError::LengthTooLarge { byte_len })?;
+        let data = self.gpu.allocate(byte_len)?;
+        // SAFETY: `data` is the unique allocation returned immediately above
+        // by this same GPU API, and ownership is transferred into `MemOwn`.
+        let memory =
+            unsafe { MemOwn::from_raw_parts_with_gpu(data, byte_len as u64, self.gpu.clone()) };
+        self.gpu.zero(data, byte_len)?;
+        Ok(memory)
     }
 
     /// Run a source-level `program` definition from `artifact`.
@@ -309,10 +329,17 @@ impl Runtime {
             .executor
             .call(&signature.symbol, &raw_inputs, &mut raw_outputs);
 
-        raw_outputs
+        // Re-establish Rust ownership before the synchronization boundary. If
+        // synchronization reports a device fault, dropping `outputs` still
+        // attempts to release every allocation returned by generated code.
+        let outputs = raw_outputs
             .into_iter()
             .map(|output| self.resolve_output(output))
-            .collect()
+            .collect::<Result<Vec<_>, _>>()?;
+        self.gpu
+            .synchronize()
+            .map_err(|error| ExecError::GpuSynchronization(error.to_string()))?;
+        Ok(outputs)
     }
 
     fn resolve_output(&self, output: AbiValue) -> Result<Value<'static>, ExecError> {
@@ -342,11 +369,11 @@ impl Runtime {
             .ok_or(ExecError::UnknownArtifact)
     }
 
-    pub(crate) fn artifact_at(&self, index: usize) -> Result<Artifact, ExecError> {
+    pub(crate) fn artifact_at(&self, index: usize) -> Result<&Artifact, ExecError> {
         self.artifacts
             .get(index)
-            .ok_or(ExecError::UnknownArtifact)?;
-        Ok(Artifact::new(self.runtime_id, index))
+            .map(|loaded| &loaded.artifact)
+            .ok_or(ExecError::UnknownArtifact)
     }
 }
 

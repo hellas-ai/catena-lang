@@ -54,11 +54,11 @@ fn main() -> anyhow::Result<()> {
 }
 ```
 
-The same example is available as
-[catena-lang/examples/readme.rs](catena-lang/examples/readme.rs):
+A more complete example is available as
+[catena-lang/examples/runtime.rs](catena-lang/examples/runtime.rs):
 
 ```sh
-cargo run -p catena-lang --example readme
+cargo run -p catena-lang --example runtime
 ```
 
 NOTE: by default this will run using the
@@ -67,5 +67,5 @@ With [Nix](https://nix.dev/), you can run the example with the required
 dependencies as follows:
 
 ```sh
-nix develop --command cargo run -p catena-lang --example readme
+nix develop --command cargo run -p catena-lang --example runtime
 ```

@@ -100,7 +100,7 @@ fn main() -> anyhow::Result<()> {
     // A device-side assertion is reported by the runtime synchronization
     // boundary. It must terminate and poison the isolated worker just like a
     // native host assertion, rather than leave a failed GPU context reusable.
-    let mut gpu_fault_runtime = SafeRuntime::new(dialect)?;
+    let gpu_fault_runtime = SafeRuntime::new(dialect)?;
     let gpu_fault_artifact = gpu_fault_runtime.load_sources(
         stdlib::sources().chain([include_str!("materializec.hex"), ADD_ONE_SOURCE]),
     )?;

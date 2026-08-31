@@ -13,10 +13,10 @@ use serde::{Deserialize, Serialize};
 use super::artifact::{Artifact, ArtifactError, RuntimeId, SharedObject};
 use super::executor::{AbiValue, Executor, ExecutorError};
 use super::mem::{MemError, MemOwn};
+#[cfg(feature = "experimental-catena-gpu")]
+use super::signature::{GeneratedFunction, generated_signatures};
 use super::{
-    signature::{
-        FunctionSignature, GeneratedFunction, SignatureTable, generated_signatures, signatures,
-    },
+    signature::{FunctionSignature, SignatureTable, signatures},
     value::{Value, ValueKind},
 };
 use crate::codegen::{GpuDialect, gpu::GpuRenderError, gpu::render_modules};
@@ -132,6 +132,7 @@ impl Runtime {
     }
 
     /// The GPU dialect used by this runtime.
+    #[cfg(feature = "experimental-catena-gpu")]
     pub fn dialect(&self) -> GpuDialect {
         self.gpu.dialect()
     }
@@ -201,6 +202,7 @@ impl Runtime {
     ///
     /// This lets another Catena compiler reuse the runtime without depending on
     /// catena-lang's compiler or code-generation representation.
+    #[cfg(feature = "experimental-catena-gpu")]
     pub fn load_generated_source(
         &mut self,
         source: &str,
@@ -209,6 +211,7 @@ impl Runtime {
         self.load_generated(source, generated_signatures(functions))
     }
 
+    #[cfg(feature = "experimental-catena-gpu")]
     fn load_generated(
         &mut self,
         source: &str,

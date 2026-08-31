@@ -6,6 +6,7 @@ use crate::{
 };
 
 /// C ABI metadata for one entry point in generated GPU source.
+#[cfg(feature = "experimental-catena-gpu")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GeneratedFunction {
     pub source_name: String,
@@ -24,6 +25,7 @@ pub(super) struct FunctionSignature {
 /// Source-level program names and their generated C ABI signatures.
 pub(super) type SignatureTable = HashMap<String, FunctionSignature>;
 
+#[cfg(feature = "experimental-catena-gpu")]
 pub(super) fn generated_signatures(
     functions: impl IntoIterator<Item = GeneratedFunction>,
 ) -> SignatureTable {

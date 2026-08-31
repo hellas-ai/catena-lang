@@ -7,7 +7,7 @@ repository = "https://github.com/hellas-ai/catena-lang"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-catena-lang = { path = "../catena-lang" }
+catena-lang = { path = "../catena-lang", features = ["experimental-catena-gpu"] }
 hexpr.workspace = true
 metacat.workspace = true
 open-hypergraphs.workspace = true

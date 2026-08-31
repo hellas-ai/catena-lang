@@ -483,3 +483,24 @@ fn materialize_borrow_topk_f32_parallel_path_matches_stable_key_order() -> anyho
     }
     Ok(())
 }
+
+#[test]
+fn materialize_borrow_topk_f32_accepts_single_column_boundary() -> anyhow::Result<()> {
+    let runtime = runtime_with(SOURCE)?;
+    let input = runtime.mem_f32(&[3.0, -7.0])?;
+
+    let [source, output] = runtime.exec(
+        "materialize-borrow-topk-f32-dynamic",
+        [input.into(), 2_u64.into(), 1_u64.into(), 1_u64.into()],
+    )?;
+    let Value::MemOwn(source) = source else {
+        anyhow::bail!("dynamic top-k returned non-memory source: {source:?}");
+    };
+    let Value::MemOwn(output) = output else {
+        anyhow::bail!("dynamic top-k returned non-memory output: {output:?}");
+    };
+
+    assert_eq!(source.to_f32_vec(), vec![3.0, -7.0]);
+    assert_eq!(output.to_u64_vec(), vec![0, 0]);
+    Ok(())
+}

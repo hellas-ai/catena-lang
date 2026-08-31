@@ -1,6 +1,6 @@
 use catena_lang::{
     codegen::GpuDialect,
-    runtime::{Artifact, ExecError, InitError, MemRef, Runtime, Value, ValueKind},
+    runtime::{Artifact, ExecError, InitError, MemError, MemRef, Runtime, Value, ValueKind},
     stdlib,
 };
 use std::ops::Deref;
@@ -70,6 +70,49 @@ fn configured_gpu_dialect() -> anyhow::Result<GpuDialect> {
 #[test]
 fn runtime_can_be_created_without_sources() -> anyhow::Result<()> {
     let _runtime = Runtime::new(configured_gpu_dialect()?)?;
+    Ok(())
+}
+
+#[test]
+fn zeroed_f32_memory_handles_empty_allocations() -> anyhow::Result<()> {
+    let runtime = Runtime::new(configured_gpu_dialect()?)?;
+    let memory = runtime.mem_f32_zeroed(0)?;
+
+    assert_eq!(memory.byte_len(), 0);
+    assert!(memory.as_ptr().is_null());
+    assert!(memory.to_f32_vec().is_empty());
+    Ok(())
+}
+
+#[test]
+fn zeroed_f32_memory_contains_positive_zero_bits() -> anyhow::Result<()> {
+    let runtime = Runtime::new(configured_gpu_dialect()?)?;
+    let memory = runtime.mem_f32_zeroed(4)?;
+
+    assert_eq!(memory.byte_len(), 4 * std::mem::size_of::<f32>() as u64);
+    assert_eq!(
+        memory
+            .to_f32_vec()
+            .into_iter()
+            .map(f32::to_bits)
+            .collect::<Vec<_>>(),
+        vec![0; 4]
+    );
+    Ok(())
+}
+
+#[test]
+fn zeroed_f32_memory_rejects_allocation_size_overflow() -> anyhow::Result<()> {
+    let runtime = Runtime::new(configured_gpu_dialect()?)?;
+    let error = runtime.mem_f32_zeroed(usize::MAX).unwrap_err();
+
+    assert!(matches!(
+        error,
+        MemError::AllocationSizeOverflow {
+            element_count: usize::MAX,
+            element_size: 4,
+        }
+    ));
     Ok(())
 }
 

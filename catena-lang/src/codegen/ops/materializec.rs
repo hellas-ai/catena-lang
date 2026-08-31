@@ -4,7 +4,7 @@
 //!
 //! ```cpp
 //! T *buf_data = nullptr;
-//! catena_host_gpu_check(cudaMallocAsync((void **)&buf_data, len * sizeof(T), nullptr));
+//! catena_host_gpu_check(cudaMalloc((void **)&buf_data, len * sizeof(T)));
 //! materialize_kernel<<<dim3((len + 255) / 256), dim3(256)>>>(buf_data, len, env...);
 //! buf = buf_data;
 //! ```
@@ -114,10 +114,10 @@ pub(in crate::codegen) fn render_call(
         name = output.name
     ));
     out.push_str(&format!(
-        "        catena_host_gpu_check({device_alloc_async_fn}((void **)&{name}_data, {name}_len * sizeof({element}), nullptr));\n",
+        "        catena_host_gpu_check({device_alloc_fn}((void **)&{name}_data, {name}_len * sizeof({element})));\n",
         name = output.name,
         element = c_type(element),
-        device_alloc_async_fn = dialect.device_alloc_async_fn(),
+        device_alloc_fn = dialect.device_alloc_fn(),
     ));
     out.push_str(&format!(
         "        {kernel_name}<<<dim3(({name}_len + 255) / 256), dim3(256)>>>\n",
@@ -314,8 +314,8 @@ pub(in crate::codegen) fn render_borrow_call(
     ));
     out.push_str(&format!("    if ({}_len != 0) {{\n", output.name));
     out.push_str(&format!(
-        "        catena_host_gpu_check({}((void **)&{}_data, {}_len * sizeof({}), nullptr));\n",
-        dialect.device_alloc_async_fn(),
+        "        catena_host_gpu_check({}((void **)&{}_data, {}_len * sizeof({})));\n",
+        dialect.device_alloc_fn(),
         output.name,
         output.name,
         c_type(element)
@@ -839,8 +839,8 @@ pub(in crate::codegen) fn render_borrow_argmax_f32_call(
         index_output.name
     ));
     out.push_str(&format!(
-        "    catena_host_gpu_check({}((void **)&{}_data, sizeof(uint64_t), nullptr));\n",
-        dialect.device_alloc_async_fn(),
+        "    catena_host_gpu_check({}((void **)&{}_data, sizeof(uint64_t)));\n",
+        dialect.device_alloc_fn(),
         index_output.name
     ));
     out.push_str(&format!(
@@ -984,6 +984,7 @@ pub(in crate::codegen) fn render_borrow_topk_f32_call(
 
     out.push_str(&format!("    catena_assert(({columns}) != 0);\n"));
     out.push_str(&format!("    catena_assert(({k}) != 0 && ({k}) <= 8);\n"));
+    out.push_str(&format!("    catena_assert(({k}) <= ({columns}));\n"));
     out.push_str(&format!(
         "    catena_assert(({len}) % ({columns}) == 0 && ({rows}) == ({len}) / ({columns}));\n"
     ));
@@ -999,8 +1000,8 @@ pub(in crate::codegen) fn render_borrow_topk_f32_call(
     ));
     out.push_str(&format!("    if (({output_len}) != 0) {{\n"));
     out.push_str(&format!(
-        "        catena_host_gpu_check({}((void **)&{}_data, ({output_len}) * sizeof(uint64_t), nullptr));\n",
-        dialect.device_alloc_async_fn(),
+        "        catena_host_gpu_check({}((void **)&{}_data, ({output_len}) * sizeof(uint64_t)));\n",
+        dialect.device_alloc_fn(),
         index_output.name
     ));
     out.push_str(&format!(
@@ -1045,8 +1046,8 @@ pub(in crate::codegen) fn render_borrow_reduce_f32_call(
     out.push_str(&format!("    catena_assert(({reduction_len}) <= 8192);\n"));
     out.push_str(&format!("    if ({}_len != 0) {{\n", output.name));
     out.push_str(&format!(
-        "        catena_host_gpu_check({}((void **)&{}_data, {}_len * sizeof(float), nullptr));\n",
-        dialect.device_alloc_async_fn(),
+        "        catena_host_gpu_check({}((void **)&{}_data, {}_len * sizeof(float)));\n",
+        dialect.device_alloc_fn(),
         output.name,
         output.name
     ));
@@ -1156,13 +1157,13 @@ pub(in crate::codegen) fn render_borrow_routed_bf16_gemv_pair_call(
     ));
     out.push_str(&format!("    if (({output_len}) != 0) {{\n"));
     out.push_str(&format!(
-        "        catena_host_gpu_check({}((void **)&{}_data, ({output_len}) * sizeof(float), nullptr));\n",
-        dialect.device_alloc_async_fn(),
+        "        catena_host_gpu_check({}((void **)&{}_data, ({output_len}) * sizeof(float)));\n",
+        dialect.device_alloc_fn(),
         gate_output.name
     ));
     out.push_str(&format!(
-        "        catena_host_gpu_check({}((void **)&{}_data, ({output_len}) * sizeof(float), nullptr));\n",
-        dialect.device_alloc_async_fn(),
+        "        catena_host_gpu_check({}((void **)&{}_data, ({output_len}) * sizeof(float)));\n",
+        dialect.device_alloc_fn(),
         up_output.name
     ));
     out.push_str(&format!(
@@ -1211,8 +1212,8 @@ pub(in crate::codegen) fn render_reduce_f32_call(
     out.push_str(&format!("    catena_assert(({reduction_len}) <= 4096);\n"));
     out.push_str(&format!("    if ({}_len != 0) {{\n", output.name));
     out.push_str(&format!(
-        "        catena_host_gpu_check({}((void **)&{}_data, {}_len * sizeof(float), nullptr));\n",
-        dialect.device_alloc_async_fn(),
+        "        catena_host_gpu_check({}((void **)&{}_data, {}_len * sizeof(float)));\n",
+        dialect.device_alloc_fn(),
         output.name,
         output.name
     ));
@@ -1256,8 +1257,8 @@ pub(in crate::codegen) fn render_reduce_f32_pair_call(
     out.push_str(&format!("    if ({output_len} != 0) {{\n"));
     for output in [left_output, right_output] {
         out.push_str(&format!(
-            "        catena_host_gpu_check({}((void **)&{}_data, ({output_len}) * sizeof(float), nullptr));\n",
-            dialect.device_alloc_async_fn(),
+            "        catena_host_gpu_check({}((void **)&{}_data, ({output_len}) * sizeof(float)));\n",
+            dialect.device_alloc_fn(),
             output.name
         ));
     }

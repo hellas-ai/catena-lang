@@ -97,6 +97,41 @@ fn main() -> anyhow::Result<()> {
     anyhow::ensure!(empty.try_to_u64_vec()?.is_empty());
     println!("owned outputs remained valid after child termination");
 
+    // A device-side assertion is reported by the runtime synchronization
+    // boundary. It must terminate and poison the isolated worker just like a
+    // native host assertion, rather than leave a failed GPU context reusable.
+    let mut gpu_fault_runtime = SafeRuntime::new(dialect)?;
+    let gpu_fault_artifact = gpu_fault_runtime.load_sources(
+        stdlib::sources().chain([include_str!("materializec.hex"), ADD_ONE_SOURCE]),
+    )?;
+    let fault_input = MemOwn::from_f32_slice(&[0.0; 8], dialect)?;
+    let gate = MemOwn::from_u16_slice(&[0; 16], dialect)?;
+    let up = MemOwn::from_u16_slice(&[0; 16], dialect)?;
+    // The two weight tensors describe experts 0 and 1, so expert 2 triggers
+    // the routed kernel's device assertion.
+    let invalid_selected = MemOwn::from_u64_slice(&[2, 0], dialect)?;
+    match gpu_fault_runtime.exec::<4, 4>(
+        &gpu_fault_artifact,
+        "materialize-borrow-routed-bf16-gemv-pair",
+        [
+            fault_input.into(),
+            gate.as_ref().into(),
+            up.as_ref().into(),
+            invalid_selected.into(),
+        ],
+    ) {
+        Err(SafeExecError::ChildTerminated { status, .. }) => {
+            anyhow::ensure!(!status.success(), "GPU-faulting child exited successfully");
+        }
+        Err(error) => anyhow::bail!("device assertion returned the wrong error: {error}"),
+        Ok(_) => anyhow::bail!("device assertion unexpectedly returned outputs"),
+    }
+    anyhow::ensure!(matches!(
+        gpu_fault_runtime.exec::<1, 1>(&gpu_fault_artifact, "add-one", [41_u64.into()]),
+        Err(SafeExecError::Unavailable { .. })
+    ));
+    println!("device assertion: child terminated and remained unavailable");
+
     Ok(())
 }
 

@@ -1343,10 +1343,10 @@ fn render_materialize_call(
         name = output.name
     ));
     out.push_str(&format!(
-        "        catena_host_gpu_check({device_alloc_async_fn}((void **)&{name}_data, {name}_len * sizeof({element}), nullptr));\n",
+        "        catena_host_gpu_check({device_alloc_fn}((void **)&{name}_data, {name}_len * sizeof({element})));\n",
         name = output.name,
         element = c_type(element),
-        device_alloc_async_fn = dialect.device_alloc_async_fn(),
+        device_alloc_fn = dialect.device_alloc_fn(),
     ));
     out.push_str(&format!(
         "        {kernel_name}<<<dim3({launch}.grid_dim.x, {launch}.grid_dim.y, {launch}.grid_dim.z), dim3({launch}.block_dim.x, {launch}.block_dim.y, {launch}.block_dim.z)>>>\n"
@@ -1712,7 +1712,7 @@ mod tests {
     }
 
     #[test]
-    fn materializing_host_wrappers_are_hidden_from_hip_device_parse() {
+    fn materializing_host_wrappers_are_device_guarded_and_use_synchronous_allocation() {
         let len = var(0, "len", CType::U64);
         let out = var(1, "out", CType::Pointer(Box::new(CType::U64)));
         let value = var(2, "value", CType::U64);
@@ -1768,8 +1768,13 @@ mod tests {
         assert!(source.contains(
             "#ifndef __HIP_DEVICE_COMPILE__\nextern \"C\" __host__ void program_materialize(uint64_t len, uint64_t * *out_out) {"
         ));
-        assert!(source.contains("catena_host_gpu_check(hipMallocAsync((void **)"));
+        assert!(source.contains("catena_host_gpu_check(hipMalloc((void **)"));
+        assert!(!source.contains("hipMallocAsync"));
         assert!(!source.contains("hipDeviceSynchronize"));
         assert!(!source.contains("catena_gpu_check"));
+
+        let cuda_source = render_modules(&modules, GpuDialect::Cuda).unwrap();
+        assert!(cuda_source.contains("catena_host_gpu_check(cudaMalloc((void **)"));
+        assert!(!cuda_source.contains("cudaMallocAsync"));
     }
 }

@@ -1,6 +1,6 @@
 use catena_gpu::{
     codegen::GpuDialect,
-    runtime::{Artifact, Runtime, Value},
+    runtime::{Artifact, Runtime, Value, load_sources},
     stdlib,
 };
 
@@ -8,7 +8,7 @@ mod cases;
 
 fn runtime_with(source: &'static str) -> anyhow::Result<(Runtime, Artifact)> {
     let mut runtime = Runtime::new(configured_gpu_dialect()?)?;
-    let artifact = runtime.load_sources(stdlib::sources().chain([source]))?;
+    let artifact = load_sources(&mut runtime, stdlib::sources().chain([source]))?;
     Ok((runtime, artifact))
 }
 

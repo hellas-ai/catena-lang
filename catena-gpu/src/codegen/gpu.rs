@@ -99,18 +99,21 @@ fn param(var: &GpuVar) -> String {
     format!("{} {}", c_type(runtime_type(var).unwrap()), var.name)
 }
 
-pub(super) fn c_type(ty: &CType) -> &'static str {
+pub(super) fn c_type(ty: &CType) -> String {
     match ty {
-        CType::Bool => "uint8_t",
-        CType::U32 => "uint32_t",
-        CType::U64 => "uint64_t",
-        CType::F32 => "float",
-        CType::Grid => "catena_grid_t",
-        CType::MemOwn => "catena_mem_own_t",
-        CType::U64Ptr => "uint64_t *",
-        CType::Thread => "catena_thread_t",
-        CType::Block => "catena_block_t",
-        CType::Scheduling => "catena_scheduling_t",
+        CType::Bool => "uint8_t".into(),
+        CType::U32 => "uint32_t".into(),
+        CType::U64 => "uint64_t".into(),
+        CType::F32 => "float".into(),
+        CType::Grid => "catena_grid_t".into(),
+        CType::MemOwn => "catena_mem_own_t".into(),
+        CType::MemRef => "catena_mem_ref_t".into(),
+        CType::Ptr(element) => format!("{} *", c_type(element)),
+        CType::ConstPtr(element) => format!("const {} *", c_type(element)),
+        CType::Ix => "catena_ix_t".into(),
+        CType::Thread => "catena_thread_t".into(),
+        CType::Block => "catena_block_t".into(),
+        CType::Scheduling => "catena_scheduling_t".into(),
     }
 }
 
@@ -132,41 +135,45 @@ fn render_prelude(dialect: GpuDialect) -> String {
     format!(
         r#"#include <{runtime_header}>
 #include <stdint.h>
-#include <math.h>
 #include <stdio.h>
 
 typedef struct {{ uint32_t x; uint32_t y; uint32_t z; }} catena_dim3_t;
 typedef struct {{ catena_dim3_t grid_dim; catena_dim3_t block_dim; }} catena_grid_t;
 typedef struct {{ void *data; uint64_t len; }} catena_mem_own_t;
+typedef struct {{ void *data; uint64_t len; }} catena_mem_ref_t;
+typedef struct {{ uint64_t first; uint64_t second; uint64_t third; }} catena_ix_t;
 typedef struct {{
-    uint64_t global_linear_id;
-    uint64_t in_block_linear_id;
-    uint64_t block_linear_id;
+    catena_ix_t global_index;
+    catena_ix_t in_block_index;
+    catena_ix_t block_index;
 }} catena_thread_t;
-typedef struct {{ uint64_t linear_id; }} catena_block_t;
+typedef struct {{ catena_ix_t index; }} catena_block_t;
 typedef enum {{
     CATENA_CELL_INACCESSIBLE = 0,
-    CATENA_CELL_READABLE = 1,
     CATENA_CELL_OWNED = 2,
 }} catena_cell_access_t;
 typedef enum {{
     CATENA_SCHEDULING_OWN_EACH = 1,
-    CATENA_SCHEDULING_READ_ALL = 2,
+    CATENA_SCHEDULING_2D_ROW_MAJOR_OWN = 3,
 }} catena_scheduling_kind_t;
-typedef struct {{ catena_scheduling_kind_t kind; }} catena_scheduling_t;
+typedef struct {{ catena_scheduling_kind_t kind; uint64_t matrix_columns; }} catena_scheduling_t;
 
 __host__ __device__ static inline catena_cell_access_t catena_scheduling_resolve(
     catena_scheduling_t scheduling,
     catena_thread_t thread,
-    uint64_t cell
+    catena_ix_t cell
 ) {{
     switch (scheduling.kind) {{
     case CATENA_SCHEDULING_OWN_EACH:
-        return thread.global_linear_id == cell
+        return thread.global_index.first == cell.first
             ? CATENA_CELL_OWNED
             : CATENA_CELL_INACCESSIBLE;
-    case CATENA_SCHEDULING_READ_ALL:
-        return CATENA_CELL_READABLE;
+    case CATENA_SCHEDULING_2D_ROW_MAJOR_OWN:
+        if (scheduling.matrix_columns == 0) return CATENA_CELL_INACCESSIBLE;
+        return thread.global_index.first == cell.first % scheduling.matrix_columns
+            && thread.global_index.second == cell.first / scheduling.matrix_columns
+            ? CATENA_CELL_OWNED
+            : CATENA_CELL_INACCESSIBLE;
     default:
         return CATENA_CELL_INACCESSIBLE;
     }}
@@ -252,45 +259,39 @@ fn render_assignment(
             Ok(())
         }
         ":.param" => Ok(()),
-        ":.ty" | ":.forget" | "u64.name" | "gpu.thread.name" => identity(output, assignment),
-        "u64.copies2" | "bool.copies2" => copy_two(output, assignment),
+        ":.ty"
+        | ":.forget"
+        | "bool.name"
+        | "u32.name"
+        | "u64.name"
+        | "gpu.thread.name"
+        | "gpu.global.element-type" => identity(output, assignment),
+        "positive-u32.intro" => identity(output, assignment),
+        "u32.is-positive" => {
+            if assignment.inputs.len() != 1 || assignment.outputs.len() != 2 {
+                return Err(arity(assignment, 1));
+            }
+            let value = input(assignment, 0)?;
+            output.push_str(&format!(
+                "    {} = {value};\n    {} = ({value} != 0U);\n",
+                assignment.outputs[0].name, assignment.outputs[1].name,
+            ));
+            Ok(())
+        }
+        "u64.copies2" | "bool.copies2" | "ix.copies2" => copy_two(output, assignment),
         "gpu.grid.1d.intro" => render_grid_intro(output, assignment, 1),
         "gpu.grid.2d.intro" => render_grid_intro(output, assignment, 2),
         "gpu.grid.3d.intro" => render_grid_intro(output, assignment, 3),
         "gpu.launch" => ops::launch::render_call(output, function, assignment_index, assignment),
         "fold" => ops::fold::render(output, assignment),
         "bool.ifc" => render_ifc(output, assignment),
-        "bool.t" => unary_output(output, assignment, "1", 0),
-        "bool.f" | "u64.zero" | "u32.zero" => unary_output(output, assignment, "0", 0),
-        "u64.one" | "u32.one" | "f32.one" => unary_output(output, assignment, "1", 0),
-        "bool.not" => unary(output, assignment, "!"),
-        "u32.not" => unary(output, assignment, "~"),
-        "f32.neg" => unary(output, assignment, "-"),
+        "u64.zero" | "scalar.zero" => unary_output(output, assignment, "0", 0),
         "bool.and" => binary(output, assignment, "&&"),
-        "bool.or" => binary(output, assignment, "||"),
-        "u64.add" | "u32.add" | "f32.add" => binary(output, assignment, "+"),
-        "u64.sub" | "u32.sub" | "f32.sub" => binary(output, assignment, "-"),
-        "u64.mul" | "u32.mul" | "f32.mul" => binary(output, assignment, "*"),
-        "u64.div" | "f32.div" => binary(output, assignment, "/"),
-        "u64.rem" => binary(output, assignment, "%"),
-        "u32.and" => binary(output, assignment, "&"),
-        "u32.or" => binary(output, assignment, "|"),
-        "u32.xor" => binary(output, assignment, "^"),
-        "u32.shl" => binary(output, assignment, "<<"),
-        "u32.shr" => binary(output, assignment, ">>"),
-        "u64.ne" | "u32.ne" | "f32.ne" => binary(output, assignment, "!="),
-        "u32.eq" | "f32.eq" => binary(output, assignment, "=="),
-        "u64.lt" | "u32.lt" | "f32.lt" => binary(output, assignment, "<"),
-        "u32.gt" | "f32.gt" => binary(output, assignment, ">"),
-        "u64.lte" | "u32.lte" | "f32.lte" => binary(output, assignment, "<="),
-        "u64.gte" | "u32.gte" | "f32.gte" => binary(output, assignment, ">="),
-        "bool.select" | "u64.select" | "u32.select" | "f32.select" => select(output, assignment),
-        "u32.to-f32" => cast(output, assignment, "float"),
-        "u64.to-f32" => cast(output, assignment, "float"),
-        "u32.bitcast-f32" => bitcast(output, assignment, "float", "uint32_t"),
-        "f32.bitcast-u32" => bitcast(output, assignment, "uint32_t", "float"),
-        "f32.round-to-u32" => call1(output, assignment, "(uint32_t)roundf"),
-        "f32.fma" => call3(output, assignment, "fmaf"),
+        "u64.add" | "scalar.add" => binary(output, assignment, "+"),
+        "u64.mul" | "scalar.mul" => binary(output, assignment, "*"),
+        "u64.lt" => binary(output, assignment, "<"),
+        "u64.lte" => binary(output, assignment, "<="),
+        "u64.select" => select(output, assignment),
         _ => Err(GpuRenderError::UnsupportedOp(assignment.op.clone())),
     }
 }
@@ -301,7 +302,8 @@ fn render_grid_intro(
     dimensions: usize,
 ) -> Result<(), GpuRenderError> {
     let expected = dimensions * 2;
-    if a.inputs.len() != expected || a.outputs.len() != 2 {
+    let expected_outputs = if dimensions == 1 { 2 } else { 1 };
+    if a.inputs.len() != expected || a.outputs.len() != expected_outputs {
         return Err(arity(a, expected));
     }
     let mut grid = ["1".to_string(), "1".to_string(), "1".to_string()];
@@ -311,14 +313,15 @@ fn render_grid_intro(
         block[axis] = input(a, dimensions + axis)?;
     }
     output.push_str(&format!(
-        "    {} = {{ {{ (uint32_t){}, (uint32_t){}, (uint32_t){} }}, {{ (uint32_t){}, (uint32_t){}, (uint32_t){} }} }};\n",
-        a.outputs[0].name,
-        grid[0], grid[1], grid[2], block[0], block[1], block[2],
+        "    {} = {{ {{ {}, {}, {} }}, {{ {}, {}, {} }} }};\n",
+        a.outputs[0].name, grid[0], grid[1], grid[2], block[0], block[1], block[2],
     ));
-    output.push_str(&format!(
-        "    {} = ({} * {}) * ({} * {}) * ({} * {});\n",
-        a.outputs[1].name, grid[0], block[0], grid[1], block[1], grid[2], block[2],
-    ));
+    if dimensions == 1 {
+        output.push_str(&format!(
+            "    {} = (uint64_t){} * (uint64_t){};\n",
+            a.outputs[1].name, grid[0], block[0],
+        ));
+    }
     Ok(())
 }
 
@@ -351,10 +354,6 @@ fn unary_output(
     Ok(())
 }
 
-fn unary(output: &mut String, a: &GpuAssign, operator: &str) -> Result<(), GpuRenderError> {
-    unary_output(output, a, &format!("{operator}{}", input(a, 0)?), 1)
-}
-
 fn binary(output: &mut String, a: &GpuAssign, operator: &str) -> Result<(), GpuRenderError> {
     unary_output(
         output,
@@ -371,40 +370,6 @@ fn select(output: &mut String, a: &GpuAssign) -> Result<(), GpuRenderError> {
         &format!("{} ? {} : {}", input(a, 0)?, input(a, 1)?, input(a, 2)?),
         3,
     )
-}
-
-fn cast(output: &mut String, a: &GpuAssign, ty: &str) -> Result<(), GpuRenderError> {
-    unary_output(output, a, &format!("({ty}){}", input(a, 0)?), 1)
-}
-
-fn call1(output: &mut String, a: &GpuAssign, function: &str) -> Result<(), GpuRenderError> {
-    unary_output(output, a, &format!("{function}({})", input(a, 0)?), 1)
-}
-
-fn call3(output: &mut String, a: &GpuAssign, function: &str) -> Result<(), GpuRenderError> {
-    unary_output(
-        output,
-        a,
-        &format!(
-            "{function}({}, {}, {})",
-            input(a, 0)?,
-            input(a, 1)?,
-            input(a, 2)?
-        ),
-        3,
-    )
-}
-
-fn bitcast(output: &mut String, a: &GpuAssign, to: &str, from: &str) -> Result<(), GpuRenderError> {
-    if a.inputs.len() != 1 || a.outputs.len() != 1 {
-        return Err(arity(a, 1));
-    }
-    output.push_str(&format!(
-        "    {{ union {{ {from} from; {to} to; }} bits = {{ {} }}; {} = bits.to; }}\n",
-        value_expr(&a.inputs[0]),
-        a.outputs[0].name
-    ));
-    Ok(())
 }
 
 fn input(a: &GpuAssign, index: usize) -> Result<String, GpuRenderError> {
@@ -516,14 +481,16 @@ mod tests {
         let one_d = grid_assignment("gpu.grid.1d.intro", &["gx", "bx"]);
         let mut generated = String::new();
         render_grid_intro(&mut generated, &one_d, 1).unwrap();
-        assert!(generated.contains("{ (uint32_t)gx, (uint32_t)1, (uint32_t)1 }"));
-        assert!(generated.contains("{ (uint32_t)bx, (uint32_t)1, (uint32_t)1 }"));
+        assert!(generated.contains("{ gx, 1, 1 }"));
+        assert!(generated.contains("{ bx, 1, 1 }"));
+        assert!(generated.contains("(uint64_t)gx * (uint64_t)bx"));
 
         let two_d = grid_assignment("gpu.grid.2d.intro", &["gx", "gy", "bx", "by"]);
         generated.clear();
         render_grid_intro(&mut generated, &two_d, 2).unwrap();
-        assert!(generated.contains("{ (uint32_t)gx, (uint32_t)gy, (uint32_t)1 }"));
-        assert!(generated.contains("{ (uint32_t)bx, (uint32_t)by, (uint32_t)1 }"));
+        assert!(generated.contains("{ gx, gy, 1 }"));
+        assert!(generated.contains("{ bx, by, 1 }"));
+        assert!(!generated.contains("uint64_t"));
     }
 
     fn grid_assignment(operation: &str, inputs: &[&str]) -> GpuAssign {
@@ -533,12 +500,16 @@ mod tests {
             inputs: inputs
                 .iter()
                 .enumerate()
-                .map(|(node, name)| GpuValue::Var(var(node, name, CType::U64)))
+                .map(|(node, name)| GpuValue::Var(var(node, name, CType::U32)))
                 .collect(),
-            outputs: vec![
-                var(inputs.len(), "grid", CType::Grid),
-                var(inputs.len() + 1, "size", CType::U64),
-            ],
+            outputs: if inputs.len() == 2 {
+                vec![
+                    var(inputs.len(), "grid", CType::Grid),
+                    var(inputs.len() + 1, "size", CType::U64),
+                ]
+            } else {
+                vec![var(inputs.len(), "grid", CType::Grid)]
+            },
         }
     }
 

@@ -25,4 +25,13 @@ fn minimal_stdlib_elaborates_names_and_generates_gpu_modules() {
     ));
     assert!(generated.contains(" = x0 + x1;"));
     assert!(generated.contains("catena_grid_t"));
+    assert!(generated.contains(
+        "typedef struct { uint64_t first; uint64_t second; uint64_t third; } catena_ix_t;"
+    ));
+    assert!(!generated.contains("uint64_t linear"));
+    assert!(!generated.contains(".linear"));
+    assert!(!generated.contains("template<"));
+    assert!(!generated.contains("typename T"));
+    assert!(!generated.contains("program_gpu_global_matrix_2d_row_major_read"));
+    assert!(!generated.contains("program_gpu_global_matrix_matmul_kernel"));
 }

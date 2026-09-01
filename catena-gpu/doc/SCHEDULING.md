@@ -1,52 +1,136 @@
-# Launch, scheduling, and permissions
+# Scheduling and memory capabilities
 
-A global memory is a buffer with a number of cells. A thread can own or read from some cells in global memory, but we want to avoid race conditions. This means that when we launch the kernel we need to specify how permissions are distributed over threads in a grid.
+Catena GPU uses capabilities and ownership schedules to prevent data races. This establishes access safety, not that a kernel computes the intended result.
 
-This distribution is called a "scheduling". For each global memory in input for a kernel function, we specify what a thread can do for each cell. Informally, we can see a schedule as a function from buffer indices to thread indices.
+## Safety is not functional correctness
 
-A scheduling is an opaque runtime value. Schedules are ordinary kernel arguments and can only be queried through `gpu.scheduling.can-own` and `gpu.scheduling.can-read`. Both operations use one backend resolver. The proofs produced by these queries are erased.
+The type system controls which threads may access each global-memory cell. It does not prove that a kernel selects the right cells, writes the right values,
+or processes every cell.
 
-`gpu.launch` is generic: it receives a grid, one product of kernel arguments, and a specialized kernel. The kernel declares the product it expects. The current example builds one destination triple and one source triple with `*.intro`, then combines them:
+For example, a kernel can safely:
+
+- skip some cells;
+- compute the wrong value for a cell it owns;
+- compute a cell that it does not own and take the false permission branch;
+- launch excess threads that do no work.
+
+These programs may be functionally wrong, but they do not perform an unauthorized memory access. If a kernel asserts that a failed permission query must be true, it may also fail at runtime. **Scheduling guarantees race freedom, not totality.**
+
+## Borrowed buffers: `cap.ref`
+
+A `cap.ref` global buffer is read-only. Any number of threads may read the same cell concurrently because read-read concurrency is not a data race. Code using
+the reference cannot call `gpu.global.write`, so no per-thread read permission or read schedule is required.
+
+`gpu.global.read` therefore needs only the borrowed buffer and a bounded index:
 
 ```text
-(destination-length, destination-buffer, destination-schedule)
-(source-length, source-buffer, source-schedule)
+buffer : gpu.global(cap.ref, buffer-size, element-type)
+cell   : ix(shape.1d(buffer-size))
+
+gpu.global.read(buffer, cell)
 ```
 
-The types connect each triple. If `b` names a global buffer of length `n`, its schedule is indexed by the same `b` and `n`. A schedule or bounded index for one buffer therefore cannot be used with another buffer.
+The capability discipline assumes that the allocation is not also exposed for concurrent mutation while it is borrowed. A `cap.ref` passed to a kernel is not
+returned as an owned result; ownership remains with the caller.
 
-Names in these types are static identities, not runtime objects. For example,
-`destination-buffer-name` names `destination-buffer`, while
-`destination-schedule-name` names `destination-scheduling`. The same convention
-is used for source buffers, threads, and blocks.
+## Owned buffers: `cap.own`
 
-A race-free condition is: for each cell, either only one thread owns it or some threads can read it.
+A `cap.own` global buffer may be written, so a bounded index alone is not enough. The kernel must also prove that the current thread owns that cell under
+the schedule chosen for the buffer.
 
-## What sort of proofs do we want? Safety is not functional correctness
+Informally, an ownership schedule maps each writable buffer cell to at most one thread. This rules out concurrent writers by construction. Other threads cannot obtain an ownership proof for that cell, and reads of mutable buffers are not available without ownership.
 
-The types guarantee **race-free and safe access**, not that the kernel computes the intended mapping or result. A bad in-bounds candidate can fail the ownership assertion, and a thread can write the wrong value to a cell it legitimately owns. These remain race-free, but the program may fail or produce the wrong result.
+Each owned buffer has its own schedule. Schedules stay in the generic kernel arguments beside their buffers rather than being a distinguished argument of `gpu.launch`. This supports kernels with zero, one, or several owned buffers, possibly using different policies:
 
-Race free and safe access is the guarnatee we need in order to prove that the kernel function is deterministic and total.
+```text
+(output-a, output-a-schedule)
+(output-b, output-b-schedule)
+(read-only-input)
+```
 
-## Own-each scheduling
+The schedule type carries the identities of its buffer, grid, and scheduling instance. Consequently, a schedule or ownership proof for one buffer cannot be
+used to write another buffer.
 
-For convenience, `gpu.scheduling.own-each` constructs a schedule that gives each buffer cell one owner. Common scheduling disciplines as primitives avoid repeating tedious race-freedom proofs.
+## Why scheduling is opaque
 
-Specifically, `gpu.scheduling.own-each` assigns buffer cell `i` to global thread `i`. The owner may read and write that cell. No other thread receives permission for it, so there cannot be two writers or a writer and a distinct reader.
+The kernel computes its destination cell inside its body. The corresponding ownership proposition depends on that computed cell:
 
-The constructor requires `buffer-size <= global-size`. This ensures that every buffer cell has a corresponding global thread. If the grid is larger, excess threads own no cell. Own-each scheduling is therefore race-free by construction; the internal race-free argument is part of this fixed primitive rather than a proof rebuilt by each program. The schedule and every permission carry the buffer identity, preventing a grant for one buffer from being used with another.
+```text
+|- gpu.schedule.owns(buffer, schedule, thread, cell)
+```
 
-`gpu.scheduling.read-all` is the complementary read-only policy: every thread may read every cell, and no thread may own or write one. It is race-free because concurrent reads do not conflict. A kernel can therefore use an own-each schedule for its destination buffer and a read-all schedule for a separate source buffer.
+Passing this proof directly as a kernel argument would require the cell to be known before the kernel runs. Alternatively, the kernel would need a dependent
+proof function that can produce ownership evidence for a cell selected later. Metacat does not currently express that function cleanly.
 
-## Access inside a kernel
+The schedule is therefore an opaque runtime value with a typed elimination operation. After computing a bounded cell, the kernel queries the schedule:
 
-The kernel computes a candidate cell and calls `gpu.scheduling.can-own` or `gpu.scheduling.can-read` with the actual `gpu.thread` handle and a bounded `ix[shape.1d(buffer-size)]`.
+```text
+decision, owns-if-true =
+    gpu.scheduling.can-own(schedule, thread, cell)
+```
 
-In the kernel, `gpu.thread.in-grid.index` obtains the current coordinate and `ix.to-u64` computes its row-major linear offset. `u64.lt` then checks the offset against the buffer size. The true branch uses `u64.to-ix` to construct a bounded cell before calling `can-own`; the false branch skips without asking for permission.
-The entry receives `grid-x` and `block-x`, so the same program covers exact tiling when `grid-x * block-x == buffer-size` and predication when the product is larger. If it is smaller, schedule construction fails its fit assertion.
+The true branch turns `owns-if-true` into the concrete ownership proof. The proof is passed directly to `gpu.global.write` and is erased during code generation:
 
-The example uses the finite `fold` primitive to visit every bounded source
-index. Its direct named body carries the source scheduling, current thread,
-source buffer, and running sum as loop state. Each iteration obtains a read
-grant from the same read-all scheduling, reads one cell, and adds it to the
-sum. No closure, loop variant, or type-changing invariant is needed.
+```text
+owns = assert(decision, owns-if-true)
+gpu.global.write(thread, buffer, cell, value, owns)
+```
+
+The schedule itself remains at runtime because `can-own` must resolve the policy selected for that particular buffer. Its construction is restricted to
+known race-free policies.
+
+## Current policies
+
+`gpu.scheduling.own-each` assigns 1D buffer cell `i` to global thread `i`. It requires `buffer-size <= global-size`; excess threads own no cell.
+
+`gpu.scheduling.2d.row-major.own-each` is needed for predicated 2D launches.
+
+Suppose the matrix has 2 rows and 3 columns:
+
+```text
+matrix coordinates and linear cells
+
+(0,0)=0  (1,0)=1  (2,0)=2
+(0,1)=3  (1,1)=4  (2,1)=5
+```
+
+We launch a grid with 4 threads per row, perhaps because of the block size:
+
+```text
+thread coordinates and flattened thread IDs
+
+(0,0)=0  (1,0)=1  (2,0)=2  (3,0)=3
+(0,1)=4  (1,1)=5  (2,1)=6  (3,1)=7
+```
+
+Threads with `x = 3` are outside the matrix, so the kernel predicates them out.
+
+The kernel wants thread `(0,1)` to process matrix cell `(0,1)`, which has linear buffer index:
+
+```text
+y * matrix_width + x
+= 1 * 3 + 0
+= 3
+```
+
+But the 1D `own-each` schedule uses the flattened thread ID. For thread
+`(0,1)`, that is:
+
+```text
+y * grid_width + x
+= 1 * 4 + 0
+= 4
+```
+
+Therefore, the 1D schedule says that thread `(0,1)` owns cell `4`, while the kernel wants it to write cell `3`. Its `can-own` query for cell `3` fails.
+
+According to the 1D schedule, cell `3` belongs to thread `(3,0)`. But `(3,0)` is an excess thread and is predicated out, so cell `3` is never written.
+
+The 2D schedule avoids flattening the thread with the padded grid width. It directly establishes that thread `(x,y)` owns matrix cell `(x,y)`. Thus thread `(0,1)` owns cell `1 * 3 + 0 = 3`, and threads with `x = 3` own no matrix cell.
+
+For perfect tiling, the matrix width and grid width are both `3`, so the 1D and 2D formulas happen to agree. The 2D policy becomes necessary when predication
+adds padding within each row.
+
+### Race free by construction
+
+Both policies are race-free by construction. Kernel code still checks bounds before constructing an `ix` and queries `can-own` before every write.

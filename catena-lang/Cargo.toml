@@ -31,6 +31,7 @@ half = "2"
 [features]
 default = []
 runtime-tests = []
+experimental-catena-gpu = []
 
 [[example]]
 name = "runtime"

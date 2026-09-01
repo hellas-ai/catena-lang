@@ -73,5 +73,7 @@ pub use mem::MemOwn;
 pub use mem::MemRef;
 pub use runtime::Runtime;
 pub use runtime::{ExecError, InitError};
+#[cfg(feature = "experimental-catena-gpu")]
+pub use signature::GeneratedFunction;
 pub use value::Value;
 pub use value::ValueKind;

@@ -2,18 +2,15 @@
 name = "catena-gpu"
 version = "0.1.0"
 edition = "2024"
-description = "Minimal GPU compiler and runtime for Catena"
+description = "Minimal GPU compiler for the Catena runtime"
 repository = "https://github.com/hellas-ai/catena-lang"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
+catena-lang = { path = "../catena-lang", features = ["experimental-catena-gpu"] }
 hexpr.workspace = true
-libffi = "5.1.0"
-libloading = "0.9.0"
 metacat.workspace = true
 open-hypergraphs.workspace = true
-serde = { version = "1.0.228", features = ["derive"] }
-tempfile = "3.23.0"
 thiserror = "2.0.18"
 
 [dev-dependencies]

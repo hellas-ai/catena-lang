@@ -2,7 +2,7 @@
 # cannot be used as the bounded buffer index required by can-own.
 
 (def program permission-for-past-end-cell-kernel : {[
-  buffer-name buffer-size grid-shape block-shape global-shape global-size
+  buffer-name buffer-size grid-shape block-shape global-shape
   schedule-name.
 ]
   ({[.buffer-size] u64} :)
@@ -10,26 +10,25 @@
   [.grid-shape]
   [.block-shape]
   [.global-shape]
-  [.global-size]
   [.schedule-name]
   ({[.buffer-name] ({cap.own [.buffer-size] u64} gpu.global)} :)
-  ({({[.grid-shape block-shape global-shape global-size]} gpu.grid)}
+  ({({[.grid-shape block-shape global-shape]} gpu.grid)}
     gpu.thread val)
   ({
     [.buffer-name buffer-size]
-    ({[.grid-shape block-shape global-shape global-size]} gpu.grid)
+    ({[.grid-shape block-shape global-shape]} gpu.grid)
     [.schedule-name]
   } gpu.scheduling val)
 } -> {[
-  buffer-name buffer-size grid-shape block-shape global-shape global-size
+  buffer-name buffer-size grid-shape block-shape global-shape
   schedule-name.
 ]
   ({
     [.buffer-name buffer-size]
-    ({[.grid-shape block-shape global-shape global-size]} gpu.grid)
+    ({[.grid-shape block-shape global-shape]} gpu.grid)
     [.schedule-name]
   } gpu.scheduling val)
-} = ([buffer-length buffer-name grid-shape block-shape global-shape global-size
+} = ([buffer-length buffer-name grid-shape block-shape global-shape
   schedule-name buffer thread scheduling.]
   ([.buffer-length] :.forget [past-end-cell.])
   ([.thread] gpu.thread.name [named-thread.])

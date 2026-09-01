@@ -48,7 +48,7 @@ pub fn render(output: &mut String, assignment: &GpuAssign) -> Result<(), GpuRend
         ));
     }
 
-    let mut arguments = vec![loop_index];
+    let mut arguments = vec![format!("catena_ix_t{{ {loop_index}, 0, 0 }}")];
     arguments.extend(assignment.outputs.iter().map(|state| state.name.clone()));
     arguments.extend(next_state.iter().map(|next| format!("&{next}")));
     output.push_str(&format!(

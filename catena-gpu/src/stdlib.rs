@@ -27,7 +27,9 @@ pub const FILES: &[StdlibFile] = stdlib_files![
     "product.hex",
     "combinators.hex",
     "gpu.hex",
-    "math.hex",
+    "matrix.hex",
+    "gpu-matrix.hex",
+    "gpu-matmul.hex",
 ];
 
 pub fn sources() -> impl ExactSizeIterator<Item = &'static str> {
@@ -37,30 +39,4 @@ pub fn sources() -> impl ExactSizeIterator<Item = &'static str> {
 pub fn paths_from(root: impl AsRef<Path>) -> impl ExactSizeIterator<Item = PathBuf> {
     let stdlib = root.as_ref().join("stdlib");
     FILES.iter().map(move |file| stdlib.join(file.filename))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn complex_features_are_not_embedded() {
-        let filenames = FILES.iter().map(|file| file.filename).collect::<Vec<_>>();
-        assert!(!filenames.iter().any(|name| name.contains("cmc")));
-        assert!(!filenames.iter().any(|name| name.contains("matrix")));
-
-        let source = sources().collect::<String>();
-        for excluded in [
-            "(arr =>",
-            "(arr bool.if :",
-            "materialize",
-            "reduce",
-            "matrix",
-        ] {
-            assert!(
-                !source.contains(excluded),
-                "found excluded feature `{excluded}`"
-            );
-        }
-    }
 }

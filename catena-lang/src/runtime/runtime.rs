@@ -13,6 +13,8 @@ use serde::{Deserialize, Serialize};
 use super::artifact::{Artifact, ArtifactError, RuntimeId, SharedObject};
 use super::executor::{AbiValue, Executor, ExecutorError};
 use super::mem::{MemError, MemOwn};
+#[cfg(feature = "experimental-catena-gpu")]
+use super::signature::{GeneratedFunction, generated_signatures};
 use super::{
     signature::{FunctionSignature, SignatureTable, signatures},
     value::{Value, ValueKind},
@@ -129,6 +131,12 @@ impl Runtime {
         })
     }
 
+    /// The GPU dialect used by this runtime.
+    #[cfg(feature = "experimental-catena-gpu")]
+    pub fn dialect(&self) -> GpuDialect {
+        self.gpu.dialect()
+    }
+
     /// Compile Catena programs from paths into a new artifact.
     pub fn load<I>(&mut self, paths: I) -> Result<Artifact, InitError>
     where
@@ -170,6 +178,59 @@ impl Runtime {
         let rendered = render_modules(modules, dialect)
             .map_err(|source| InitError::RenderGpu { dialect, source })?;
         fs::write(&cpp_path, rendered).map_err(|source| InitError::WriteGeneratedSource {
+            path: cpp_path.clone(),
+            source,
+        })?;
+        let shared_object = super::artifact::compile(&cpp_path, dialect)?;
+
+        let library = load_generated_library(shared_object.path())?;
+        let executor = Executor::new(library, &signature_table).map_err(|error| match error {
+            ExecutorError::LoadSymbol { symbol, source } => {
+                InitError::LoadSymbol { symbol, source }
+            }
+        })?;
+        let artifact = Artifact::new(self.runtime_id, self.artifacts.len());
+        self.artifacts.push(LoadedArtifact {
+            _shared_object: shared_object,
+            executor,
+            signatures: signature_table,
+        });
+        Ok(artifact)
+    }
+
+    /// Compile and load generated GPU source with its public entry-point ABI.
+    ///
+    /// This lets another Catena compiler reuse the runtime without depending on
+    /// catena-lang's compiler or code-generation representation.
+    #[cfg(feature = "experimental-catena-gpu")]
+    pub fn load_generated_source(
+        &mut self,
+        source: &str,
+        functions: impl IntoIterator<Item = GeneratedFunction>,
+    ) -> Result<Artifact, InitError> {
+        self.load_generated(source, generated_signatures(functions))
+    }
+
+    #[cfg(feature = "experimental-catena-gpu")]
+    fn load_generated(
+        &mut self,
+        source: &str,
+        signature_table: SignatureTable,
+    ) -> Result<Artifact, InitError> {
+        let dialect = self.gpu.dialect();
+        if let Some((name, index)) = ref_output(&signature_table) {
+            return Err(InitError::UnsupportedRefOutput { name, index });
+        }
+
+        let report_dir = tempfile::Builder::new()
+            .prefix("catena-report-")
+            .tempdir()
+            .map_err(|source| InitError::CreateBuildDir {
+                path: std::env::temp_dir(),
+                source,
+            })?;
+        let cpp_path = report_dir.path().join("module.cpp");
+        fs::write(&cpp_path, source).map_err(|source| InitError::WriteGeneratedSource {
             path: cpp_path.clone(),
             source,
         })?;

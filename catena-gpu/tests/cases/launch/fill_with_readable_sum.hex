@@ -1,8 +1,8 @@
-# Each destination thread owns one destination cell and folds over every source
-# cell through a read-all schedule.
+# Each destination thread owns one destination cell and folds over a borrowed,
+# read-only source buffer.
 
 (def program write-readable-sum-in-bounds-branch : {[
-  buffer-name buffer-size grid-shape block-shape global-shape global-size
+  buffer-name buffer-size grid-shape block-shape global-shape
   schedule-name thread-name candidate-index bounds-decision.
 ]
   ({[.bounds-decision] bool.t} = [bounds-true.])
@@ -13,7 +13,7 @@
     ({
       ({
         [.buffer-name buffer-size]
-        ({[.grid-shape block-shape global-shape global-size]} gpu.grid)
+        ({[.grid-shape block-shape global-shape]} gpu.grid)
         [.schedule-name]
       } gpu.scheduling val)
       ({
@@ -24,7 +24,7 @@
             ({[.bounds-decision] bool} :)
             ({
               ({[.thread-name]
-                ({({[.grid-shape block-shape global-shape global-size]} gpu.grid)}
+                ({({[.grid-shape block-shape global-shape]} gpu.grid)}
                   gpu.thread)} :)
               ({
                 ({[.buffer-name] ({cap.own [.buffer-size] u64} gpu.global)} :)
@@ -37,12 +37,12 @@
     } *)
   } *)
 } -> {[
-  buffer-name buffer-size grid-shape block-shape global-shape global-size
+  buffer-name buffer-size grid-shape block-shape global-shape
   schedule-name thread-name candidate-index bounds-decision.
 ]
   ({
     [.buffer-name buffer-size]
-    ({[.grid-shape block-shape global-shape global-size]} gpu.grid)
+    ({[.grid-shape block-shape global-shape]} gpu.grid)
     [.schedule-name]
   } gpu.scheduling val)
 } = ([branch-input.]
@@ -61,16 +61,13 @@
     [scheduling-after-decision thread-after-decision cell-after-decision
       allowed owns-if-allowed _not-owns-if-denied.])
   ({[.allowed owns-if-allowed]} assert-then [owns-cell.])
-  ([.owns-cell] gpu.permissions.grant-own [ownership.])
-  ({[.thread-after-decision buffer cell-after-decision value ownership]}
-    gpu.global.write
-    [ownership-after-write.])
-  ([.ownership-after-write] gpu.global.own.forget)
+  ({[.thread-after-decision buffer cell-after-decision value owns-cell]}
+    gpu.global.write)
   [.scheduling-after-decision]
 ))
 
 (def program skip-readable-sum-out-of-bounds-branch : {[
-  buffer-name buffer-size grid-shape block-shape global-shape global-size
+  buffer-name buffer-size grid-shape block-shape global-shape
   schedule-name thread-name candidate-index bounds-decision.
 ]
   ({[.bounds-decision] bool.t} = [bounds-true.])
@@ -81,7 +78,7 @@
     ({
       ({
         [.buffer-name buffer-size]
-        ({[.grid-shape block-shape global-shape global-size]} gpu.grid)
+        ({[.grid-shape block-shape global-shape]} gpu.grid)
         [.schedule-name]
       } gpu.scheduling val)
       ({
@@ -92,7 +89,7 @@
             ({[.bounds-decision] bool} :)
             ({
               ({[.thread-name]
-                ({({[.grid-shape block-shape global-shape global-size]} gpu.grid)}
+                ({({[.grid-shape block-shape global-shape]} gpu.grid)}
                   gpu.thread)} :)
               ({
                 ({[.buffer-name] ({cap.own [.buffer-size] u64} gpu.global)} :)
@@ -105,12 +102,12 @@
     } *)
   } *)
 } -> {[
-  buffer-name buffer-size grid-shape block-shape global-shape global-size
+  buffer-name buffer-size grid-shape block-shape global-shape
   schedule-name thread-name candidate-index bounds-decision.
 ]
   ({
     [.buffer-name buffer-size]
-    ({[.grid-shape block-shape global-shape global-size]} gpu.grid)
+    ({[.grid-shape block-shape global-shape]} gpu.grid)
     [.schedule-name]
   } gpu.scheduling val)
 } = ([branch-input.]
@@ -119,77 +116,34 @@
   [.scheduling]
 ))
 
-(def program sum-readable-cell-fold-step : {[
-  source-buffer-name source-size grid-shape block-shape global-shape global-size
-  source-schedule-name thread-name.
-]
+(def program sum-readable-cell-fold-step : {[source-buffer-name source-size.]
   ({
     ({({[.source-size]} shape.1d)} ix val)
     ({
-      ({
-        [.source-buffer-name source-size]
-        ({[.grid-shape block-shape global-shape global-size]} gpu.grid)
-        [.source-schedule-name]
-      } gpu.scheduling val)
-      ({
-        ({[.thread-name]
-          ({({[.grid-shape block-shape global-shape global-size]} gpu.grid)}
-            gpu.thread)} :)
-        ({
-          ({[.source-buffer-name]
-            ({cap.own [.source-size] u64} gpu.global)} :)
-          (u64 val)
-        } *)
-      } *)
+      ({[.source-buffer-name]
+        ({cap.ref [.source-size] u64} gpu.global)} :)
+      (u64 val)
     } *)
   } *)
-} -> {[
-  source-buffer-name source-size grid-shape block-shape global-shape global-size
-  source-schedule-name thread-name.
-]
+} -> {[source-buffer-name source-size.]
   ({
-    ({
-      [.source-buffer-name source-size]
-      ({[.grid-shape block-shape global-shape global-size]} gpu.grid)
-      [.source-schedule-name]
-    } gpu.scheduling val)
-    ({
-      ({[.thread-name]
-        ({({[.grid-shape block-shape global-shape global-size]} gpu.grid)}
-          gpu.thread)} :)
-      ({
-        ({[.source-buffer-name]
-          ({cap.own [.source-size] u64} gpu.global)} :)
-        (u64 val)
-      } *)
-    } *)
+    ({[.source-buffer-name]
+      ({cap.ref [.source-size] u64} gpu.global)} :)
+    (u64 val)
   } *)
 } = ([fold-input.]
   ([.fold-input] *.elim [cell state.])
-  ([.state] *.elim [scheduling thread-and-tail.])
-  ([.thread-and-tail] *.elim [thread buffer-and-sum.])
-  ([.buffer-and-sum] *.elim [buffer sum.])
-  ({[.scheduling thread cell]}
-    gpu.scheduling.can-read
-    [scheduling-after-query thread-after-query cell-after-query
-      can-read reads-if-allowed _not-readable-if-denied.])
-  ({[.can-read reads-if-allowed]} assert-then [reads-cell.])
-  ([.reads-cell] gpu.permissions.grant-read [read-grant.])
-  ({[.buffer cell-after-query read-grant]}
-    gpu.global.read
-    [buffer-after-read read-grant-after-read cell-value.])
-  ([.read-grant-after-read] gpu.global.read.forget)
+  ([.state] *.elim [buffer sum.])
+  ({[.buffer cell]} gpu.global.read [buffer-after-read cell-value.])
   ({[.sum cell-value]} u64.add [next-sum.])
-  ({[.buffer-after-read next-sum]} *.intro [next-buffer-and-sum.])
-  ({[.thread-after-query next-buffer-and-sum]} *.intro [next-thread-and-tail.])
-  ({[.scheduling-after-query next-thread-and-tail]} *.intro [next-state.])
+  ({[.buffer-after-read next-sum]} *.intro [next-state.])
   [.next-state]
 ))
 
 (def program fill-with-readable-sum-kernel : {[
   destination-buffer-name destination-size source-buffer-name source-size
-  grid-shape block-shape global-shape global-size
-  destination-schedule-name source-schedule-name.
+  grid-count block-count global-count
+  destination-schedule-name.
 ]
   ({
     ({
@@ -200,18 +154,22 @@
         ({
           ({
             [.destination-buffer-name destination-size]
-            ({[.grid-shape block-shape global-shape global-size]} gpu.grid)
+            ({
+              ({[.grid-count]} shape.1d)
+              ({[.block-count]} shape.1d)
+              ({[.global-count]} shape.1d)
+            } gpu.grid)
             [.destination-schedule-name]
           } gpu.scheduling val)
           ({
             [.destination-buffer-name]
             ({
-              [.grid-shape]
+              ({[.grid-count]} shape.1d)
               ({
-                [.block-shape]
+                ({[.block-count]} shape.1d)
                 ({
-                  [.global-shape]
-                  ({[.global-size destination-schedule-name]} *)
+                  ({[.global-count]} shape.1d)
+                  [.destination-schedule-name]
                 } *)
               } *)
             } *)
@@ -222,31 +180,29 @@
     ({
       ({[.source-size] u64} :)
       ({
-        ({[.source-buffer-name] ({cap.own [.source-size] u64} gpu.global)} :)
-        ({
-          ({
-            [.source-buffer-name source-size]
-            ({[.grid-shape block-shape global-shape global-size]} gpu.grid)
-            [.source-schedule-name]
-          } gpu.scheduling val)
-          ({
-            [.source-buffer-name]
-            ({[.source-size source-schedule-name]} *)
-          } *)
-        } *)
+        ({[.source-buffer-name] ({cap.ref [.source-size] u64} gpu.global)} :)
+        ({[.source-buffer-name] [.source-size]} *)
       } *)
     } *)
   } *)
-  ({({[.grid-shape block-shape global-shape global-size]} gpu.grid)}
+  ({({
+      ({[.grid-count]} shape.1d)
+      ({[.block-count]} shape.1d)
+      ({[.global-count]} shape.1d)
+    } gpu.grid)}
     gpu.thread val)
 } -> {[
   destination-buffer-name destination-size source-buffer-name source-size
-  grid-shape block-shape global-shape global-size
-  destination-schedule-name source-schedule-name.
+  grid-count block-count global-count
+  destination-schedule-name.
 ]
   ({
     [.destination-buffer-name destination-size]
-    ({[.grid-shape block-shape global-shape global-size]} gpu.grid)
+    ({
+      ({[.grid-count]} shape.1d)
+      ({[.block-count]} shape.1d)
+      ({[.global-count]} shape.1d)
+    } gpu.grid)
     [.destination-schedule-name]
   } gpu.scheduling val)
 } = ([kernel-arguments thread.]
@@ -269,21 +225,10 @@
   ([.block-context] *.elim [block-shape global-shape-context.])
   ([.global-shape-context]
     *.elim
-    [global-shape global-size-and-schedule.])
-  ([.global-size-and-schedule]
-    *.elim
-    [global-size destination-schedule-name.])
+    [global-shape destination-schedule-name.])
   ([.source-arguments] *.elim [source-length source-tail.])
-  ([.source-tail] *.elim [source-buffer source-schedule-and-context.])
-  ([.source-schedule-and-context]
-    *.elim
-    [source-scheduling source-context.])
-  ([.source-context]
-    *.elim
-    [source-buffer-name source-size-and-schedule.])
-  ([.source-size-and-schedule]
-    *.elim
-    [source-size source-schedule-name.])
+  ([.source-tail] *.elim [source-buffer source-context.])
+  ([.source-context] *.elim [source-buffer-name source-size.])
 
   ([.destination-length]
     u64.copies2
@@ -293,7 +238,7 @@
     [destination-length-for-cell destination-length-for-name.])
   ([.destination-length-for-name] :.param [destination-size-name.])
   ([.thread] gpu.thread.in-grid.index [thread-for-own grid-index.])
-  ([.grid-index] ix.to-u64 [_grid-index-after candidate.])
+  ([.grid-index] ix.1d.value [candidate.])
   ([.candidate] u64.name [named-candidate.])
   ([.named-candidate]
     u64.copies2
@@ -313,38 +258,23 @@
   ([.thread-for-own] gpu.thread.name [named-thread-for-fold.])
   ([.named-thread-for-fold] :.ty [thread-for-fold thread-name.])
 
-  # fold state = scheduling * (thread * (source-buffer * sum))
+  # The fold carries only the borrowed source buffer and scalar accumulator.
   u64.zero [zero-sum.]
-  ({[.source-buffer zero-sum]} *.intro [initial-buffer-and-sum.])
-  ({[.thread-for-fold initial-buffer-and-sum]} *.intro [initial-thread-and-tail.])
-  ({[.source-scheduling initial-thread-and-tail]} *.intro [initial-fold-state.])
+  ({[.source-buffer zero-sum]} *.intro [initial-fold-state.])
 
   ({
     # loop-carried state
     [.initial-fold-state]
     # one iteration per bounded source index
     [.source-length]
-    # direct body specialized to this buffer, scheduling, and thread
-    ({[
-      .source-buffer-name source-size
-      grid-shape block-shape global-shape global-size
-      source-schedule-name thread-name
-    ]} name.sum-readable-cell-fold-step)
+    # direct body specialized to this borrowed buffer
+    ({[.source-buffer-name source-size]} name.sum-readable-cell-fold-step)
   } fold [final-fold-state.])
-  ([.final-fold-state]
-    *.elim
-    [source-scheduling-after-fold final-thread-and-tail.])
-  ([.final-thread-and-tail]
-    *.elim
-    [thread-after-fold final-buffer-and-sum.])
-  ([.final-buffer-and-sum]
-    *.elim
-    [source-buffer-after-fold sum.])
-  ([.source-scheduling-after-fold] gpu.scheduling.forget)
+  ([.final-fold-state] *.elim [source-buffer-after-fold sum.])
   ([.source-buffer-after-fold] gpu.global.forget)
 
   ({[.destination-buffer sum]} *.intro [destination-buffer-and-sum.])
-  ({[.thread-after-fold destination-buffer-and-sum]}
+  ({[.thread-for-fold destination-buffer-and-sum]}
     *.intro
     [destination-thread-and-tail.])
   ({[.destination-bounds-for-state destination-thread-and-tail]}
@@ -361,11 +291,11 @@
     [destination-branch-state.])
 
   ({[.destination-buffer-name destination-size-name grid-shape block-shape global-shape
-      global-size destination-schedule-name thread-name candidate-index bounds-decision]}
+      destination-schedule-name thread-name candidate-index bounds-decision]}
     name.write-readable-sum-in-bounds-branch
     [destination-true-branch.])
   ({[.destination-buffer-name destination-size-name grid-shape block-shape global-shape
-      global-size destination-schedule-name thread-name candidate-index bounds-decision]}
+      destination-schedule-name thread-name candidate-index bounds-decision]}
     name.skip-readable-sum-out-of-bounds-branch
     [destination-false-branch.])
   ({[.destination-bounds-true destination-true-branch
@@ -378,9 +308,9 @@
 ))
 
 (def program fill-with-readable-sum :
-  {(cap.own mem) (cap.own mem) (u64 val) (u64 val)}
+  {(cap.own mem) (cap.ref mem) (u32 val) (u32 val)}
   ->
-  {(cap.own mem) (cap.own mem)}
+  (cap.own mem)
 = ([destination-input source-input grid-x-value block-x-value.]
   ([.destination-input]
     mem.cast.u64
@@ -393,8 +323,28 @@
     :.ty
     [source-buffer source-buffer-name.])
 
-  ([.grid-x-value] u64.name [grid-x.])
-  ([.block-x-value] u64.name [block-x.])
+  ([.grid-x-value] u32.name [named-grid-x.])
+  ([.named-grid-x]
+    u32.is-positive
+    [grid-x-before-refinement grid-x-positive-decision grid-x-positive-if-true.])
+  ({[.grid-x-positive-decision grid-x-positive-if-true]}
+    assert-then
+    [grid-x-is-positive.])
+  ({[.grid-x-before-refinement grid-x-is-positive]}
+    positive-u32.intro
+    [grid-x.])
+
+  ([.block-x-value] u32.name [named-block-x.])
+  ([.named-block-x]
+    u32.is-positive
+    [block-x-before-refinement block-x-positive-decision block-x-positive-if-true.])
+  ({[.block-x-positive-decision block-x-positive-if-true]}
+    assert-then
+    [block-x-is-positive.])
+  ({[.block-x-before-refinement block-x-is-positive]}
+    positive-u32.intro
+    [block-x.])
+
   ({[.grid-x block-x]}
     gpu.grid.1d.intro
     [grid-shape block-shape global-shape grid global-size.])
@@ -406,11 +356,7 @@
     u64.copies2
     [destination-length-for-fit destination-length-for-name.])
   ([.destination-length-for-name] :.param [destination-size.])
-  ([.global-size]
-    u64.copies2
-    [global-size-for-fit global-size-for-name.])
-  ([.global-size-for-name] :.param [global-size-name.])
-  ({[.destination-length-for-fit global-size-for-fit]}
+  ({[.destination-length-for-fit global-size]}
     u64.lte
     [fits-decision fits-if-true.])
   ([.fits-decision] assert [fits-is-true.])
@@ -423,21 +369,11 @@
     u64.copies2
     [source-length-for-kernel source-length-for-name.])
   ([.source-length-for-name] :.param [source-size.])
-  ({[.source-buffer-name source-size grid-shape block-shape global-shape global-size-name]}
-    gpu.scheduling.read-all
-    [source-schedule-name source-scheduling.])
-  ({[.source-size source-schedule-name]} *.intro [source-size-and-schedule.])
-  ({[.source-buffer-name source-size-and-schedule]} *.intro [source-context.])
-  ({[.source-scheduling source-context]}
-    *.intro
-    [source-schedule-and-context.])
-  ({[.source-buffer source-schedule-and-context]} *.intro [source-tail.])
+  ({[.source-buffer-name source-size]} *.intro [source-context.])
+  ({[.source-buffer source-context]} *.intro [source-tail.])
   ({[.source-length-for-kernel source-tail]} *.intro [source-arguments.])
 
-  ({[.global-size-name destination-schedule-name]}
-    *.intro
-    [global-size-and-destination-schedule.])
-  ({[.global-shape global-size-and-destination-schedule]}
+  ({[.global-shape destination-schedule-name]}
     *.intro
     [global-shape-context.])
   ({[.block-shape global-shape-context]} *.intro [block-context.])
@@ -456,8 +392,11 @@
     *.intro
     [kernel-arguments.])
 
-  ({[.destination-buffer-name destination-size source-buffer-name source-size grid-shape block-shape
-      global-shape global-size-name destination-schedule-name source-schedule-name]}
+  ([.grid-shape] shape.1d.size [grid-count.])
+  ([.block-shape] shape.1d.size [block-count.])
+  ([.global-shape] shape.1d.size [global-count.])
+  ({[.destination-buffer-name destination-size source-buffer-name source-size grid-count block-count
+      global-count destination-schedule-name]}
     name.fill-with-readable-sum-kernel
     [kernel.])
   ({[.grid kernel-arguments kernel]}
@@ -472,17 +411,8 @@
   ([.returned-destination-tail]
     *.elim
     [destination-buffer-after-launch _returned-destination-schedule-and-context.])
-  ([.returned-source-arguments]
-    *.elim
-    [source-length-after-launch source-tail-after-launch.])
-  ([.source-tail-after-launch]
-    *.elim
-    [source-buffer-after-launch _source-scheduling-after-launch.])
   ({[.destination-length-after-launch destination-buffer-after-launch]}
     gpu.global.to-mem
     [destination-output.])
-  ({[.source-length-after-launch source-buffer-after-launch]}
-    gpu.global.to-mem
-    [source-output.])
-  {[.destination-output source-output]}
+  [.destination-output]
 ))

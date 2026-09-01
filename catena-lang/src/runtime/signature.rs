@@ -5,6 +5,16 @@ use crate::{
     runtime::value::ValueKind,
 };
 
+/// C ABI metadata for one entry point in generated GPU source.
+#[cfg(feature = "experimental-catena-gpu")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GeneratedFunction {
+    pub source_name: String,
+    pub symbol: String,
+    pub inputs: Vec<ValueKind>,
+    pub outputs: Vec<ValueKind>,
+}
+
 #[derive(Debug, Clone)]
 pub(super) struct FunctionSignature {
     pub(super) symbol: String,
@@ -14,6 +24,25 @@ pub(super) struct FunctionSignature {
 
 /// Source-level program names and their generated C ABI signatures.
 pub(super) type SignatureTable = HashMap<String, FunctionSignature>;
+
+#[cfg(feature = "experimental-catena-gpu")]
+pub(super) fn generated_signatures(
+    functions: impl IntoIterator<Item = GeneratedFunction>,
+) -> SignatureTable {
+    functions
+        .into_iter()
+        .map(|function| {
+            (
+                function.source_name,
+                FunctionSignature {
+                    symbol: function.symbol,
+                    inputs: function.inputs,
+                    outputs: function.outputs,
+                },
+            )
+        })
+        .collect()
+}
 
 pub(super) fn signatures(modules: &GpuModuleMap) -> SignatureTable {
     let mut signatures = HashMap::new();

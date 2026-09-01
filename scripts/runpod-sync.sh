@@ -50,9 +50,9 @@ fi
 # Runpod, the mapped SSH port, and the private key matching the public key
 # configured on the pod/template. To open a shell directly:
 #   ssh -i "$key" -p "$port" "$host"
-# Sync only the files needed to run catena-lang tests on the pod. Cargo still
-# needs the workspace root and member manifests, but it does not need the other
-# packages' source trees when running `cargo test -p catena-lang`.
+# Sync only the files needed to run catena-lang and catena-gpu tests on the pod.
+# Cargo still needs the workspace root and member manifests, but it does not
+# need the other packages' source trees when testing these crates.
 rsync -rlptDz --delete --prune-empty-dirs --info=progress2 "${dry_run[@]}" \
   -e "ssh -i $key -p $port -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new" \
   --include '/Cargo.lock' \
@@ -65,6 +65,12 @@ rsync -rlptDz --delete --prune-empty-dirs --info=progress2 "${dry_run[@]}" \
   --include '/catena-core/Cargo.toml' \
   --include '/catena-core/src/' \
   --include '/catena-core/src/lib.rs' \
+  --include '/catena-gpu/' \
+  --include '/catena-gpu/Cargo.toml' \
+  --include '/catena-gpu/src/***' \
+  --include '/catena-gpu/tests/***' \
+  --include '/catena-gpu/examples/***' \
+  --include '/catena-gpu/stdlib/***' \
   --include '/catena-lang/' \
   --include '/catena-lang/Cargo.toml' \
   --include '/catena-lang/src/***' \

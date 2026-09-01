@@ -1,0 +1,14 @@
+(def program unrefined-grid-extent : {[gx bx.]
+  ({[.gx] u32} :)
+  ({[.bx] u32} :)
+} -> {[gx bx.]
+  ({[.gx]} shape.1d)
+  ({[.bx]} shape.1d)
+  ({({[.gx bx]} *)} shape.1d)
+  ({
+    ({[.gx]} shape.1d)
+    ({[.bx]} shape.1d)
+    ({({[.gx bx]} *)} shape.1d)
+  } gpu.grid val)
+  ({({[.gx bx]} *) u64} :)
+} = gpu.grid.1d.intro)

@@ -32,8 +32,7 @@ fn check_naive_u64_matmul(
     let a = runtime.mem_u64(&a_values)?;
     let b = runtime.mem_u64(&b_values)?;
 
-    let [c] = runtime.exec(
-        &artifact,
+    let [c] = artifact.exec(
         "naive-u64-matmul",
         [
             c.into(),

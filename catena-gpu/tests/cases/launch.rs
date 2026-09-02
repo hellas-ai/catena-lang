@@ -18,8 +18,7 @@ fn check_readable_sum(destination_size: usize, grid_x: u32, block_x: u32) -> any
     let source_values = [17_u64, 25, 99];
     let source = runtime.mem_u64(&source_values)?;
 
-    let [destination] = runtime.exec(
-        &artifact,
+    let [destination] = artifact.exec(
         "fill-with-readable-sum",
         [
             destination.into(),

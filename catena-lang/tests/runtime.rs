@@ -33,7 +33,7 @@ impl TestRuntime {
         name: &str,
         args: [Value<'a>; M],
     ) -> Result<[Value<'static>; N], ExecError> {
-        self.runtime.exec(&self.artifact, name, args)
+        self.artifact.exec(name, args)
     }
 
     fn exec_values<'a>(
@@ -41,7 +41,7 @@ impl TestRuntime {
         name: &str,
         args: Vec<Value<'a>>,
     ) -> Result<Vec<Value<'static>>, ExecError> {
-        self.runtime.exec_values(&self.artifact, name, args)
+        self.artifact.exec_values(name, args)
     }
 }
 
@@ -85,16 +85,14 @@ fn multiple_artifacts_resolve_same_function_independently() -> anyhow::Result<()
     let identity = runtime.load_sources(stdlib::sources().chain([IDENTITY]))?;
     let add_one = runtime.load_sources(stdlib::sources().chain([ADD_ONE]))?;
 
-    let [first] = runtime.exec(&identity, "inspect", [41_u64.into()])?;
-    let [second] = runtime.exec(&add_one, "inspect", [41_u64.into()])?;
+    let [first] = identity.exec("inspect", [41_u64.into()])?;
+    let [second] = add_one.exec("inspect", [41_u64.into()])?;
     assert!(matches!(first, Value::U64(41)));
     assert!(matches!(second, Value::U64(42)));
 
-    let other_runtime = Runtime::new(dialect)?;
-    assert!(matches!(
-        other_runtime.exec::<1, 1>(&identity, "inspect", [41_u64.into()]),
-        Err(ExecError::UnknownArtifact)
-    ));
+    drop(runtime);
+    let [after_runtime_drop] = identity.exec("inspect", [41_u64.into()])?;
+    assert!(matches!(after_runtime_drop, Value::U64(41)));
     Ok(())
 }
 

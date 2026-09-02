@@ -382,7 +382,7 @@ fn input(a: &GpuAssign, index: usize) -> Result<String, GpuRenderError> {
 pub(super) fn value_expr(value: &GpuValue) -> String {
     match value {
         GpuValue::Var(var) => var.name.clone(),
-        GpuValue::FnSymbol(target) => sanitize_ident(&format!("program.{target}")),
+        GpuValue::FnSymbol(symbol) => symbol.to_string(),
     }
 }
 
@@ -439,18 +439,6 @@ fn render_ifc_call<'a>(
         value_expr(function),
         arguments.join(", ")
     ));
-}
-
-pub(super) fn sanitize_ident(name: &str) -> String {
-    name.chars()
-        .map(|character| {
-            if character.is_ascii_alphanumeric() {
-                character
-            } else {
-                '_'
-            }
-        })
-        .collect()
 }
 
 fn arity(a: &GpuAssign, expected: usize) -> GpuRenderError {

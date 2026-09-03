@@ -1,107 +1,51 @@
-# Tiled matrix multiplication kernel scaffold. The stub remains executable by
-# forwarding to the naive kernel until the tiled implementation is introduced.
+# Tiled matrix multiplication kernel scaffold. The arithmetic still forwards
+# to the naive kernel, while this fold establishes the synchronization shape
+# that the shared-memory implementation will use.
 
-(def program gpu.global.matrix.tiled-matmul.kernel.stub : {[
-  element-type c-buffer-name c-size a-buffer-name a-size b-buffer-name b-size
-  grid-shape block-shape global-columns global-rows
-  c-schedule-name
-  output-rows shared-size output-columns tile-elements.
+(def program gpu.global.matrix.tiled-matmul.barrier-fold-step : {[
+  count grid-shape block-shape global-shape.
 ]
-  ({
-    ({
-      [.tile-elements element-type]
-      ({[.tile-elements element-type] gpu.shared.empty} gpu.shared.slot)
-    } gpu.shared.slot gpu.shared.layout val)
-    ({
-    ({
-      ({[.c-size] u64} :)
-      ({
-        ({[.c-buffer-name]
-          ({cap.own [.c-size element-type]} gpu.global)} :)
-        ({
-          ({
-            [.c-buffer-name c-size]
-            ({
-              [.grid-shape]
-              [.block-shape]
-              ({[.global-columns global-rows]} shape.2d)
-            } gpu.grid)
-            [.c-schedule-name]
-          } gpu.scheduling val)
-          ({
-            [.c-buffer-name]
-            ({[.element-type]
-              ({
-                ([.element-type] gpu.numeric |-)
-                ({[.grid-shape]
-                  ({[.block-shape]
-                    ({({[.global-columns global-rows]} shape.2d)
-                      [.c-schedule-name]} *)} *)} *)
-              } *)} *)
-          } *)
-        } *)
-      } *)
-    } *)
-    ({
-      ({
-        ({[.a-size] u64} :)
-        ({
-          ({[.a-buffer-name]
-            ({cap.ref [.a-size element-type]} gpu.global)} :)
-          ({[.a-buffer-name] [.a-size]} *)
-        } *)
-      } *)
-      ({
-        ({
-          ({[.b-size] u64} :)
-          ({
-            ({[.b-buffer-name]
-              ({cap.ref [.b-size element-type]} gpu.global)} :)
-            ({[.b-buffer-name] [.b-size]} *)
-          } *)
-        } *)
-        ({
-          ({[.output-rows] u64} :)
-          ({({[.shared-size] u64} :) ({[.output-columns] u64} :)} *)
-        } *)
-      } *)
-    } *)
-    } *)
-  } *)
+  ({({[.count]} shape.1d)} ix val)
   ({({
     [.grid-shape]
     [.block-shape]
-    ({[.global-columns global-rows]} shape.2d)
+    [.global-shape]
   } gpu.grid)} gpu.thread val)
-} -> {[
-  element-type c-buffer-name c-size a-buffer-name a-size b-buffer-name b-size
-  grid-shape block-shape global-columns global-rows
-  c-schedule-name
-  output-rows shared-size output-columns tile-elements.
-]
   ({
-    [.c-buffer-name c-size]
     ({
       [.grid-shape]
       [.block-shape]
-      ({[.global-columns global-rows]} shape.2d)
+      [.global-shape]
     } gpu.grid)
-    [.c-schedule-name]
-  } gpu.scheduling val)
-} = ([layout-and-kernel-arguments thread.]
-  ([.layout-and-kernel-arguments]
-    *.elim
-    [_shared-layout kernel-arguments.])
-  (gpu.shared.layout.empty [empty-shared-layout.])
-  ({[.empty-shared-layout kernel-arguments]}
-    *.intro
-    [naive-layout-and-kernel-arguments.])
-  ({[.naive-layout-and-kernel-arguments thread]}
-    gpu.global.matrix.matmul.kernel)
+    ({({gpu.barrier.trace.end} gpu.barrier.trace.sync)}
+      gpu.barrier.trace.sync)
+  } gpu.barrier.cursor |-)
+} -> {[
+  count grid-shape block-shape global-shape.
+]
+  ({({
+    [.grid-shape]
+    [.block-shape]
+    [.global-shape]
+  } gpu.grid)} gpu.thread val)
+  ({
+    ({
+      [.grid-shape]
+      [.block-shape]
+      [.global-shape]
+    } gpu.grid)
+    gpu.barrier.trace.end
+  } gpu.barrier.cursor |-)
+} = ([iteration-index thread barriers.]
+  ([.iteration-index] ix.forget)
+  ([.thread] gpu.thread.block [thread-after-block block.])
+  ({[.block barriers]} gpu.sync [block-after-load barriers-after-load.])
+  ({[.block-after-load barriers-after-load]}
+    gpu.sync
+    [block-after-use barriers-after-use.])
+  [.thread-after-block barriers-after-use]
 ))
 
-# Public tiled kernel boundary. Its type is independent from the temporary
-# implementation selected by the stub arrow above.
 (def program gpu.global.matrix.tiled-matmul.kernel : {[
   element-type c-buffer-name c-size a-buffer-name a-size b-buffer-name b-size
   grid-shape block-shape global-columns global-rows
@@ -174,6 +118,20 @@
     [.block-shape]
     ({[.global-columns global-rows]} shape.2d)
   } gpu.grid)} gpu.thread val)
+  ({
+    ({
+      [.grid-shape]
+      [.block-shape]
+      ({[.global-columns global-rows]} shape.2d)
+    } gpu.grid)
+    ({
+      [.shared-size]
+      ({
+        ({gpu.barrier.trace.end} gpu.barrier.trace.sync)
+      } gpu.barrier.trace.sync)
+      gpu.barrier.trace.end
+    } gpu.barrier.trace.repeat)
+  } gpu.barrier.cursor |-)
 } -> {[
   element-type c-buffer-name c-size a-buffer-name a-size b-buffer-name b-size
   grid-shape block-shape global-columns global-rows
@@ -189,4 +147,48 @@
     } gpu.grid)
     [.c-schedule-name]
   } gpu.scheduling val)
-} = gpu.global.matrix.tiled-matmul.kernel.stub)
+  ({
+    ({
+      [.grid-shape]
+      [.block-shape]
+      ({[.global-columns global-rows]} shape.2d)
+    } gpu.grid)
+    gpu.barrier.trace.end
+  } gpu.barrier.cursor |-)
+} = ([layout-and-kernel-arguments thread barriers.]
+  ([.layout-and-kernel-arguments]
+    *.elim
+    [_shared-layout kernel-arguments.])
+  # shared-size is a scalar kernel argument and therefore block-uniform.
+  ([.kernel-arguments] *.elim [c-arguments a-b-and-dimensions.])
+  ([.c-arguments] *.elim [_c-length c-tail.])
+  ([.c-tail] *.elim [_c-buffer c-schedule-and-context.])
+  ([.c-schedule-and-context] *.elim [_c-scheduling c-context.])
+  ([.c-context] *.elim [_c-buffer-name element-and-grid-context.])
+  ([.element-and-grid-context] *.elim [_element-type numeric-and-grid-context.])
+  ([.numeric-and-grid-context] *.elim [_numeric-proof grid-context.])
+  ([.grid-context] *.elim [grid-shape-value block-context.])
+  ([.block-context] *.elim [block-shape-value global-context.])
+  ([.global-context] *.elim [global-shape-value _schedule-name.])
+  ([.a-b-and-dimensions] *.elim [_a-arguments b-and-dimensions.])
+  ([.b-and-dimensions] *.elim [_b-arguments dimensions.])
+  ([.dimensions] *.elim [_output-rows shared-and-columns.])
+  ([.shared-and-columns] *.elim [shared-size _output-columns.])
+  ([.shared-size] u64.copies2 [shared-size-for-fold shared-size-for-name.])
+  ([.shared-size-for-name] :.param [shared-size-name.])
+  ({
+    [.thread]
+    [.shared-size-for-fold]
+    [.barriers]
+    ({[.shared-size-name grid-shape-value block-shape-value global-shape-value]}
+      name.gpu.global.matrix.tiled-matmul.barrier-fold-step)
+  } gpu.fold [thread-after-fold barriers-after-fold.])
+  (gpu.shared.layout.empty [empty-shared-layout.])
+  ({[.empty-shared-layout kernel-arguments]}
+    *.intro
+    [naive-layout-and-kernel-arguments.])
+  ({[.naive-layout-and-kernel-arguments thread-after-fold barriers-after-fold]}
+    gpu.global.matrix.matmul.kernel
+    [scheduling barriers-after-naive.])
+  [.scheduling barriers-after-naive]
+))

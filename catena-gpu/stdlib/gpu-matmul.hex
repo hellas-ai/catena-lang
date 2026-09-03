@@ -308,6 +308,14 @@
     [.block-shape]
     ({[.global-columns global-rows]} shape.2d)
   } gpu.grid)} gpu.thread val)
+  ({
+    ({
+      [.grid-shape]
+      [.block-shape]
+      ({[.global-columns global-rows]} shape.2d)
+    } gpu.grid)
+    gpu.barrier.trace.end
+  } gpu.barrier.cursor |-)
 } -> {[
   element-type c-buffer-name c-size a-buffer-name a-size b-buffer-name b-size
   grid-shape block-shape global-columns global-rows
@@ -323,7 +331,15 @@
     } gpu.grid)
     [.c-schedule-name]
   } gpu.scheduling val)
-} = ([layout-and-kernel-arguments thread.]
+  ({
+    ({
+      [.grid-shape]
+      [.block-shape]
+      ({[.global-columns global-rows]} shape.2d)
+    } gpu.grid)
+    gpu.barrier.trace.end
+  } gpu.barrier.cursor |-)
+} = ([layout-and-kernel-arguments thread barriers.]
   ([.layout-and-kernel-arguments]
     *.elim
     [_shared-layout kernel-arguments.])
@@ -550,5 +566,5 @@
       _c-bounds-false c-false-branch c-bounds-value c-branch-state]}
     bool.ifc
     [c-scheduling-after-bounds.])
-  [.c-scheduling-after-bounds]
+  [.c-scheduling-after-bounds barriers]
 ))

@@ -194,6 +194,14 @@
       ({[.global-count]} shape.1d)
     } gpu.grid)}
     gpu.thread val)
+  ({
+    ({
+      ({[.grid-count]} shape.1d)
+      ({[.block-count]} shape.1d)
+      ({[.global-count]} shape.1d)
+    } gpu.grid)
+    gpu.barrier.trace.end
+  } gpu.barrier.cursor |-)
 } -> {[
   destination-buffer-name destination-size source-buffer-name source-size
   grid-count block-count global-count
@@ -208,7 +216,15 @@
     } gpu.grid)
     [.destination-schedule-name]
   } gpu.scheduling val)
-} = ([layout-and-kernel-arguments thread.]
+  ({
+    ({
+      ({[.grid-count]} shape.1d)
+      ({[.block-count]} shape.1d)
+      ({[.global-count]} shape.1d)
+    } gpu.grid)
+    gpu.barrier.trace.end
+  } gpu.barrier.cursor |-)
+} = ([layout-and-kernel-arguments thread barriers.]
   ([.layout-and-kernel-arguments]
     *.elim
     [_shared-layout kernel-arguments.])
@@ -310,7 +326,7 @@
     bool.ifc
     [destination-scheduling-after-bounds.])
 
-  [.destination-scheduling-after-bounds]
+  [.destination-scheduling-after-bounds barriers]
 ))
 
 (def program fill-with-readable-sum :

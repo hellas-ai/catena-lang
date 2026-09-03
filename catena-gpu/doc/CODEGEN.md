@@ -164,6 +164,20 @@ Kernel arguments are forwarded as ordinary runtime parameters. Type-only informa
 
 A launched kernel must be a direct function definition and must not reach another `gpu.launch`, including through helper functions or folds. Code generation checks this restriction before rendering the module.
 
+## Barrier traces
+
+Every launched kernel receives an erased `gpu.barrier.cursor` describing its
+remaining barriers and must return a cursor at `gpu.barrier.trace.end`.
+`gpu.sync` consumes one `gpu.barrier.trace.sync` node and lowers to
+`__syncthreads()`. A missing or extra synchronization therefore prevents the
+kernel definition from matching its declared arrow type.
+
+`gpu.barrier.trace.repeat(count, body, rest)` represents iteration without
+expanding the trace. `gpu.fold` checks its body from `body` to
+`gpu.barrier.trace.end` once, repeats that body for the named kernel count, and
+returns the cursor at `rest`. Barrier cursors and trace constructors have no
+runtime representation and do not change generated function signatures.
+
 ## Scheduling and ownership
 
 Scheduling is checked by Hex types but remains a small runtime value because the kernel must query the policy selected for each owned buffer:

@@ -15,6 +15,13 @@
   (arr gpu.shared.empty : 0 -> 1)
   (arr gpu.shared.slot : 3 -> 1)
 
+  # A canonical, type-level description of the barriers remaining in a
+  # kernel. Cursors are erased linear witnesses threaded through kernel code.
+  (arr gpu.barrier.trace.end : 0 -> 1)
+  (arr gpu.barrier.trace.sync : 1 -> 1)
+  (arr gpu.barrier.trace.repeat : 3 -> 1)
+  (arr gpu.barrier.cursor : 2 -> 1)
+
   # A global handle is independent of the thread layout.
   (arr gpu.global : 3 -> 1)
 
@@ -191,13 +198,48 @@
       ({[.block-name buffer-size element-type]} gpu.shared)} :)
   })
 
-  # Synchronize all threads in the exact block represented by this token.
-  (arr gpu.shared.sync : {[grid-topology block-name.]
+  # Synchronize all threads in the exact block represented by this token and
+  # consume the next event in the kernel's barrier trace.
+  (arr gpu.sync : {[grid-topology block-name remaining-trace.]
     ({[.block-name]
       ({[.grid-topology block-name]} gpu.block)} :)
-  } -> {[grid-topology block-name.]
+    ({
+      [.grid-topology]
+      ({[.remaining-trace]} gpu.barrier.trace.sync)
+    } gpu.barrier.cursor |-)
+  } -> {[grid-topology block-name remaining-trace.]
     ({[.block-name]
       ({[.grid-topology block-name]} gpu.block)} :)
+    ({[.grid-topology] [.remaining-trace]} gpu.barrier.cursor |-)
+  })
+
+  # Fold a block-uniform number of times. The body consumes the same complete
+  # barrier sub-trace on every iteration; the outer cursor consumes one
+  # symbolic repeat node rather than unrolling the trace.
+  (arr gpu.fold : {[count state grid-topology body-trace remaining-trace.]
+    ([.state])
+    ({[.count] u64} :)
+    ({
+      [.grid-topology]
+      ({[.count] [.body-trace] [.remaining-trace]}
+        gpu.barrier.trace.repeat)
+    } gpu.barrier.cursor |-)
+    ({
+      ({
+        ({({[.count]} shape.1d)} ix val)
+        ({
+          ([.state])
+          ({[.grid-topology] [.body-trace]} gpu.barrier.cursor |-)
+        } *)
+      } *)
+      ({
+        ([.state])
+        ({[.grid-topology] gpu.barrier.trace.end} gpu.barrier.cursor |-)
+      } *)
+    } -> val)
+  } -> {[count state grid-topology body-trace remaining-trace.]
+    ([.state])
+    ({[.grid-topology] [.remaining-trace]} gpu.barrier.cursor |-)
   })
 
   # The fixed linear policy assigns buffer cell i to global thread i. It is
@@ -337,7 +379,7 @@
   # including all buffers, lengths, and schedules, is declared by the kernel.
   (arr gpu.launch : {[
     grid-shape block-shape global-shape kernel-arguments kernel-result
-    shared-slots.
+    shared-slots barrier-trace.
   ]
     ([.shared-slots] gpu.shared.layout val)
     ({[.grid-shape block-shape global-shape]} gpu.grid val)
@@ -348,14 +390,26 @@
           ([.shared-slots] gpu.shared.layout val)
           ([.kernel-arguments])
         } *)
-        ({({[.grid-shape block-shape global-shape]} gpu.grid)}
-          gpu.thread val)
+        ({
+          ({({[.grid-shape block-shape global-shape]} gpu.grid)}
+            gpu.thread val)
+          ({
+            ({[.grid-shape block-shape global-shape]} gpu.grid)
+            [.barrier-trace]
+          } gpu.barrier.cursor |-)
+        } *)
       } *)
-      ([.kernel-result])
+      ({
+        ([.kernel-result])
+        ({
+          ({[.grid-shape block-shape global-shape]} gpu.grid)
+          gpu.barrier.trace.end
+        } gpu.barrier.cursor |-)
+      } *)
     } -> val)
   } -> {[
     grid-shape block-shape global-shape kernel-arguments kernel-result
-    shared-slots.
+    shared-slots barrier-trace.
   ]
     ([.kernel-arguments])
   })

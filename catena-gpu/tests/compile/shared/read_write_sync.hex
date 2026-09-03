@@ -40,13 +40,18 @@
   (u64 val)
 } = gpu.shared.read)
 
-(def program shared-sync : {[grid-topology block-name.]
+(def program shared-sync-consumes-one-barrier-event : {[grid-topology block-name.]
   ({[.block-name]
     ({[.grid-topology block-name]} gpu.block)} :)
+  ({
+    [.grid-topology]
+    ({gpu.barrier.trace.end} gpu.barrier.trace.sync)
+  } gpu.barrier.cursor |-)
 } -> {[grid-topology block-name.]
   ({[.block-name]
     ({[.grid-topology block-name]} gpu.block)} :)
-} = gpu.shared.sync)
+  ({[.grid-topology] gpu.barrier.trace.end} gpu.barrier.cursor |-)
+} = gpu.sync)
 
 (def program shared-layout-f32 :
   ([n.] ({[.n] u64} :))

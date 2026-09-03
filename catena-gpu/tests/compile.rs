@@ -6,6 +6,8 @@ use catena_gpu::{
 };
 use metacat::theory::RawTheorySet;
 
+#[path = "compile/barriers.rs"]
+mod barriers;
 #[path = "compile/basic.rs"]
 mod basic;
 #[path = "compile/indexing.rs"]

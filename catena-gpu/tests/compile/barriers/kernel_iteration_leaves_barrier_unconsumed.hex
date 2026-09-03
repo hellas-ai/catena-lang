@@ -1,0 +1,22 @@
+# One loop iteration promises two barriers but executes only one, leaving a
+# sync event in the local iteration cursor.
+(def program kernel-iteration-that-leaves-barrier-unconsumed : {[
+  count grid-topology block-name.
+]
+  ({({[.count]} shape.1d)} ix val)
+  ({[.block-name] ({[.grid-topology block-name]} gpu.block)} :)
+  ({
+    [.grid-topology]
+    ({({gpu.barrier.trace.end} gpu.barrier.trace.sync)}
+      gpu.barrier.trace.sync)
+  } gpu.barrier.cursor |-)
+} -> {[
+  count grid-topology block-name.
+]
+  ({[.block-name] ({[.grid-topology block-name]} gpu.block)} :)
+  ({[.grid-topology] gpu.barrier.trace.end} gpu.barrier.cursor |-)
+} = ([iteration-index block barriers.]
+  ([.iteration-index] ix.forget)
+  ({[.block barriers]} gpu.sync [block-after-sync barriers-after-sync.])
+  [.block-after-sync barriers-after-sync]
+))

@@ -14,13 +14,18 @@ fn predicated_tiling_computes_naive_u64_matmul() -> anyhow::Result<()> {
 }
 
 #[test]
-fn perfect_tiling_computes_tiled_u64_matmul() -> anyhow::Result<()> {
+fn tiled_matmul_with_two_barriers_per_iteration_computes_a_full_tile() -> anyhow::Result<()> {
     check_u64_matmul(TILED_U64, "tiled-u64-matmul", Some(4), 1, 1, 2, 2)
 }
 
 #[test]
-fn predicated_tiling_computes_tiled_u64_matmul() -> anyhow::Result<()> {
+fn tiled_matmul_with_two_barriers_per_iteration_computes_a_partial_tile() -> anyhow::Result<()> {
     check_u64_matmul(TILED_U64, "tiled-u64-matmul", Some(6), 1, 1, 3, 2)
+}
+
+#[test]
+fn tiled_matmul_barriers_are_independent_between_multiple_blocks() -> anyhow::Result<()> {
+    check_u64_matmul(TILED_U64, "tiled-u64-matmul", Some(1), 2, 2, 1, 1)
 }
 
 fn check_naive_u64_matmul(

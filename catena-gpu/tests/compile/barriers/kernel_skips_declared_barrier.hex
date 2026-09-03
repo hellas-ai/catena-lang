@@ -1,0 +1,14 @@
+# The arrow promises to consume one barrier, but the body returns its input
+# cursor unchanged.
+(def program kernel-that-skips-declared-barrier : {[grid-topology block-name.]
+  ({[.block-name] ({[.grid-topology block-name]} gpu.block)} :)
+  ({
+    [.grid-topology]
+    ({gpu.barrier.trace.end} gpu.barrier.trace.sync)
+  } gpu.barrier.cursor |-)
+} -> {[grid-topology block-name.]
+  ({[.block-name] ({[.grid-topology block-name]} gpu.block)} :)
+  ({[.grid-topology] gpu.barrier.trace.end} gpu.barrier.cursor |-)
+} = ([block barriers.]
+  [.block barriers]
+))

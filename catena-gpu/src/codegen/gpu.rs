@@ -312,7 +312,7 @@ fn render_assignment(
             Ok(())
         }
         "gpu.launch" => ops::launch::render_call(output, function, assignment_index, assignment),
-        "fold" => ops::fold::render(output, assignment),
+        "fold" | "gpu.fold" => ops::fold::render(output, assignment),
         "bool.ifc" => render_ifc(output, assignment),
         "u64.zero" | "scalar.zero" => unary_output(output, assignment, "0", 0),
         "bool.and" => binary(output, assignment, "&&"),

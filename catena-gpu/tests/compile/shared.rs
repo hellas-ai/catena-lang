@@ -4,7 +4,7 @@ const READ_WRITE_SYNC: &str = include_str!("shared/read_write_sync.hex");
 const TILED_U64: &str = include_str!("../cases/matmul/tiled_u64.hex");
 
 #[test]
-fn shared_read_write_and_sync_reach_gpu_codegen() {
+fn shared_memory_operations_and_barrier_sync_reach_gpu_codegen() {
     let raw = RawTheorySet::from_texts(stdlib::sources().chain([READ_WRITE_SYNC])).unwrap();
     let report = compile(raw).unwrap();
     let modules = report.gpu_modules.as_ref().unwrap();
@@ -47,5 +47,17 @@ fn shared_layout_is_passed_to_tiled_kernel_launch() {
                 .trim_start()
                 .starts_with(shared_layout)
         );
+    }
+}
+
+#[test]
+fn tiled_matmul_codegen_places_two_barriers_inside_each_traced_iteration() {
+    let raw = RawTheorySet::from_texts(stdlib::sources().chain([TILED_U64])).unwrap();
+    let report = compile(raw).unwrap();
+
+    for dialect in [GpuDialect::Hip, GpuDialect::Cuda] {
+        let generated = render_modules(report.gpu_modules.as_ref().unwrap(), dialect).unwrap();
+        assert_eq!(generated.matches("catena_block_sync();").count(), 2);
+        assert!(generated.contains("for (uint64_t fold_index_"));
     }
 }

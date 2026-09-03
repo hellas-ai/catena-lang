@@ -104,7 +104,7 @@ pub fn render(output: &mut String, assignment: &GpuAssign) -> Result<bool, GpuRe
                 value_expr(cell),
             ));
         }
-        "gpu.shared.sync" => {
+        "gpu.sync" => {
             let [block] = assignment.inputs.as_slice() else {
                 return Err(invalid_arity(assignment, 1, 1));
             };

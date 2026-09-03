@@ -1,5 +1,6 @@
 mod elaboration;
 mod gpu;
+#[cfg(feature = "svg-reports")]
 mod svg;
 
 use std::{fs, io, path::Path};
@@ -23,12 +24,14 @@ pub type TheoryTermMap<A = Operation> = BTreeMap<TheoryId, BTreeMap<Operation, A
 
 #[derive(Clone, Copy, Debug)]
 pub struct ReportOptions {
+    #[cfg(feature = "svg-reports")]
     pub generate_svgs: bool,
 }
 
 impl Default for ReportOptions {
     fn default() -> Self {
         Self {
+            #[cfg(feature = "svg-reports")]
             generate_svgs: true,
         }
     }
@@ -70,6 +73,7 @@ impl CompileReport {
         self.dump_graphs_to_dir_with_options(dir, ReportOptions::default())
     }
 
+    #[cfg_attr(not(feature = "svg-reports"), allow(unused_variables))]
     pub fn dump_graphs_to_dir_with_options(
         &self,
         dir: impl AsRef<Path>,
@@ -82,6 +86,7 @@ impl CompileReport {
             self.raw_theories.to_hexpr_text(),
         )?;
         elaboration::dump_elaboration(self, dir)?;
+        #[cfg(feature = "svg-reports")]
         if options.generate_svgs {
             svg::dump_svgs(self, &dir.join("svgs"))?;
         }

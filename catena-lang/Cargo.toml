@@ -14,7 +14,7 @@ clap = { version = "4.5.57", features = ["derive"] }
 hexpr.workspace = true
 metacat.workspace = true
 open-hypergraphs.workspace = true
-open-hypergraphs-dot = { version = "0.2.4", features = ["svg"] }
+open-hypergraphs-dot = { version = "0.2.4", features = ["svg"], optional = true }
 thiserror = "2.0.18"
 
 # for runtime
@@ -29,9 +29,10 @@ serde = { version = "1.0.228", features = ["derive"] }
 half = "2"
 
 [features]
-default = []
+default = ["svg-reports"]
 runtime-tests = []
 experimental-catena-gpu = []
+svg-reports = ["dep:open-hypergraphs-dot"]
 
 [[example]]
 name = "runtime"

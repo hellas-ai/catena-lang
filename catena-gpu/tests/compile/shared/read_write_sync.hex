@@ -1,42 +1,46 @@
-(def program shared-write-u64 : {[
-  grid-topology block-name buffer-name buffer-size schedule-name thread-name
-  cell-index.
+(def program guarded-shared-write-preserves-cell-ownership : {[
+  grid-topology block-name shared-name buffer-size thread-name cell-index.
 ]
   ({[.thread-name] ([.grid-topology] gpu.thread)} :)
   ({[.block-name]
     ({[.grid-topology block-name]} gpu.block)} :)
-  ({[.buffer-name]
+  ({[.shared-name]
     ({[.block-name buffer-size] u64} gpu.shared)} :)
   ({[.cell-index] ({({[.buffer-size]} shape.1d)} ix)} :)
   (u64 val)
-  ([.buffer-name schedule-name thread-name cell-index]
-    gpu.schedule.owns |-)
+  ({[.thread-name cell-index shared-name]} gpu.shared.owns |-)
 } -> {[
-  grid-topology block-name buffer-name buffer-size schedule-name thread-name
-  cell-index.
+  grid-topology block-name shared-name buffer-size thread-name cell-index.
 ]
   ({[.thread-name] ([.grid-topology] gpu.thread)} :)
   ({[.block-name]
     ({[.grid-topology block-name]} gpu.block)} :)
-  ({[.buffer-name]
+  ({[.shared-name]
     ({[.block-name buffer-size] u64} gpu.shared)} :)
+  ({[.cell-index] ({({[.buffer-size]} shape.1d)} ix)} :)
+  ({[.thread-name cell-index shared-name]} gpu.shared.owns |-)
 } = gpu.shared.write)
 
-(def program shared-read-u64 : {[
-  grid-topology block-name buffer-name buffer-size.
+(def program guarded-shared-read-preserves-whole-buffer-read-permission : {[
+  grid-topology block-name shared-name buffer-size thread-name cell-index.
 ]
+  ({[.thread-name] ([.grid-topology] gpu.thread)} :)
   ({[.block-name]
     ({[.grid-topology block-name]} gpu.block)} :)
-  ({[.buffer-name]
+  ({[.shared-name]
     ({[.block-name buffer-size] u64} gpu.shared)} :)
-  ({({[.buffer-size]} shape.1d)} ix val)
+  ({[.cell-index] ({({[.buffer-size]} shape.1d)} ix)} :)
+  ({[.thread-name shared-name]} gpu.shared.reads |-)
 } -> {[
-  grid-topology block-name buffer-name buffer-size.
+  grid-topology block-name shared-name buffer-size thread-name cell-index.
 ]
+  ({[.thread-name] ([.grid-topology] gpu.thread)} :)
   ({[.block-name]
     ({[.grid-topology block-name]} gpu.block)} :)
-  ({[.buffer-name]
+  ({[.shared-name]
     ({[.block-name buffer-size] u64} gpu.shared)} :)
+  ({[.cell-index] ({({[.buffer-size]} shape.1d)} ix)} :)
+  ({[.thread-name shared-name]} gpu.shared.reads |-)
   (u64 val)
 } = gpu.shared.read)
 

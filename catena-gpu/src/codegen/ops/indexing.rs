@@ -38,6 +38,25 @@ pub fn render(output: &mut String, assignment: &GpuAssign) -> Result<bool, GpuRe
                 value_expr(thread),
             ));
         }
+        "gpu.thread.in-block.linear-index" => {
+            let [thread, tile_elements] = assignment.inputs.as_slice() else {
+                return Err(invalid_arity(assignment, 2, 3));
+            };
+            let [thread_after, tile_elements_after, index] = assignment.outputs.as_slice() else {
+                return Err(invalid_arity(assignment, 2, 3));
+            };
+            output.push_str(&format!(
+                "    {} = {};\n    {} = {};\n    {} = {{ {}.in_block_index.first + {}.in_block_index.second * {}.block_dim.first, 0, 0 }};\n",
+                thread_after.name,
+                value_expr(thread),
+                tile_elements_after.name,
+                value_expr(tile_elements),
+                index.name,
+                value_expr(thread),
+                value_expr(thread),
+                value_expr(thread),
+            ));
+        }
         "gpu.thread.block" => {
             let [thread] = assignment.inputs.as_slice() else {
                 return Err(invalid_arity(assignment, 1, 2));

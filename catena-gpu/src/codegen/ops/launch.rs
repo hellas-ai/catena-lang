@@ -53,8 +53,9 @@ pub fn render_kernel(
     output.push_str("    catena_ix_t global_index = { global_x, global_y, global_z };\n");
     output.push_str("    catena_ix_t in_block_index = { (uint64_t)threadIdx.x, (uint64_t)threadIdx.y, (uint64_t)threadIdx.z };\n");
     output.push_str("    catena_ix_t block_index = { (uint64_t)blockIdx.x, (uint64_t)blockIdx.y, (uint64_t)blockIdx.z };\n");
+    output.push_str("    catena_ix_t block_dim = { (uint64_t)blockDim.x, (uint64_t)blockDim.y, (uint64_t)blockDim.z };\n");
     output.push_str(
-        "    catena_thread_t thread = { global_index, in_block_index, block_index, catena_shared, shared_layout };\n",
+        "    catena_thread_t thread = { global_index, in_block_index, block_index, block_dim, catena_shared, shared_layout };\n",
     );
     for (index, result) in kernel_function.targets.iter().enumerate() {
         output.push_str(&format!(
@@ -63,10 +64,11 @@ pub fn render_kernel(
         ));
     }
     let mut arguments = vec!["shared_layout".to_string()];
-    arguments.extend(kernel_arguments
-        .iter()
-        .enumerate()
-        .map(|(index, _)| format!("kernel_argument_{index}"))
+    arguments.extend(
+        kernel_arguments
+            .iter()
+            .enumerate()
+            .map(|(index, _)| format!("kernel_argument_{index}")),
     );
     arguments.push("thread".to_string());
     arguments.extend(

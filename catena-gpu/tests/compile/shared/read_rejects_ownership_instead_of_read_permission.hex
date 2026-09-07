@@ -1,0 +1,18 @@
+(def program shared-read-with-ownership-instead-of-read-permission : {[
+  grid block shared size thread cell element.
+]
+  ({[.thread] ([.grid] gpu.thread)} :)
+  ({[.block] ({[.grid block]} gpu.block)} :)
+  ({[.shared] ({[.block size element]} gpu.shared)} :)
+  ({[.cell] ({({[.size]} shape.1d)} ix)} :)
+  ({[.thread cell shared]} gpu.shared.owns |-)
+} -> {[
+  grid block shared size thread cell element.
+]
+  ({[.thread] ([.grid] gpu.thread)} :)
+  ({[.block] ({[.grid block]} gpu.block)} :)
+  ({[.shared] ({[.block size element]} gpu.shared)} :)
+  ({[.cell] ({({[.size]} shape.1d)} ix)} :)
+  ({[.thread shared]} gpu.shared.reads |-)
+  ([.element] val)
+} = gpu.shared.read)

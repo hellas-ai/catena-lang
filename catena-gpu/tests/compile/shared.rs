@@ -2,6 +2,26 @@ use super::*;
 
 const READ_WRITE_SYNC: &str = include_str!("shared/read_write_sync.hex");
 const TILED_U64: &str = include_str!("../cases/matmul/tiled_u64.hex");
+const WRITE_WITH_OWNERSHIP_FOR_ANOTHER_CELL: &str =
+    include_str!("shared/write_rejects_ownership_for_another_cell.hex");
+const READ_WITH_OWNERSHIP_INSTEAD_OF_READ_PERMISSION: &str =
+    include_str!("shared/read_rejects_ownership_instead_of_read_permission.hex");
+
+#[test]
+fn shared_write_with_ownership_for_another_cell_is_rejected() {
+    assert_shared_definition_is_rejected(
+        WRITE_WITH_OWNERSHIP_FOR_ANOTHER_CELL,
+        "shared-write-with-ownership-for-another-cell",
+    );
+}
+
+#[test]
+fn shared_read_with_ownership_instead_of_read_permission_is_rejected() {
+    assert_shared_definition_is_rejected(
+        READ_WITH_OWNERSHIP_INSTEAD_OF_READ_PERMISSION,
+        "shared-read-with-ownership-instead-of-read-permission",
+    );
+}
 
 #[test]
 fn shared_memory_operations_and_barrier_sync_reach_gpu_codegen() {
@@ -13,7 +33,7 @@ fn shared_memory_operations_and_barrier_sync_reach_gpu_codegen() {
         let generated = render_modules(modules, dialect).unwrap();
         assert!(generated.contains("catena_block_sync();"));
         assert!(generated.contains("x2[x3.first] = x4;"));
-        assert!(generated.contains("= x1[x2.first];"));
+        assert!(generated.contains("= x2[x3.first];"));
         assert!(generated.contains("x0 * sizeof(float);"));
     }
 }
@@ -28,7 +48,7 @@ fn shared_layout_is_passed_to_tiled_kernel_launch() {
         let generated = render_modules(modules, dialect).unwrap();
         assert!(generated.contains("extern __shared__ unsigned char catena_shared[];"));
         assert!(generated.contains("uint64_t shared_layout"));
-        assert!(generated.contains("block_index, catena_shared, shared_layout };"));
+        assert!(generated.contains("block_index, block_dim, catena_shared, shared_layout };"));
         assert!(generated.contains("(shared_layout, kernel_argument_0"));
         assert!(generated.matches("* sizeof(uint64_t)").count() >= 2);
         let lines = generated.lines().collect::<Vec<_>>();
@@ -59,6 +79,8 @@ fn tiled_matmul_codegen_places_two_barriers_inside_each_traced_iteration() {
         let generated = render_modules(report.gpu_modules.as_ref().unwrap(), dialect).unwrap();
         assert_eq!(generated.matches("catena_block_sync();").count(), 2);
         assert!(generated.contains("for (uint64_t fold_index_"));
+        assert!(generated.contains(".shared +"));
+        assert!(generated.contains(".in_block_index.first"));
     }
 }
 
@@ -82,4 +104,14 @@ fn tiled_matmul_asserts_shared_cell_ownership_before_entering_the_barrier_fold()
         assert!(ownership_decision < fold);
         assert!(ownership_assertion < fold);
     }
+}
+
+fn assert_shared_definition_is_rejected(source: &'static str, expected_definition: &str) {
+    let raw = RawTheorySet::from_texts(stdlib::sources().chain([source])).unwrap();
+    let failure = compile(raw).expect_err("unguarded shared-memory access must not compile");
+
+    let CompileError::Check(CheckError::Definition { definition, .. }) = &failure.cause else {
+        panic!("expected a definition type error, got: {}", failure.cause);
+    };
+    assert_eq!(definition, expected_definition);
 }

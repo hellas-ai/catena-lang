@@ -147,6 +147,7 @@ typedef struct {{
     catena_ix_t global_index;
     catena_ix_t in_block_index;
     catena_ix_t block_index;
+    catena_ix_t block_dim;
     unsigned char *shared;
     uint64_t shared_layout;
 }} catena_thread_t;
@@ -277,6 +278,7 @@ fn render_assignment(
         | "gpu.thread.name"
         | "gpu.thread.with-name"
         | "gpu.shared.layout.with-name"
+        | "gpu.shared.layout.resources"
         | "gpu.global.element-type" => identity(output, assignment),
         "positive-u32.intro" => identity(output, assignment),
         "u32.is-positive" => {

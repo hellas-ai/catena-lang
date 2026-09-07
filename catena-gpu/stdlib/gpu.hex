@@ -139,6 +139,30 @@
     ([.block-shape] ix val)
   })
 
+  # Flatten the current thread's block-local coordinate into the cell space
+  # described by a two-slot shared layout. The shared scheduler below guards
+  # the resulting ownership claim.
+  (arr gpu.thread.in-block.linear-index : {[
+    grid-shape block-shape global-shape tile-elements element-type.
+  ]
+    ({({[.grid-shape block-shape global-shape]} gpu.grid)}
+      gpu.thread val)
+    ({
+      [.tile-elements element-type]
+      ({[.tile-elements element-type] gpu.shared.empty} gpu.shared.slot)
+    } gpu.shared.slot gpu.shared.layout val)
+  } -> {[
+    grid-shape block-shape global-shape tile-elements element-type.
+  ]
+    ({({[.grid-shape block-shape global-shape]} gpu.grid)}
+      gpu.thread val)
+    ({
+      [.tile-elements element-type]
+      ({[.tile-elements element-type] gpu.shared.empty} gpu.shared.slot)
+    } gpu.shared.slot gpu.shared.layout val)
+    ({({[.tile-elements]} shape.1d)} ix val)
+  })
+
   # Attach a fresh static name to the current thread so permissions can refer
   # to its stable launch identity.
   (arr gpu.thread.name : {[grid-topology thread-name.]
@@ -176,51 +200,124 @@
     ([.grid-shape] ix val)
   })
 
-  # Read one bounded cell from block-local shared memory. Threading both the
-  # block and handle through the result keeps shared operations ordered while
-  # preserving the stable names used by later accesses.
-  (arr gpu.shared.read : {[
-    grid-topology block-name buffer-name buffer-size element-type.
+  # Open the two equally-sized slots used by tiled matrix multiplication.
+  # Both handles retain the allocation name because phase proofs guard the
+  # whole shared allocation, rather than either slot in isolation.
+  (arr gpu.shared.layout.open-pair : {[
+    grid-topology block-name thread-name shared-name elements element-type.
   ]
+    ({[.shared-name]
+      ({
+        [.elements element-type]
+        ({[.elements element-type] gpu.shared.empty} gpu.shared.slot)
+      } gpu.shared.slot gpu.shared.layout)} :)
+    ({[.thread-name] ([.grid-topology] gpu.thread)} :)
     ({[.block-name]
       ({[.grid-topology block-name]} gpu.block)} :)
-    ({[.buffer-name]
-      ({[.block-name buffer-size element-type]} gpu.shared)} :)
-    ({({[.buffer-size]} shape.1d)} ix val)
   } -> {[
-    grid-topology block-name buffer-name buffer-size element-type.
+    grid-topology block-name thread-name shared-name elements element-type.
   ]
+    ({[.thread-name] ([.grid-topology] gpu.thread)} :)
     ({[.block-name]
       ({[.grid-topology block-name]} gpu.block)} :)
-    ({[.buffer-name]
+    ({[.shared-name]
+      ({[.block-name elements element-type]} gpu.shared)} :)
+    ({[.shared-name]
+      ({[.block-name elements element-type]} gpu.shared)} :)
+  })
+
+  (arr gpu.shared.layout.resources : {[shared-name elements element-type.]
+    ({[.shared-name]
+      ({
+        [.elements element-type]
+        ({[.elements element-type] gpu.shared.empty} gpu.shared.slot)
+      } gpu.shared.slot gpu.shared.layout)} :)
+  } -> {[shared-name elements element-type.]
+    ({[.shared-name]
+      ({
+        [.elements element-type]
+        ({[.elements element-type] gpu.shared.empty} gpu.shared.slot)
+      } gpu.shared.slot gpu.shared.layout)} :)
+    [.elements]
+    [.element-type]
+  })
+
+  # Close the two handles after the final read-to-write transition. Requiring
+  # the restored ownership proof prevents a kernel from abandoning the shared
+  # allocation in its read phase.
+  (arr gpu.shared.layout.close-pair : {[
+    grid-topology block-name thread-name shared-name cell-name
+    elements element-type.
+  ]
+    ({[.thread-name] ([.grid-topology] gpu.thread)} :)
+    ({[.block-name]
+      ({[.grid-topology block-name]} gpu.block)} :)
+    ({[.shared-name]
+      ({[.block-name elements element-type]} gpu.shared)} :)
+    ({[.shared-name]
+      ({[.block-name elements element-type]} gpu.shared)} :)
+    ({[.cell-name] ({({[.elements]} shape.1d)} ix)} :)
+    ({[.thread-name cell-name shared-name]} gpu.shared.owns |-)
+  } -> {[
+    grid-topology block-name thread-name shared-name cell-name
+    elements element-type.
+  ]
+    ({[.thread-name] ([.grid-topology] gpu.thread)} :)
+  })
+
+  # Read one bounded cell while holding this thread's read-phase proof. Every
+  # resource and the proof are returned so several slots can be read during
+  # the same phase.
+  (arr gpu.shared.read : {[
+    grid-topology block-name shared-name buffer-size element-type
+    thread-name cell-index.
+  ]
+    ({[.thread-name] ([.grid-topology] gpu.thread)} :)
+    ({[.block-name]
+      ({[.grid-topology block-name]} gpu.block)} :)
+    ({[.shared-name]
       ({[.block-name buffer-size element-type]} gpu.shared)} :)
+    ({[.cell-index] ({({[.buffer-size]} shape.1d)} ix)} :)
+    ({[.thread-name shared-name]} gpu.shared.reads |-)
+  } -> {[
+    grid-topology block-name shared-name buffer-size element-type
+    thread-name cell-index.
+  ]
+    ({[.thread-name] ([.grid-topology] gpu.thread)} :)
+    ({[.block-name]
+      ({[.grid-topology block-name]} gpu.block)} :)
+    ({[.shared-name]
+      ({[.block-name buffer-size element-type]} gpu.shared)} :)
+    ({[.cell-index] ({({[.buffer-size]} shape.1d)} ix)} :)
+    ({[.thread-name shared-name]} gpu.shared.reads |-)
     ([.element-type] val)
   })
 
-  # Write one bounded shared-memory cell owned by the current named thread.
-  # The ownership proposition is the same one used by gpu.global.write, so
-  # scheduling policy remains separate from the memory space being accessed.
+  # Write the exact shared cell owned by the current named thread. Ownership
+  # is preserved, allowing the thread to populate both slots before syncing.
   (arr gpu.shared.write : {[
-    grid-topology block-name buffer-name buffer-size element-type
-    schedule-name thread-name cell-index.
+    grid-topology block-name shared-name buffer-size element-type
+    thread-name cell-index.
   ]
     ({[.thread-name] ([.grid-topology] gpu.thread)} :)
     ({[.block-name]
       ({[.grid-topology block-name]} gpu.block)} :)
-    ({[.buffer-name]
+    ({[.shared-name]
       ({[.block-name buffer-size element-type]} gpu.shared)} :)
     ({[.cell-index] ({({[.buffer-size]} shape.1d)} ix)} :)
     ([.element-type] val)
-    ([.buffer-name schedule-name thread-name cell-index] gpu.schedule.owns |-)
+    ({[.thread-name cell-index shared-name]} gpu.shared.owns |-)
   } -> {[
-    grid-topology block-name buffer-name buffer-size element-type
-    schedule-name thread-name cell-index.
+    grid-topology block-name shared-name buffer-size element-type
+    thread-name cell-index.
   ]
     ({[.thread-name] ([.grid-topology] gpu.thread)} :)
     ({[.block-name]
       ({[.grid-topology block-name]} gpu.block)} :)
-    ({[.buffer-name]
+    ({[.shared-name]
       ({[.block-name buffer-size element-type]} gpu.shared)} :)
+    ({[.cell-index] ({({[.buffer-size]} shape.1d)} ix)} :)
+    ({[.thread-name cell-index shared-name]} gpu.shared.owns |-)
   })
 
   # Synchronize all threads in the exact block represented by this token,

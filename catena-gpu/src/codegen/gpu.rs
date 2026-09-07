@@ -159,8 +159,13 @@ typedef enum {{
 typedef enum {{
     CATENA_SCHEDULING_OWN_EACH = 1,
     CATENA_SCHEDULING_2D_ROW_MAJOR_OWN = 3,
+    CATENA_SCHEDULING_SHARED_OWN_EACH = 4,
 }} catena_scheduling_kind_t;
-typedef struct {{ catena_scheduling_kind_t kind; uint64_t matrix_columns; }} catena_scheduling_t;
+typedef struct {{
+    catena_scheduling_kind_t kind;
+    uint64_t matrix_columns;
+    uint64_t size;
+}} catena_scheduling_t;
 
 __host__ __device__ static inline catena_cell_access_t catena_scheduling_resolve(
     catena_scheduling_t scheduling,
@@ -178,6 +183,13 @@ __host__ __device__ static inline catena_cell_access_t catena_scheduling_resolve
             && thread.global_index.second == cell.first / scheduling.matrix_columns
             ? CATENA_CELL_OWNED
             : CATENA_CELL_INACCESSIBLE;
+    case CATENA_SCHEDULING_SHARED_OWN_EACH: {{
+        uint64_t local = thread.in_block_index.first
+            + thread.in_block_index.second * thread.block_dim.first;
+        return cell.first < scheduling.size && local == cell.first
+            ? CATENA_CELL_OWNED
+            : CATENA_CELL_INACCESSIBLE;
+    }}
     default:
         return CATENA_CELL_INACCESSIBLE;
     }}

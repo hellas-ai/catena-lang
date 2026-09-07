@@ -91,9 +91,11 @@ fn tiled_matmul_asserts_shared_cell_ownership_before_entering_the_barrier_fold()
 
     for dialect in [GpuDialect::Hip, GpuDialect::Cuda] {
         let generated = render_modules(report.gpu_modules.as_ref().unwrap(), dialect).unwrap();
+        assert!(generated.contains("{ CATENA_SCHEDULING_SHARED_OWN_EACH, 0,"));
+        assert!(generated.contains("cell.first < scheduling.size && local == cell.first"));
         let ownership_decision = generated
-            .find(" = true;")
-            .expect("shared scheduling should produce an ownership decision");
+            .find(" = (catena_scheduling_resolve(")
+            .expect("shared scheduling should resolve ownership at runtime");
         let ownership_assertion = generated
             .find("if (!")
             .expect("shared ownership should be asserted");

@@ -180,9 +180,11 @@ Shared barrier conditions retain both their synchronization phase and resource
 identities: `gpu.shared.owns(phase, thread, cell, shared) |-` and
 `gpu.shared.reads(phase, thread, shared) |-`. Shared reads and writes preserve
 that phase index, while `gpu.sync` is the operation that changes it according
-to the trusted barrier step. Before entering a repeated barrier protocol,
-`gpu.schedule.shared.can-own` receives the initial phase extracted from the
-trace and returns a Boolean decision with the corresponding conditional
+to the trusted barrier step. The host constructs a `gpu.shared.scheduling`
+value indexed by the shared allocation, tile size, grid, initial phase, and
+schedule name. Before entering a repeated barrier protocol,
+`gpu.schedule.shared.can-own` resolves that schedule for the executing thread
+and cell, then returns a Boolean decision with the corresponding conditional
 ownership proof. `assert-then` turns the successful decision into the
 phase-bound ownership proof carried by the fold.
 
@@ -200,6 +202,7 @@ Scheduling is checked by Hex types but remains a small runtime value because the
 typedef struct {
     catena_scheduling_kind_t kind;
     uint64_t matrix_columns;
+    uint64_t size;
 } catena_scheduling_t;
 ```
 
@@ -207,6 +210,9 @@ The current schedule constructors lower as follows:
 
 - `gpu.scheduling.own-each` stores the 1D `OWN_EACH` policy.
 - `gpu.scheduling.2d.row-major.own-each(columns)` stores the 2D row-major policy and its column count.
+- `gpu.scheduling.shared.own-each(size)` stores the block-local policy and
+  shared tile size. Its Hex type also retains the initial synchronization
+  phase.
 - Static buffer, grid, and schedule names are erased. Their role is to prevent mixing unrelated values during type checking.
 
 `gpu.scheduling.can-own(schedule, thread, cell)` becomes a runtime policy query. For the current policies, the generated checks are equivalent to:
@@ -218,6 +224,10 @@ own-each:
 2d row-major own-each:
     thread.x == cell.first % columns
     and thread.y == cell.first / columns
+
+shared own-each:
+    local = thread.local.x + thread.local.y * block.width
+    cell.first < size and local == cell.first
 ```
 
 The Boolean decision remains at runtime. The positive ownership proof exists only in Hex and is erased. An `assert` on a false decision becomes a GPU trap; a predicated kernel can instead handle the false branch and skip the write.

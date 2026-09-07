@@ -101,9 +101,6 @@
     gpu.scheduling.2d.row-major.own-each
     [c-schedule-name c-scheduling.])
 
-  ({[.shared-size-value output-columns-value]} *.intro [shared-and-columns.])
-  ({[.output-rows-value shared-and-columns]} *.intro [dimensions.])
-
   ({[.a-buffer-name a-size]} *.intro [a-context.])
   ({[.a-buffer a-context]} *.intro [a-tail.])
   ({[.a-length-for-kernel a-tail]} *.intro [a-arguments.])
@@ -122,18 +119,35 @@
   ({[.c-buffer c-schedule-and-context]} *.intro [c-tail.])
   ({[.c-length-for-launch c-tail]} *.intro [c-arguments.])
 
+  ([.tile-elements-input] u64.name [named-tile-elements.])
+  ([.named-tile-elements] :.ty [tile-elements-value tile-elements.])
+  ([.tile-elements-value]
+    u64.copies2 [tile-elements-for-schedule tile-elements-for-layout.])
+  ([.tile-elements-for-layout]
+    u64.copies2 [named-a-tile-elements named-b-tile-elements.])
+  (gpu.tiled.write.phase [write-phase.])
+  ({
+    [.tile-elements-for-schedule tile-elements
+      grid-shape block-shape global-shape write-phase]
+  } gpu.scheduling.shared.own-each
+    [shared-schedule-name shared-scheduling.])
+
+  ({[.output-columns-value shared-scheduling]}
+    *.intro
+    [columns-and-shared-schedule.])
+  ({[.shared-size-value columns-and-shared-schedule]}
+    *.intro
+    [shared-and-columns.])
+  ({[.output-rows-value shared-and-columns]} *.intro [dimensions.])
+
   ({[.b-arguments dimensions]} *.intro [b-and-dimensions.])
   ({[.a-arguments b-and-dimensions]} *.intro [a-b-and-dimensions.])
   ({[.c-arguments a-b-and-dimensions]} *.intro [kernel-arguments.])
 
-  ([.tile-elements-input] u64.name [named-tile-elements.])
-  ([.named-tile-elements] :.ty [tile-elements-value tile-elements.])
-  ([.tile-elements-value]
-    u64.copies2 [named-a-tile-elements named-b-tile-elements.])
   ({[
     .element-type c-buffer-name c-size a-buffer-name a-size b-buffer-name b-size
     grid-shape block-shape global-columns global-rows
-    c-schedule-name
+    c-schedule-name shared-schedule-name
     output-rows shared-size output-columns tile-elements
     grid-shape block-shape tile-elements
   ]} name.gpu.global.matrix.tiled-matmul.kernel [kernel.])

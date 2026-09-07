@@ -8,7 +8,7 @@ pub fn render(output: &mut String, assignment: &GpuAssign) -> Result<bool, GpuRe
                 return Err(invalid_arity(assignment, 0, 1));
             }
             output.push_str(&format!(
-                "    {} = {{ CATENA_SCHEDULING_OWN_EACH, 0 }};\n",
+                "    {} = {{ CATENA_SCHEDULING_OWN_EACH, 0, 0 }};\n",
                 assignment.outputs[0].name,
             ));
         }
@@ -20,9 +20,22 @@ pub fn render(output: &mut String, assignment: &GpuAssign) -> Result<bool, GpuRe
                 return Err(invalid_arity(assignment, 1, 1));
             };
             output.push_str(&format!(
-                "    {} = {{ CATENA_SCHEDULING_2D_ROW_MAJOR_OWN, {} }};\n",
+                "    {} = {{ CATENA_SCHEDULING_2D_ROW_MAJOR_OWN, {}, 0 }};\n",
                 scheduling.name,
                 value_expr(column_count),
+            ));
+        }
+        "gpu.scheduling.shared.own-each" => {
+            let [size] = assignment.inputs.as_slice() else {
+                return Err(invalid_arity(assignment, 1, 1));
+            };
+            let [scheduling] = assignment.outputs.as_slice() else {
+                return Err(invalid_arity(assignment, 1, 1));
+            };
+            output.push_str(&format!(
+                "    {} = {{ CATENA_SCHEDULING_SHARED_OWN_EACH, 0, {} }};\n",
+                scheduling.name,
+                value_expr(size),
             ));
         }
         "gpu.scheduling.can-own" => {
@@ -49,22 +62,26 @@ pub fn render(output: &mut String, assignment: &GpuAssign) -> Result<bool, GpuRe
             ));
         }
         "gpu.schedule.shared.can-own" => {
-            let [shared, thread, cell] = assignment.inputs.as_slice() else {
+            let [schedule, thread, cell] = assignment.inputs.as_slice() else {
                 return Err(invalid_arity(assignment, 3, 4));
             };
-            let [shared_after, thread_after, cell_after, decision] = assignment.outputs.as_slice()
+            let [schedule_after, thread_after, cell_after, decision] =
+                assignment.outputs.as_slice()
             else {
                 return Err(invalid_arity(assignment, 3, 4));
             };
             output.push_str(&format!(
-                "    {} = {};\n    {} = {};\n    {} = {};\n    {} = true;\n",
-                shared_after.name,
-                value_expr(shared),
+                "    {} = {};\n    {} = {};\n    {} = {};\n    {} = (catena_scheduling_resolve({}, {}, {}) == CATENA_CELL_OWNED);\n",
+                schedule_after.name,
+                value_expr(schedule),
                 thread_after.name,
                 value_expr(thread),
                 cell_after.name,
                 value_expr(cell),
                 decision.name,
+                value_expr(schedule),
+                value_expr(thread),
+                value_expr(cell),
             ));
         }
         _ => return Ok(false),

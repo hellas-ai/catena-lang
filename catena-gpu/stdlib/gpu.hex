@@ -38,6 +38,7 @@
   # The scheduling relates buffer cells to global thread indices.
   (arr gpu.scheduling : 4 -> 1)
   (arr gpu.schedule.owns : 4 -> 1)
+  (arr gpu.shared.scheduling : 5 -> 1)
 })
 
 (theory program type {
@@ -513,25 +514,52 @@
   # The shared scheduling assigns each named thread its named in-block cell.
   # As with global scheduling, the Boolean result is converted into an actual
   # ownership proof with assert-then at the use site.
-  (arr gpu.schedule.shared.can-own : {[
-    shared-slots shared-name grid-topology thread-name
-    cell-shape cell-name phase decision.
+  (arr gpu.scheduling.shared.own-each : {[
+    shared-name size grid-columns grid-rows block-columns block-rows
+    global-columns global-rows phase schedule-name.
   ]
-    ({[.shared-name] ([.shared-slots] gpu.shared.layout)} :)
-    ({[.thread-name] ([.grid-topology] gpu.thread)} :)
-    ({[.cell-name] ([.cell-shape] ix)} :)
+    ({[.size] u64} :)
+    [.shared-name]
+    ({[.grid-columns grid-rows]} shape.2d)
+    ({[.block-columns block-rows]} shape.2d)
+    ({[.global-columns global-rows]} shape.2d)
     [.phase]
   } -> {[
-    shared-slots shared-name grid-topology thread-name
-    cell-shape cell-name phase decision.
+    shared-name size grid-columns grid-rows block-columns block-rows
+    global-columns global-rows phase schedule-name.
+  ]
+    [.schedule-name]
+    ({
+      [.shared-name size]
+      ({
+        ({[.grid-columns grid-rows]} shape.2d)
+        ({[.block-columns block-rows]} shape.2d)
+        ({[.global-columns global-rows]} shape.2d)
+      } gpu.grid)
+      [.phase schedule-name]
+    } gpu.shared.scheduling val)
+  })
+
+  (arr gpu.schedule.shared.can-own : {[
+    shared-name size grid-topology phase schedule-name thread-name
+    cell-name decision.
+  ]
+    ({[.shared-name size grid-topology phase schedule-name]}
+      gpu.shared.scheduling val)
+    ({[.thread-name] ([.grid-topology] gpu.thread)} :)
+    ({[.cell-name] ({({[.size]} shape.1d)} ix)} :)
+  } -> {[
+    shared-name size grid-topology phase schedule-name thread-name
+    cell-name decision.
   ]
     ({[.decision] bool.t} = [decision-true.])
     ({[.decision] bool.f} = [decision-false.])
     ({[.phase thread-name cell-name shared-name]} gpu.shared.owns [owns.])
 
-    ({[.shared-name] ([.shared-slots] gpu.shared.layout)} :)
+    ({[.shared-name size grid-topology phase schedule-name]}
+      gpu.shared.scheduling val)
     ({[.thread-name] ([.grid-topology] gpu.thread)} :)
-    ({[.cell-name] ([.cell-shape] ix)} :)
+    ({[.cell-name] ({({[.size]} shape.1d)} ix)} :)
     ({[.decision] bool} :)
     ([.decision-true owns] ==> |-)
     ([.owns] {[.decision-false] not} ==> |-)

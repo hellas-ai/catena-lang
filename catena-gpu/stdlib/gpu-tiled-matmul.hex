@@ -9,6 +9,11 @@
   (arr gpu.tiled.read : 0 -> 1)
 })
 
+(theory program type {
+  (arr gpu.tiled.write.phase : [] -> gpu.tiled.write)
+  (arr gpu.tiled.read.phase : [] -> gpu.tiled.read)
+})
+
 (def program gpu.global.matrix.tiled-matmul.barrier-fold-step : {[
   element-type a-buffer-name a-size b-buffer-name b-size
   output-rows output-columns shared-size tile-elements
@@ -247,7 +252,7 @@
 (def program gpu.global.matrix.tiled-matmul.kernel : {[
   element-type c-buffer-name c-size a-buffer-name a-size b-buffer-name b-size
   grid-shape block-shape global-columns global-rows
-  c-schedule-name
+  c-schedule-name shared-schedule-name
   output-rows shared-size output-columns tile-elements
   thread-name cell-name shared-name.
 ]
@@ -306,7 +311,22 @@
         } *)
         ({
           ({[.output-rows] u64} :)
-          ({({[.shared-size] u64} :) ({[.output-columns] u64} :)} *)
+          ({
+            ({[.shared-size] u64} :)
+            ({
+              ({[.output-columns] u64} :)
+              ({
+                [.shared-name tile-elements]
+                ({
+                  [.grid-shape]
+                  [.block-shape]
+                  ({[.global-columns global-rows]} shape.2d)
+                } gpu.grid)
+                gpu.tiled.write
+                [.shared-schedule-name]
+              } gpu.shared.scheduling val)
+            } *)
+          } *)
         } *)
       } *)
     } *)
@@ -348,19 +368,31 @@
 } -> {[
   element-type c-buffer-name c-size a-buffer-name a-size b-buffer-name b-size
   grid-shape block-shape global-columns global-rows
-  c-schedule-name
+  c-schedule-name shared-schedule-name
   output-rows shared-size output-columns tile-elements
   thread-name cell-name shared-name.
 ]
   ({
-    [.c-buffer-name c-size]
     ({
-      [.grid-shape]
-      [.block-shape]
-      ({[.global-columns global-rows]} shape.2d)
-    } gpu.grid)
-    [.c-schedule-name]
-  } gpu.scheduling val)
+      [.c-buffer-name c-size]
+      ({
+        [.grid-shape]
+        [.block-shape]
+        ({[.global-columns global-rows]} shape.2d)
+      } gpu.grid)
+      [.c-schedule-name]
+    } gpu.scheduling val)
+    ({
+      [.shared-name tile-elements]
+      ({
+        [.grid-shape]
+        [.block-shape]
+        ({[.global-columns global-rows]} shape.2d)
+      } gpu.grid)
+      gpu.tiled.write
+      [.shared-schedule-name]
+    } gpu.shared.scheduling val)
+  } *)
   ({
     ({
       [.grid-shape]
@@ -377,7 +409,10 @@
   ([.a-b-and-dimensions] *.elim [a-arguments b-and-dimensions.])
   ([.b-and-dimensions] *.elim [b-arguments dimensions.])
   ([.dimensions] *.elim [output-rows-value shared-and-columns.])
-  ([.shared-and-columns] *.elim [shared-size-value output-columns-value.])
+  ([.shared-and-columns] *.elim [shared-size-value columns-and-shared-schedule.])
+  ([.columns-and-shared-schedule]
+    *.elim
+    [output-columns-value shared-scheduling.])
 
   ([.c-arguments] *.elim [c-length c-tail.])
   ([.c-tail] *.elim [c-buffer c-schedule-and-context.])
@@ -540,7 +575,7 @@
   ([.barriers]
     gpu.barrier.shared.resources
     [barriers-for-fold thread-name-for-bind cell-name-for-bind
-      shared-name-for-bind write-phase-for-schedule _read-phase-for-bind.])
+      shared-name-for-bind _write-phase-for-bind _read-phase-for-bind.])
   ([.thread-after-grid] gpu.thread.block [thread-before-cell block.])
   ({[.thread-before-cell shared-layout]}
     gpu.thread.in-block.linear-index
@@ -552,13 +587,13 @@
   ({[.shared-layout-for-name shared-name-for-bind]}
     gpu.shared.layout.with-name
     [named-shared.])
-  ({[.named-shared named-thread named-cell write-phase-for-schedule]}
+  ({[.shared-scheduling named-thread named-cell]}
     gpu.schedule.shared.can-own
-    [named-shared-after-schedule named-thread-after-schedule
+    [shared-scheduling-after-schedule named-thread-after-schedule
       named-cell-after-schedule allowed owns-if-allowed
       _not-owns-if-denied.])
   ({[.allowed owns-if-allowed]} assert-then [own.])
-  ([.named-shared-after-schedule]
+  ([.named-shared]
     gpu.shared.layout.resources
     [named-shared-for-open tile-elements-for-fold _shared-element-type.])
   ({[.named-shared-for-open named-thread-after-schedule block]}
@@ -643,5 +678,8 @@
       _c-bounds-false c-false-branch c-bounds-value c-branch-state]}
     bool.ifc
     [c-scheduling-after-bounds.])
-  [.c-scheduling-after-bounds barriers-after-fold]
+  ({[.c-scheduling-after-bounds shared-scheduling-after-schedule]}
+    *.intro
+    [schedules-after-kernel.])
+  [.schedules-after-kernel barriers-after-fold]
 ))

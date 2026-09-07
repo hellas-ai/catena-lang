@@ -98,7 +98,7 @@ Most inputs are static or proofs and are erased. Code generation creates the
 runtime schedule value:
 
 ```c
-schedule = { CATENA_SCHEDULING_OWN_EACH, 0 };
+schedule = { CATENA_SCHEDULING_OWN_EACH, 0, 0 };
 ```
 
 Excess threads are allowed. They enter the kernel but cannot construct a
@@ -136,7 +136,8 @@ At runtime, only the policy kind and logical matrix width are stored:
 ```c
 schedule = {
     CATENA_SCHEDULING_2D_ROW_MAJOR_OWN,
-    matrix_columns
+    matrix_columns,
+    0
 };
 ```
 
@@ -200,6 +201,19 @@ thread.global_index.second == cell.first / matrix_columns
 
 If `matrix_columns` is zero, the resolver returns inaccessible rather than
 performing division or remainder.
+
+For block-local shared memory, `gpu.scheduling.shared.own-each` additionally
+stores the shared tile size and carries the initial synchronization phase in
+its Hex type. The phase is erased, while the runtime resolver checks:
+
+```c
+local = thread.in_block_index.first
+    + thread.in_block_index.second * thread.block_dim.first;
+cell.first < schedule.size && local == cell.first
+```
+
+Consequently, `gpu.schedule.shared.can-own` produces its conditional proof
+only for the schedule's shared allocation, executing thread, cell, and phase.
 
 The kernel obtains the concrete ownership proof only on the true path. In the
 current definitions this is commonly written using `assert-then` after the

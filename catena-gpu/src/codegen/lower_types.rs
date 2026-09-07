@@ -138,6 +138,9 @@ fn lower_runtime_type(
         ("gpu.scheduling", [_buffer_name, _buffer_size, _grid, _schedule_name]) => {
             Ok(CType::Scheduling)
         }
+        ("gpu.shared.scheduling", [_shared_name, _size, _grid, _phase, _schedule_name]) => {
+            Ok(CType::Scheduling)
+        }
         ("ix", [_shape]) => Ok(CType::Ix),
         ("val", [inner]) => lower_runtime_type(inner, substitutions),
         _ => Err(LowerTypeError::NoRuntimeRepresentation(ty.clone())),

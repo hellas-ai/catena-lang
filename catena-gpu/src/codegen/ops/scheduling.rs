@@ -48,6 +48,25 @@ pub fn render(output: &mut String, assignment: &GpuAssign) -> Result<bool, GpuRe
                 value_expr(cell),
             ));
         }
+        "gpu.schedule.shared.can-own" => {
+            let [shared, thread, cell] = assignment.inputs.as_slice() else {
+                return Err(invalid_arity(assignment, 3, 4));
+            };
+            let [shared_after, thread_after, cell_after, decision] = assignment.outputs.as_slice()
+            else {
+                return Err(invalid_arity(assignment, 3, 4));
+            };
+            output.push_str(&format!(
+                "    {} = {};\n    {} = {};\n    {} = {};\n    {} = true;\n",
+                shared_after.name,
+                value_expr(shared),
+                thread_after.name,
+                value_expr(thread),
+                cell_after.name,
+                value_expr(cell),
+                decision.name,
+            ));
+        }
         _ => return Ok(false),
     }
     Ok(true)

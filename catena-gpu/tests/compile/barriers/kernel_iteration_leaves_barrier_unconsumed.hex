@@ -7,16 +7,36 @@
   ({[.block-name] ({[.grid-topology block-name]} gpu.block)} :)
   ({
     [.grid-topology]
-    ({({gpu.barrier.trace.end} gpu.barrier.trace.sync)}
+    ({
+      ({
+        gpu.tiled.wr
+        ({[.grid-topology block-name block-name]} gpu.shared.owns |-)
+        ({[.grid-topology block-name]} gpu.shared.reads |-)
+      }
+        gpu.barrier.step)
+      ({
+        ({
+          gpu.tiled.rw
+          ({[.grid-topology block-name]} gpu.shared.reads |-)
+          ({[.grid-topology block-name block-name]} gpu.shared.owns |-)
+        }
+          gpu.barrier.step)
+        gpu.barrier.trace.end
+      } gpu.barrier.trace.sync)
+    }
       gpu.barrier.trace.sync)
   } gpu.barrier.cursor |-)
+  ({[.grid-topology block-name block-name]} gpu.shared.owns |-)
 } -> {[
   count grid-topology block-name.
 ]
   ({[.block-name] ({[.grid-topology block-name]} gpu.block)} :)
   ({[.grid-topology] gpu.barrier.trace.end} gpu.barrier.cursor |-)
-} = ([iteration-index block barriers.]
+  ({[.grid-topology block-name block-name]} gpu.shared.owns |-)
+} = ([iteration-index block barriers own.]
   ([.iteration-index] ix.forget)
-  ({[.block barriers]} gpu.sync [block-after-sync barriers-after-sync.])
-  [.block-after-sync barriers-after-sync]
+  ({[.block barriers own]}
+    gpu.sync
+    [block-after-sync barriers-after-sync read.])
+  [.block-after-sync barriers-after-sync read]
 ))

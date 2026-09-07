@@ -22,6 +22,14 @@
     ([.index-shape] ix val)
   })
 
+  # Bind an index to a resource identity already supplied by a protocol type.
+  (arr ix.with-name : {[index-shape index-name.]
+    ([.index-shape] ix val)
+    [.index-name]
+  } -> {[index-shape index-name.]
+    ({[.index-name] ([.index-shape] ix)} :)
+  })
+
   (arr ix.forget : {[index-shape.]
     ([.index-shape] ix val)
   } -> ([index-shape.] []))

@@ -135,6 +135,7 @@
     grid-shape block-shape global-columns global-rows
     c-schedule-name
     output-rows shared-size output-columns tile-elements
+    grid-shape block-shape tile-elements
   ]} name.gpu.global.matrix.tiled-matmul.kernel [kernel.])
   gpu.numeric.u64 [a-shared-numeric-proof.]
   gpu.numeric.u64 [b-shared-numeric-proof.]

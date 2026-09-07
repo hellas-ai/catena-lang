@@ -168,9 +168,20 @@ A launched kernel must be a direct function definition and must not reach anothe
 
 Every launched kernel receives an erased `gpu.barrier.cursor` describing its
 remaining barriers and must return a cursor at `gpu.barrier.trace.end`.
-`gpu.sync` consumes one `gpu.barrier.trace.sync` node and lowers to
-`__syncthreads()`. A missing or extra synchronization therefore prevents the
-kernel definition from matching its declared arrow type.
+`gpu.sync` consumes one named `gpu.barrier.trace.sync` node and lowers to
+`__syncthreads()`. The trace node contains its trusted
+`gpu.barrier.step(id, pre-proof, post-proof)` definition. `gpu.sync` consumes
+the exact `pre-proof` object and returns `post-proof`; structural matching
+checks the identity and both proof types. A missing, extra, or misordered
+synchronization therefore prevents the kernel definition from matching its
+declared arrow type.
+
+Shared barrier conditions retain their resource identities:
+`gpu.shared.owns(thread, cell, shared) |-` and
+`gpu.shared.reads(thread, shared) |-`. Before entering a repeated barrier
+protocol, `gpu.schedule.shared.can-own` returns a Boolean decision and the
+corresponding conditional ownership proof. `assert-then` turns the successful
+decision into the ownership proof carried by the fold.
 
 `gpu.barrier.trace.repeat(count, body, rest)` represents iteration without
 expanding the trace. `gpu.fold` checks its body from `body` to

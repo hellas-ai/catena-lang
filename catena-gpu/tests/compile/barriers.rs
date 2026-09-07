@@ -3,6 +3,12 @@ use super::*;
 const SKIPS_DECLARED_BARRIER: &str = include_str!("barriers/kernel_skips_declared_barrier.hex");
 const LEAVES_ITERATION_BARRIER_UNCONSUMED: &str =
     include_str!("barriers/kernel_iteration_leaves_barrier_unconsumed.hex");
+const SYNC_USES_WRONG_PRECONDITION: &str =
+    include_str!("barriers/sync_rejects_wrong_precondition.hex");
+const SYNC_CLAIMS_WRONG_POSTCONDITION: &str =
+    include_str!("barriers/sync_rejects_wrong_postcondition.hex");
+const SYNC_USES_OWNERSHIP_FOR_WRONG_SHARED_CELL: &str =
+    include_str!("barriers/sync_rejects_wrong_shared_cell.hex");
 
 #[test]
 fn kernel_that_skips_a_declared_barrier_is_rejected() {
@@ -17,6 +23,30 @@ fn kernel_iteration_that_leaves_a_barrier_unconsumed_is_rejected() {
     assert_barrier_definition_is_rejected(
         LEAVES_ITERATION_BARRIER_UNCONSUMED,
         "kernel-iteration-that-leaves-barrier-unconsumed",
+    );
+}
+
+#[test]
+fn sync_that_uses_the_wrong_precondition_is_rejected() {
+    assert_barrier_definition_is_rejected(
+        SYNC_USES_WRONG_PRECONDITION,
+        "sync-that-uses-the-wrong-precondition",
+    );
+}
+
+#[test]
+fn sync_that_claims_the_wrong_postcondition_is_rejected() {
+    assert_barrier_definition_is_rejected(
+        SYNC_CLAIMS_WRONG_POSTCONDITION,
+        "sync-that-claims-the-wrong-postcondition",
+    );
+}
+
+#[test]
+fn sync_that_uses_ownership_for_the_wrong_shared_cell_is_rejected() {
+    assert_barrier_definition_is_rejected(
+        SYNC_USES_OWNERSHIP_FOR_WRONG_SHARED_CELL,
+        "sync-that-uses-ownership-for-the-wrong-shared-cell",
     );
 }
 

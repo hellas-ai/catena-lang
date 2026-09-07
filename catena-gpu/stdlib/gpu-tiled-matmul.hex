@@ -2,32 +2,57 @@
 # to the naive kernel, while this fold establishes the synchronization shape
 # that the shared-memory implementation will use.
 
+(theory type nat {
+  (arr gpu.tiled.wr : 0 -> 1)
+  (arr gpu.tiled.rw : 0 -> 1)
+})
+
 (def program gpu.global.matrix.tiled-matmul.barrier-fold-step : {[
-  count grid-shape block-shape global-shape.
+  count grid-shape block-shape global-shape thread cell shared.
 ]
   ({({[.count]} shape.1d)} ix val)
-  ({({
-    [.grid-shape]
-    [.block-shape]
-    [.global-shape]
-  } gpu.grid)} gpu.thread val)
+  ({
+    ({({
+      [.grid-shape]
+      [.block-shape]
+      [.global-shape]
+    } gpu.grid)} gpu.thread val)
+    ({[.thread cell shared]} gpu.shared.owns |-)
+  } *)
   ({
     ({
       [.grid-shape]
       [.block-shape]
       [.global-shape]
     } gpu.grid)
-    ({({gpu.barrier.trace.end} gpu.barrier.trace.sync)}
+    ({
+      ({
+        gpu.tiled.wr
+        ({[.thread cell shared]} gpu.shared.owns |-)
+        ({[.thread shared]} gpu.shared.reads |-)
+      } gpu.barrier.step)
+      ({
+        ({
+          gpu.tiled.rw
+          ({[.thread shared]} gpu.shared.reads |-)
+          ({[.thread cell shared]} gpu.shared.owns |-)
+        } gpu.barrier.step)
+        gpu.barrier.trace.end
+      } gpu.barrier.trace.sync)
+    }
       gpu.barrier.trace.sync)
   } gpu.barrier.cursor |-)
 } -> {[
-  count grid-shape block-shape global-shape.
+  count grid-shape block-shape global-shape thread cell shared.
 ]
-  ({({
-    [.grid-shape]
-    [.block-shape]
-    [.global-shape]
-  } gpu.grid)} gpu.thread val)
+  ({
+    ({({
+      [.grid-shape]
+      [.block-shape]
+      [.global-shape]
+    } gpu.grid)} gpu.thread val)
+    ({[.thread cell shared]} gpu.shared.owns |-)
+  } *)
   ({
     ({
       [.grid-shape]
@@ -36,21 +61,44 @@
     } gpu.grid)
     gpu.barrier.trace.end
   } gpu.barrier.cursor |-)
-} = ([iteration-index thread barriers.]
+} = ([iteration-index state barriers.]
   ([.iteration-index] ix.forget)
+
+  ([.state] *.elim [thread own.])
   ([.thread] gpu.thread.block [thread-after-block block.])
-  ({[.block barriers]} gpu.sync [block-after-load barriers-after-load.])
-  ({[.block-after-load barriers-after-load]}
-    gpu.sync
-    [block-after-use barriers-after-use.])
-  [.thread-after-block barriers-after-use]
+
+  # write -> read
+  ({
+    [.block]
+    [.barriers]
+    [.own]
+  } gpu.sync [
+    block-after-wr
+    barriers-after-wr
+    read.
+  ])
+
+  # read -> write
+  ({
+    [.block-after-wr]
+    [.barriers-after-wr]
+    [.read]
+  } gpu.sync [
+    _block-after-rw
+    barriers-after-rw
+    own-again.
+  ])
+
+  ({[.thread-after-block own-again]} *.intro [state-after-rw.])
+  [.state-after-rw barriers-after-rw]
 ))
 
 (def program gpu.global.matrix.tiled-matmul.kernel : {[
   element-type c-buffer-name c-size a-buffer-name a-size b-buffer-name b-size
   grid-shape block-shape global-columns global-rows
   c-schedule-name
-  output-rows shared-size output-columns tile-elements.
+  output-rows shared-size output-columns tile-elements
+  thread-name cell-name shared-name.
 ]
   ({
     ({
@@ -127,7 +175,19 @@
     ({
       [.shared-size]
       ({
-        ({gpu.barrier.trace.end} gpu.barrier.trace.sync)
+        ({
+          gpu.tiled.wr
+          ({[.thread-name cell-name shared-name]} gpu.shared.owns |-)
+          ({[.thread-name shared-name]} gpu.shared.reads |-)
+        } gpu.barrier.step)
+        ({
+          ({
+            gpu.tiled.rw
+            ({[.thread-name shared-name]} gpu.shared.reads |-)
+            ({[.thread-name cell-name shared-name]} gpu.shared.owns |-)
+          } gpu.barrier.step)
+          gpu.barrier.trace.end
+        } gpu.barrier.trace.sync)
       } gpu.barrier.trace.sync)
       gpu.barrier.trace.end
     } gpu.barrier.trace.repeat)
@@ -136,7 +196,8 @@
   element-type c-buffer-name c-size a-buffer-name a-size b-buffer-name b-size
   grid-shape block-shape global-columns global-rows
   c-schedule-name
-  output-rows shared-size output-columns tile-elements.
+  output-rows shared-size output-columns tile-elements
+  thread-name cell-name shared-name.
 ]
   ({
     [.c-buffer-name c-size]
@@ -158,7 +219,7 @@
 } = ([layout-and-kernel-arguments thread barriers.]
   ([.layout-and-kernel-arguments]
     *.elim
-    [_shared-layout kernel-arguments.])
+    [shared-layout kernel-arguments.])
   # shared-size is a scalar kernel argument and therefore block-uniform.
   ([.kernel-arguments] *.elim [c-arguments a-b-and-dimensions.])
   ([.c-arguments] *.elim [_c-length c-tail.])
@@ -176,13 +237,49 @@
   ([.shared-and-columns] *.elim [shared-size _output-columns.])
   ([.shared-size] u64.copies2 [shared-size-for-fold shared-size-for-name.])
   ([.shared-size-for-name] :.param [shared-size-name.])
+
+  # Bind the runtime resources to the identities declared by the trace, then
+  # obtain the actual initial ownership proof from the shared schedule.
+  ([.barriers]
+    gpu.barrier.shared.resources
+    [barriers-for-fold thread-name-for-bind cell-name-for-bind
+      shared-name-for-bind.])
+  ([.thread] gpu.thread.in-block.index [thread-for-name cell.])
+  ({[.cell cell-name-for-bind]} ix.with-name [named-cell.])
+  ({[.thread-for-name thread-name-for-bind]}
+    gpu.thread.with-name
+    [named-thread.])
+  ({[.shared-layout shared-name-for-bind]}
+    gpu.shared.layout.with-name
+    [named-shared.])
+  ({[.named-shared named-thread named-cell]}
+    gpu.schedule.shared.can-own
+    [named-shared-after-schedule named-thread-after-schedule
+      named-cell-after-schedule allowed owns-if-allowed
+      _not-owns-if-denied.])
+  ({[.allowed owns-if-allowed]} assert-then [own.])
+
+  ([.named-thread-after-schedule]
+    :.ty
+    [thread-for-forget thread-name.])
+  ([.thread-for-forget] :.forget [thread-for-fold.])
+  ([.named-cell-after-schedule] :.ty [_cell-after-schedule cell-name.])
+  ([.named-shared-after-schedule]
+    :.ty
+    [_shared-after-schedule shared-name.])
+
+  ({[.thread-for-fold own]} *.intro [fold-state.])
   ({
-    [.thread]
+    [.fold-state]
     [.shared-size-for-fold]
-    [.barriers]
-    ({[.shared-size-name grid-shape-value block-shape-value global-shape-value]}
+    [.barriers-for-fold]
+    ({[
+      .shared-size-name grid-shape-value block-shape-value global-shape-value
+      thread-name cell-name shared-name
+    ]}
       name.gpu.global.matrix.tiled-matmul.barrier-fold-step)
-  } gpu.fold [thread-after-fold barriers-after-fold.])
+  } gpu.fold [fold-state-after-fold barriers-after-fold.])
+  ([.fold-state-after-fold] *.elim [thread-after-fold _own-after-fold.])
   (gpu.shared.layout.empty [empty-shared-layout.])
   ({[.empty-shared-layout kernel-arguments]}
     *.intro

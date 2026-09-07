@@ -1,0 +1,24 @@
+# The ownership proof names other-cell, while the barrier requires cell.
+(def program sync-that-uses-ownership-for-the-wrong-shared-cell : {[
+  grid-topology block-name thread cell other-cell shared.
+]
+  ({[.block-name] ({[.grid-topology block-name]} gpu.block)} :)
+  ({
+    [.grid-topology]
+    ({
+      ({
+        gpu.tiled.wr
+        ({[.thread cell shared]} gpu.shared.owns |-)
+        ({[.thread shared]} gpu.shared.reads |-)
+      } gpu.barrier.step)
+      gpu.barrier.trace.end
+    } gpu.barrier.trace.sync)
+  } gpu.barrier.cursor |-)
+  ({[.thread other-cell shared]} gpu.shared.owns |-)
+} -> {[
+  grid-topology block-name thread cell other-cell shared.
+]
+  ({[.block-name] ({[.grid-topology block-name]} gpu.block)} :)
+  ({[.grid-topology] gpu.barrier.trace.end} gpu.barrier.cursor |-)
+  ({[.thread shared]} gpu.shared.reads |-)
+} = gpu.sync)

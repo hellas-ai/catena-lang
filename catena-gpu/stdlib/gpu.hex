@@ -9,6 +9,11 @@
   # used by a thread from another block.
   (arr gpu.shared : 3 -> 1)
 
+  # Shared-memory phase propositions indexed by the exact thread, cell, and
+  # shared allocation identities participating in a barrier protocol.
+  (arr gpu.shared.owns : 3 -> 1)
+  (arr gpu.shared.reads : 2 -> 1)
+
   # A typed list of shared slots whose runtime value is the total byte size
   # requested for each block at kernel launch.
   (arr gpu.shared.layout : 1 -> 1)
@@ -18,9 +23,14 @@
   # A canonical, type-level description of the barriers remaining in a
   # kernel. Cursors are erased linear witnesses threaded through kernel code.
   (arr gpu.barrier.trace.end : 0 -> 1)
-  (arr gpu.barrier.trace.sync : 1 -> 1)
+  (arr gpu.barrier.trace.sync : 2 -> 1)
   (arr gpu.barrier.trace.repeat : 3 -> 1)
   (arr gpu.barrier.cursor : 2 -> 1)
+
+  # A barrier definition relates an identity to its trusted pre-proof and
+  # post-proof types. Definitions are stored directly in synchronization
+  # traces; gpu.sync neither constructs nor interprets either proof.
+  (arr gpu.barrier.step : 3 -> 1)
 
   # A global handle is independent of the thread layout.
   (arr gpu.global : 3 -> 1)
@@ -41,6 +51,13 @@
     ([.rest] gpu.shared.layout val)
   } -> ([n element-type rest.]
     ({[.n element-type rest]} gpu.shared.slot gpu.shared.layout val)))
+
+  (arr gpu.shared.layout.with-name : {[shared-slots shared-name.]
+    ([.shared-slots] gpu.shared.layout val)
+    [.shared-name]
+  } -> {[shared-slots shared-name.]
+    ({[.shared-name] ([.shared-slots] gpu.shared.layout)} :)
+  })
 
   # Logical dimensionality is preserved in shapes. CUDA's three-dimensional
   # launch values remain a backend detail.
@@ -129,6 +146,14 @@
   } -> ([grid-topology thread-name.]
     ({[.thread-name] ([.grid-topology] gpu.thread)} :)))
 
+  # Bind the current thread to an identity already supplied by a protocol.
+  (arr gpu.thread.with-name : {[grid-topology thread-name.]
+    ([.grid-topology] gpu.thread val)
+    [.thread-name]
+  } -> {[grid-topology thread-name.]
+    ({[.thread-name] ([.grid-topology] gpu.thread)} :)
+  })
+
   # Obtain the opaque block containing a thread. The block's own index is
   # available only through gpu.block.index.
   (arr gpu.thread.block : {[grid-topology block-name.]
@@ -198,19 +223,73 @@
       ({[.block-name buffer-size element-type]} gpu.shared)} :)
   })
 
-  # Synchronize all threads in the exact block represented by this token and
-  # consume the next event in the kernel's barrier trace.
-  (arr gpu.sync : {[grid-topology block-name remaining-trace.]
+  # Synchronize all threads in the exact block represented by this token,
+  # consume the named event, and apply its trusted state transition.
+  (arr gpu.sync : {[
+    grid-topology block-name barrier-name pre-proof post-proof remaining-trace.
+  ]
     ({[.block-name]
       ({[.grid-topology block-name]} gpu.block)} :)
     ({
       [.grid-topology]
-      ({[.remaining-trace]} gpu.barrier.trace.sync)
+      ({
+        ({[.barrier-name] [.pre-proof] [.post-proof]} gpu.barrier.step)
+        [.remaining-trace]
+      } gpu.barrier.trace.sync)
     } gpu.barrier.cursor |-)
-  } -> {[grid-topology block-name remaining-trace.]
+    ([.pre-proof])
+  } -> {[
+    grid-topology block-name barrier-name pre-proof post-proof remaining-trace.
+  ]
     ({[.block-name]
       ({[.grid-topology block-name]} gpu.block)} :)
     ({[.grid-topology] [.remaining-trace]} gpu.barrier.cursor |-)
+    ([.post-proof])
+  })
+
+  # Reveal the shared resource identities named by the first barrier of a
+  # repeated protocol while preserving its linear cursor.
+  (arr gpu.barrier.shared.resources : {[
+    grid-topology count barrier-name thread-name cell-name shared-name
+    post-proof body-rest remaining-trace.
+  ]
+    ({
+      [.grid-topology]
+      ({
+        [.count]
+        ({
+          ({
+            [.barrier-name]
+            ({[.thread-name cell-name shared-name]} gpu.shared.owns |-)
+            [.post-proof]
+          } gpu.barrier.step)
+          [.body-rest]
+        } gpu.barrier.trace.sync)
+        [.remaining-trace]
+      } gpu.barrier.trace.repeat)
+    } gpu.barrier.cursor |-)
+  } -> {[
+    grid-topology count barrier-name thread-name cell-name shared-name
+    post-proof body-rest remaining-trace.
+  ]
+    ({
+      [.grid-topology]
+      ({
+        [.count]
+        ({
+          ({
+            [.barrier-name]
+            ({[.thread-name cell-name shared-name]} gpu.shared.owns |-)
+            [.post-proof]
+          } gpu.barrier.step)
+          [.body-rest]
+        } gpu.barrier.trace.sync)
+        [.remaining-trace]
+      } gpu.barrier.trace.repeat)
+    } gpu.barrier.cursor |-)
+    [.thread-name]
+    [.cell-name]
+    [.shared-name]
   })
 
   # Fold a block-uniform number of times. The body consumes the same complete
@@ -325,6 +404,32 @@
       gpu.scheduling val)
     ({[.thread-name] ([.grid-topology] gpu.thread)} :)
     ({[.cell-index] ({({[.buffer-size]} shape.1d)} ix)} :)
+    ({[.decision] bool} :)
+    ([.decision-true owns] ==> |-)
+    ([.owns] {[.decision-false] not} ==> |-)
+  })
+
+  # The shared scheduling assigns each named thread its named in-block cell.
+  # As with global scheduling, the Boolean result is converted into an actual
+  # ownership proof with assert-then at the use site.
+  (arr gpu.schedule.shared.can-own : {[
+    shared-slots shared-name grid-topology thread-name
+    cell-shape cell-name decision.
+  ]
+    ({[.shared-name] ([.shared-slots] gpu.shared.layout)} :)
+    ({[.thread-name] ([.grid-topology] gpu.thread)} :)
+    ({[.cell-name] ([.cell-shape] ix)} :)
+  } -> {[
+    shared-slots shared-name grid-topology thread-name
+    cell-shape cell-name decision.
+  ]
+    ({[.decision] bool.t} = [decision-true.])
+    ({[.decision] bool.f} = [decision-false.])
+    ({[.thread-name cell-name shared-name]} gpu.shared.owns [owns.])
+
+    ({[.shared-name] ([.shared-slots] gpu.shared.layout)} :)
+    ({[.thread-name] ([.grid-topology] gpu.thread)} :)
+    ({[.cell-name] ([.cell-shape] ix)} :)
     ({[.decision] bool} :)
     ([.decision-true owns] ==> |-)
     ([.owns] {[.decision-false] not} ==> |-)

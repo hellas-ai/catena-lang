@@ -61,3 +61,25 @@ fn tiled_matmul_codegen_places_two_barriers_inside_each_traced_iteration() {
         assert!(generated.contains("for (uint64_t fold_index_"));
     }
 }
+
+#[test]
+fn tiled_matmul_asserts_shared_cell_ownership_before_entering_the_barrier_fold() {
+    let raw = RawTheorySet::from_texts(stdlib::sources().chain([TILED_U64])).unwrap();
+    let report = compile(raw).unwrap();
+
+    for dialect in [GpuDialect::Hip, GpuDialect::Cuda] {
+        let generated = render_modules(report.gpu_modules.as_ref().unwrap(), dialect).unwrap();
+        let ownership_decision = generated
+            .find(" = true;")
+            .expect("shared scheduling should produce an ownership decision");
+        let ownership_assertion = generated
+            .find("if (!")
+            .expect("shared ownership should be asserted");
+        let fold = generated[ownership_decision..]
+            .find("for (uint64_t fold_index_")
+            .map(|offset| ownership_decision + offset)
+            .expect("tiled kernel should contain its barrier fold");
+        assert!(ownership_decision < fold);
+        assert!(ownership_assertion < fold);
+    }
+}

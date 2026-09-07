@@ -273,7 +273,10 @@ fn render_assignment(
         | "bool.name"
         | "u32.name"
         | "u64.name"
+        | "ix.with-name"
         | "gpu.thread.name"
+        | "gpu.thread.with-name"
+        | "gpu.shared.layout.with-name"
         | "gpu.global.element-type" => identity(output, assignment),
         "positive-u32.intro" => identity(output, assignment),
         "u32.is-positive" => {

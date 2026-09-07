@@ -21,7 +21,8 @@
 (def program gpu.global.matrix.tiled-matmul.barrier-fold-step : {[
   element-type a-buffer-name a-size b-buffer-name b-size
   output-rows output-columns shared-size tile-elements
-  grid-shape block-shape global-shape block-name thread cell shared.
+  grid-shape block-shape global-shape block-name thread cell shared
+  shared-schedule.
 ]
   ({({[.shared-size]} shape.1d)} ix val)
   ({
@@ -42,26 +43,30 @@
           ({
             ({[.cell] ({({[.tile-elements]} shape.1d)} ix)} :)
             ({
-              ({gpu.tiled.write [.thread cell shared]} gpu.shared.owns |-)
+              ({[.shared-schedule thread cell shared]}
+                gpu.shared.assigned |-)
               ({
-                ({[.a-buffer-name]
-                  ({cap.ref [.a-size element-type]} gpu.global)} :)
+                ({gpu.tiled.write [.thread cell shared]} gpu.shared.owns |-)
                 ({
-                  ({[.b-buffer-name]
-                    ({cap.ref [.b-size element-type]} gpu.global)} :)
+                  ({[.a-buffer-name]
+                  ({cap.ref [.a-size element-type]} gpu.global)} :)
                   ({
-                    ({[.a-size] u64} :)
+                    ({[.b-buffer-name]
+                    ({cap.ref [.b-size element-type]} gpu.global)} :)
                     ({
-                      ({[.b-size] u64} :)
+                      ({[.a-size] u64} :)
                       ({
-                        ({[.shared-size] u64} :)
+                        ({[.b-size] u64} :)
                         ({
-                          ({[.output-columns] u64} :)
+                          ({[.shared-size] u64} :)
                           ({
-                            ([.element-type] gpu.numeric |-)
+                            ({[.output-columns] u64} :)
                             ({
-                              ({({[.output-rows output-columns]} shape.2d)} ix val)
-                              ([.element-type] val)
+                              ([.element-type] gpu.numeric |-)
+                              ({
+                                ({({[.output-rows output-columns]} shape.2d)} ix val)
+                                ([.element-type] val)
+                              } *)
                             } *)
                           } *)
                         } *)
@@ -102,7 +107,8 @@
 } -> {[
   element-type a-buffer-name a-size b-buffer-name b-size
   output-rows output-columns shared-size tile-elements
-  grid-shape block-shape global-shape block-name thread cell shared.
+  grid-shape block-shape global-shape block-name thread cell shared
+  shared-schedule.
 ]
   ({
     ({[.thread]
@@ -122,26 +128,30 @@
           ({
             ({[.cell] ({({[.tile-elements]} shape.1d)} ix)} :)
             ({
-              ({gpu.tiled.write [.thread cell shared]} gpu.shared.owns |-)
+              ({[.shared-schedule thread cell shared]}
+                gpu.shared.assigned |-)
               ({
-                ({[.a-buffer-name]
-                  ({cap.ref [.a-size element-type]} gpu.global)} :)
+                ({gpu.tiled.write [.thread cell shared]} gpu.shared.owns |-)
                 ({
-                  ({[.b-buffer-name]
-                    ({cap.ref [.b-size element-type]} gpu.global)} :)
+                  ({[.a-buffer-name]
+                  ({cap.ref [.a-size element-type]} gpu.global)} :)
                   ({
-                    ({[.a-size] u64} :)
+                    ({[.b-buffer-name]
+                    ({cap.ref [.b-size element-type]} gpu.global)} :)
                     ({
-                      ({[.b-size] u64} :)
+                      ({[.a-size] u64} :)
                       ({
-                        ({[.shared-size] u64} :)
+                        ({[.b-size] u64} :)
                         ({
-                          ({[.output-columns] u64} :)
+                          ({[.shared-size] u64} :)
                           ({
-                            ([.element-type] gpu.numeric |-)
+                            ({[.output-columns] u64} :)
                             ({
-                              ({({[.output-rows output-columns]} shape.2d)} ix val)
-                              ([.element-type] val)
+                              ([.element-type] gpu.numeric |-)
+                              ({
+                                ({({[.output-rows output-columns]} shape.2d)} ix val)
+                                ([.element-type] val)
+                              } *)
                             } *)
                           } *)
                         } *)
@@ -169,7 +179,8 @@
   ([.block-and-tail] *.elim [block a-shared-and-tail.])
   ([.a-shared-and-tail] *.elim [a-shared b-shared-and-tail.])
   ([.b-shared-and-tail] *.elim [b-shared cell-and-tail.])
-  ([.cell-and-tail] *.elim [cell own-and-tail.])
+  ([.cell-and-tail] *.elim [cell assigned-and-tail.])
+  ([.assigned-and-tail] *.elim [assigned own-and-tail.])
   ([.own-and-tail] *.elim [own a-buffer-and-tail.])
   ([.a-buffer-and-tail] *.elim [a-buffer b-buffer-and-tail.])
   ([.b-buffer-and-tail] *.elim [b-buffer a-length-and-tail.])
@@ -193,15 +204,15 @@
     [b-buffer-after-read b-length-after-read b-columns-after-read b-value.])
 
   # Publish both values while retaining ownership of this exact shared cell.
-  ({[.thread block a-shared cell a-value own]}
+  ({[.thread block a-shared cell a-value assigned own]}
     gpu.shared.write
     [thread-after-a-write block-after-a-write a-shared-after-write
-      cell-after-a-write own-after-a-write.])
+      cell-after-a-write assigned-after-a-write own-after-a-write.])
   ({[.thread-after-a-write block-after-a-write b-shared
-      cell-after-a-write b-value own-after-a-write]}
+      cell-after-a-write b-value assigned-after-a-write own-after-a-write]}
     gpu.shared.write
     [thread-after-b-write block-after-b-write b-shared-after-write
-      cell-after-b-write own-after-writes.])
+      cell-after-b-write assigned-after-writes own-after-writes.])
 
   # write -> read
   ({
@@ -249,7 +260,8 @@
   ({[.b-buffer-after-read next-a-length-and-tail]} *.intro [next-b-buffer-and-tail.])
   ({[.a-buffer-after-read next-b-buffer-and-tail]} *.intro [next-a-buffer-and-tail.])
   ({[.own-again next-a-buffer-and-tail]} *.intro [next-own-and-tail.])
-  ({[.cell-after-b-read next-own-and-tail]} *.intro [next-cell-and-tail.])
+  ({[.assigned-after-writes next-own-and-tail]} *.intro [next-assigned-and-tail.])
+  ({[.cell-after-b-read next-assigned-and-tail]} *.intro [next-cell-and-tail.])
   ({[.b-shared-after-read next-cell-and-tail]} *.intro [next-b-shared-and-tail.])
   ({[.a-shared-after-read next-b-shared-and-tail]} *.intro [next-a-shared-and-tail.])
   ({[.block-after-rw next-a-shared-and-tail]} *.intro [next-block-and-tail.])
@@ -602,12 +614,19 @@
   ({[.shared-layout-for-name shared-name-for-bind]}
     gpu.shared.layout.with-name
     [named-shared.])
-  ({[.shared-scheduling named-thread named-cell]}
+  ([.shared-scheduling]
+    gpu.shared.scheduling.name
+    [shared-scheduling-for-check shared-schedule-name-for-fold.])
+  ({[.shared-scheduling-for-check named-thread named-cell]}
     gpu.schedule.shared.can-own
     [shared-scheduling-after-schedule named-thread-after-schedule
-      named-cell-after-schedule allowed owns-if-allowed
+      named-cell-after-schedule allowed assigned-if-allowed owns-if-allowed
       _not-owns-if-denied.])
-  ({[.allowed owns-if-allowed]} assert-then [own.])
+  ([.allowed] bool.copies2 [allowed-for-assignment allowed-for-ownership.])
+  ({[.allowed-for-assignment assigned-if-allowed]}
+    assert-then
+    [assigned.])
+  ({[.allowed-for-ownership owns-if-allowed]} assert-then [own.])
   ([.named-shared]
     gpu.shared.layout.head
     [named-shared-for-take tile-elements-for-fold
@@ -637,7 +656,8 @@
   ({[.b-buffer a-length-and-tail]} *.intro [b-buffer-and-tail.])
   ({[.a-buffer b-buffer-and-tail]} *.intro [a-buffer-and-tail.])
   ({[.own a-buffer-and-tail]} *.intro [own-and-tail.])
-  ({[.named-cell-for-state own-and-tail]} *.intro [cell-and-tail.])
+  ({[.assigned own-and-tail]} *.intro [assigned-and-tail.])
+  ({[.named-cell-for-state assigned-and-tail]} *.intro [cell-and-tail.])
   ({[.b-shared cell-and-tail]} *.intro [b-shared-and-tail.])
   ({[.a-shared-for-state b-shared-and-tail]} *.intro [a-shared-and-tail.])
   ({[.named-block-for-state a-shared-and-tail]} *.intro [block-and-tail.])
@@ -651,7 +671,7 @@
       a-buffer-name-value a-size-value b-buffer-name-value b-size-value
       output-rows-name output-columns-name shared-size-name tile-elements-for-fold
       grid-shape-value block-shape-value global-shape-value block-name
-      thread-name cell-name shared-name-for-bind
+      thread-name cell-name shared-name-for-bind shared-schedule-name-for-fold
     ]}
       name.gpu.global.matrix.tiled-matmul.barrier-fold-step)
   } gpu.fold [fold-state-after-fold barriers-after-fold.])
@@ -660,7 +680,8 @@
   ([.block-and-tail-after] *.elim [block-after-fold a-shared-and-tail-after.])
   ([.a-shared-and-tail-after] *.elim [a-shared-after-fold b-shared-and-tail-after.])
   ([.b-shared-and-tail-after] *.elim [b-shared-after-fold cell-and-tail-after.])
-  ([.cell-and-tail-after] *.elim [cell-after-fold own-and-tail-after.])
+  ([.cell-and-tail-after] *.elim [cell-after-fold assigned-and-tail-after.])
+  ([.assigned-and-tail-after] *.elim [assigned-after-fold own-and-tail-after.])
   ([.own-and-tail-after] *.elim [own-after-fold a-buffer-and-tail-after.])
   ([.a-buffer-and-tail-after] *.elim [a-buffer-after-fold b-buffer-and-tail-after.])
   ([.b-buffer-and-tail-after] *.elim [b-buffer-after-fold a-length-and-tail-after.])
@@ -682,7 +703,7 @@
     gpu.shared.put
     [restored-shared-layout _tile-elements-after-put.])
   ({[.restored-shared-layout thread-after-fold block-after-fold
-      cell-after-fold own-after-fold]}
+      cell-after-fold assigned-after-fold own-after-fold]}
     gpu.shared.layout.close
     [thread-for-write.])
 

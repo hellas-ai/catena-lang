@@ -4,6 +4,8 @@ const READ_WRITE_SYNC: &str = include_str!("shared/read_write_sync.hex");
 const TILED_U64: &str = include_str!("../cases/matmul/tiled_u64.hex");
 const WRITE_WITH_OWNERSHIP_FOR_ANOTHER_CELL: &str =
     include_str!("shared/write_rejects_ownership_for_another_cell.hex");
+const WRITE_WITH_ASSIGNMENT_FOR_ANOTHER_CELL: &str =
+    include_str!("shared/write_rejects_assignment_for_another_cell.hex");
 const READ_WITH_OWNERSHIP_INSTEAD_OF_READ_PERMISSION: &str =
     include_str!("shared/read_rejects_ownership_instead_of_read_permission.hex");
 const TAKE_WITH_WRONG_NAMED_SLOT: &str = include_str!("shared/take_rejects_wrong_named_slot.hex");
@@ -13,6 +15,14 @@ fn shared_write_with_ownership_for_another_cell_is_rejected() {
     assert_shared_definition_is_rejected(
         WRITE_WITH_OWNERSHIP_FOR_ANOTHER_CELL,
         "shared-write-with-ownership-for-another-cell",
+    );
+}
+
+#[test]
+fn shared_write_with_assignment_for_another_cell_is_rejected() {
+    assert_shared_definition_is_rejected(
+        WRITE_WITH_ASSIGNMENT_FOR_ANOTHER_CELL,
+        "shared-write-with-assignment-for-another-cell",
     );
 }
 

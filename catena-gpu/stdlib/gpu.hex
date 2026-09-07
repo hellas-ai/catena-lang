@@ -10,8 +10,9 @@
   # that allocation.
   (arr gpu.shared : 5 -> 1)
 
-  # Shared-memory propositions indexed by the synchronization phase and the
-  # exact resources participating in its barrier protocol.
+  # A stable schedule assignment authorizes one thread/cell relation. Phase
+  # permissions may change at barriers, but this assignment is preserved.
+  (arr gpu.shared.assigned : 4 -> 1)
   (arr gpu.shared.owns : 4 -> 1)
   (arr gpu.shared.reads : 3 -> 1)
 
@@ -79,6 +80,20 @@
     [.elements]
     [.element-type]
     [.slot-name]
+  })
+
+  # Expose the static schedule identity while preserving the runtime policy.
+  (arr gpu.shared.scheduling.name : {[
+    shared-name size grid-topology phase schedule-name.
+  ]
+    ({[.shared-name size grid-topology phase schedule-name]}
+      gpu.shared.scheduling val)
+  } -> {[
+    shared-name size grid-topology phase schedule-name.
+  ]
+    ({[.shared-name size grid-topology phase schedule-name]}
+      gpu.shared.scheduling val)
+    [.schedule-name]
   })
 
   # Logical dimensionality is preserved in shapes. CUDA's three-dimensional
@@ -270,21 +285,22 @@
   })
 
   # Close a fully reconstructed layout after the final read-to-write
-  # transition. The restored proof ensures the allocation is not abandoned
-  # in its read phase.
+  # transition. Assignment and ownership must still name the same cell.
   (arr gpu.shared.layout.close : {[
     grid-topology block-name thread-name shared-name cell-name slots
-    elements phase.
+    elements phase schedule-name.
   ]
     ({[.shared-name] ([.slots] gpu.shared.layout)} :)
     ({[.thread-name] ([.grid-topology] gpu.thread)} :)
     ({[.block-name]
       ({[.grid-topology block-name]} gpu.block)} :)
     ({[.cell-name] ({({[.elements]} shape.1d)} ix)} :)
+    ({[.schedule-name thread-name cell-name shared-name]}
+      gpu.shared.assigned |-)
     ({[.phase thread-name cell-name shared-name]} gpu.shared.owns |-)
   } -> {[
     grid-topology block-name thread-name shared-name cell-name slots
-    elements phase.
+    elements phase schedule-name.
   ]
     ({[.thread-name] ([.grid-topology] gpu.thread)} :)
   })
@@ -317,11 +333,11 @@
     ([.element-type] val)
   })
 
-  # Write the exact shared cell owned by the current named thread. Ownership
-  # is preserved, allowing the thread to populate both slots before syncing.
+  # Write the exact shared cell assigned to and owned by the current named
+  # thread. Both proofs are preserved so several slots can be populated.
   (arr gpu.shared.write : {[
     grid-topology block-name shared-name slot-name buffer-size element-type
-    phase thread-name cell-index.
+    phase schedule-name thread-name cell-index.
   ]
     ({[.thread-name] ([.grid-topology] gpu.thread)} :)
     ({[.block-name]
@@ -330,10 +346,12 @@
       ({[.shared-name block-name slot-name buffer-size element-type]} gpu.shared)} :)
     ({[.cell-index] ({({[.buffer-size]} shape.1d)} ix)} :)
     ([.element-type] val)
+    ({[.schedule-name thread-name cell-index shared-name]}
+      gpu.shared.assigned |-)
     ({[.phase thread-name cell-index shared-name]} gpu.shared.owns |-)
   } -> {[
     grid-topology block-name shared-name slot-name buffer-size element-type
-    phase thread-name cell-index.
+    phase schedule-name thread-name cell-index.
   ]
     ({[.thread-name] ([.grid-topology] gpu.thread)} :)
     ({[.block-name]
@@ -341,6 +359,8 @@
     ({[.shared-name]
       ({[.shared-name block-name slot-name buffer-size element-type]} gpu.shared)} :)
     ({[.cell-index] ({({[.buffer-size]} shape.1d)} ix)} :)
+    ({[.schedule-name thread-name cell-index shared-name]}
+      gpu.shared.assigned |-)
     ({[.phase thread-name cell-index shared-name]} gpu.shared.owns |-)
   })
 
@@ -535,8 +555,8 @@
   })
 
   # The shared scheduling assigns each named thread its named in-block cell.
-  # As with global scheduling, the Boolean result is converted into an actual
-  # ownership proof with assert-then at the use site.
+  # A successful decision provides both the stable assignment and the initial
+  # phase ownership proof.
   (arr gpu.scheduling.shared.own-each : {[
     shared-name size grid-columns grid-rows block-columns block-rows
     global-columns global-rows phase schedule-name.
@@ -577,6 +597,8 @@
   ]
     ({[.decision] bool.t} = [decision-true.])
     ({[.decision] bool.f} = [decision-false.])
+    ({[.schedule-name thread-name cell-name shared-name]}
+      gpu.shared.assigned [assigned.])
     ({[.phase thread-name cell-name shared-name]} gpu.shared.owns [owns.])
 
     ({[.shared-name size grid-topology phase schedule-name]}
@@ -584,6 +606,7 @@
     ({[.thread-name] ([.grid-topology] gpu.thread)} :)
     ({[.cell-name] ({({[.size]} shape.1d)} ix)} :)
     ({[.decision] bool} :)
+    ([.decision-true assigned] ==> |-)
     ([.decision-true owns] ==> |-)
     ([.owns] {[.decision-false] not} ==> |-)
   })

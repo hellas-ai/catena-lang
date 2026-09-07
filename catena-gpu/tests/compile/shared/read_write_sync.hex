@@ -1,5 +1,6 @@
 (def program guarded-shared-write-preserves-cell-ownership : {[
-  grid-topology block-name shared-name slot-name buffer-size phase thread-name cell-index.
+  grid-topology block-name shared-name slot-name buffer-size phase schedule-name
+  thread-name cell-index.
 ]
   ({[.thread-name] ([.grid-topology] gpu.thread)} :)
   ({[.block-name]
@@ -8,9 +9,12 @@
     ({[.shared-name block-name slot-name buffer-size] u64} gpu.shared)} :)
   ({[.cell-index] ({({[.buffer-size]} shape.1d)} ix)} :)
   (u64 val)
+  ({[.schedule-name thread-name cell-index shared-name]}
+    gpu.shared.assigned |-)
   ({[.phase thread-name cell-index shared-name]} gpu.shared.owns |-)
 } -> {[
-  grid-topology block-name shared-name slot-name buffer-size phase thread-name cell-index.
+  grid-topology block-name shared-name slot-name buffer-size phase schedule-name
+  thread-name cell-index.
 ]
   ({[.thread-name] ([.grid-topology] gpu.thread)} :)
   ({[.block-name]
@@ -18,6 +22,8 @@
   ({[.shared-name]
     ({[.shared-name block-name slot-name buffer-size] u64} gpu.shared)} :)
   ({[.cell-index] ({({[.buffer-size]} shape.1d)} ix)} :)
+  ({[.schedule-name thread-name cell-index shared-name]}
+    gpu.shared.assigned |-)
   ({[.phase thread-name cell-index shared-name]} gpu.shared.owns |-)
 } = gpu.shared.write)
 

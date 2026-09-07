@@ -178,15 +178,18 @@ declared arrow type.
 
 Shared barrier conditions retain both their synchronization phase and resource
 identities: `gpu.shared.owns(phase, thread, cell, shared) |-` and
-`gpu.shared.reads(phase, thread, shared) |-`. Shared reads and writes preserve
-that phase index, while `gpu.sync` is the operation that changes it according
-to the trusted barrier step. The host constructs a `gpu.shared.scheduling`
+`gpu.shared.reads(phase, thread, shared) |-`. A separate
+`gpu.shared.assigned(schedule, thread, cell, shared) |-` proof records the
+stable schedule assignment. Shared reads and writes preserve their proofs,
+while `gpu.sync` changes the phase proof according to the trusted barrier step.
+The host constructs a `gpu.shared.scheduling`
 value indexed by the shared allocation, tile size, grid, initial phase, and
 schedule name. Before entering a repeated barrier protocol,
 `gpu.schedule.shared.can-own` resolves that schedule for the executing thread
-and cell, then returns a Boolean decision with the corresponding conditional
-ownership proof. `assert-then` turns the successful decision into the
-phase-bound ownership proof carried by the fold.
+and cell, then returns a Boolean decision with conditional assignment and
+ownership proofs. `assert-then` turns the successful decision into the stable
+assignment and phase-bound ownership carried by the fold. Shared writes and
+layout closure require both proofs to name the same cell.
 
 `gpu.barrier.trace.repeat(count, body, rest)` represents iteration without
 expanding the trace. `gpu.fold` checks its body from `body` to

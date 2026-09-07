@@ -291,6 +291,7 @@ fn render_assignment(
         | "gpu.thread.with-name"
         | "gpu.shared.layout.with-name"
         | "gpu.shared.layout.head"
+        | "gpu.shared.scheduling.name"
         | "gpu.global.element-type" => identity(output, assignment),
         "positive-u32.intro" => identity(output, assignment),
         "u32.is-positive" => {

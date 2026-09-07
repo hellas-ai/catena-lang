@@ -113,6 +113,19 @@ the kernel type.
 
 ## Shared-memory permissions
 
+The schedule establishes a stable assignment:
+
+```rust
+gpu.shared.assigned(
+    schedule-name,
+    thread-name,
+    cell-name,
+    shared-name)
+```
+
+This proof records which cell the thread may own. It remains in the kernel
+state while synchronization changes the phase permission.
+
 Writing requires ownership of one exact cell:
 
 ```rust
@@ -142,9 +155,12 @@ gpu.shared.write
         block-name, slot-name, element-count, element-type)
     ● cell-name : Cell(element-count)
     ● value : element-type
+    ● |- gpu.shared.assigned(
+        schedule-name, thread-name, cell-name, shared-name)
     ● |- gpu.shared.owns(
         phase, thread-name, cell-name, shared-name)
-    -> thread-name ● block-name ● shared-name ● cell-name ● ownership
+    -> thread-name ● block-name ● shared-name ● cell-name
+    ● assignment ● ownership
 
 gpu.shared.read
     : thread-name : Thread(grid)
@@ -159,13 +175,14 @@ gpu.shared.read
 ```
 
 The permission refers to the allocation rather than an individual slot. One
-ownership proof permits the thread to write its cell in several slots before
-the barrier. One read proof permits reads from several slots after the
-barrier. Slot handles still determine which typed region is accessed.
+assignment and ownership proofs permit the thread to write its cell in several
+slots before the barrier. One read proof permits reads from several slots
+after the barrier. Slot handles still determine which typed region is
+accessed.
 
 The host constructs a trusted block-local schedule. In the kernel,
 `gpu.schedule.shared.can-own` checks that the current thread owns the selected
-cell and conditionally provides the initial ownership proof:
+cell and conditionally provides its stable assignment and initial ownership:
 
 ```rust
 gpu.schedule.shared.can-own
@@ -177,7 +194,11 @@ gpu.schedule.shared.can-own
     ● cell-name
     ● decision : bool
     ● (|- decision = true ->
-         gpu.shared.owns(phase, thread-name, cell-name, shared-name))
+         gpu.shared.assigned(
+             schedule-name, thread-name, cell-name, shared-name))
+    ● (|- decision = true ->
+         gpu.shared.owns(
+             phase, thread-name, cell-name, shared-name))
 ```
 
 The current `shared.own-each` schedule assigns each block-local linear cell to
@@ -201,13 +222,22 @@ ownership and shared read permission:
 
 ```text
 write-to-read:
-    |- owns(write-phase, thread, cell, shared)
-    -> |- reads(read-phase, thread, shared)
+    |- assigned(schedule, thread, cell, shared)
+    ● |- owns(write-phase, thread, cell, shared)
+    -> |- assigned(schedule, thread, cell, shared)
+    ● |- reads(read-phase, thread, shared)
 
 read-to-write:
-    |- reads(read-phase, thread, shared)
-    -> |- owns(write-phase, thread, cell, shared)
+    |- assigned(schedule, thread, cell, shared)
+    ● |- reads(read-phase, thread, shared)
+    -> |- assigned(schedule, thread, cell, shared)
+    ● |- owns(write-phase, thread, cell, shared)
 ```
+
+In the current MetaCat encoding, `assigned` is framed through the fold state;
+`gpu.sync` consumes only the changing phase proof. A returned ownership proof
+cannot authorize a write unless the kernel also carries the matching
+assignment for the same schedule, thread, cell, and shared allocation.
 
 The kernel trace repeats these steps once per inner-product iteration:
 
@@ -250,7 +280,8 @@ does not derive or inspect them.
 The model establishes two properties:
 
 - **Race-free writes:** a trusted schedule gives each shared cell at most one
-  owning thread, and `gpu.shared.write` requires that exact ownership proof.
+  assigned thread, and `gpu.shared.write` requires matching assignment and
+  ownership proofs.
 - **Barrier safety:** every thread starts with the same trace and must consume
   all of it. A synchronization consumes one named event with its exact
   precondition and produces its declared postcondition.

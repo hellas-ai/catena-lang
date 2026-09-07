@@ -212,12 +212,15 @@ local = thread.in_block_index.first
 cell.first < schedule.size && local == cell.first
 ```
 
-Consequently, `gpu.schedule.shared.can-own` produces its conditional proof
-only for the schedule's shared allocation, executing thread, cell, and phase.
+Consequently, `gpu.schedule.shared.can-own` produces conditional assignment
+and ownership proofs only for the schedule's shared allocation, executing
+thread, cell, and phase. The assignment remains stable across barrier phases;
+shared writes require it to match the current ownership proof.
 
-The kernel obtains the concrete ownership proof only on the true path. In the
-current definitions this is commonly written using `assert-then` after the
-kernel has already selected an in-bounds cell consistent with the schedule.
+The kernel obtains the concrete assignment and ownership proofs only on the
+true path. In the current definitions this is commonly written using
+`assert-then` after the kernel has already selected an in-bounds cell
+consistent with the schedule.
 If the kernel selects an in-bounds cell that its thread does not own,
 `can-own` is false and that assertion traps. Predicated threads avoid the
 assertion by taking the outer false branch.

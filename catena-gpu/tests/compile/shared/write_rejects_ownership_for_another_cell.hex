@@ -1,18 +1,18 @@
 (def program shared-write-with-ownership-for-another-cell : {[
-  grid block shared size phase thread cell another-cell element.
+  grid block shared slot size phase thread cell another-cell element.
 ]
   ({[.thread] ([.grid] gpu.thread)} :)
   ({[.block] ({[.grid block]} gpu.block)} :)
-  ({[.shared] ({[.block size element]} gpu.shared)} :)
+  ({[.shared] ({[.shared block slot size element]} gpu.shared)} :)
   ({[.cell] ({({[.size]} shape.1d)} ix)} :)
   ([.element] val)
   ({[.phase thread another-cell shared]} gpu.shared.owns |-)
 } -> {[
-  grid block shared size phase thread cell another-cell element.
+  grid block shared slot size phase thread cell another-cell element.
 ]
   ({[.thread] ([.grid] gpu.thread)} :)
   ({[.block] ({[.grid block]} gpu.block)} :)
-  ({[.shared] ({[.block size element]} gpu.shared)} :)
+  ({[.shared] ({[.shared block slot size element]} gpu.shared)} :)
   ({[.cell] ({({[.size]} shape.1d)} ix)} :)
   ({[.phase thread cell shared]} gpu.shared.owns |-)
 } = gpu.shared.write)

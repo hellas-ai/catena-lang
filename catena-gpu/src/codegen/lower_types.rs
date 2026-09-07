@@ -130,9 +130,9 @@ fn lower_runtime_type(
                 _ => Err(LowerTypeError::NoRuntimeRepresentation(ty.clone())),
             }
         }
-        ("gpu.shared", [_block_name, _buffer_size, element]) => Ok(CType::Ptr(Box::new(
-            lower_runtime_type(element, substitutions)?,
-        ))),
+        ("gpu.shared", [_shared_name, _block_name, _slot_name, _buffer_size, element]) => Ok(
+            CType::Ptr(Box::new(lower_runtime_type(element, substitutions)?)),
+        ),
         ("gpu.thread", [_grid]) => Ok(CType::Thread),
         ("gpu.block", [_grid, _block_name]) => Ok(CType::Block),
         ("gpu.scheduling", [_buffer_name, _buffer_size, _grid, _schedule_name]) => {
@@ -156,7 +156,7 @@ fn lower_shared_slots(
     };
     match (operation.as_str(), children.as_slice()) {
         ("gpu.shared.empty", []) => Ok(Vec::new()),
-        ("gpu.shared.slot", [_length, element, rest]) => {
+        ("gpu.shared.slot", [_slot_name, _length, element, rest]) => {
             let mut lowered = vec![lower_runtime_type(element, substitutions)?];
             lowered.extend(lower_shared_slots(rest, substitutions)?);
             Ok(lowered)
@@ -230,9 +230,11 @@ fn infer_runtime_type(
         {
             infer_runtime_type(element, actual, substitutions)
         }
-        ("gpu.shared", [_block_name, _size, element], CType::Ptr(actual)) => {
-            infer_runtime_type(element, actual, substitutions)
-        }
+        (
+            "gpu.shared",
+            [_shared_name, _block_name, _slot_name, _size, element],
+            CType::Ptr(actual),
+        ) => infer_runtime_type(element, actual, substitutions),
         ("gpu.shared.layout", [slots], CType::SharedLayout(actual)) => {
             infer_shared_slots(slots, actual, substitutions)
         }
@@ -263,7 +265,7 @@ fn infer_shared_slots(
         actual.split_first(),
     ) {
         ("gpu.shared.empty", [], None) => Ok(()),
-        ("gpu.shared.slot", [_length, element, rest], Some((first, remaining))) => {
+        ("gpu.shared.slot", [_slot_name, _length, element, rest], Some((first, remaining))) => {
             infer_runtime_type(element, first, substitutions)?;
             infer_shared_slots(rest, remaining, substitutions)
         }

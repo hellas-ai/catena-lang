@@ -114,42 +114,66 @@ pub fn render(output: &mut String, assignment: &GpuAssign) -> Result<bool, GpuRe
                 value_expr(cell),
             ));
         }
-        "gpu.shared.layout.open-pair" => {
-            let [layout, thread, block] = assignment.inputs.as_slice() else {
-                return Err(invalid_arity(assignment, 3, 4));
+        "gpu.shared.take" => {
+            let [layout, elements, thread, block] = assignment.inputs.as_slice() else {
+                return Err(invalid_arity(assignment, 4, 5));
             };
-            let [thread_after, block_after, first, second] = assignment.outputs.as_slice() else {
-                return Err(invalid_arity(assignment, 3, 4));
+            let [
+                layout_after,
+                elements_after,
+                thread_after,
+                block_after,
+                slot,
+            ] = assignment.outputs.as_slice()
+            else {
+                return Err(invalid_arity(assignment, 4, 5));
             };
-            let first_type = c_type(
-                runtime_type(first)
-                    .ok_or_else(|| GpuRenderError::UnsupportedOp(assignment.op.clone()))?,
-            );
-            let second_type = c_type(
-                runtime_type(second)
+            let slot_type = c_type(
+                runtime_type(slot)
                     .ok_or_else(|| GpuRenderError::UnsupportedOp(assignment.op.clone()))?,
             );
             output.push_str(&format!(
-                "    {} = {};\n    {} = {};\n    {} = ({}){}.shared;\n    {} = ({})({}.shared + {} / 2);\n",
+                "    {} = ({})({}.shared + {}.shared_layout - {});\n    {} = {} - {} * sizeof(*{});\n    {} = {};\n    {} = {};\n    {} = {};\n",
+                slot.name,
+                slot_type,
+                value_expr(thread),
+                value_expr(thread),
+                value_expr(layout),
+                layout_after.name,
+                value_expr(layout),
+                value_expr(elements),
+                slot.name,
+                elements_after.name,
+                value_expr(elements),
                 thread_after.name,
                 value_expr(thread),
                 block_after.name,
                 value_expr(block),
-                first.name,
-                first_type,
-                value_expr(thread),
-                second.name,
-                second_type,
-                value_expr(thread),
-                value_expr(layout),
             ));
         }
-        "gpu.shared.layout.close-pair" => {
-            let [thread, _block, _first, _second, _cell] = assignment.inputs.as_slice() else {
-                return Err(invalid_arity(assignment, 5, 1));
+        "gpu.shared.put" => {
+            let [layout, elements, slot] = assignment.inputs.as_slice() else {
+                return Err(invalid_arity(assignment, 3, 2));
+            };
+            let [layout_after, elements_after] = assignment.outputs.as_slice() else {
+                return Err(invalid_arity(assignment, 3, 2));
+            };
+            output.push_str(&format!(
+                "    {} = {} + {} * sizeof(*{});\n    {} = {};\n",
+                layout_after.name,
+                value_expr(layout),
+                value_expr(elements),
+                value_expr(slot),
+                elements_after.name,
+                value_expr(elements),
+            ));
+        }
+        "gpu.shared.layout.close" => {
+            let [_layout, thread, _block, _cell] = assignment.inputs.as_slice() else {
+                return Err(invalid_arity(assignment, 4, 1));
             };
             let [thread_after] = assignment.outputs.as_slice() else {
-                return Err(invalid_arity(assignment, 5, 1));
+                return Err(invalid_arity(assignment, 4, 1));
             };
             output.push_str(&format!(
                 "    {} = {};\n",

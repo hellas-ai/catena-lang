@@ -7,11 +7,15 @@
   (arr gpu.tiled.rw : 0 -> 1)
   (arr gpu.tiled.write : 0 -> 1)
   (arr gpu.tiled.read : 0 -> 1)
+  (arr gpu.tiled.a : 0 -> 1)
+  (arr gpu.tiled.b : 0 -> 1)
 })
 
 (theory program type {
   (arr gpu.tiled.write.phase : [] -> gpu.tiled.write)
   (arr gpu.tiled.read.phase : [] -> gpu.tiled.read)
+  (arr gpu.tiled.a.slot-name : [] -> gpu.tiled.a)
+  (arr gpu.tiled.b.slot-name : [] -> gpu.tiled.b)
 })
 
 (def program gpu.global.matrix.tiled-matmul.barrier-fold-step : {[
@@ -29,10 +33,12 @@
           gpu.block)} :)
       ({
         ({[.shared]
-          ({[.block-name tile-elements element-type]} gpu.shared)} :)
+          ({[.shared block-name] gpu.tiled.a [.tile-elements element-type]}
+            gpu.shared)} :)
         ({
           ({[.shared]
-            ({[.block-name tile-elements element-type]} gpu.shared)} :)
+            ({[.shared block-name] gpu.tiled.b [.tile-elements element-type]}
+              gpu.shared)} :)
           ({
             ({[.cell] ({({[.tile-elements]} shape.1d)} ix)} :)
             ({
@@ -107,10 +113,12 @@
           gpu.block)} :)
       ({
         ({[.shared]
-          ({[.block-name tile-elements element-type]} gpu.shared)} :)
+          ({[.shared block-name] gpu.tiled.a [.tile-elements element-type]}
+            gpu.shared)} :)
         ({
           ({[.shared]
-            ({[.block-name tile-elements element-type]} gpu.shared)} :)
+            ({[.shared block-name] gpu.tiled.b [.tile-elements element-type]}
+              gpu.shared)} :)
           ({
             ({[.cell] ({({[.tile-elements]} shape.1d)} ix)} :)
             ({
@@ -258,8 +266,9 @@
 ]
   ({
     ({
+      gpu.tiled.a
       [.tile-elements element-type]
-      ({[.tile-elements element-type] gpu.shared.empty} gpu.shared.slot)
+      ({gpu.tiled.b [.tile-elements element-type] gpu.shared.empty} gpu.shared.slot)
     } gpu.shared.slot gpu.shared.layout val)
     ({
     ({
@@ -316,15 +325,18 @@
             ({
               ({[.output-columns] u64} :)
               ({
-                [.shared-name tile-elements]
                 ({
-                  [.grid-shape]
-                  [.block-shape]
-                  ({[.global-columns global-rows]} shape.2d)
-                } gpu.grid)
-                gpu.tiled.write
-                [.shared-schedule-name]
-              } gpu.shared.scheduling val)
+                  [.shared-name tile-elements]
+                  ({
+                    [.grid-shape]
+                    [.block-shape]
+                    ({[.global-columns global-rows]} shape.2d)
+                  } gpu.grid)
+                  gpu.tiled.write
+                  [.shared-schedule-name]
+                } gpu.shared.scheduling val)
+                ({[.tile-elements] u64} :)
+              } *)
             } *)
           } *)
         } *)
@@ -412,7 +424,10 @@
   ([.shared-and-columns] *.elim [shared-size-value columns-and-shared-schedule.])
   ([.columns-and-shared-schedule]
     *.elim
-    [output-columns-value shared-scheduling.])
+    [output-columns-value shared-schedule-and-tile-elements.])
+  ([.shared-schedule-and-tile-elements]
+    *.elim
+    [shared-scheduling tile-elements-value.])
 
   ([.c-arguments] *.elim [c-length c-tail.])
   ([.c-tail] *.elim [c-buffer c-schedule-and-context.])
@@ -594,11 +609,19 @@
       _not-owns-if-denied.])
   ({[.allowed owns-if-allowed]} assert-then [own.])
   ([.named-shared]
-    gpu.shared.layout.resources
-    [named-shared-for-open tile-elements-for-fold _shared-element-type.])
-  ({[.named-shared-for-open named-thread-after-schedule block]}
-    gpu.shared.layout.open-pair
-    [thread-for-fold block-for-fold a-shared b-shared.])
+    gpu.shared.layout.head
+    [named-shared-for-take tile-elements-for-fold
+      _shared-element-type _tile-a-name.])
+  ({[.named-shared-for-take tile-elements-value
+      named-thread-after-schedule block]}
+    gpu.shared.take
+    [layout-after-a-take tile-elements-after-a-take
+      thread-after-a-take block-after-a-take a-shared.])
+  ({[.layout-after-a-take tile-elements-after-a-take
+      thread-after-a-take block-after-a-take]}
+    gpu.shared.take
+    [empty-layout-after-takes tile-elements-after-takes
+      thread-for-fold block-for-fold b-shared.])
   ([.thread-for-fold] :.ty [named-thread-for-state thread-name.])
   ([.block-for-fold] :.ty [named-block-for-state block-name.])
   ([.named-cell-after-schedule] :.ty [named-cell-for-state cell-name.])
@@ -628,7 +651,7 @@
       a-buffer-name-value a-size-value b-buffer-name-value b-size-value
       output-rows-name output-columns-name shared-size-name tile-elements-for-fold
       grid-shape-value block-shape-value global-shape-value block-name
-      thread-name cell-name shared-name
+      thread-name cell-name shared-name-for-bind
     ]}
       name.gpu.global.matrix.tiled-matmul.barrier-fold-step)
   } gpu.fold [fold-state-after-fold barriers-after-fold.])
@@ -650,9 +673,17 @@
   ([.output-index-after] ix.forget)
   ([.a-buffer-after-fold] gpu.global.forget)
   ([.b-buffer-after-fold] gpu.global.forget)
-  ({[.thread-after-fold block-after-fold a-shared-after-fold
-      b-shared-after-fold cell-after-fold own-after-fold]}
-    gpu.shared.layout.close-pair
+  ({[.empty-layout-after-takes tile-elements-after-takes
+      b-shared-after-fold]}
+    gpu.shared.put
+    [layout-after-b-put tile-elements-after-b-put.])
+  ({[.layout-after-b-put tile-elements-after-b-put
+      a-shared-after-fold]}
+    gpu.shared.put
+    [restored-shared-layout _tile-elements-after-put.])
+  ({[.restored-shared-layout thread-after-fold block-after-fold
+      cell-after-fold own-after-fold]}
+    gpu.shared.layout.close
     [thread-for-write.])
 
   ({[.c-buffer sum]} *.intro [c-buffer-and-value.])

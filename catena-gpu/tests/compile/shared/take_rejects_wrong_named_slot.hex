@@ -1,0 +1,19 @@
+(def program taking-tile-a-as-tile-b-is-rejected : {[
+  grid block thread shared size element.
+]
+  ({[.shared]
+    ({gpu.tiled.a [.size element] gpu.shared.empty}
+      gpu.shared.slot gpu.shared.layout)} :)
+  ({[.size] u64} :)
+  ({[.thread] ([.grid] gpu.thread)} :)
+  ({[.block] ({[.grid block]} gpu.block)} :)
+} -> {[
+  grid block thread shared size element.
+]
+  ({[.shared] (gpu.shared.empty gpu.shared.layout)} :)
+  ({[.size] u64} :)
+  ({[.thread] ([.grid] gpu.thread)} :)
+  ({[.block] ({[.grid block]} gpu.block)} :)
+  ({[.shared]
+    ({[.shared block] gpu.tiled.b [.size element]} gpu.shared)} :)
+} = gpu.shared.take)

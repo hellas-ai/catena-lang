@@ -6,6 +6,7 @@ const WRITE_WITH_OWNERSHIP_FOR_ANOTHER_CELL: &str =
     include_str!("shared/write_rejects_ownership_for_another_cell.hex");
 const READ_WITH_OWNERSHIP_INSTEAD_OF_READ_PERMISSION: &str =
     include_str!("shared/read_rejects_ownership_instead_of_read_permission.hex");
+const TAKE_WITH_WRONG_NAMED_SLOT: &str = include_str!("shared/take_rejects_wrong_named_slot.hex");
 
 #[test]
 fn shared_write_with_ownership_for_another_cell_is_rejected() {
@@ -20,6 +21,14 @@ fn shared_read_with_ownership_instead_of_read_permission_is_rejected() {
     assert_shared_definition_is_rejected(
         READ_WITH_OWNERSHIP_INSTEAD_OF_READ_PERMISSION,
         "shared-read-with-ownership-instead-of-read-permission",
+    );
+}
+
+#[test]
+fn taking_a_shared_slot_under_a_different_name_is_rejected() {
+    assert_shared_definition_is_rejected(
+        TAKE_WITH_WRONG_NAMED_SLOT,
+        "taking-tile-a-as-tile-b-is-rejected",
     );
 }
 
@@ -81,6 +90,18 @@ fn tiled_matmul_codegen_places_two_barriers_inside_each_traced_iteration() {
         assert!(generated.contains("for (uint64_t fold_index_"));
         assert!(generated.contains(".shared +"));
         assert!(generated.contains(".in_block_index.first"));
+    }
+}
+
+#[test]
+fn tiled_matmul_takes_each_named_slot_without_assuming_equal_layout_halves() {
+    let raw = RawTheorySet::from_texts(stdlib::sources().chain([TILED_U64])).unwrap();
+    let report = compile(raw).unwrap();
+
+    for dialect in [GpuDialect::Hip, GpuDialect::Cuda] {
+        let generated = render_modules(report.gpu_modules.as_ref().unwrap(), dialect).unwrap();
+        assert_eq!(generated.matches(".shared_layout -").count(), 2);
+        assert!(!generated.contains("shared_layout / 2"));
     }
 }
 

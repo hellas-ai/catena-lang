@@ -122,7 +122,9 @@
   ([.tile-elements-input] u64.name [named-tile-elements.])
   ([.named-tile-elements] :.ty [tile-elements-value tile-elements.])
   ([.tile-elements-value]
-    u64.copies2 [tile-elements-for-schedule tile-elements-for-layout.])
+    u64.copies2 [tile-elements-for-schedule tile-elements-rest.])
+  ([.tile-elements-rest]
+    u64.copies2 [tile-elements-for-kernel tile-elements-for-layout.])
   ([.tile-elements-for-layout]
     u64.copies2 [named-a-tile-elements named-b-tile-elements.])
   (gpu.tiled.write.phase [write-phase.])
@@ -132,7 +134,10 @@
   } gpu.scheduling.shared.own-each
     [shared-schedule-name shared-scheduling.])
 
-  ({[.output-columns-value shared-scheduling]}
+  ({[.shared-scheduling tile-elements-for-kernel]}
+    *.intro
+    [shared-schedule-and-tile-elements.])
+  ({[.output-columns-value shared-schedule-and-tile-elements]}
     *.intro
     [columns-and-shared-schedule.])
   ({[.shared-size-value columns-and-shared-schedule]}
@@ -144,6 +149,17 @@
   ({[.a-arguments b-and-dimensions]} *.intro [a-b-and-dimensions.])
   ({[.c-arguments a-b-and-dimensions]} *.intro [kernel-arguments.])
 
+  gpu.numeric.u64 [a-shared-numeric-proof.]
+  gpu.numeric.u64 [b-shared-numeric-proof.]
+  gpu.tiled.a.slot-name [tile-a-name.]
+  gpu.tiled.b.slot-name [tile-b-name.]
+  (gpu.shared.layout.empty [empty-shared-layout.])
+  ({[.named-b-tile-elements b-shared-numeric-proof empty-shared-layout]
+      [.tile-b-name]}
+    gpu.shared.layout.add [b-shared-layout.])
+  ({[.named-a-tile-elements a-shared-numeric-proof b-shared-layout]
+      [.tile-a-name]}
+    gpu.shared.layout.add [shared-layout.])
   ({[
     .element-type c-buffer-name c-size a-buffer-name a-size b-buffer-name b-size
     grid-shape block-shape global-columns global-rows
@@ -151,13 +167,6 @@
     output-rows shared-size output-columns tile-elements
     grid-shape block-shape tile-elements
   ]} name.gpu.global.matrix.tiled-matmul.kernel [kernel.])
-  gpu.numeric.u64 [a-shared-numeric-proof.]
-  gpu.numeric.u64 [b-shared-numeric-proof.]
-  (gpu.shared.layout.empty [empty-shared-layout.])
-  ({[.named-b-tile-elements b-shared-numeric-proof empty-shared-layout]}
-    gpu.shared.layout.add [b-shared-layout.])
-  ({[.named-a-tile-elements a-shared-numeric-proof b-shared-layout]}
-    gpu.shared.layout.add [shared-layout.])
   ({[.shared-layout grid kernel-arguments kernel]}
     gpu.launch [returned-kernel-arguments.])
 

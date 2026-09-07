@@ -9,10 +9,10 @@
   # used by a thread from another block.
   (arr gpu.shared : 3 -> 1)
 
-  # Shared-memory phase propositions indexed by the exact thread, cell, and
-  # shared allocation identities participating in a barrier protocol.
-  (arr gpu.shared.owns : 3 -> 1)
-  (arr gpu.shared.reads : 2 -> 1)
+  # Shared-memory propositions indexed by the synchronization phase and the
+  # exact resources participating in its barrier protocol.
+  (arr gpu.shared.owns : 4 -> 1)
+  (arr gpu.shared.reads : 3 -> 1)
 
   # A typed list of shared slots whose runtime value is the total byte size
   # requested for each block at kernel launch.
@@ -247,7 +247,7 @@
   # allocation in its read phase.
   (arr gpu.shared.layout.close-pair : {[
     grid-topology block-name thread-name shared-name cell-name
-    elements element-type.
+    elements element-type phase.
   ]
     ({[.thread-name] ([.grid-topology] gpu.thread)} :)
     ({[.block-name]
@@ -257,10 +257,10 @@
     ({[.shared-name]
       ({[.block-name elements element-type]} gpu.shared)} :)
     ({[.cell-name] ({({[.elements]} shape.1d)} ix)} :)
-    ({[.thread-name cell-name shared-name]} gpu.shared.owns |-)
+    ({[.phase thread-name cell-name shared-name]} gpu.shared.owns |-)
   } -> {[
     grid-topology block-name thread-name shared-name cell-name
-    elements element-type.
+    elements element-type phase.
   ]
     ({[.thread-name] ([.grid-topology] gpu.thread)} :)
   })
@@ -270,7 +270,7 @@
   # the same phase.
   (arr gpu.shared.read : {[
     grid-topology block-name shared-name buffer-size element-type
-    thread-name cell-index.
+    phase thread-name cell-index.
   ]
     ({[.thread-name] ([.grid-topology] gpu.thread)} :)
     ({[.block-name]
@@ -278,10 +278,10 @@
     ({[.shared-name]
       ({[.block-name buffer-size element-type]} gpu.shared)} :)
     ({[.cell-index] ({({[.buffer-size]} shape.1d)} ix)} :)
-    ({[.thread-name shared-name]} gpu.shared.reads |-)
+    ({[.phase thread-name shared-name]} gpu.shared.reads |-)
   } -> {[
     grid-topology block-name shared-name buffer-size element-type
-    thread-name cell-index.
+    phase thread-name cell-index.
   ]
     ({[.thread-name] ([.grid-topology] gpu.thread)} :)
     ({[.block-name]
@@ -289,7 +289,7 @@
     ({[.shared-name]
       ({[.block-name buffer-size element-type]} gpu.shared)} :)
     ({[.cell-index] ({({[.buffer-size]} shape.1d)} ix)} :)
-    ({[.thread-name shared-name]} gpu.shared.reads |-)
+    ({[.phase thread-name shared-name]} gpu.shared.reads |-)
     ([.element-type] val)
   })
 
@@ -297,7 +297,7 @@
   # is preserved, allowing the thread to populate both slots before syncing.
   (arr gpu.shared.write : {[
     grid-topology block-name shared-name buffer-size element-type
-    thread-name cell-index.
+    phase thread-name cell-index.
   ]
     ({[.thread-name] ([.grid-topology] gpu.thread)} :)
     ({[.block-name]
@@ -306,10 +306,10 @@
       ({[.block-name buffer-size element-type]} gpu.shared)} :)
     ({[.cell-index] ({({[.buffer-size]} shape.1d)} ix)} :)
     ([.element-type] val)
-    ({[.thread-name cell-index shared-name]} gpu.shared.owns |-)
+    ({[.phase thread-name cell-index shared-name]} gpu.shared.owns |-)
   } -> {[
     grid-topology block-name shared-name buffer-size element-type
-    thread-name cell-index.
+    phase thread-name cell-index.
   ]
     ({[.thread-name] ([.grid-topology] gpu.thread)} :)
     ({[.block-name]
@@ -317,7 +317,7 @@
     ({[.shared-name]
       ({[.block-name buffer-size element-type]} gpu.shared)} :)
     ({[.cell-index] ({({[.buffer-size]} shape.1d)} ix)} :)
-    ({[.thread-name cell-index shared-name]} gpu.shared.owns |-)
+    ({[.phase thread-name cell-index shared-name]} gpu.shared.owns |-)
   })
 
   # Synchronize all threads in the exact block represented by this token,
@@ -347,8 +347,8 @@
   # Reveal the shared resource identities named by the first barrier of a
   # repeated protocol while preserving its linear cursor.
   (arr gpu.barrier.shared.resources : {[
-    grid-topology count barrier-name thread-name cell-name shared-name
-    post-proof body-rest remaining-trace.
+    grid-topology count barrier-name write-phase read-phase
+    thread-name cell-name shared-name body-rest remaining-trace.
   ]
     ({
       [.grid-topology]
@@ -357,8 +357,9 @@
         ({
           ({
             [.barrier-name]
-            ({[.thread-name cell-name shared-name]} gpu.shared.owns |-)
-            [.post-proof]
+            ({[.write-phase thread-name cell-name shared-name]}
+              gpu.shared.owns |-)
+            ({[.read-phase thread-name shared-name]} gpu.shared.reads |-)
           } gpu.barrier.step)
           [.body-rest]
         } gpu.barrier.trace.sync)
@@ -366,8 +367,8 @@
       } gpu.barrier.trace.repeat)
     } gpu.barrier.cursor |-)
   } -> {[
-    grid-topology count barrier-name thread-name cell-name shared-name
-    post-proof body-rest remaining-trace.
+    grid-topology count barrier-name write-phase read-phase
+    thread-name cell-name shared-name body-rest remaining-trace.
   ]
     ({
       [.grid-topology]
@@ -376,8 +377,9 @@
         ({
           ({
             [.barrier-name]
-            ({[.thread-name cell-name shared-name]} gpu.shared.owns |-)
-            [.post-proof]
+            ({[.write-phase thread-name cell-name shared-name]}
+              gpu.shared.owns |-)
+            ({[.read-phase thread-name shared-name]} gpu.shared.reads |-)
           } gpu.barrier.step)
           [.body-rest]
         } gpu.barrier.trace.sync)
@@ -387,6 +389,8 @@
     [.thread-name]
     [.cell-name]
     [.shared-name]
+    [.write-phase]
+    [.read-phase]
   })
 
   # Fold a block-uniform number of times. The body consumes the same complete
@@ -511,18 +515,19 @@
   # ownership proof with assert-then at the use site.
   (arr gpu.schedule.shared.can-own : {[
     shared-slots shared-name grid-topology thread-name
-    cell-shape cell-name decision.
+    cell-shape cell-name phase decision.
   ]
     ({[.shared-name] ([.shared-slots] gpu.shared.layout)} :)
     ({[.thread-name] ([.grid-topology] gpu.thread)} :)
     ({[.cell-name] ([.cell-shape] ix)} :)
+    [.phase]
   } -> {[
     shared-slots shared-name grid-topology thread-name
-    cell-shape cell-name decision.
+    cell-shape cell-name phase decision.
   ]
     ({[.decision] bool.t} = [decision-true.])
     ({[.decision] bool.f} = [decision-false.])
-    ({[.thread-name cell-name shared-name]} gpu.shared.owns [owns.])
+    ({[.phase thread-name cell-name shared-name]} gpu.shared.owns [owns.])
 
     ({[.shared-name] ([.shared-slots] gpu.shared.layout)} :)
     ({[.thread-name] ([.grid-topology] gpu.thread)} :)

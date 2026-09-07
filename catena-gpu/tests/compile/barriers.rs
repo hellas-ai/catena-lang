@@ -9,6 +9,8 @@ const SYNC_CLAIMS_WRONG_POSTCONDITION: &str =
     include_str!("barriers/sync_rejects_wrong_postcondition.hex");
 const SYNC_USES_OWNERSHIP_FOR_WRONG_SHARED_CELL: &str =
     include_str!("barriers/sync_rejects_wrong_shared_cell.hex");
+const SYNC_USES_OWNERSHIP_FROM_WRONG_PHASE: &str =
+    include_str!("barriers/sync_rejects_ownership_from_wrong_phase.hex");
 
 #[test]
 fn kernel_that_skips_a_declared_barrier_is_rejected() {
@@ -47,6 +49,14 @@ fn sync_that_uses_ownership_for_the_wrong_shared_cell_is_rejected() {
     assert_barrier_definition_is_rejected(
         SYNC_USES_OWNERSHIP_FOR_WRONG_SHARED_CELL,
         "sync-that-uses-ownership-for-the-wrong-shared-cell",
+    );
+}
+
+#[test]
+fn sync_that_uses_ownership_from_the_wrong_phase_is_rejected() {
+    assert_barrier_definition_is_rejected(
+        SYNC_USES_OWNERSHIP_FROM_WRONG_PHASE,
+        "sync-that-uses-ownership-from-the-wrong-phase",
     );
 }
 

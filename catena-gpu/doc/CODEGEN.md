@@ -176,12 +176,15 @@ checks the identity and both proof types. A missing, extra, or misordered
 synchronization therefore prevents the kernel definition from matching its
 declared arrow type.
 
-Shared barrier conditions retain their resource identities:
-`gpu.shared.owns(thread, cell, shared) |-` and
-`gpu.shared.reads(thread, shared) |-`. Before entering a repeated barrier
-protocol, `gpu.schedule.shared.can-own` returns a Boolean decision and the
-corresponding conditional ownership proof. `assert-then` turns the successful
-decision into the ownership proof carried by the fold.
+Shared barrier conditions retain both their synchronization phase and resource
+identities: `gpu.shared.owns(phase, thread, cell, shared) |-` and
+`gpu.shared.reads(phase, thread, shared) |-`. Shared reads and writes preserve
+that phase index, while `gpu.sync` is the operation that changes it according
+to the trusted barrier step. Before entering a repeated barrier protocol,
+`gpu.schedule.shared.can-own` receives the initial phase extracted from the
+trace and returns a Boolean decision with the corresponding conditional
+ownership proof. `assert-then` turns the successful decision into the
+phase-bound ownership proof carried by the fold.
 
 `gpu.barrier.trace.repeat(count, body, rest)` represents iteration without
 expanding the trace. `gpu.fold` checks its body from `body` to

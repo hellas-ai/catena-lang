@@ -5,6 +5,8 @@
 (theory type nat {
   (arr gpu.tiled.wr : 0 -> 1)
   (arr gpu.tiled.rw : 0 -> 1)
+  (arr gpu.tiled.write : 0 -> 1)
+  (arr gpu.tiled.read : 0 -> 1)
 })
 
 (def program gpu.global.matrix.tiled-matmul.barrier-fold-step : {[
@@ -29,7 +31,7 @@
           ({
             ({[.cell] ({({[.tile-elements]} shape.1d)} ix)} :)
             ({
-              ({[.thread cell shared]} gpu.shared.owns |-)
+              ({gpu.tiled.write [.thread cell shared]} gpu.shared.owns |-)
               ({
                 ({[.a-buffer-name]
                   ({cap.ref [.a-size element-type]} gpu.global)} :)
@@ -72,14 +74,14 @@
     ({
       ({
         gpu.tiled.wr
-        ({[.thread cell shared]} gpu.shared.owns |-)
-        ({[.thread shared]} gpu.shared.reads |-)
+        ({gpu.tiled.write [.thread cell shared]} gpu.shared.owns |-)
+        ({gpu.tiled.read [.thread shared]} gpu.shared.reads |-)
       } gpu.barrier.step)
       ({
         ({
           gpu.tiled.rw
-          ({[.thread shared]} gpu.shared.reads |-)
-          ({[.thread cell shared]} gpu.shared.owns |-)
+          ({gpu.tiled.read [.thread shared]} gpu.shared.reads |-)
+          ({gpu.tiled.write [.thread cell shared]} gpu.shared.owns |-)
         } gpu.barrier.step)
         gpu.barrier.trace.end
       } gpu.barrier.trace.sync)
@@ -107,7 +109,7 @@
           ({
             ({[.cell] ({({[.tile-elements]} shape.1d)} ix)} :)
             ({
-              ({[.thread cell shared]} gpu.shared.owns |-)
+              ({gpu.tiled.write [.thread cell shared]} gpu.shared.owns |-)
               ({
                 ({[.a-buffer-name]
                   ({cap.ref [.a-size element-type]} gpu.global)} :)
@@ -326,14 +328,16 @@
       ({
         ({
           gpu.tiled.wr
-          ({[.thread-name cell-name shared-name]} gpu.shared.owns |-)
-          ({[.thread-name shared-name]} gpu.shared.reads |-)
+          ({gpu.tiled.write [.thread-name cell-name shared-name]}
+            gpu.shared.owns |-)
+          ({gpu.tiled.read [.thread-name shared-name]} gpu.shared.reads |-)
         } gpu.barrier.step)
         ({
           ({
             gpu.tiled.rw
-            ({[.thread-name shared-name]} gpu.shared.reads |-)
-            ({[.thread-name cell-name shared-name]} gpu.shared.owns |-)
+            ({gpu.tiled.read [.thread-name shared-name]} gpu.shared.reads |-)
+            ({gpu.tiled.write [.thread-name cell-name shared-name]}
+              gpu.shared.owns |-)
           } gpu.barrier.step)
           gpu.barrier.trace.end
         } gpu.barrier.trace.sync)
@@ -536,7 +540,7 @@
   ([.barriers]
     gpu.barrier.shared.resources
     [barriers-for-fold thread-name-for-bind cell-name-for-bind
-      shared-name-for-bind.])
+      shared-name-for-bind write-phase-for-schedule _read-phase-for-bind.])
   ([.thread-after-grid] gpu.thread.block [thread-before-cell block.])
   ({[.thread-before-cell shared-layout]}
     gpu.thread.in-block.linear-index
@@ -548,7 +552,7 @@
   ({[.shared-layout-for-name shared-name-for-bind]}
     gpu.shared.layout.with-name
     [named-shared.])
-  ({[.named-shared named-thread named-cell]}
+  ({[.named-shared named-thread named-cell write-phase-for-schedule]}
     gpu.schedule.shared.can-own
     [named-shared-after-schedule named-thread-after-schedule
       named-cell-after-schedule allowed owns-if-allowed

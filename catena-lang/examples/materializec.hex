@@ -413,6 +413,28 @@
   ({[.output-count] [.output]} buf.to-mem)
 ))
 
+(def program materialize-bf16-gemm-wmma :
+  {(cap.own mem) (cap.ref mem) (u64 val) (u64 val) (u64 val) (u64 val)}
+  ->
+  (cap.own mem)
+= ([input weight rows columns reduction input-row.]
+  ([.input] mem.cast.bf16 [input-count input-buffer.])
+  ([.weight] mem.cast.bf16 [weight-count weight-buffer.])
+  ([.rows columns] u64.mul u64.name [output-count.])
+  ([.reduction] u64.name [reduction-count.])
+  {
+    [.input-buffer]
+    [.input-count]
+    [.weight-buffer]
+    [.weight-count]
+    [.output-count]
+    [.reduction-count]
+    [.input-row]
+    [.columns]
+  } materializec.bf16-gemm-wmma [output.]
+  ({[.output-count] [.output]} buf.to-mem)
+))
+
 (def program materialize-borrow-topk-f32 :
   (cap.own mem)
   ->

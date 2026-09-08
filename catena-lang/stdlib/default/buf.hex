@@ -338,6 +338,20 @@
     (u64 val)
   } -> {[input-cap weight-cap n k.] ({cap.own [.n] bf16} buf val)})
 
+  # HIP matrix-core counterpart of bf16-gemv. gfx11 uses 16x16x16 BF16 WMMA
+  # tiles with F32 accumulation for at least 64 input rows. Smaller inputs
+  # retain the packed-BF16 SIMT implementation; the operation is gfx11-only.
+  (arr materializec.bf16-gemm-wmma : {[input-cap weight-cap n k.]
+    ({cap.own [.input-cap] bf16} buf val)
+    ({[.input-cap] u64} :)
+    ({cap.ref [.weight-cap] bf16} buf val)
+    ({[.weight-cap] u64} :)
+    ({[.n] u64} :)
+    ({[.k] u64} :)
+    (u64 val)
+    (u64 val)
+  } -> {[input-cap weight-cap n k.] ({cap.own [.n] bf16} buf val)})
+
   # Find the greatest F32 element while returning the source owner. Comparison
   # uses IEEE-bit total order (negative NaNs through positive NaNs); equal bit
   # patterns select the greatest index. The input must be non-empty. The index

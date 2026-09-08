@@ -523,6 +523,43 @@ fn materialize_bf16_gemv_accumulates_in_f32_and_selects_input_rows() -> anyhow::
 }
 
 #[test]
+fn materialize_bf16_gemm_wmma_executes_matrix_tiles() -> anyhow::Result<()> {
+    let runtime = runtime_with(SOURCE)?;
+    let bf16_bits = |values: &[f32]| {
+        values
+            .iter()
+            .copied()
+            .map(half::bf16::from_f32)
+            .map(half::bf16::to_bits)
+            .collect::<Vec<_>>()
+    };
+    let input_values = (0..64 * 16)
+        .map(|index| (index % 16) as f32 - 8.0)
+        .collect::<Vec<_>>();
+    let weight_values = (0..16 * 16)
+        .map(|index| if index / 16 == index % 16 { 1.0 } else { 0.0 })
+        .collect::<Vec<_>>();
+    let input = runtime.mem_u16(&bf16_bits(&input_values))?;
+    let weight = runtime.mem_u16(&bf16_bits(&weight_values))?;
+    let [output] = runtime.exec(
+        "materialize-bf16-gemm-wmma",
+        [
+            input.into(),
+            weight.as_ref().into(),
+            64_u64.into(),
+            16_u64.into(),
+            16_u64.into(),
+            0_u64.into(),
+        ],
+    )?;
+    let Value::MemOwn(output) = output else {
+        anyhow::bail!("BF16 WMMA GEMM returned non-memory output: {output:?}");
+    };
+    assert_eq!(output.to_u16_vec(), bf16_bits(&input_values));
+    Ok(())
+}
+
+#[test]
 fn materialize_borrow_topk_f32_is_stable_and_canonicalizes_zero() -> anyhow::Result<()> {
     let runtime = runtime_with(SOURCE)?;
     let values = [

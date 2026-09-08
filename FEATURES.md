@@ -165,6 +165,38 @@ One kernel shares term setup and synchronization barriers between the two
 trees without changing either tree's arithmetic. The current implementation
 supports `K ≤ 8192`.
 
+## `materializec.bf16-gemm-wmma`
+
+```text
+materializec.bf16-gemm-wmma[I, W, N, K] :
+  Bufᵒʷⁿ(I, BF16)
+  ⊗ ⟦I : U64⟧
+  ⊗ Bufʳᵉᶠ(W, BF16)
+  ⊗ ⟦W : U64⟧
+  ⊗ ⟦N : U64⟧
+  ⊗ ⟦K : U64⟧
+  ⊗ Val(U64)
+  ⊗ Val(U64)
+  ⊸ Bufᵒʷⁿ(N, BF16)
+```
+
+The final values are `input_row` and `output_features`. The operation has the
+same row-major shape, capacity, ownership, and BF16-output contract as
+`materializec.bf16-gemv`: it computes selected rows of the input matrix times
+the transpose of the row-major weight matrix, accumulates in F32, and rounds
+once to BF16.
+
+This operation is HIP/gfx11-only. For 64 or more input rows, one 32-lane wave
+computes each 16×16 output tile with rocWMMA BF16 16×16×16 instructions and
+F32 accumulator fragments. Shared-memory edge tiles zero-pad row, column, and
+reduction tails. Inputs with fewer than 64 rows use the existing packed-BF16
+SIMT kernel, which keeps token-at-a-time decode on its established path.
+
+Unlike the regular primitive, this fast operation does not promise the
+canonical adjacent-pair reduction order: WMMA groups and accumulates products
+according to the matrix instruction. It is therefore selected explicitly by
+the caller when that numerical tradeoff is acceptable.
+
 ## `materializec.borrow-routed-bf16-gemv-pair`
 
 ```text

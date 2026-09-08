@@ -1015,6 +1015,39 @@ pub(in crate::codegen) fn render_bf16_gemv_kernel(
     Ok(())
 }
 
+/// Render an opt-in HIP BF16 GEMM. gfx11 executes one wave per 16x16 output
+/// tile through rocWMMA; the companion SIMT kernel handles inputs below the
+/// measured 64-row crossover. This operation is intentionally gfx11-only.
+pub(in crate::codegen) fn render_bf16_gemm_wmma_kernels(
+    out: &mut String,
+    kernel_name: &str,
+    assignment: &GpuAssign,
+) -> Result<(), GpuRenderError> {
+    let simt_name = format!("{kernel_name}_simt");
+    render_bf16_gemv_kernel(out, &simt_name, assignment, GpuDialect::Hip)?;
+    out.push_str("#if !defined(__HIP_DEVICE_COMPILE__) || defined(__gfx1100__) || defined(__gfx1101__) || defined(__gfx1102__) || defined(__gfx1103__) || defined(__gfx1150__) || defined(__gfx1151__) || defined(__gfx1152__) || defined(__gfx1153__)\n");
+    out.push_str("#include <rocwmma/rocwmma.hpp>\n");
+    out.push_str(&format!(
+        "__global__ void {kernel_name}(const catena_bf16_t *input, const catena_bf16_t *weight, catena_bf16_t *out, uint64_t rows, uint64_t reduction_len, uint64_t input_row, uint64_t output_features) {{\n"
+    ));
+    out.push_str("    using frag_a_t = rocwmma::fragment<rocwmma::matrix_a, 16, 16, 16, catena_bf16_t, rocwmma::row_major>;\n");
+    out.push_str("    using frag_b_t = rocwmma::fragment<rocwmma::matrix_b, 16, 16, 16, catena_bf16_t, rocwmma::col_major>;\n");
+    out.push_str(
+        "    using frag_c_t = rocwmma::fragment<rocwmma::accumulator, 16, 16, 16, float>;\n",
+    );
+    out.push_str("    uint64_t row_base = (uint64_t)blockIdx.y * 16;\n    uint64_t column_base = (uint64_t)blockIdx.x * 16;\n");
+    out.push_str("    __shared__ catena_bf16_t tile_a[16 * 16];\n    __shared__ catena_bf16_t tile_b[16 * 16];\n    __shared__ float tile_c[16 * 16];\n");
+    out.push_str("    frag_a_t a; frag_b_t b; frag_c_t c;\n    rocwmma::fill_fragment(c, 0.0f);\n");
+    out.push_str("    for (uint64_t k_base = 0; k_base < reduction_len; k_base += 16) {\n        for (uint32_t flat = threadIdx.x; flat < 256; flat += blockDim.x) {\n");
+    out.push_str("            uint32_t tile_row = flat >> 4; uint32_t tile_column = flat & 15;\n            uint64_t row = row_base + tile_row; uint64_t k = k_base + tile_column;\n");
+    out.push_str("            tile_a[flat] = (row < rows && k < reduction_len) ? input[(input_row + row) * reduction_len + k] : catena_bf16_from_f32(0.0f);\n");
+    out.push_str("            uint64_t column = column_base + tile_row;\n            tile_b[flat] = (column < output_features && k < reduction_len) ? weight[column * reduction_len + k] : catena_bf16_from_f32(0.0f);\n");
+    out.push_str("        }\n        __syncthreads();\n        rocwmma::load_matrix_sync(a, tile_a, 16);\n        rocwmma::load_matrix_sync(b, tile_b, 16);\n        rocwmma::mma_sync(c, a, b, c);\n        __syncthreads();\n    }\n");
+    out.push_str("    rocwmma::store_matrix_sync(tile_c, c, 16, rocwmma::mem_row_major);\n    __syncthreads();\n");
+    out.push_str("    for (uint32_t flat = threadIdx.x; flat < 256; flat += blockDim.x) {\n        uint64_t row = row_base + (flat >> 4); uint64_t column = column_base + (flat & 15);\n        if (row < rows && column < output_features) out[row * output_features + column] = catena_bf16_from_f32(tile_c[flat]);\n    }\n}\n#endif\n");
+    Ok(())
+}
+
 pub(in crate::codegen) fn render_borrow_argmax_f32_kernel(
     out: &mut String,
     kernel_name: &str,
@@ -1702,6 +1735,43 @@ pub(in crate::codegen) fn render_bf16_gemv_call(
     ));
     out.push_str("    }\n");
     out.push_str(&format!("    {} = {}_data;\n", output.name, output.name));
+    Ok(())
+}
+
+pub(in crate::codegen) fn render_bf16_gemm_wmma_call(
+    out: &mut String,
+    function: &GpuFunction,
+    assignment: &GpuAssign,
+) -> Result<(), GpuRenderError> {
+    let [output] = assignment.outputs.as_slice() else {
+        return Err(invalid_outputs(assignment, 1));
+    };
+    let (
+        input,
+        input_capacity,
+        weight,
+        weight_capacity,
+        output_len,
+        reduction_len,
+        input_row,
+        output_features,
+    ) = bf16_gemv_parts(assignment)?;
+    let input_capacity = value_expr(input_capacity);
+    let weight_capacity = value_expr(weight_capacity);
+    let output_len = value_expr(output_len);
+    let reduction_len = value_expr(reduction_len);
+    let input_row = value_expr(input_row);
+    let output_features = value_expr(output_features);
+    let kernel_name = kernel_name(&function.name, assignment)?;
+    let name = &output.name;
+    out.push_str(&format!(
+        "    uint64_t {name}_len = {output_len};\n    catena_bf16_t *{name}_data = nullptr;\n"
+    ));
+    out.push_str(&format!("    catena_assert(({reduction_len}) != 0);\n    catena_assert(({input_capacity}) % ({reduction_len}) == 0);\n    uint64_t {name}_input_rows = ({input_capacity}) / ({reduction_len});\n    catena_assert(({output_features}) != 0);\n    catena_assert({name}_len % ({output_features}) == 0);\n    uint64_t {name}_rows = {name}_len / ({output_features});\n"));
+    out.push_str(&format!("    catena_assert(({input_row}) <= {name}_input_rows && {name}_rows <= {name}_input_rows - ({input_row}));\n    catena_assert(({output_features}) <= UINT64_MAX / ({reduction_len}));\n    catena_assert(({weight_capacity}) == ({output_features}) * ({reduction_len}));\n"));
+    out.push_str(&format!("    if ({name}_len != 0) {{\n        catena_host_gpu_check(hipMallocAsync((void **)&{name}_data, {name}_len * sizeof(catena_bf16_t), nullptr));\n"));
+    out.push_str(&format!("        if ({name}_rows >= 64) {{\n            {kernel_name}<<<dim3((({output_features}) + 15) / 16, ({name}_rows + 15) / 16), dim3(32)>>>(\n                {}, {}, {name}_data, {name}_rows, {reduction_len}, {input_row}, {output_features});\n        }} else\n", value_expr(input), value_expr(weight)));
+    out.push_str(&format!("        {{\n            {kernel_name}_simt<<<dim3({name}_len), dim3(256)>>>(\n                {}, {}, {name}_data, {name}_len, {reduction_len}, {input_row}, {output_features});\n        }}\n    }}\n    {name} = {name}_data;\n", value_expr(input), value_expr(weight)));
     Ok(())
 }
 

@@ -249,6 +249,16 @@ fn render_module_body(
                 dialect,
             )?;
             out.push('\n');
+        } else if assignment.op.as_str() == "materializec.bf16-gemm-wmma" {
+            if dialect != GpuDialect::Hip {
+                return Err(GpuRenderError::UnsupportedOp(assignment.op.clone()));
+            }
+            materializec::render_bf16_gemm_wmma_kernels(
+                out,
+                &materializec::kernel_name(&module.entry.name, assignment)?,
+                assignment,
+            )?;
+            out.push('\n');
         } else if assignment.op.as_str() == "materializec.borrow-gated-delta-net-f32" {
             gated_delta_net::render_kernel(
                 out,
@@ -469,6 +479,12 @@ fn render_assignment(
         }
         "materializec.bf16-gemv" => {
             materializec::render_bf16_gemv_call(out, function, assignment, dialect)?
+        }
+        "materializec.bf16-gemm-wmma" => {
+            if dialect != GpuDialect::Hip {
+                return Err(GpuRenderError::UnsupportedOp(assignment.op.clone()));
+            }
+            materializec::render_bf16_gemm_wmma_call(out, function, assignment)?
         }
         "materializec.borrow-gated-delta-net-f32" => gated_delta_net::render_call(
             out,

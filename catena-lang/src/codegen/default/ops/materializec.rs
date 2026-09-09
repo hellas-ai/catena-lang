@@ -1048,6 +1048,56 @@ pub(in crate::codegen) fn render_bf16_gemm_wmma_kernels(
     Ok(())
 }
 
+pub(in crate::codegen) fn render_hipblas_support(out: &mut String) {
+    out.push_str(
+        r#"#include <hipblas/hipblas.h>
+#ifndef __HIP_DEVICE_COMPILE__
+__host__ static inline void catena_host_hipblas_check(hipblasStatus_t status) {
+    if (status != HIPBLAS_STATUS_SUCCESS) {
+        fprintf(stderr, "catena hipBLAS error: %s\n", hipblasStatusToString(status));
+        fflush(stderr);
+        __builtin_trap();
+    }
+}
+
+struct catena_hipblas_context_t {
+    hipblasHandle_t handle;
+
+    catena_hipblas_context_t() : handle(nullptr) {
+        catena_host_hipblas_check(hipblasCreate(&handle));
+        catena_host_hipblas_check(hipblasSetPointerMode(handle, HIPBLAS_POINTER_MODE_HOST));
+        catena_host_hipblas_check(hipblasSetStream(handle, nullptr));
+    }
+
+    ~catena_hipblas_context_t() {
+        if (handle != nullptr) {
+            (void)hipblasDestroy(handle);
+        }
+    }
+};
+
+__host__ static inline hipblasHandle_t catena_host_hipblas_handle() {
+    static catena_hipblas_context_t context;
+    return context.handle;
+}
+#endif
+"#,
+    );
+}
+
+pub(in crate::codegen) fn render_bf16_gemm_hipblas_kernels(
+    out: &mut String,
+    kernel_name: &str,
+    assignment: &GpuAssign,
+) -> Result<(), GpuRenderError> {
+    render_bf16_gemv_kernel(
+        out,
+        &format!("{kernel_name}_simt"),
+        assignment,
+        GpuDialect::Hip,
+    )
+}
+
 pub(in crate::codegen) fn render_borrow_argmax_f32_kernel(
     out: &mut String,
     kernel_name: &str,
@@ -1772,6 +1822,71 @@ pub(in crate::codegen) fn render_bf16_gemm_wmma_call(
     out.push_str(&format!("    if ({name}_len != 0) {{\n        catena_host_gpu_check(hipMallocAsync((void **)&{name}_data, {name}_len * sizeof(catena_bf16_t), nullptr));\n"));
     out.push_str(&format!("        if ({name}_rows >= 64) {{\n            {kernel_name}<<<dim3((({output_features}) + 15) / 16, ({name}_rows + 15) / 16), dim3(32)>>>(\n                {}, {}, {name}_data, {name}_rows, {reduction_len}, {input_row}, {output_features});\n        }} else\n", value_expr(input), value_expr(weight)));
     out.push_str(&format!("        {{\n            {kernel_name}_simt<<<dim3({name}_len), dim3(256)>>>(\n                {}, {}, {name}_data, {name}_len, {reduction_len}, {input_row}, {output_features});\n        }}\n    }}\n    {name} = {name}_data;\n", value_expr(input), value_expr(weight)));
+    Ok(())
+}
+
+pub(in crate::codegen) fn render_bf16_gemm_hipblas_call(
+    out: &mut String,
+    function: &GpuFunction,
+    assignment: &GpuAssign,
+) -> Result<(), GpuRenderError> {
+    let [output] = assignment.outputs.as_slice() else {
+        return Err(invalid_outputs(assignment, 1));
+    };
+    let (
+        input,
+        input_capacity,
+        weight,
+        weight_capacity,
+        output_len,
+        reduction_len,
+        input_row,
+        output_features,
+    ) = bf16_gemv_parts(assignment)?;
+    let kernel_name = kernel_name(&function.name, assignment)?;
+    let name = &output.name;
+
+    out.push_str(&format!(
+        r#"    uint64_t {name}_len = {output_len};
+    catena_bf16_t *{name}_data = nullptr;
+    catena_assert(({reduction_len}) != 0);
+    catena_assert(({input_capacity}) % ({reduction_len}) == 0);
+    uint64_t {name}_input_rows = ({input_capacity}) / ({reduction_len});
+    catena_assert(({output_features}) != 0);
+    catena_assert({name}_len % ({output_features}) == 0);
+    uint64_t {name}_rows = {name}_len / ({output_features});
+    catena_assert(({input_row}) <= {name}_input_rows && {name}_rows <= {name}_input_rows - ({input_row}));
+    catena_assert(({output_features}) <= UINT64_MAX / ({reduction_len}));
+    catena_assert(({weight_capacity}) == ({output_features}) * ({reduction_len}));
+    if ({name}_len != 0) {{
+        catena_host_gpu_check(hipMallocAsync((void **)&{name}_data, {name}_len * sizeof(catena_bf16_t), nullptr));
+        if ({name}_rows >= 64) {{
+            catena_assert(({output_features}) <= INT32_MAX && {name}_rows <= INT32_MAX && ({reduction_len}) <= INT32_MAX);
+            const float {name}_alpha = 1.0f;
+            const float {name}_beta = 0.0f;
+            catena_host_hipblas_check(hipblasGemmEx(
+                catena_host_hipblas_handle(), HIPBLAS_OP_T, HIPBLAS_OP_N,
+                (int)({output_features}), (int){name}_rows, (int)({reduction_len}),
+                &{name}_alpha, {weight}, HIP_R_16BF, (int)({reduction_len}),
+                {input} + ({input_row}) * ({reduction_len}), HIP_R_16BF, (int)({reduction_len}),
+                &{name}_beta, {name}_data, HIP_R_16BF, (int)({output_features}),
+                HIPBLAS_COMPUTE_32F, HIPBLAS_GEMM_DEFAULT));
+        }} else {{
+            {kernel_name}_simt<<<dim3({name}_len), dim3(256)>>>(
+                {input}, {weight}, {name}_data, {name}_len, {reduction_len}, {input_row}, {output_features});
+        }}
+    }}
+    {name} = {name}_data;
+"#,
+        input = value_expr(input),
+        input_capacity = value_expr(input_capacity),
+        weight = value_expr(weight),
+        weight_capacity = value_expr(weight_capacity),
+        output_len = value_expr(output_len),
+        reduction_len = value_expr(reduction_len),
+        input_row = value_expr(input_row),
+        output_features = value_expr(output_features),
+    ));
     Ok(())
 }
 

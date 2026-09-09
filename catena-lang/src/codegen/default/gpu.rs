@@ -97,6 +97,10 @@ fn render_module(module: &GpuModule, dialect: GpuDialect) -> Result<String, GpuR
     let mut out = String::new();
     out.push_str(&render_gpu_prelude(dialect));
     out.push('\n');
+    if dialect == GpuDialect::Hip && function_uses_hipblas(&module.entry) {
+        materializec::render_hipblas_support(&mut out);
+        out.push('\n');
+    }
     render_module_body(
         &mut out,
         module,
@@ -114,6 +118,14 @@ pub fn render_modules(
     let mut out = String::new();
     out.push_str(&render_gpu_prelude(dialect));
     out.push('\n');
+    if dialect == GpuDialect::Hip
+        && modules
+            .values()
+            .any(|module| function_uses_hipblas(&module.entry))
+    {
+        materializec::render_hipblas_support(&mut out);
+        out.push('\n');
+    }
     let placements = function_placements(modules);
 
     for module in modules.values() {
@@ -139,6 +151,13 @@ pub fn render_modules(
     }
 
     Ok(out)
+}
+
+fn function_uses_hipblas(function: &GpuFunction) -> bool {
+    function
+        .assignments
+        .iter()
+        .any(|assignment| assignment.op.as_str() == "materializec.bf16-gemm-hipblas")
 }
 
 fn render_module_body(
@@ -254,6 +273,16 @@ fn render_module_body(
                 return Err(GpuRenderError::UnsupportedOp(assignment.op.clone()));
             }
             materializec::render_bf16_gemm_wmma_kernels(
+                out,
+                &materializec::kernel_name(&module.entry.name, assignment)?,
+                assignment,
+            )?;
+            out.push('\n');
+        } else if assignment.op.as_str() == "materializec.bf16-gemm-hipblas" {
+            if dialect != GpuDialect::Hip {
+                return Err(GpuRenderError::UnsupportedOp(assignment.op.clone()));
+            }
+            materializec::render_bf16_gemm_hipblas_kernels(
                 out,
                 &materializec::kernel_name(&module.entry.name, assignment)?,
                 assignment,
@@ -485,6 +514,12 @@ fn render_assignment(
                 return Err(GpuRenderError::UnsupportedOp(assignment.op.clone()));
             }
             materializec::render_bf16_gemm_wmma_call(out, function, assignment)?
+        }
+        "materializec.bf16-gemm-hipblas" => {
+            if dialect != GpuDialect::Hip {
+                return Err(GpuRenderError::UnsupportedOp(assignment.op.clone()));
+            }
+            materializec::render_bf16_gemm_hipblas_call(out, function, assignment)?
         }
         "materializec.borrow-gated-delta-net-f32" => gated_delta_net::render_call(
             out,

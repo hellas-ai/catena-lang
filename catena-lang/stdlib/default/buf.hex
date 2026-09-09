@@ -352,6 +352,20 @@
     (u64 val)
   } -> {[input-cap weight-cap n k.] ({cap.own [.n] bf16} buf val)})
 
+  # hipBLAS counterpart of bf16-gemv. Matrices with at least 64 input rows
+  # use BF16 GEMM with F32 accumulation; smaller inputs retain the packed-BF16
+  # SIMT implementation. This operation is available only on HIP.
+  (arr materializec.bf16-gemm-hipblas : {[input-cap weight-cap n k.]
+    ({cap.own [.input-cap] bf16} buf val)
+    ({[.input-cap] u64} :)
+    ({cap.ref [.weight-cap] bf16} buf val)
+    ({[.weight-cap] u64} :)
+    ({[.n] u64} :)
+    ({[.k] u64} :)
+    (u64 val)
+    (u64 val)
+  } -> {[input-cap weight-cap n k.] ({cap.own [.n] bf16} buf val)})
+
   # Find the greatest F32 element while returning the source owner. Comparison
   # uses IEEE-bit total order (negative NaNs through positive NaNs); equal bit
   # patterns select the greatest index. The input must be non-empty. The index

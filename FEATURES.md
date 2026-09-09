@@ -197,6 +197,31 @@ canonical adjacent-pair reduction order: WMMA groups and accumulates products
 according to the matrix instruction. It is therefore selected explicitly by
 the caller when that numerical tradeoff is acceptable.
 
+## `materializec.bf16-gemm-hipblas`
+
+```text
+materializec.bf16-gemm-hipblas[I, W, N, K] :
+  Bufᵒʷⁿ(I, BF16)
+  ⊗ ⟦I : U64⟧
+  ⊗ Bufʳᵉᶠ(W, BF16)
+  ⊗ ⟦W : U64⟧
+  ⊗ ⟦N : U64⟧
+  ⊗ ⟦K : U64⟧
+  ⊗ U64
+  ⊗ U64
+  → Bufᵒʷⁿ(N, BF16)
+```
+
+This HIP-only operation has the same row-major shape, capacity, ownership, and
+BF16-output contract as `materializec.bf16-gemv`. For at least 64 selected input
+rows it calls `hipblasGemmEx` with BF16 inputs and output and F32 accumulation.
+The generated module reuses one hipBLAS handle on the default stream and links
+hipBLAS only when this primitive is present. Smaller inputs retain the packed
+BF16 SIMT kernel, preserving the established decode path.
+
+The hipBLAS path does not promise the canonical adjacent-pair reduction order;
+the library selects its GEMM algorithm and accumulation grouping.
+
 ## `materializec.borrow-routed-bf16-gemv-pair`
 
 ```text

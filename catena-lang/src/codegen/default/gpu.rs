@@ -154,10 +154,12 @@ pub fn render_modules(
 }
 
 fn function_uses_hipblas(function: &GpuFunction) -> bool {
-    function
-        .assignments
-        .iter()
-        .any(|assignment| assignment.op.as_str() == "materializec.bf16-gemm-hipblas")
+    function.assignments.iter().any(|assignment| {
+        matches!(
+            assignment.op.as_str(),
+            "materializec.bf16-gemm-hipblas" | "materializec.borrow-native-bf16-gemm-hipblas-pair"
+        )
+    })
 }
 
 fn render_module_body(
@@ -239,6 +241,34 @@ fn render_module_body(
             out.push('\n');
         } else if assignment.op.as_str() == "materializec.borrow-routed-bf16-gemv-pair" {
             materializec::render_borrow_routed_bf16_gemv_pair_kernel(
+                out,
+                &materializec::kernel_name(&module.entry.name, assignment)?,
+                assignment,
+            )?;
+            out.push('\n');
+        } else if assignment.op.as_str() == "materializec.borrow-native-bf16-gemv-pair" {
+            materializec::render_borrow_native_bf16_gemv_pair_kernel(
+                out,
+                &materializec::kernel_name(&module.entry.name, assignment)?,
+                assignment,
+                dialect,
+            )?;
+            out.push('\n');
+        } else if assignment.op.as_str() == "materializec.borrow-native-bf16-gemm-wmma-pair" {
+            if dialect != GpuDialect::Hip {
+                return Err(GpuRenderError::UnsupportedOp(assignment.op.clone()));
+            }
+            materializec::render_borrow_native_bf16_gemm_wmma_pair_kernels(
+                out,
+                &materializec::kernel_name(&module.entry.name, assignment)?,
+                assignment,
+            )?;
+            out.push('\n');
+        } else if assignment.op.as_str() == "materializec.borrow-native-bf16-gemm-hipblas-pair" {
+            if dialect != GpuDialect::Hip {
+                return Err(GpuRenderError::UnsupportedOp(assignment.op.clone()));
+            }
+            materializec::render_borrow_native_bf16_gemm_hipblas_pair_kernels(
                 out,
                 &materializec::kernel_name(&module.entry.name, assignment)?,
                 assignment,
@@ -494,6 +524,39 @@ fn render_assignment(
         "materializec.borrow-routed-bf16-gemv-pair" => {
             materializec::render_borrow_routed_bf16_gemv_pair_call(
                 out, function, assignment, dialect,
+            )?
+        }
+        "materializec.borrow-native-bf16-gemv-pair" => {
+            materializec::render_borrow_native_bf16_gemm_pair_call(
+                out,
+                function,
+                assignment,
+                dialect,
+                materializec::NativeBf16PairBackend::Simt,
+            )?
+        }
+        "materializec.borrow-native-bf16-gemm-wmma-pair" => {
+            if dialect != GpuDialect::Hip {
+                return Err(GpuRenderError::UnsupportedOp(assignment.op.clone()));
+            }
+            materializec::render_borrow_native_bf16_gemm_pair_call(
+                out,
+                function,
+                assignment,
+                dialect,
+                materializec::NativeBf16PairBackend::Wmma,
+            )?
+        }
+        "materializec.borrow-native-bf16-gemm-hipblas-pair" => {
+            if dialect != GpuDialect::Hip {
+                return Err(GpuRenderError::UnsupportedOp(assignment.op.clone()));
+            }
+            materializec::render_borrow_native_bf16_gemm_pair_call(
+                out,
+                function,
+                assignment,
+                dialect,
+                materializec::NativeBf16PairBackend::Hipblas,
             )?
         }
         "materializec.borrow-routed-native-bf16-gemv-pair" => {

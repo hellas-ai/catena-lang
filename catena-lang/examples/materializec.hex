@@ -457,6 +457,75 @@
   ({[.output-count] [.output]} buf.to-mem)
 ))
 
+(def program materialize-borrow-native-bf16-gemv-pair :
+  {(cap.own mem) (cap.ref mem) (cap.ref mem) (u64 val) (u64 val) (u64 val) (u64 val)}
+  ->
+  {(cap.own mem) (cap.own mem) (cap.own mem)}
+= ([input gate-weight up-weight rows columns reduction input-row.]
+  ([.input] mem.cast.bf16 [input-count input-buffer.])
+  ([.gate-weight] mem.cast.bf16 [gate-count gate-buffer.])
+  ([.up-weight] mem.cast.bf16 [up-count up-buffer.])
+  ([.rows columns] u64.mul u64.name [output-count.])
+  ([.reduction] u64.name [reduction-count.])
+  {
+    [.input-buffer] [.input-count]
+    [.gate-buffer] [.gate-count]
+    [.up-buffer] [.up-count]
+    [.output-count] [.reduction-count] [.input-row] [.columns]
+  } materializec.borrow-native-bf16-gemv-pair [input-after gate up.]
+  {
+    ({[.input-count] [.input-after]} buf.to-mem)
+    ({[.output-count] [.gate]} buf.to-mem)
+    ({[.output-count] [.up]} buf.to-mem)
+  }
+))
+
+(def program materialize-borrow-native-bf16-gemm-wmma-pair :
+  {(cap.own mem) (cap.ref mem) (cap.ref mem) (u64 val) (u64 val) (u64 val) (u64 val)}
+  ->
+  {(cap.own mem) (cap.own mem) (cap.own mem)}
+= ([input gate-weight up-weight rows columns reduction input-row.]
+  ([.input] mem.cast.bf16 [input-count input-buffer.])
+  ([.gate-weight] mem.cast.bf16 [gate-count gate-buffer.])
+  ([.up-weight] mem.cast.bf16 [up-count up-buffer.])
+  ([.rows columns] u64.mul u64.name [output-count.])
+  ([.reduction] u64.name [reduction-count.])
+  {
+    [.input-buffer] [.input-count]
+    [.gate-buffer] [.gate-count]
+    [.up-buffer] [.up-count]
+    [.output-count] [.reduction-count] [.input-row] [.columns]
+  } materializec.borrow-native-bf16-gemm-wmma-pair [input-after gate up.]
+  {
+    ({[.input-count] [.input-after]} buf.to-mem)
+    ({[.output-count] [.gate]} buf.to-mem)
+    ({[.output-count] [.up]} buf.to-mem)
+  }
+))
+
+(def program materialize-borrow-native-bf16-gemm-hipblas-pair :
+  {(cap.own mem) (cap.ref mem) (cap.ref mem) (u64 val) (u64 val) (u64 val) (u64 val)}
+  ->
+  {(cap.own mem) (cap.own mem) (cap.own mem)}
+= ([input gate-weight up-weight rows columns reduction input-row.]
+  ([.input] mem.cast.bf16 [input-count input-buffer.])
+  ([.gate-weight] mem.cast.bf16 [gate-count gate-buffer.])
+  ([.up-weight] mem.cast.bf16 [up-count up-buffer.])
+  ([.rows columns] u64.mul u64.name [output-count.])
+  ([.reduction] u64.name [reduction-count.])
+  {
+    [.input-buffer] [.input-count]
+    [.gate-buffer] [.gate-count]
+    [.up-buffer] [.up-count]
+    [.output-count] [.reduction-count] [.input-row] [.columns]
+  } materializec.borrow-native-bf16-gemm-hipblas-pair [input-after gate up.]
+  {
+    ({[.input-count] [.input-after]} buf.to-mem)
+    ({[.output-count] [.gate]} buf.to-mem)
+    ({[.output-count] [.up]} buf.to-mem)
+  }
+))
+
 (def program materialize-borrow-topk-f32 :
   (cap.own mem)
   ->

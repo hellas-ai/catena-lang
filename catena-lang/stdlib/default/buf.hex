@@ -297,6 +297,69 @@
       ({cap.own [.n] bf16} buf val)
     }})
 
+  # Paired dense BF16 GEMV which returns the input owner.
+  (arr materializec.borrow-native-bf16-gemv-pair :
+    {[input-cap gate-cap up-cap n k.]
+      ({cap.own [.input-cap] bf16} buf val)
+      ({[.input-cap] u64} :)
+      ({cap.ref [.gate-cap] bf16} buf val)
+      ({[.gate-cap] u64} :)
+      ({cap.ref [.up-cap] bf16} buf val)
+      ({[.up-cap] u64} :)
+      ({[.n] u64} :)
+      ({[.k] u64} :)
+      (u64 val)
+      (u64 val)
+    }
+    ->
+    {[input-cap gate-cap up-cap n k.] {
+      ({cap.own [.input-cap] bf16} buf val)
+      ({cap.own [.n] bf16} buf val)
+      ({cap.own [.n] bf16} buf val)
+    }})
+
+  # HIP/gfx11 WMMA counterpart with a paired SIMT fallback below 64 rows.
+  (arr materializec.borrow-native-bf16-gemm-wmma-pair :
+    {[input-cap gate-cap up-cap n k.]
+      ({cap.own [.input-cap] bf16} buf val)
+      ({[.input-cap] u64} :)
+      ({cap.ref [.gate-cap] bf16} buf val)
+      ({[.gate-cap] u64} :)
+      ({cap.ref [.up-cap] bf16} buf val)
+      ({[.up-cap] u64} :)
+      ({[.n] u64} :)
+      ({[.k] u64} :)
+      (u64 val)
+      (u64 val)
+    }
+    ->
+    {[input-cap gate-cap up-cap n k.] {
+      ({cap.own [.input-cap] bf16} buf val)
+      ({cap.own [.n] bf16} buf val)
+      ({cap.own [.n] bf16} buf val)
+    }})
+
+  # HIP hipBLAS counterpart with a paired SIMT fallback below 64 rows.
+  (arr materializec.borrow-native-bf16-gemm-hipblas-pair :
+    {[input-cap gate-cap up-cap n k.]
+      ({cap.own [.input-cap] bf16} buf val)
+      ({[.input-cap] u64} :)
+      ({cap.ref [.gate-cap] bf16} buf val)
+      ({[.gate-cap] u64} :)
+      ({cap.ref [.up-cap] bf16} buf val)
+      ({[.up-cap] u64} :)
+      ({[.n] u64} :)
+      ({[.k] u64} :)
+      (u64 val)
+      (u64 val)
+    }
+    ->
+    {[input-cap gate-cap up-cap n k.] {
+      ({cap.own [.input-cap] bf16} buf val)
+      ({cap.own [.n] bf16} buf val)
+      ({cap.own [.n] bf16} buf val)
+    }})
+
   # Native routed down projection. The active selected-expert rows and weights
   # are BF16, accumulation and residual addition are F32, and the output is
   # rounded once to BF16. All owned inputs are returned after the launch.

@@ -1,13 +1,20 @@
 use std::{fs::File, io::Write};
 
-use catena_lang::safe_gpu::{AssetError, GpuDialect, Session, run_worker_if_requested};
+use catena_lang::safe_gpu::{
+    AssetError, Backend, Session, SessionTimeouts, run_worker_if_requested,
+};
 
 fn main() -> anyhow::Result<()> {
     if run_worker_if_requested()? {
         return Ok(());
     }
 
-    let session = Session::new(GpuDialect::Hip)?;
+    let backend: Backend = std::env::var("CATENA_GPU_DIALECT")
+        .unwrap_or_else(|_| "auto".into())
+        .parse()
+        .map_err(anyhow::Error::msg)?;
+    let session = Session::with_backend(backend, SessionTimeouts::default())?;
+    eprintln!("resident asset test backend: {:?}", session.dialect());
     let key = [0x42; 32];
     let asset = session.attach(key, unlinked_read_only_file(&[7; 4096])?)?;
     anyhow::ensure!(asset.byte_len() == 4096);
@@ -43,7 +50,7 @@ fn main() -> anyhow::Result<()> {
         Err(AssetError::Remote(_))
     ));
 
-    let other_session = Session::new(GpuDialect::Hip)?;
+    let other_session = Session::new(session.dialect())?;
     anyhow::ensure!(matches!(
         other_session.slice(&asset, 0, 1),
         Err(AssetError::WrongSession)

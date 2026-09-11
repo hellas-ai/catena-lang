@@ -44,6 +44,8 @@ struct LoadedArtifact {
 
 #[derive(Debug, Error)]
 pub enum InitError {
+    #[error("no usable GPU backend (CUDA: {cuda}; HIP: {hip})")]
+    NoBackend { cuda: String, hip: String },
     #[error("Failed to parse program: {0}")]
     Parse(#[from] metacat::theory::ast::ParseRawError),
     #[error(transparent)]
@@ -119,6 +121,23 @@ pub enum ExecError {
 }
 
 impl Runtime {
+    /// Select a provider-local runtime. Auto probes CUDA before HIP, and
+    /// reports both failures if neither has a usable device.
+    pub fn with_backend(backend: super::Backend) -> Result<Self, InitError> {
+        if let Some(dialect) = backend.dialect() {
+            return Self::new(dialect);
+        }
+        Self::new(GpuDialect::Cuda).or_else(|cuda| {
+            Self::new(GpuDialect::Hip).map_err(|hip| InitError::NoBackend {
+                cuda: cuda.to_string(),
+                hip: hip.to_string(),
+            })
+        })
+    }
+
+    pub fn dialect(&self) -> GpuDialect {
+        self.gpu.dialect()
+    }
     pub(crate) fn gpu_api(&self) -> Arc<GpuApi> {
         self.gpu.clone()
     }

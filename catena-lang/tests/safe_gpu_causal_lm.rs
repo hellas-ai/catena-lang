@@ -1,7 +1,7 @@
-use std::{fs::File, io::Write, path::PathBuf, sync::mpsc, thread, time::Duration};
+use std::{fs::File, io::Write, sync::mpsc, thread, time::Duration};
 
 use catena_lang::safe_gpu::{
-    GpuDialect, Session,
+    Backend, GpuDialect, Session, SessionTimeouts,
     causal_lm::{
         GenerationControl, GenerationError, GenerationTermination, ModelConfig,
         minimum_generation_device_bytes,
@@ -20,7 +20,13 @@ fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
-    let mut session = Session::new(GpuDialect::Hip)?;
+    let backend: Backend = std::env::var("CATENA_GPU_DIALECT")
+        .unwrap_or_else(|_| "auto".into())
+        .parse()
+        .map_err(anyhow::Error::msg)?;
+    let mut session = Session::with_backend(backend, SessionTimeouts::default())?;
+    let dialect = session.dialect();
+    eprintln!("resident model test backend: {dialect:?}");
     let program = session.prepare(SOURCE)?;
     let asset = session.attach([0x51; 32], weight_file(1)?)?;
     let weight = session.slice(&asset, 0, 8)?;
@@ -117,14 +123,14 @@ fn main() -> anyhow::Result<()> {
             catena_lang::safe_runtime::ResidentError::Unavailable { .. }
         ))
     ));
-    verify_known_insufficient_envelope_preserves_session()?;
-    verify_generated_allocation_overflow_isolation()?;
-    verify_generic_fault_isolation()?;
+    verify_known_insufficient_envelope_preserves_session(dialect)?;
+    verify_generated_allocation_overflow_isolation(dialect)?;
+    verify_generic_fault_isolation(dialect)?;
     Ok(())
 }
 
-fn verify_known_insufficient_envelope_preserves_session() -> anyhow::Result<()> {
-    let mut session = Session::new(GpuDialect::Hip)?;
+fn verify_known_insufficient_envelope_preserves_session(dialect: GpuDialect) -> anyhow::Result<()> {
+    let mut session = Session::new(dialect)?;
     let program = session.prepare(SOURCE)?;
     let asset = session.attach([0x52; 32], weight_file(1)?)?;
     let weight = session.slice(&asset, 0, 8)?;
@@ -167,8 +173,8 @@ fn verify_known_insufficient_envelope_preserves_session() -> anyhow::Result<()> 
     Ok(())
 }
 
-fn verify_generated_allocation_overflow_isolation() -> anyhow::Result<()> {
-    let runtime = SafeRuntime::new(GpuDialect::Hip)?;
+fn verify_generated_allocation_overflow_isolation(dialect: GpuDialect) -> anyhow::Result<()> {
+    let runtime = SafeRuntime::new(dialect)?;
     let artifact = runtime.load_sources(stdlib::sources().chain([SOURCE]))?;
     let overflow = runtime
         .exec::<1, 1>(&artifact, "causal-test-logits", [u64::MAX.into()])
@@ -184,8 +190,8 @@ fn verify_generated_allocation_overflow_isolation() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn verify_generic_fault_isolation() -> anyhow::Result<()> {
-    let runtime = SafeRuntime::new(GpuDialect::Hip)?;
+fn verify_generic_fault_isolation(dialect: GpuDialect) -> anyhow::Result<()> {
+    let runtime = SafeRuntime::new(dialect)?;
     let artifact = runtime.load_sources(stdlib::sources().chain([SOURCE]))?;
     anyhow::ensure!(matches!(
         runtime.exec::<1, 1>(&artifact, "causal-test-fault-logits", [16_u64.into()]),
@@ -211,11 +217,9 @@ fn generation_killed_child(error: &GenerationError) -> bool {
 }
 
 fn weight_file(first: u64) -> anyhow::Result<File> {
-    let scratch = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../target/safe-gpu-test-assets");
-    std::fs::create_dir_all(&scratch)?;
     let mut temporary = tempfile::Builder::new()
         .prefix("causal-lm-weight-")
-        .tempfile_in(scratch)?;
+        .tempfile()?;
     temporary.write_all(&first.to_ne_bytes())?;
     temporary.as_file().set_len(4096)?;
     temporary.as_file().sync_all()?;

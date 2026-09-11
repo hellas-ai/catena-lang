@@ -13,6 +13,10 @@ use crate::gpu::GpuApi;
 
 #[derive(Debug, Error)]
 pub enum MemError {
+    #[error("no usable {dialect:?} GPU device is available")]
+    NoDevice { dialect: GpuDialect },
+    #[error("{dialect:?} runtime returned a null mapped host pointer")]
+    NullMappedPointer { dialect: GpuDialect },
     #[error(
         "failed to load {dialect:?} GPU library (tried: {tried}): {source}",
         tried = display_paths(tried)

@@ -1,24 +1,40 @@
-use std::{ffi::c_void, fs::File, os::fd::AsRawFd, ptr::NonNull};
+use std::{ffi::c_void, fs::File, os::fd::AsRawFd, ptr::NonNull, sync::Arc};
 
-use anyhow::{Context, Result, bail, ensure};
-use memmap2::{Mmap, MmapOptions};
+use anyhow::{Context, Result, ensure};
+use memmap2::{Mmap, MmapMut, MmapOptions};
 
-use crate::{codegen::GpuDialect, runtime::MemRef};
-
-use super::hip::HipRegistration;
+use crate::{codegen::GpuDialect, gpu::GpuApi, runtime::MemRef};
 
 pub(super) struct LoadedAsset {
-    registration: DeviceRegistration,
-    bytes: Mmap,
+    gpu: Arc<GpuApi>,
+    device_base: NonNull<c_void>,
+    bytes: AssetMapping,
 }
 
 impl LoadedAsset {
     pub(super) fn open(file: File, byte_len: usize, dialect: GpuDialect) -> Result<Self> {
-        let bytes = unsafe { MmapOptions::new().len(byte_len).map(&file) }
-            .context("failed to mmap asset")?;
-        let registration = DeviceRegistration::new(&bytes, dialect)?;
+        let gpu = GpuApi::load(dialect)?;
+        let read_only = gpu.supports_read_only_host()?;
+        // CUDA devices without read-only registration need writable pages.
+        // MAP_PRIVATE keeps writes isolated from the source file. Pinning may
+        // materialize private host pages, charged to the worker's memory limit.
+        let bytes = if read_only {
+            AssetMapping::ReadOnly(
+                unsafe { MmapOptions::new().len(byte_len).map(&file) }
+                    .context("failed to mmap asset")?,
+            )
+        } else {
+            AssetMapping::Private(
+                unsafe { MmapOptions::new().len(byte_len).map_copy(&file) }
+                    .context("failed to privately mmap asset")?,
+            )
+        };
+        // SAFETY: this object retains the mapping and unregisters before drop.
+        let device_base =
+            unsafe { gpu.register_host(bytes.as_ptr().cast_mut().cast(), bytes.len(), read_only)? };
         Ok(Self {
-            registration,
+            gpu,
+            device_base,
             bytes,
         })
     }
@@ -39,8 +55,7 @@ impl LoadedAsset {
             .context("mapped buffer range overflowed")?;
         ensure!(end <= self.bytes.len(), "mapped buffer exceeds its asset");
         let data = unsafe {
-            self.registration
-                .device_base()
+            self.device_base
                 .as_ptr()
                 .cast::<u8>()
                 .add(offset)
@@ -70,21 +85,32 @@ pub(super) fn validated_len(file: &File, expected: u64) -> Result<usize> {
     usize::try_from(actual).context("asset length exceeds usize")
 }
 
-enum DeviceRegistration {
-    Hip(HipRegistration),
-}
-
-impl DeviceRegistration {
-    fn new(bytes: &Mmap, dialect: GpuDialect) -> Result<Self> {
-        match dialect {
-            GpuDialect::Hip => Ok(Self::Hip(HipRegistration::new(bytes)?)),
-            GpuDialect::Cuda => bail!("CUDA-visible mmap assets are not yet supported"),
+impl Drop for LoadedAsset {
+    fn drop(&mut self) {
+        // SAFETY: bytes is still mapped and was registered by this GPU API.
+        if let Err(error) = unsafe {
+            self.gpu
+                .unregister_host(self.bytes.as_ptr().cast_mut().cast())
+        } {
+            eprintln!("fatal GPU asset cleanup failure: {error}");
+            std::process::abort();
         }
     }
+}
 
-    fn device_base(&self) -> NonNull<c_void> {
+// Both variants expose only immutable CPU access after registration.
+enum AssetMapping {
+    ReadOnly(Mmap),
+    Private(MmapMut),
+}
+
+impl std::ops::Deref for AssetMapping {
+    type Target = [u8];
+
+    fn deref(&self) -> &[u8] {
         match self {
-            Self::Hip(registration) => registration.device_base,
+            Self::ReadOnly(bytes) => bytes,
+            Self::Private(bytes) => bytes,
         }
     }
 }

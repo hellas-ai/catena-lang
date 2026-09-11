@@ -56,6 +56,8 @@ pub mod runtime;
 
 /// Compile generated GPU C++ to a shared object.
 mod artifact;
+mod backend;
+pub use backend::Backend;
 
 /// Marshal catena values into the C ABI and invoke compiled symbols
 mod executor;

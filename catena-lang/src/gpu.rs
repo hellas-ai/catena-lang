@@ -2,6 +2,7 @@ use std::{
     env,
     ffi::{CString, c_int, c_uint, c_void},
     path::PathBuf,
+    ptr::NonNull,
     sync::{Arc, OnceLock},
 };
 
@@ -14,6 +15,10 @@ const MEMCPY_HOST_TO_DEVICE: c_int = 1;
 const MEMCPY_DEVICE_TO_HOST: c_int = 2;
 const MEMCPY_DEVICE_TO_DEVICE: c_int = 3;
 const IPC_LAZY_ENABLE_PEER_ACCESS: c_uint = 1;
+const DEVICE_MAP_HOST: c_uint = 0x8;
+const HOST_REGISTER_MAPPED: c_uint = 0x2;
+const HIP_HOST_REGISTER_COARSE_GRAINED: c_uint = 0x8;
+const CUDA_HOST_REGISTER_READ_ONLY: c_uint = 0x8;
 pub(crate) const IPC_HANDLE_BYTES: usize = 64;
 
 #[repr(C)]
@@ -65,11 +70,113 @@ impl GpuApi {
                 vec![PathBuf::from("libcuda.so.1"), PathBuf::from("libcuda.so")],
             )?),
         };
-        Ok(Self {
+        let api = Self {
             dialect,
             runtime_library,
             cuda_driver_library,
-        })
+        };
+        api.initialize_device()?;
+        Ok(api)
+    }
+
+    fn initialize_device(&self) -> Result<(), MemError> {
+        let count: Symbol<'_, unsafe extern "C" fn(*mut c_int) -> c_int> =
+            unsafe { self.load_symbol(self.symbol("hipGetDeviceCount", "cudaGetDeviceCount"))? };
+        let mut devices = 0;
+        self.check("enumerate devices", unsafe { count(&mut devices) })?;
+        if devices == 0 {
+            return Err(MemError::NoDevice {
+                dialect: self.dialect,
+            });
+        }
+        // Configure mapped host memory before CUDA's primary context is created.
+        // Vendor visibility variables determine which physical GPU is device 0.
+        let flags: Symbol<'_, unsafe extern "C" fn(c_uint) -> c_int> =
+            unsafe { self.load_symbol(self.symbol("hipSetDeviceFlags", "cudaSetDeviceFlags"))? };
+        self.check("enable mapped host memory", unsafe {
+            flags(DEVICE_MAP_HOST)
+        })?;
+        let select: Symbol<'_, unsafe extern "C" fn(c_int) -> c_int> =
+            unsafe { self.load_symbol(self.symbol("hipSetDevice", "cudaSetDevice"))? };
+        self.check("select device", unsafe { select(0) })
+    }
+
+    pub(crate) fn supports_read_only_host(&self) -> Result<bool, MemError> {
+        if self.dialect == GpuDialect::Hip {
+            return Ok(true);
+        }
+        let attribute: Symbol<'_, unsafe extern "C" fn(*mut c_int, c_int, c_int) -> c_int> =
+            unsafe { self.load_symbol("cudaDeviceGetAttribute")? };
+        let mut supported = 0;
+        self.check("query read-only host registration", unsafe {
+            attribute(&mut supported, 113, 0)
+        })?;
+        Ok(supported != 0)
+    }
+
+    /// Register a host mapping without a device allocation.
+    ///
+    /// # Safety
+    /// The range must remain mapped until unregister_host succeeds or the
+    /// process exits, and must not already be registered with this runtime.
+    /// When read_only is false, the mapping must be privately writable.
+    pub(crate) unsafe fn register_host(
+        &self,
+        base: *mut c_void,
+        byte_len: usize,
+        read_only: bool,
+    ) -> Result<NonNull<c_void>, MemError> {
+        let register: Symbol<'_, unsafe extern "C" fn(*mut c_void, usize, c_uint) -> c_int> =
+            unsafe { self.load_symbol(self.symbol("hipHostRegister", "cudaHostRegister"))? };
+        let pointer: Symbol<
+            '_,
+            unsafe extern "C" fn(*mut *mut c_void, *mut c_void, c_uint) -> c_int,
+        > = unsafe {
+            self.load_symbol(self.symbol("hipHostGetDevicePointer", "cudaHostGetDevicePointer"))?
+        };
+        // Resolve cleanup before registering, so later symbol errors cannot
+        // strand a pinned mapping. Bit 0x8 means coarse-grained on HIP and
+        // read-only on CUDA; CUDA requires it for a read-only CPU mmap.
+        let unregister: Symbol<'_, unsafe extern "C" fn(*mut c_void) -> c_int> =
+            unsafe { self.load_symbol(self.symbol("hipHostUnregister", "cudaHostUnregister"))? };
+        let flags = HOST_REGISTER_MAPPED
+            | match self.dialect {
+                GpuDialect::Hip => HIP_HOST_REGISTER_COARSE_GRAINED,
+                GpuDialect::Cuda if read_only => CUDA_HOST_REGISTER_READ_ONLY,
+                GpuDialect::Cuda => 0,
+            };
+        self.check("register read-only host memory", unsafe {
+            register(base, byte_len, flags)
+        })?;
+        let mut device = std::ptr::null_mut();
+        let result = self
+            .check("map registered host memory", unsafe {
+                pointer(&mut device, base, 0)
+            })
+            .and_then(|()| {
+                NonNull::new(device).ok_or(MemError::NullMappedPointer {
+                    dialect: self.dialect,
+                })
+            });
+        if result.is_err()
+            && let Err(error) = self.check("unregister host memory after mapping failure", unsafe {
+                unregister(base)
+            })
+        {
+            // The caller owns the mmap. It cannot safely drop it while
+            // a failed rollback leaves the GPU registration live.
+            eprintln!("fatal GPU mapping cleanup failure: {error}");
+            std::process::abort();
+        }
+        result
+    }
+
+    /// # Safety
+    /// base must be a live mapping registered by this GPU API.
+    pub(crate) unsafe fn unregister_host(&self, base: *mut c_void) -> Result<(), MemError> {
+        let function: Symbol<'_, unsafe extern "C" fn(*mut c_void) -> c_int> =
+            unsafe { self.load_symbol(self.symbol("hipHostUnregister", "cudaHostUnregister"))? };
+        self.check("unregister host memory", unsafe { function(base) })
     }
 
     pub(crate) fn dialect(&self) -> GpuDialect {

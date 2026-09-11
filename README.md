@@ -68,3 +68,28 @@ dependencies as follows:
 ```sh
 nix develop --command cargo run -p catena-lang --example readme
 ```
+
+### Resident GPU sessions
+
+`safe_gpu::Session::with_backend(Backend::Auto, timeouts)` selects a usable CUDA
+or HIP device inside an isolated worker process. `Backend::Cuda` and
+`Backend::Hip` require a specific vendor. Existing `Session::new(GpuDialect)`
+callers remain supported. The parent does not initialize a GPU context for the
+resident API.
+
+Read-only asset descriptors are mapped and registered through the shared GPU
+runtime. On CUDA devices that cannot register read-only host pages, Catena uses
+a private copy-on-write mapping. Pinning this mapping can materialize a host-RAM
+copy of the weights; it never makes the source file writable. Keep the worker's
+memory limit above the session asset budget with room for compilation and state.
+
+Run the same conformance tests in a matching GPU/toolchain environment:
+
+```sh
+CATENA_GPU_DIALECT=hip cargo test -p catena-lang --no-default-features --features runtime-tests --test runtime --test safe_gpu_assets --test safe_gpu_causal_lm
+CATENA_GPU_DIALECT=cuda cargo test -p catena-lang --no-default-features --features runtime-tests --test runtime --test safe_gpu_assets --test safe_gpu_causal_lm
+```
+
+The resident tests also accept `CATENA_GPU_DIALECT=auto` (the default).
+CUDA compilation requires an `nvcc` supporting `-arch=native` and targets the
+worker-visible device. Set vendor visibility variables before creating a session.

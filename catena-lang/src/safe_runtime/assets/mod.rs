@@ -4,7 +4,6 @@ use anyhow::{Result, ensure};
 
 use crate::{codegen::GpuDialect, runtime::MemRef};
 
-mod hip;
 mod memory;
 
 use memory::{LoadedAsset, validated_len};

@@ -825,6 +825,7 @@ impl Drop for SessionOperationLease {
 /// worker and therefore loads the native GPU runtime only there.
 #[derive(Debug)]
 pub struct SafeRuntime {
+    dialect: GpuDialect,
     worker: Mutex<WorkerProcess>,
     operation_gate: Arc<SessionOperationGate>,
     parent_ipc: Option<IpcTransport>,
@@ -874,7 +875,7 @@ impl SafeRuntime {
         dialect: GpuDialect,
         timeouts: SafeRuntimeTimeouts,
     ) -> Result<Self, SafeInitError> {
-        Self::with_interface(dialect, timeouts, ParentInterface::RawValues)
+        Self::with_interface(dialect.into(), timeouts, ParentInterface::RawValues)
     }
 
     /// Construct the worker-resident protocol used by `safe_gpu` without
@@ -883,11 +884,18 @@ impl SafeRuntime {
         dialect: GpuDialect,
         timeouts: SafeRuntimeTimeouts,
     ) -> Result<Self, SafeInitError> {
-        Self::with_interface(dialect, timeouts, ParentInterface::ResidentProtocol)
+        Self::with_resident_backend(dialect.into(), timeouts)
+    }
+
+    pub(crate) fn with_resident_backend(
+        backend: crate::runtime::Backend,
+        timeouts: SafeRuntimeTimeouts,
+    ) -> Result<Self, SafeInitError> {
+        Self::with_interface(backend, timeouts, ParentInterface::ResidentProtocol)
     }
 
     fn with_interface(
-        dialect: GpuDialect,
+        backend: crate::runtime::Backend,
         timeouts: SafeRuntimeTimeouts,
         interface: ParentInterface,
     ) -> Result<Self, SafeInitError> {
@@ -899,18 +907,32 @@ impl SafeRuntime {
         }
         ensure_waitable_children()?;
         let executable = env::current_exe().map_err(SafeInitError::CurrentExecutable)?;
-        let parent_ipc = initialize_parent_ipc(interface, || IpcTransport::load(dialect))?;
+        let parent_ipc = initialize_parent_ipc(interface, || {
+            IpcTransport::load(
+                backend
+                    .dialect()
+                    .expect("raw-value runtime requires an explicit dialect"),
+            )
+        })?;
         let mut worker = WorkerProcess::spawn(&executable)?;
 
         match worker
             .with_deadline(
                 timeouts.execution_timeout(),
                 DeadlineKind::Initialize,
-                |worker, deadline| worker.request(&Request::Initialize { dialect }, deadline),
+                |worker, deadline| worker.request(&Request::Initialize { backend }, deadline),
             )
             .map_err(map_init_worker_error)?
         {
-            Response::Initialized(Ok(())) => Ok(Self {
+            Response::Initialized(Ok(dialect))
+                if backend
+                    .dialect()
+                    .is_some_and(|expected| expected != dialect) =>
+            {
+                Err(SafeInitError::UnexpectedResponse)
+            }
+            Response::Initialized(Ok(dialect)) => Ok(Self {
+                dialect,
                 worker: Mutex::new(worker),
                 operation_gate: Arc::new(SessionOperationGate::default()),
                 parent_ipc,
@@ -976,6 +998,10 @@ impl SafeRuntime {
                 Err(worker.reject_protocol_response(SafeInitError::UnexpectedResponse))
             }
         }
+    }
+
+    pub(crate) fn dialect(&self) -> GpuDialect {
+        self.dialect
     }
 
     pub(crate) fn id(&self) -> RuntimeId {
@@ -1624,21 +1650,22 @@ fn run_child_loop(
     asset_socket: &UnixStream,
 ) -> Result<(), ChildMainError> {
     let request = read_request(&mut reader)?.ok_or(ChildMainError::ExpectedInitialization)?;
-    let Request::Initialize { dialect } = request else {
+    let Request::Initialize { backend } = request else {
         return Err(ChildMainError::ExpectedInitialization);
     };
 
-    let mut runtime = match Runtime::new(dialect) {
+    let mut runtime = match Runtime::with_backend(backend) {
         Ok(runtime) => runtime,
         Err(error) => {
             write_response(&mut writer, &Response::Initialized(Err(error.to_string())))?;
             return Ok(());
         }
     };
+    let dialect = runtime.dialect();
     let ipc = IpcTransport::from_runtime(&runtime);
     let mut assets = AssetStore::new(dialect);
     let mut resident = ResidentStore::new();
-    write_response(&mut writer, &Response::Initialized(Ok(())))?;
+    write_response(&mut writer, &Response::Initialized(Ok(dialect)))?;
 
     let mut pending_outputs = Vec::new();
     while let Some(request) = read_request(&mut reader)? {

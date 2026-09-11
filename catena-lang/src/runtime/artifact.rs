@@ -144,8 +144,8 @@ pub(super) fn compile(cpp_path: &Path, dialect: GpuDialect) -> Result<SharedObje
                 .arg("-Xcompiler")
                 .arg("-fPIC")
                 .arg("--std=c++17")
-                // Default to SM_80 (Ampere and later)
-                .arg("-arch=sm_80")
+                // Compile for the worker-visible device, not a client-selected target.
+                .arg("-arch=native")
                 // Match the no-FMA intent for generated arithmetic.
                 .arg("--fmad=false");
         }

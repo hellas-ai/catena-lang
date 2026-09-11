@@ -53,7 +53,11 @@ __host__ __device__ static inline void catena_assert(uint8_t condition) {{
         fprintf(stderr, "catena assertion failed\n");
         fflush(stderr);
 #endif
+#ifdef __CUDA_ARCH__
+        __trap();
+#else
         __builtin_trap();
+#endif
     }}
 }}
 

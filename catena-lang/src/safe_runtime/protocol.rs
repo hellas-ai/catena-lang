@@ -5,7 +5,7 @@ use thiserror::Error;
 
 use crate::{
     codegen::GpuDialect,
-    runtime::{EntryPoint, ExecError},
+    runtime::{Backend, EntryPoint, ExecError},
 };
 
 pub(super) const MAX_FRAME_LEN: usize = 64 * 1024 * 1024;
@@ -18,7 +18,7 @@ pub(super) struct EncodedFrame {
 #[derive(Debug, Serialize, Deserialize)]
 pub(super) enum Request {
     Initialize {
-        dialect: GpuDialect,
+        backend: Backend,
     },
     LoadSources {
         sources: Vec<String>,
@@ -56,7 +56,7 @@ pub(super) enum Request {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(super) enum Response {
-    Initialized(Result<(), String>),
+    Initialized(Result<GpuDialect, String>),
     Loaded(Result<(usize, Vec<EntryPoint>), String>),
     Attached(Result<(u64, u64), String>),
     Resident(Result<ResidentResponse, String>),

@@ -20,7 +20,7 @@ use crate::{
 
 pub use crate::{
     codegen::GpuDialect,
-    runtime::{EntryPoint, ValueKind},
+    runtime::{Backend, EntryPoint, ValueKind},
     safe_runtime::{
         AssetError, ChildMainError, DEFAULT_COMPILE_TIMEOUT, DEFAULT_EXECUTION_TIMEOUT,
         SafeInitError, SafeRuntimeTimeouts as SessionTimeouts,
@@ -78,6 +78,22 @@ pub struct Session {
 }
 
 impl Session {
+    /// Select a backend inside the isolated worker. Auto tries CUDA then HIP;
+    /// native runtime libraries are never probed in the parent process.
+    pub fn with_backend(
+        backend: Backend,
+        timeouts: SessionTimeouts,
+    ) -> Result<Self, SafeInitError> {
+        SafeRuntime::with_resident_backend(backend, timeouts).map(|runtime| Self {
+            runtime: Arc::new(runtime),
+        })
+    }
+
+    /// The dialect selected for this session's device, programs, and assets.
+    pub fn dialect(&self) -> GpuDialect {
+        self.runtime.dialect()
+    }
+
     /// Start a worker for the selected provider-local GPU dialect.
     pub fn new(dialect: GpuDialect) -> Result<Self, SafeInitError> {
         SafeRuntime::with_resident_timeouts(dialect, SessionTimeouts::default()).map(|runtime| {

@@ -1099,44 +1099,68 @@ pub(in crate::codegen) fn render_bf16_gemv_kernel(
     Ok(())
 }
 
-fn render_bf16_gemm_wmma_kernel(out: &mut String, kernel_name: &str) {
-    out.push_str("#if !defined(__HIP_DEVICE_COMPILE__) || defined(__gfx1100__) || defined(__gfx1101__) || defined(__gfx1102__) || defined(__gfx1103__) || defined(__gfx1150__) || defined(__gfx1151__) || defined(__gfx1152__) || defined(__gfx1153__)\n");
-    out.push_str("#include <rocwmma/rocwmma.hpp>\n");
+fn render_bf16_gemm_wmma_kernel(out: &mut String, kernel_name: &str, dialect: GpuDialect) {
+    let (namespace, include, matrix_a, matrix_b, accumulator, row_major, col_major, store_layout) =
+        match dialect {
+            GpuDialect::Hip => (
+                "rocwmma",
+                "#if !defined(__HIP_DEVICE_COMPILE__) || defined(__gfx1100__) || defined(__gfx1101__) || defined(__gfx1102__) || defined(__gfx1103__) || defined(__gfx1150__) || defined(__gfx1151__) || defined(__gfx1152__) || defined(__gfx1153__)\n#include <rocwmma/rocwmma.hpp>\n",
+                "rocwmma::matrix_a",
+                "rocwmma::matrix_b",
+                "rocwmma::accumulator",
+                "rocwmma::row_major",
+                "rocwmma::col_major",
+                "rocwmma::mem_row_major",
+            ),
+            GpuDialect::Cuda => (
+                "nvcuda::wmma",
+                "#include <mma.h>\n",
+                "nvcuda::wmma::matrix_a",
+                "nvcuda::wmma::matrix_b",
+                "nvcuda::wmma::accumulator",
+                "nvcuda::wmma::row_major",
+                "nvcuda::wmma::col_major",
+                "nvcuda::wmma::mem_row_major",
+            ),
+        };
+    out.push_str(include);
     out.push_str(&format!(
         "__global__ void {kernel_name}(const catena_bf16_t *input, const catena_bf16_t *weight, catena_bf16_t *out, uint64_t rows, uint64_t reduction_len, uint64_t input_row, uint64_t output_features) {{\n"
     ));
-    out.push_str("    using frag_a_t = rocwmma::fragment<rocwmma::matrix_a, 16, 16, 16, catena_bf16_t, rocwmma::row_major>;\n");
-    out.push_str("    using frag_b_t = rocwmma::fragment<rocwmma::matrix_b, 16, 16, 16, catena_bf16_t, rocwmma::col_major>;\n");
-    out.push_str(
-        "    using frag_c_t = rocwmma::fragment<rocwmma::accumulator, 16, 16, 16, float>;\n",
-    );
+    out.push_str(&format!("    using frag_a_t = {namespace}::fragment<{matrix_a}, 16, 16, 16, catena_bf16_t, {row_major}>;\n"));
+    out.push_str(&format!("    using frag_b_t = {namespace}::fragment<{matrix_b}, 16, 16, 16, catena_bf16_t, {col_major}>;\n"));
+    out.push_str(&format!(
+        "    using frag_c_t = {namespace}::fragment<{accumulator}, 16, 16, 16, float>;\n"
+    ));
     out.push_str("    uint64_t row_base = (uint64_t)blockIdx.y * 16;\n    uint64_t column_base = (uint64_t)blockIdx.x * 16;\n");
     out.push_str("    __shared__ catena_bf16_t tile_a[16 * 16];\n    __shared__ catena_bf16_t tile_b[16 * 16];\n    __shared__ float tile_c[16 * 16];\n");
-    out.push_str("    frag_a_t a; frag_b_t b; frag_c_t c;\n    rocwmma::fill_fragment(c, 0.0f);\n");
+    out.push_str(&format!(
+        "    frag_a_t a; frag_b_t b; frag_c_t c;\n    {namespace}::fill_fragment(c, 0.0f);\n"
+    ));
     out.push_str("    for (uint64_t k_base = 0; k_base < reduction_len; k_base += 16) {\n        for (uint32_t flat = threadIdx.x; flat < 256; flat += blockDim.x) {\n");
     out.push_str("            uint32_t tile_row = flat >> 4; uint32_t tile_column = flat & 15;\n            uint64_t row = row_base + tile_row; uint64_t k = k_base + tile_column;\n");
     out.push_str("            tile_a[flat] = (row < rows && k < reduction_len) ? input[(input_row + row) * reduction_len + k] : catena_bf16_from_f32(0.0f);\n");
     out.push_str("            uint64_t column = column_base + tile_row;\n            tile_b[flat] = (column < output_features && k < reduction_len) ? weight[column * reduction_len + k] : catena_bf16_from_f32(0.0f);\n");
-    out.push_str("        }\n        __syncthreads();\n        rocwmma::load_matrix_sync(a, tile_a, 16);\n        rocwmma::load_matrix_sync(b, tile_b, 16);\n        rocwmma::mma_sync(c, a, b, c);\n        __syncthreads();\n    }\n");
-    out.push_str("    rocwmma::store_matrix_sync(tile_c, c, 16, rocwmma::mem_row_major);\n    __syncthreads();\n");
-    out.push_str("    for (uint32_t flat = threadIdx.x; flat < 256; flat += blockDim.x) {\n        uint64_t row = row_base + (flat >> 4); uint64_t column = column_base + (flat & 15);\n        if (row < rows && column < output_features) out[row * output_features + column] = catena_bf16_from_f32(tile_c[flat]);\n    }\n}\n#endif\n");
+    out.push_str(&format!("        }}\n        __syncthreads();\n        {namespace}::load_matrix_sync(a, tile_a, 16);\n        {namespace}::load_matrix_sync(b, tile_b, 16);\n        {namespace}::mma_sync(c, a, b, c);\n        __syncthreads();\n    }}\n"));
+    out.push_str(&format!(
+        "    {namespace}::store_matrix_sync(tile_c, c, 16, {store_layout});\n    __syncthreads();\n"
+    ));
+    out.push_str("    for (uint32_t flat = threadIdx.x; flat < 256; flat += blockDim.x) {\n        uint64_t row = row_base + (flat >> 4); uint64_t column = column_base + (flat & 15);\n        if (row < rows && column < output_features) out[row * output_features + column] = catena_bf16_from_f32(tile_c[flat]);\n    }\n}\n");
+    if dialect == GpuDialect::Hip {
+        out.push_str("#endif\n");
+    }
 }
 
-/// Render an opt-in HIP BF16 GEMM. gfx11 executes one wave per 16x16 output
-/// tile through rocWMMA; the companion SIMT kernel handles inputs below the
-/// measured 64-row crossover. This operation is intentionally gfx11-only.
+/// Render an opt-in BF16 GEMM. HIP gfx11 and CUDA sm80+ execute one wave/warp
+/// per 16x16 output tile; the companion SIMT kernel handles small inputs.
 pub(in crate::codegen) fn render_bf16_gemm_wmma_kernels(
     out: &mut String,
     kernel_name: &str,
     assignment: &GpuAssign,
+    dialect: GpuDialect,
 ) -> Result<(), GpuRenderError> {
-    render_bf16_gemv_kernel(
-        out,
-        &format!("{kernel_name}_simt"),
-        assignment,
-        GpuDialect::Hip,
-    )?;
-    render_bf16_gemm_wmma_kernel(out, kernel_name);
+    render_bf16_gemv_kernel(out, &format!("{kernel_name}_simt"), assignment, dialect)?;
+    render_bf16_gemm_wmma_kernel(out, kernel_name, dialect);
     Ok(())
 }
 
@@ -1144,23 +1168,25 @@ pub(in crate::codegen) fn render_borrow_native_bf16_gemm_wmma_pair_kernels(
     out: &mut String,
     kernel_name: &str,
     assignment: &GpuAssign,
+    dialect: GpuDialect,
 ) -> Result<(), GpuRenderError> {
     render_borrow_native_bf16_gemv_pair_kernel(
         out,
         &format!("{kernel_name}_simt"),
         assignment,
-        GpuDialect::Hip,
+        dialect,
     )?;
-    render_bf16_gemm_wmma_kernel(out, &format!("{kernel_name}_gate"));
-    render_bf16_gemm_wmma_kernel(out, &format!("{kernel_name}_up"));
+    render_bf16_gemm_wmma_kernel(out, &format!("{kernel_name}_gate"), dialect);
+    render_bf16_gemm_wmma_kernel(out, &format!("{kernel_name}_up"), dialect);
     Ok(())
 }
 
-pub(in crate::codegen) fn render_hipblas_support(out: &mut String) {
-    out.push_str(
-        r#"#include <hipblas/hipblas.h>
+pub(in crate::codegen) fn render_blas_support(out: &mut String, dialect: GpuDialect) {
+    out.push_str(match dialect {
+        GpuDialect::Hip => {
+            r#"#include <hipblas/hipblas.h>
 #ifndef __HIP_DEVICE_COMPILE__
-__host__ static inline void catena_host_hipblas_check(hipblasStatus_t status) {
+__host__ static inline void catena_host_blas_check(hipblasStatus_t status) {
     if (status != HIPBLAS_STATUS_SUCCESS) {
         fprintf(stderr, "catena hipBLAS error: %s\n", hipblasStatusToString(status));
         fflush(stderr);
@@ -1168,54 +1194,108 @@ __host__ static inline void catena_host_hipblas_check(hipblasStatus_t status) {
     }
 }
 
-struct catena_hipblas_context_t {
+struct catena_blas_context_t {
     hipblasHandle_t handle;
 
-    catena_hipblas_context_t() : handle(nullptr) {
-        catena_host_hipblas_check(hipblasCreate(&handle));
-        catena_host_hipblas_check(hipblasSetPointerMode(handle, HIPBLAS_POINTER_MODE_HOST));
-        catena_host_hipblas_check(hipblasSetStream(handle, nullptr));
+    catena_blas_context_t() : handle(nullptr) {
+        catena_host_blas_check(hipblasCreate(&handle));
+        catena_host_blas_check(hipblasSetPointerMode(handle, HIPBLAS_POINTER_MODE_HOST));
+        catena_host_blas_check(hipblasSetStream(handle, nullptr));
     }
 
-    ~catena_hipblas_context_t() {
+    ~catena_blas_context_t() {
         if (handle != nullptr) {
             (void)hipblasDestroy(handle);
         }
     }
 };
 
-__host__ static inline hipblasHandle_t catena_host_hipblas_handle() {
-    static catena_hipblas_context_t context;
+__host__ static inline hipblasHandle_t catena_host_blas_handle() {
+    static catena_blas_context_t context;
     return context.handle;
 }
+
+__host__ static inline void catena_host_blas_gemm(
+    const catena_bf16_t *weight, const catena_bf16_t *input, catena_bf16_t *output,
+    int output_features, int rows, int reduction_len, const float *alpha, const float *beta) {
+    catena_host_blas_check(hipblasGemmEx(
+        catena_host_blas_handle(), HIPBLAS_OP_T, HIPBLAS_OP_N,
+        output_features, rows, reduction_len, alpha,
+        weight, HIP_R_16BF, reduction_len, input, HIP_R_16BF, reduction_len,
+        beta, output, HIP_R_16BF, output_features,
+        HIPBLAS_COMPUTE_32F, HIPBLAS_GEMM_DEFAULT));
+}
 #endif
-"#,
-    );
+"#
+        }
+        GpuDialect::Cuda => {
+            r#"#include <cublas_v2.h>
+#ifndef __CUDA_ARCH__
+__host__ static inline void catena_host_blas_check(cublasStatus_t status) {
+    if (status != CUBLAS_STATUS_SUCCESS) {
+        fprintf(stderr, "catena cuBLAS error: %d\n", (int)status);
+        fflush(stderr);
+        __builtin_trap();
+    }
 }
 
-pub(in crate::codegen) fn render_bf16_gemm_hipblas_kernels(
+struct catena_blas_context_t {
+    cublasHandle_t handle;
+
+    catena_blas_context_t() : handle(nullptr) {
+        catena_host_blas_check(cublasCreate(&handle));
+        catena_host_blas_check(cublasSetPointerMode(handle, CUBLAS_POINTER_MODE_HOST));
+        catena_host_blas_check(cublasSetStream(handle, nullptr));
+    }
+
+    ~catena_blas_context_t() {
+        if (handle != nullptr) {
+            (void)cublasDestroy(handle);
+        }
+    }
+};
+
+__host__ static inline cublasHandle_t catena_host_blas_handle() {
+    static catena_blas_context_t context;
+    return context.handle;
+}
+
+__host__ static inline void catena_host_blas_gemm(
+    const catena_bf16_t *weight, const catena_bf16_t *input, catena_bf16_t *output,
+    int output_features, int rows, int reduction_len, const float *alpha, const float *beta) {
+    catena_host_blas_check(cublasGemmEx(
+        catena_host_blas_handle(), CUBLAS_OP_T, CUBLAS_OP_N,
+        output_features, rows, reduction_len, alpha,
+        weight, CUDA_R_16BF, reduction_len, input, CUDA_R_16BF, reduction_len,
+        beta, output, CUDA_R_16BF, output_features,
+        CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT));
+}
+#endif
+"#
+        }
+    });
+}
+
+pub(in crate::codegen) fn render_bf16_gemm_blas_kernels(
     out: &mut String,
     kernel_name: &str,
     assignment: &GpuAssign,
+    dialect: GpuDialect,
 ) -> Result<(), GpuRenderError> {
-    render_bf16_gemv_kernel(
-        out,
-        &format!("{kernel_name}_simt"),
-        assignment,
-        GpuDialect::Hip,
-    )
+    render_bf16_gemv_kernel(out, &format!("{kernel_name}_simt"), assignment, dialect)
 }
 
-pub(in crate::codegen) fn render_borrow_native_bf16_gemm_hipblas_pair_kernels(
+pub(in crate::codegen) fn render_borrow_native_bf16_gemm_blas_pair_kernels(
     out: &mut String,
     kernel_name: &str,
     assignment: &GpuAssign,
+    dialect: GpuDialect,
 ) -> Result<(), GpuRenderError> {
     render_borrow_native_bf16_gemv_pair_kernel(
         out,
         &format!("{kernel_name}_simt"),
         assignment,
-        GpuDialect::Hip,
+        dialect,
     )
 }
 
@@ -1675,7 +1755,7 @@ pub(in crate::codegen) fn render_borrow_routed_bf16_gemv_pair_call(
 pub(in crate::codegen) enum NativeBf16PairBackend {
     Simt,
     Wmma,
-    Hipblas,
+    Blas,
 }
 
 pub(in crate::codegen) fn render_borrow_native_bf16_gemm_pair_call(
@@ -1772,13 +1852,13 @@ pub(in crate::codegen) fn render_borrow_native_bf16_gemm_pair_call(
                 up_output.name,
             ));
         }
-        NativeBf16PairBackend::Hipblas => {
+        NativeBf16PairBackend::Blas => {
             out.push_str(&format!(
                 "        if ({prefix}_rows >= 64) {{\n            catena_assert(({output_features}) <= INT32_MAX && {prefix}_rows <= INT32_MAX && ({reduction_len}) <= INT32_MAX);\n            const float {prefix}_alpha = 1.0f;\n            const float {prefix}_beta = 0.0f;\n"
             ));
             for (weight, output) in [(gate_weight, gate_output), (up_weight, up_output)] {
                 out.push_str(&format!(
-                    "            catena_host_hipblas_check(hipblasGemmEx(\n                catena_host_hipblas_handle(), HIPBLAS_OP_T, HIPBLAS_OP_N,\n                (int)({output_features}), (int){prefix}_rows, (int)({reduction_len}),\n                &{prefix}_alpha, {}, HIP_R_16BF, (int)({reduction_len}),\n                {} + ({input_row}) * ({reduction_len}), HIP_R_16BF, (int)({reduction_len}),\n                &{prefix}_beta, {}_data, HIP_R_16BF, (int)({output_features}),\n                HIPBLAS_COMPUTE_32F, HIPBLAS_GEMM_DEFAULT));\n",
+                    "            catena_host_blas_gemm(\n                {}, {} + ({input_row}) * ({reduction_len}), {}_data,\n                (int)({output_features}), (int){prefix}_rows, (int)({reduction_len}),\n                &{prefix}_alpha, &{prefix}_beta);\n",
                     value_expr(weight),
                     value_expr(input),
                     output.name,
@@ -2049,6 +2129,7 @@ pub(in crate::codegen) fn render_bf16_gemm_wmma_call(
     out: &mut String,
     function: &GpuFunction,
     assignment: &GpuAssign,
+    dialect: GpuDialect,
 ) -> Result<(), GpuRenderError> {
     let [output] = assignment.outputs.as_slice() else {
         return Err(invalid_outputs(assignment, 1));
@@ -2076,16 +2157,17 @@ pub(in crate::codegen) fn render_bf16_gemm_wmma_call(
     ));
     out.push_str(&format!("    catena_assert(({reduction_len}) != 0);\n    catena_assert(({input_capacity}) % ({reduction_len}) == 0);\n    uint64_t {name}_input_rows = ({input_capacity}) / ({reduction_len});\n    catena_assert(({output_features}) != 0);\n    catena_assert({name}_len % ({output_features}) == 0);\n    uint64_t {name}_rows = {name}_len / ({output_features});\n"));
     out.push_str(&format!("    catena_assert(({input_row}) <= {name}_input_rows && {name}_rows <= {name}_input_rows - ({input_row}));\n    catena_assert(({output_features}) <= UINT64_MAX / ({reduction_len}));\n    catena_assert(({weight_capacity}) == ({output_features}) * ({reduction_len}));\n"));
-    out.push_str(&format!("    if ({name}_len != 0) {{\n        catena_host_gpu_check(hipMallocAsync((void **)&{name}_data, {name}_len * sizeof(catena_bf16_t), nullptr));\n"));
+    out.push_str(&format!("    if ({name}_len != 0) {{\n        catena_host_gpu_check({}((void **)&{name}_data, {name}_len * sizeof(catena_bf16_t), nullptr));\n", dialect.device_alloc_async_fn()));
     out.push_str(&format!("        if ({name}_rows >= 64) {{\n            {kernel_name}<<<dim3((({output_features}) + 15) / 16, ({name}_rows + 15) / 16), dim3(32)>>>(\n                {}, {}, {name}_data, {name}_rows, {reduction_len}, {input_row}, {output_features});\n        }} else\n", value_expr(input), value_expr(weight)));
     out.push_str(&format!("        {{\n            {kernel_name}_simt<<<dim3({name}_len), dim3(256)>>>(\n                {}, {}, {name}_data, {name}_len, {reduction_len}, {input_row}, {output_features});\n        }}\n    }}\n    {name} = {name}_data;\n", value_expr(input), value_expr(weight)));
     Ok(())
 }
 
-pub(in crate::codegen) fn render_bf16_gemm_hipblas_call(
+pub(in crate::codegen) fn render_bf16_gemm_blas_call(
     out: &mut String,
     function: &GpuFunction,
     assignment: &GpuAssign,
+    dialect: GpuDialect,
 ) -> Result<(), GpuRenderError> {
     let [output] = assignment.outputs.as_slice() else {
         return Err(invalid_outputs(assignment, 1));
@@ -2116,18 +2198,15 @@ pub(in crate::codegen) fn render_bf16_gemm_hipblas_call(
     catena_assert(({output_features}) <= UINT64_MAX / ({reduction_len}));
     catena_assert(({weight_capacity}) == ({output_features}) * ({reduction_len}));
     if ({name}_len != 0) {{
-        catena_host_gpu_check(hipMallocAsync((void **)&{name}_data, {name}_len * sizeof(catena_bf16_t), nullptr));
+        catena_host_gpu_check({device_alloc}((void **)&{name}_data, {name}_len * sizeof(catena_bf16_t), nullptr));
         if ({name}_rows >= 64) {{
             catena_assert(({output_features}) <= INT32_MAX && {name}_rows <= INT32_MAX && ({reduction_len}) <= INT32_MAX);
             const float {name}_alpha = 1.0f;
             const float {name}_beta = 0.0f;
-            catena_host_hipblas_check(hipblasGemmEx(
-                catena_host_hipblas_handle(), HIPBLAS_OP_T, HIPBLAS_OP_N,
+            catena_host_blas_gemm(
+                {weight}, {input} + ({input_row}) * ({reduction_len}), {name}_data,
                 (int)({output_features}), (int){name}_rows, (int)({reduction_len}),
-                &{name}_alpha, {weight}, HIP_R_16BF, (int)({reduction_len}),
-                {input} + ({input_row}) * ({reduction_len}), HIP_R_16BF, (int)({reduction_len}),
-                &{name}_beta, {name}_data, HIP_R_16BF, (int)({output_features}),
-                HIPBLAS_COMPUTE_32F, HIPBLAS_GEMM_DEFAULT));
+                &{name}_alpha, &{name}_beta);
         }} else {{
             {kernel_name}_simt<<<dim3({name}_len), dim3(256)>>>(
                 {input}, {weight}, {name}_data, {name}_len, {reduction_len}, {input_row}, {output_features});
@@ -2143,6 +2222,7 @@ pub(in crate::codegen) fn render_bf16_gemm_hipblas_call(
         reduction_len = value_expr(reduction_len),
         input_row = value_expr(input_row),
         output_features = value_expr(output_features),
+        device_alloc = dialect.device_alloc_async_fn(),
     ));
     Ok(())
 }

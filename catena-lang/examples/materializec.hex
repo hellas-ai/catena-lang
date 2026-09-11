@@ -435,7 +435,7 @@
   ({[.output-count] [.output]} buf.to-mem)
 ))
 
-(def program materialize-bf16-gemm-hipblas :
+(def program materialize-bf16-gemm-blas :
   {(cap.own mem) (cap.ref mem) (u64 val) (u64 val) (u64 val) (u64 val)}
   ->
   (cap.own mem)
@@ -453,7 +453,7 @@
     [.reduction-count]
     [.input-row]
     [.columns]
-  } materializec.bf16-gemm-hipblas [output.]
+  } materializec.bf16-gemm-blas [output.]
   ({[.output-count] [.output]} buf.to-mem)
 ))
 
@@ -503,7 +503,7 @@
   }
 ))
 
-(def program materialize-borrow-native-bf16-gemm-hipblas-pair :
+(def program materialize-borrow-native-bf16-gemm-blas-pair :
   {(cap.own mem) (cap.ref mem) (cap.ref mem) (u64 val) (u64 val) (u64 val) (u64 val)}
   ->
   {(cap.own mem) (cap.own mem) (cap.own mem)}
@@ -518,7 +518,7 @@
     [.gate-buffer] [.gate-count]
     [.up-buffer] [.up-count]
     [.output-count] [.reduction-count] [.input-row] [.columns]
-  } materializec.borrow-native-bf16-gemm-hipblas-pair [input-after gate up.]
+  } materializec.borrow-native-bf16-gemm-blas-pair [input-after gate up.]
   {
     ({[.input-count] [.input-after]} buf.to-mem)
     ({[.output-count] [.gate]} buf.to-mem)

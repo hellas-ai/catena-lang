@@ -339,8 +339,8 @@
       ({cap.own [.n] bf16} buf val)
     }})
 
-  # HIP hipBLAS counterpart with a paired SIMT fallback below 64 rows.
-  (arr materializec.borrow-native-bf16-gemm-hipblas-pair :
+  # Platform BLAS counterpart with a paired SIMT fallback below 64 rows.
+  (arr materializec.borrow-native-bf16-gemm-blas-pair :
     {[input-cap gate-cap up-cap n k.]
       ({cap.own [.input-cap] bf16} buf val)
       ({[.input-cap] u64} :)
@@ -415,10 +415,10 @@
     (u64 val)
   } -> {[input-cap weight-cap n k.] ({cap.own [.n] bf16} buf val)})
 
-  # hipBLAS counterpart of bf16-gemv. Matrices with at least 64 input rows
+  # Platform BLAS counterpart of bf16-gemv. Matrices with at least 64 input rows
   # use BF16 GEMM with F32 accumulation; smaller inputs retain the packed-BF16
   # SIMT implementation. This operation is available only on HIP.
-  (arr materializec.bf16-gemm-hipblas : {[input-cap weight-cap n k.]
+  (arr materializec.bf16-gemm-blas : {[input-cap weight-cap n k.]
     ({cap.own [.input-cap] bf16} buf val)
     ({[.input-cap] u64} :)
     ({cap.ref [.weight-cap] bf16} buf val)

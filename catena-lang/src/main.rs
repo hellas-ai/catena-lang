@@ -29,6 +29,7 @@ fn main() -> anyhow::Result<()> {
     all_sources.extend(sources.iter().map(String::as_str));
     let raw_theories = RawTheorySet::from_texts(all_sources)?;
     let report_options = ReportOptions {
+        #[cfg(feature = "svg-reports")]
         generate_svgs: !cli.no_svg,
     };
     match catena_lang::compile::compile(raw_theories) {

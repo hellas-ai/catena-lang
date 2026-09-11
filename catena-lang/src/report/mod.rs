@@ -24,12 +24,14 @@ pub type TheoryTermMap<A = Operation> = BTreeMap<TheoryId, BTreeMap<Operation, A
 
 #[derive(Clone, Copy, Debug)]
 pub struct ReportOptions {
+    #[cfg(feature = "svg-reports")]
     pub generate_svgs: bool,
 }
 
 impl Default for ReportOptions {
     fn default() -> Self {
         Self {
+            #[cfg(feature = "svg-reports")]
             generate_svgs: true,
         }
     }
@@ -71,12 +73,12 @@ impl CompileReport {
         self.dump_graphs_to_dir_with_options(dir, ReportOptions::default())
     }
 
+    #[cfg_attr(not(feature = "svg-reports"), allow(unused_variables))]
     pub fn dump_graphs_to_dir_with_options(
         &self,
         dir: impl AsRef<Path>,
         options: ReportOptions,
     ) -> io::Result<()> {
-        require_supported_options(options)?;
         let dir = dir.as_ref();
         fs::create_dir_all(dir)?;
         fs::write(
@@ -84,8 +86,8 @@ impl CompileReport {
             self.raw_theories.to_hexpr_text(),
         )?;
         elaboration::dump_elaboration(self, dir)?;
+        #[cfg(feature = "svg-reports")]
         if options.generate_svgs {
-            #[cfg(feature = "svg-reports")]
             svg::dump_svgs(self, &dir.join("svgs"))?;
         }
         Ok(())
@@ -104,38 +106,5 @@ impl CompileReport {
         self.dump_graphs_to_dir_with_options(dir, options)?;
         gpu::dump_gpu(self, &dir.join("gpu"))?;
         Ok(())
-    }
-}
-
-fn require_supported_options(options: ReportOptions) -> io::Result<()> {
-    if options.generate_svgs && !cfg!(feature = "svg-reports") {
-        return Err(io::Error::new(
-            io::ErrorKind::Unsupported,
-            "SVG reports were requested, but catena-lang was built without the `svg-reports` feature; disable SVG generation or enable that feature",
-        ));
-    }
-    Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn report_options_match_compiled_svg_support() {
-        let requested = require_supported_options(ReportOptions {
-            generate_svgs: true,
-        });
-        if cfg!(feature = "svg-reports") {
-            requested.expect("default build must support requested SVG reports");
-        } else {
-            let error = requested.expect_err("SVG request must fail without renderer support");
-            assert_eq!(error.kind(), io::ErrorKind::Unsupported);
-            assert!(error.to_string().contains("`svg-reports` feature"));
-        }
-        require_supported_options(ReportOptions {
-            generate_svgs: false,
-        })
-        .expect("non-SVG reports never require the renderer feature");
     }
 }

@@ -69,3 +69,34 @@ dependencies as follows:
 ```sh
 nix develop --command cargo run -p catena-lang --example runtime
 ```
+
+### Resident GPU sessions
+
+`safe_gpu::Session::with_backend(Backend::Auto, timeouts)` selects a usable CUDA
+or HIP device inside an isolated worker process. `Backend::Cuda` and
+`Backend::Hip` require a specific vendor. Existing `Session::new(GpuDialect)`
+callers remain supported. The parent does not initialize a GPU context for the
+resident API.
+
+`safe_gpu::AssetOwner` uploads each verified content identity to VRAM once.
+`Session::with_assets(&owner, timeouts)` shares those allocations across execution
+workers through read-only GPU mappings. KV caches and scratch allocations stay
+private. Replacing an execution worker preserves the owner's weights; source FDs
+are used only for ingestion and can be closed after attachment. `owner.usage()`
+reports weight allocation count, uploaded bytes, and rounded device bytes.
+
+The resident API requires GPU virtual-memory sharing and HIP 7.15 or newer on
+AMD. Older HIP releases can accept read-only access while installing writable
+mappings and are rejected. Unsupported devices return an error. Budget VRAM for
+the shared weights, allocation granularity, private state, and GPU contexts.
+
+Run the same conformance tests in a matching GPU/toolchain environment:
+
+```sh
+CATENA_GPU_DIALECT=hip cargo test -p catena-lang --no-default-features --features runtime-tests --test runtime --test safe_gpu_assets --test safe_gpu_causal_lm
+CATENA_GPU_DIALECT=cuda cargo test -p catena-lang --no-default-features --features runtime-tests --test runtime --test safe_gpu_assets --test safe_gpu_causal_lm
+```
+
+The resident tests also accept `CATENA_GPU_DIALECT=auto` (the default).
+CUDA compilation requires an `nvcc` supporting `-arch=native` and targets the
+worker-visible device. Set vendor visibility variables before creating a session.

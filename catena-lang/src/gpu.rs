@@ -1,3 +1,5 @@
+pub(crate) mod vmm;
+
 use std::{
     env,
     ffi::{CString, c_int, c_uint, c_void},
@@ -65,11 +67,28 @@ impl GpuApi {
                 vec![PathBuf::from("libcuda.so.1"), PathBuf::from("libcuda.so")],
             )?),
         };
-        Ok(Self {
+        let api = Self {
             dialect,
             runtime_library,
             cuda_driver_library,
-        })
+        };
+        api.initialize_device()?;
+        Ok(api)
+    }
+
+    fn initialize_device(&self) -> Result<(), MemError> {
+        let count: Symbol<'_, unsafe extern "C" fn(*mut c_int) -> c_int> =
+            unsafe { self.load_symbol(self.symbol("hipGetDeviceCount", "cudaGetDeviceCount"))? };
+        let mut devices = 0;
+        self.check("enumerate devices", unsafe { count(&mut devices) })?;
+        if devices == 0 {
+            return Err(MemError::NoDevice {
+                dialect: self.dialect,
+            });
+        }
+        let select: Symbol<'_, unsafe extern "C" fn(c_int) -> c_int> =
+            unsafe { self.load_symbol(self.symbol("hipSetDevice", "cudaSetDevice"))? };
+        self.check("select device", unsafe { select(0) })
     }
 
     pub(crate) fn dialect(&self) -> GpuDialect {

@@ -173,8 +173,8 @@
 
   # Select stable descending top-k indices independently from contiguous F32
   # rows while returning the source owner. Equal numeric values keep the lower
-  # column index. The GPU implementation supports 1 <= k <= 8 and emits a
-  # row-major [rows, k] U64 buffer without changing any F32 bits.
+  # column index. The GPU implementation requires 1 <= k <= min(8, columns)
+  # and emits a row-major [rows, k] U64 buffer without changing any F32 bits.
   (arr materializec.borrow-topk-f32 : {[n rows out.]
     ({cap.own [.n] f32} buf val)
     ({[.n] u64} :)

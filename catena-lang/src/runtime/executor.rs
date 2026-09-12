@@ -6,7 +6,14 @@ use libffi::middle::{Arg, Cif, CodePtr, Type};
 use libloading::Library;
 use thiserror::Error;
 
+use crate::codegen::{
+    GENERATED_ALLOCATION_BUDGET_BEGIN_SYMBOL, GENERATED_ALLOCATION_BUDGET_END_SYMBOL,
+};
+
 use super::{signature::SignatureTable, value::ValueKind};
+
+type AllocationBudgetBegin = unsafe extern "C" fn(u64);
+type AllocationBudgetEnd = unsafe extern "C" fn();
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
@@ -54,12 +61,37 @@ struct PreparedFunction {
     cif: Cif,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct AllocationBudgetControl {
+    begin: AllocationBudgetBegin,
+    end: AllocationBudgetEnd,
+}
+
+impl AllocationBudgetControl {
+    fn under_limit<T>(&self, byte_limit: u64, invoke: impl FnOnce() -> T) -> T {
+        unsafe { (self.begin)(byte_limit) };
+        let _reset = AllocationBudgetReset { control: self };
+        invoke()
+    }
+}
+
+struct AllocationBudgetReset<'a> {
+    control: &'a AllocationBudgetControl,
+}
+
+impl Drop for AllocationBudgetReset<'_> {
+    fn drop(&mut self) {
+        unsafe { (self.control.end)() };
+    }
+}
+
 /// Loaded generated code and its prepared dynamic call interfaces.
 #[derive(Debug)]
 pub(super) struct Executor {
     // Keep the library loaded for as long as any cached code pointer can be used.
     _library: Library,
     functions: HashMap<String, PreparedFunction>,
+    allocation_budget: Option<AllocationBudgetControl>,
 }
 
 #[derive(Debug, Error)]
@@ -77,6 +109,28 @@ impl Executor {
     pub(super) fn new(
         library: Library,
         signatures: &SignatureTable,
+    ) -> Result<Self, ExecutorError> {
+        let allocation_budget = AllocationBudgetControl {
+            begin: load_control_symbol(&library, GENERATED_ALLOCATION_BUDGET_BEGIN_SYMBOL)?,
+            end: load_control_symbol(&library, GENERATED_ALLOCATION_BUDGET_END_SYMBOL)?,
+        };
+        Self::with_allocation_budget(library, signatures, Some(allocation_budget))
+    }
+
+    /// External compiler output need not implement Catena's allocation controls.
+    /// This constructor never enables execution with an allocation budget.
+    #[cfg(feature = "experimental-catena-gpu")]
+    pub(super) fn external(
+        library: Library,
+        signatures: &SignatureTable,
+    ) -> Result<Self, ExecutorError> {
+        Self::with_allocation_budget(library, signatures, None)
+    }
+
+    fn with_allocation_budget(
+        library: Library,
+        signatures: &SignatureTable,
+        allocation_budget: Option<AllocationBudgetControl>,
     ) -> Result<Self, ExecutorError> {
         let mut functions = HashMap::with_capacity(signatures.len());
         for signature in signatures.values() {
@@ -111,11 +165,38 @@ impl Executor {
         Ok(Self {
             _library: library,
             functions,
+            allocation_budget,
         })
     }
 
     /// Invoke a prepared symbol. Runtime validation guarantees the value shapes and kinds.
     pub(super) fn call(&self, symbol: &str, inputs: &[AbiValue], outputs: &mut [AbiValue]) {
+        match self.allocation_budget {
+            Some(control) => {
+                control.under_limit(u64::MAX, || self.call_raw(symbol, inputs, outputs))
+            }
+            None => self.call_raw(symbol, inputs, outputs),
+        }
+    }
+
+    /// Invoke a prepared symbol with a cumulative generated-device-allocation limit.
+    pub(super) fn call_with_generated_allocation_budget(
+        &self,
+        symbol: &str,
+        inputs: &[AbiValue],
+        outputs: &mut [AbiValue],
+        byte_limit: u64,
+    ) {
+        self.allocation_budget
+            .expect("budget support is checked before input ownership is transferred")
+            .under_limit(byte_limit, || self.call_raw(symbol, inputs, outputs));
+    }
+
+    pub(super) fn supports_allocation_budget(&self) -> bool {
+        self.allocation_budget.is_some()
+    }
+
+    fn call_raw(&self, symbol: &str, inputs: &[AbiValue], outputs: &mut [AbiValue]) {
         let function = self
             .functions
             .get(symbol)
@@ -130,10 +211,18 @@ impl Executor {
             .chain(output_pointers.iter().map(Arg::new))
             .collect::<Vec<_>>();
 
-        unsafe {
-            function.cif.call::<()>(function.code, &arguments);
-        }
+        unsafe { function.cif.call::<()>(function.code, &arguments) };
     }
+}
+
+fn load_control_symbol<T: Copy>(library: &Library, symbol: &str) -> Result<T, ExecutorError> {
+    let symbol_name = format!("{symbol}\0");
+    unsafe { library.get::<T>(symbol_name.as_bytes()) }
+        .map(|loaded| *loaded)
+        .map_err(|source| ExecutorError::LoadSymbol {
+            symbol: symbol.to_string(),
+            source,
+        })
 }
 
 fn ffi_type(kind: ValueKind) -> Type {
@@ -166,5 +255,73 @@ fn output_pointer(value: &mut AbiValue) -> *mut c_void {
         AbiValue::U64(value) => (value as *mut u64).cast(),
         AbiValue::F32(value) => (value as *mut f32).cast(),
         AbiValue::Mem(value) => (value as *mut CatenaMem).cast(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    use super::*;
+
+    static ACTIVE_LIMIT: AtomicU64 = AtomicU64::new(u64::MAX);
+    static END_COUNT: AtomicU64 = AtomicU64::new(0);
+
+    unsafe extern "C" fn begin(byte_limit: u64) {
+        ACTIVE_LIMIT.store(byte_limit, Ordering::SeqCst);
+    }
+
+    unsafe extern "C" fn end() {
+        ACTIVE_LIMIT.store(u64::MAX, Ordering::SeqCst);
+        END_COUNT.fetch_add(1, Ordering::SeqCst);
+    }
+
+    #[test]
+    fn normal_loader_requires_allocation_control_symbols() {
+        let library = libloading::os::unix::Library::this().into();
+        assert!(matches!(
+            Executor::new(library, &SignatureTable::new()),
+            Err(ExecutorError::LoadSymbol { symbol, .. })
+                if symbol == GENERATED_ALLOCATION_BUDGET_BEGIN_SYMBOL
+        ));
+    }
+
+    #[cfg(feature = "experimental-catena-gpu")]
+    #[test]
+    fn external_executor_runs_without_allocation_control_symbols() {
+        unsafe extern "C" fn write_output(output: *mut u64) {
+            unsafe { output.write(42) };
+        }
+        let library = libloading::os::unix::Library::this().into();
+        let mut executor = Executor::external(library, &SignatureTable::new()).unwrap();
+        assert!(!executor.supports_allocation_budget());
+        executor.functions.insert(
+            "fixture".into(),
+            PreparedFunction {
+                code: CodePtr(write_output as *mut c_void),
+                cif: Cif::new([Type::pointer()], Type::void()),
+            },
+        );
+        let mut outputs = [AbiValue::U64(0)];
+        executor.call("fixture", &[], &mut outputs);
+        assert!(matches!(outputs, [AbiValue::U64(42)]));
+    }
+
+    #[test]
+    fn allocation_budget_is_reset_between_invocations_and_on_unwind() {
+        let control = AllocationBudgetControl { begin, end };
+        END_COUNT.store(0, Ordering::SeqCst);
+
+        control.under_limit(17, || {
+            assert_eq!(ACTIVE_LIMIT.load(Ordering::SeqCst), 17);
+        });
+        assert_eq!(ACTIVE_LIMIT.load(Ordering::SeqCst), u64::MAX);
+
+        let panic = std::panic::catch_unwind(|| {
+            control.under_limit(23, || panic!("fixture panic"));
+        });
+        assert!(panic.is_err());
+        assert_eq!(ACTIVE_LIMIT.load(Ordering::SeqCst), u64::MAX);
+        assert_eq!(END_COUNT.load(Ordering::SeqCst), 2);
     }
 }

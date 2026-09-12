@@ -2,7 +2,7 @@ use std::env;
 
 use catena_lang::{
     codegen::GpuDialect,
-    runtime::{MemOwn, Value},
+    runtime::{MemOwn, Value, ValueKind},
     safe_runtime::{SafeExecError, SafeRuntime, run_safe_runtime_child_if_requested},
     stdlib,
 };
@@ -21,13 +21,21 @@ fn main() -> anyhow::Result<()> {
     }
 
     let dialect = configured_gpu_dialect()?;
-    let mut runtime = SafeRuntime::new(dialect)?;
+    let runtime = SafeRuntime::new(dialect)?;
     let artifact = runtime.load_sources(stdlib::sources().chain([
         include_str!("example.hex"),
         include_str!("materializec.hex"),
         OWNED_SOURCE,
     ]))?;
     let add_one = runtime.load_sources(stdlib::sources().chain([ADD_ONE_SOURCE]))?;
+    drop(runtime);
+    let signature = add_one
+        .entry_points()
+        .iter()
+        .find(|entry| entry.name() == "add-one")
+        .ok_or_else(|| anyhow::anyhow!("add-one entry point is missing"))?;
+    anyhow::ensure!(signature.inputs() == [ValueKind::U64]);
+    anyhow::ensure!(signature.outputs() == [ValueKind::U64]);
 
     let [added] = add_one.exec("add-one", [41_u64.into()])?;
     anyhow::ensure!(matches!(added, Value::U64(42)));
@@ -89,6 +97,40 @@ fn main() -> anyhow::Result<()> {
     anyhow::ensure!(materialized.try_to_u64_vec()? == [1, 1, 1, 1]);
     anyhow::ensure!(empty.try_to_u64_vec()?.is_empty());
     println!("owned outputs remained valid after child termination");
+
+    // A device-side assertion is reported by the runtime synchronization
+    // boundary. It must terminate and poison the isolated worker just like a
+    // native host assertion, rather than leave a failed GPU context reusable.
+    let gpu_fault_runtime = SafeRuntime::new(dialect)?;
+    let gpu_fault_artifact = gpu_fault_runtime.load_sources(
+        stdlib::sources().chain([include_str!("materializec.hex"), ADD_ONE_SOURCE]),
+    )?;
+    let fault_input = MemOwn::from_f32_slice(&[0.0; 8], dialect)?;
+    let gate = MemOwn::from_u16_slice(&[0; 16], dialect)?;
+    let up = MemOwn::from_u16_slice(&[0; 16], dialect)?;
+    // The two weight tensors describe experts 0 and 1, so expert 2 triggers
+    // the routed kernel's device assertion.
+    let invalid_selected = MemOwn::from_u64_slice(&[2, 0], dialect)?;
+    match gpu_fault_artifact.exec::<4, 4>(
+        "materialize-borrow-routed-bf16-gemv-pair",
+        [
+            fault_input.into(),
+            gate.as_ref().into(),
+            up.as_ref().into(),
+            invalid_selected.into(),
+        ],
+    ) {
+        Err(SafeExecError::ChildTerminated { status, .. }) => {
+            anyhow::ensure!(!status.success(), "GPU-faulting child exited successfully");
+        }
+        Err(error) => anyhow::bail!("device assertion returned the wrong error: {error}"),
+        Ok(_) => anyhow::bail!("device assertion unexpectedly returned outputs"),
+    }
+    anyhow::ensure!(matches!(
+        gpu_fault_artifact.exec::<1, 1>("add-one", [41_u64.into()]),
+        Err(SafeExecError::Unavailable { .. })
+    ));
+    println!("device assertion: child terminated and remained unavailable");
 
     Ok(())
 }

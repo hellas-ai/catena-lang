@@ -4,6 +4,7 @@ use std::{
     ffi::OsString,
     path::{Path, PathBuf},
     process::{Command, ExitStatus},
+    sync::atomic::{AtomicU64, Ordering},
 };
 
 use thiserror::Error;
@@ -26,6 +27,20 @@ pub enum ArtifactError {
         status: ExitStatus,
         stderr: String,
     },
+}
+
+static NEXT_RUNTIME_ID: AtomicU64 = AtomicU64::new(1);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct RuntimeId(u64);
+
+impl RuntimeId {
+    pub(crate) fn new() -> Self {
+        let id = NEXT_RUNTIME_ID
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
+            .expect("runtime ID space exhausted");
+        Self(id)
+    }
 }
 
 /// A shared object file created by compiling generated Catena GPU C++.
@@ -52,19 +67,6 @@ pub(super) fn compile(cpp_path: &Path, dialect: GpuDialect) -> Result<SharedObje
     let module_path = build_dir.path().join(module_filename);
     let so_path = build_dir.path().join("module.so");
 
-    // Profilers which instrument a process from startup can interfere with a
-    // nested hipcc invocation. This opt-in hook lets an exploratory runner
-    // compile the exact generated module once outside the profiler and load a
-    // copy on the profiled run. The caller owns cache validity deliberately;
-    // ordinary Runtime construction never consults this path.
-    if let Some(cached_path) = std::env::var_os("CATENA_GPU_MODULE_LOAD") {
-        std::fs::copy(cached_path, &so_path)?;
-        return Ok(SharedObject {
-            _build_dir: build_dir,
-            path: so_path,
-        });
-    }
-
     std::fs::copy(cpp_path, &module_path)?;
 
     let compiler = gpu_compiler(dialect);
@@ -88,8 +90,8 @@ pub(super) fn compile(cpp_path: &Path, dialect: GpuDialect) -> Result<SharedObje
                 .arg("-Xcompiler")
                 .arg("-fPIC")
                 .arg("--std=c++17")
-                // Default to SM_80 (Ampere and later)
-                .arg("-arch=sm_80")
+                // Compile for the worker-visible device, not a client-selected target.
+                .arg("-arch=native")
                 // Match the no-FMA intent for generated arithmetic.
                 .arg("--fmad=false");
         }
@@ -110,10 +112,6 @@ pub(super) fn compile(cpp_path: &Path, dialect: GpuDialect) -> Result<SharedObje
             status: output.status,
             stderr: String::from_utf8_lossy(&output.stderr).trim().to_string(),
         });
-    }
-
-    if let Some(cache_path) = std::env::var_os("CATENA_GPU_MODULE_SAVE") {
-        std::fs::copy(&so_path, cache_path)?;
     }
 
     Ok(SharedObject {

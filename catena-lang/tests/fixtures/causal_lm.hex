@@ -1,0 +1,108 @@
+(def program causal-test-logit-at :
+  ([n.] {1 ([.n] ix val)})
+  ->
+  ([n.] (f32 val))
+= ([_environment _index.]
+  (const.u32.0x00000000 u32.bitcast-f32)
+))
+
+(def program causal-test-fault-logit-at :
+  ([n.] {1 ([.n] ix val)})
+  ->
+  ([n.] (f32 val))
+= ([_environment _index.]
+  (const.u64.0x0000000000000000 [zero-value.])
+  ([.zero-value] u64.name [zero.])
+  ([.zero] u64.assert-nz [_proof.])
+  (const.u32.0x00000000 u32.bitcast-f32)
+))
+
+(def program causal-test-next-at :
+  ([n.] {(u64 val) ([.n] ix val)})
+  ->
+  ([n.] (u64 val))
+= ([value _index.] [.value]))
+
+(def program causal-test-head :
+  ([n.] (cap.ref mem))
+  ->
+  ([n.] (u64 val))
+= (mem.cast.u64
+  {
+    (u64.assert-nz ix.zero)
+    [buffer]
+  }
+  ix
+))
+
+(def program causal-test-next-buffer :
+  (u64 val)
+  ->
+  (cap.own mem)
+= ([value.]
+  (const.u64.0x0000000000000001 [one-value.])
+  ([.one-value] u64.name [one.])
+  {
+    [.one]
+    ({[.one] [.value] (([.one] :.param) name.causal-test-next-at)} materializec)
+  }
+  buf.to-mem
+))
+
+(def program causal-test-logits :
+  ({[n] u64} :)
+  ->
+  ([n.] (cap.own mem))
+= ([len.]
+  {
+    [.len]
+    ({[.len] unit.intro (([.len] :.param) name.causal-test-logit-at)} materializec)
+  }
+  buf.to-mem
+))
+
+(def program causal-test-fault-logits :
+  ({[n] u64} :)
+  ->
+  ([n.] (cap.own mem))
+= ([len.]
+  {
+    [.len]
+    ({[.len] unit.intro (([.len] :.param) name.causal-test-fault-logit-at)} materializec)
+  }
+  buf.to-mem
+))
+
+(def program causal-test :
+  {(cap.ref mem) (cap.own mem) (u64 val) (u64 val) (cap.ref mem)}
+  ->
+  {(cap.own mem) (cap.own mem) (cap.own mem)}
+= ([tokens state capacity position weight.]
+  ([.tokens] causal-test-head [first-token.])
+  ([.weight] causal-test-head [weight-value.])
+  ({[.first-token weight-value]} u64.add [next-with-weight.])
+  ({[.next-with-weight capacity]} u64.add [next-with-capacity.])
+  ({[.next-with-capacity position]} u64.add [next-value.])
+  ([.next-value] causal-test-next-buffer [next-token.])
+  (const.u64.0x0000000000000010 [vocabulary-value.])
+  ([.vocabulary-value] u64.name [vocabulary.])
+  ([.vocabulary] causal-test-logits [logits.])
+  {[.state] [.logits] [.next-token]}
+))
+
+(def program causal-test-fault :
+  {(cap.ref mem) (cap.own mem) (u64 val) (u64 val) (cap.ref mem)}
+  ->
+  {(cap.own mem) (cap.own mem) (cap.own mem)}
+= ([tokens state capacity position weight.]
+  ([.tokens] causal-test-head [first-token.])
+  ([.weight] causal-test-head [weight-value.])
+  ({[.first-token weight-value]} u64.add [next-with-weight.])
+  ({[.next-with-weight capacity]} u64.add [next-with-capacity.])
+  ({[.next-with-capacity position]} u64.add [next-value.])
+  ([.next-value] causal-test-next-buffer [next-token.])
+  (const.u64.0x0000000000000010 [vocabulary-value.])
+  ([.vocabulary-value] u64.name [vocabulary.])
+  ([.vocabulary] causal-test-fault-logits [logits.])
+  {[.state] [.logits] [.next-token]}
+))

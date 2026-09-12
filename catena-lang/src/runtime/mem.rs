@@ -13,6 +13,12 @@ use crate::gpu::GpuApi;
 
 #[derive(Debug, Error)]
 pub enum MemError {
+    #[error("invalid shared GPU allocation: {reason}")]
+    InvalidSharedAllocation { reason: &'static str },
+    #[error("failed to manage shared GPU allocation descriptor: {0}")]
+    SharedHandleIo(#[source] std::io::Error),
+    #[error("no usable {dialect:?} GPU device is available")]
+    NoDevice { dialect: GpuDialect },
     #[error(
         "failed to load {dialect:?} GPU library (tried: {tried}): {source}",
         tried = display_paths(tried)

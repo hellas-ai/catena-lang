@@ -48,6 +48,11 @@ type CodegenTermMap = TheoryTermMap<CodegenOperation>;
 
 const PROGRAM_THEORY: &str = "program";
 
+pub(crate) const GENERATED_ALLOCATION_BUDGET_BEGIN_SYMBOL: &str =
+    "catena_generated_allocation_budget_begin";
+pub(crate) const GENERATED_ALLOCATION_BUDGET_END_SYMBOL: &str =
+    "catena_generated_allocation_budget_end";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum GpuDialect {
     Hip,
@@ -83,17 +88,23 @@ impl GpuDialect {
         }
     }
 
-    pub(crate) fn device_alloc_async_fn(self) -> &'static str {
+    /// Returns the non-stream-ordered allocator for generated buffers.
+    ///
+    /// Generated buffer lifetimes span separately emitted kernel launches, but
+    /// codegen does not yet own an explicit stream. Async allocation can be
+    /// introduced once allocation, launches, and deallocation share an owned
+    /// stream and an explicit synchronization policy.
+    pub(crate) fn device_alloc_fn(self) -> &'static str {
         match self {
-            Self::Hip => "hipMallocAsync",
-            Self::Cuda => "cudaMallocAsync",
+            Self::Hip => "hipMalloc",
+            Self::Cuda => "cudaMalloc",
         }
     }
 
-    pub(crate) fn device_free_async_fn(self) -> &'static str {
+    pub(crate) fn device_free_fn(self) -> &'static str {
         match self {
-            Self::Hip => "hipFreeAsync",
-            Self::Cuda => "cudaFreeAsync",
+            Self::Hip => "hipFree",
+            Self::Cuda => "cudaFree",
         }
     }
 
@@ -421,6 +432,14 @@ fn is_erased_only(inputs: &[GpuValue], outputs: &[GpuVar]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn generated_buffer_lifetimes_use_non_stream_ordered_allocators() {
+        assert_eq!(GpuDialect::Hip.device_alloc_fn(), "hipMalloc");
+        assert_eq!(GpuDialect::Hip.device_free_fn(), "hipFree");
+        assert_eq!(GpuDialect::Cuda.device_alloc_fn(), "cudaMalloc");
+        assert_eq!(GpuDialect::Cuda.device_free_fn(), "cudaFree");
+    }
 
     fn erased_var(node: usize) -> GpuVar {
         GpuVar {

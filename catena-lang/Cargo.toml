@@ -22,7 +22,9 @@ tempfile = "3.23.0"
 libffi = "5.1.0"
 libloading = "0.9.0"
 libc = "0.2.183"
-bincode = "1.3.3"
+memmap2 = "0.9"
+rustix = { version = "1.1", features = ["net"] }
+postcard = { version = "1.1.3", default-features = false, features = ["alloc"] }
 serde = { version = "1.0.228", features = ["derive"] }
 
 [dev-dependencies]
@@ -49,4 +51,16 @@ path = "examples/safe_runtime.rs"
 [[test]]
 name = "runtime"
 path = "tests/runtime.rs"
+required-features = ["runtime-tests"]
+
+[[test]]
+name = "safe_gpu_assets"
+path = "tests/safe_gpu_assets.rs"
+harness = false
+required-features = ["runtime-tests"]
+
+[[test]]
+name = "safe_gpu_causal_lm"
+path = "tests/safe_gpu_causal_lm.rs"
+harness = false
 required-features = ["runtime-tests"]

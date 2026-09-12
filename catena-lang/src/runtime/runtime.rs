@@ -16,7 +16,7 @@ use super::mem::{MemError, MemOwn};
 #[cfg(feature = "experimental-catena-gpu")]
 use super::signature::{GeneratedFunction, generated_signatures};
 use super::{
-    signature::{FunctionSignature, SignatureTable, signatures},
+    signature::{EntryPoint, FunctionSignature, SignatureTable, entry_points, signatures},
     value::{Value, ValueKind},
 };
 use crate::codegen::{GpuDialect, gpu::GpuRenderError, gpu::render_modules};
@@ -39,6 +39,7 @@ pub struct Runtime {
 pub struct Artifact {
     /// GPU operations used to validate and release memory crossing the ABI.
     gpu: Arc<GpuApi>,
+    entry_points: Vec<EntryPoint>,
     // Keep the tempdir-backed shared object alive for as long as the library is loaded.
     _shared_object: SharedObject,
     /// Prepared entry points in the loaded shared object.
@@ -49,6 +50,8 @@ pub struct Artifact {
 
 #[derive(Debug, Error)]
 pub enum InitError {
+    #[error("no usable GPU backend (CUDA: {cuda}; HIP: {hip})")]
+    NoBackend { cuda: String, hip: String },
     #[error("Failed to parse program: {0}")]
     Parse(#[from] metacat::theory::ast::ParseRawError),
     #[error(transparent)]
@@ -117,28 +120,43 @@ pub enum ExecError {
     },
     #[error("Argument {index} contains device memory from a different GPU dialect")]
     IncompatibleDeviceMemory { index: usize },
+    #[error("artifact does not provide generated-device-allocation controls")]
+    AllocationBudgetUnavailable,
+    #[error("GPU execution failed while synchronizing: {0}")]
+    GpuSynchronization(String),
 }
 
 impl Runtime {
+    /// Select a provider-local runtime. Auto probes CUDA before HIP, and
+    /// reports both failures if neither has a usable device.
+    pub fn with_backend(backend: super::Backend) -> Result<Self, InitError> {
+        if let Some(dialect) = backend.dialect() {
+            return Self::new(dialect);
+        }
+        Self::new(GpuDialect::Cuda).or_else(|cuda| {
+            Self::new(GpuDialect::Hip).map_err(|hip| InitError::NoBackend {
+                cuda: cuda.to_string(),
+                hip: hip.to_string(),
+            })
+        })
+    }
+
+    pub fn dialect(&self) -> GpuDialect {
+        self.gpu.dialect()
+    }
     pub(crate) fn gpu_api(&self) -> Arc<GpuApi> {
         self.gpu.clone()
     }
 
-    /// Create an empty runtime for the selected GPU dialect
+    /// Construct an empty runtime for the selected GPU dialect.
     pub fn new(dialect: GpuDialect) -> Result<Runtime, InitError> {
         Ok(Self {
             gpu: GpuApi::load(dialect)?,
         })
     }
 
-    /// The GPU dialect used by this runtime.
-    #[cfg(feature = "experimental-catena-gpu")]
-    pub fn dialect(&self) -> GpuDialect {
-        self.gpu.dialect()
-    }
-
     /// Compile Catena programs from paths into a new artifact.
-    pub fn load<I>(&mut self, paths: I) -> Result<Artifact, InitError>
+    pub fn load<I>(&self, paths: I) -> Result<Artifact, InitError>
     where
         I: IntoIterator<Item = PathBuf>,
     {
@@ -146,8 +164,8 @@ impl Runtime {
         self.load_raw_theories(raw_theories)
     }
 
-    /// Compile in-memory Catena sources into a new artifact.
-    pub fn load_sources<'a, I>(&mut self, sources: I) -> Result<Artifact, InitError>
+    /// Compile in-memory Catena source strings into a new artifact.
+    pub fn load_sources<'a, I>(&self, sources: I) -> Result<Artifact, InitError>
     where
         I: IntoIterator<Item = &'a str>,
     {
@@ -155,7 +173,7 @@ impl Runtime {
         self.load_raw_theories(raw_theories)
     }
 
-    fn load_raw_theories(&mut self, raw_theories: RawTheorySet) -> Result<Artifact, InitError> {
+    fn load_raw_theories(&self, raw_theories: RawTheorySet) -> Result<Artifact, InitError> {
         let dialect = self.gpu.dialect();
         let report = crate::compile::compile(raw_theories)?;
         let modules = report
@@ -191,6 +209,7 @@ impl Runtime {
         })?;
         Ok(Artifact {
             gpu: self.gpu.clone(),
+            entry_points: entry_points(&signature_table),
             _shared_object: shared_object,
             executor,
             signatures: signature_table,
@@ -200,10 +219,11 @@ impl Runtime {
     /// Compile and load generated GPU source with its public entry-point ABI.
     ///
     /// This lets another Catena compiler reuse the runtime without depending on
-    /// catena-lang's compiler or code-generation representation.
+    /// catena-lang's compiler or code-generation representation. External
+    /// source is not instrumented for generated-device-allocation budgets.
     #[cfg(feature = "experimental-catena-gpu")]
     pub fn load_generated_source(
-        &mut self,
+        &self,
         source: &str,
         functions: impl IntoIterator<Item = GeneratedFunction>,
     ) -> Result<Artifact, InitError> {
@@ -212,7 +232,7 @@ impl Runtime {
 
     #[cfg(feature = "experimental-catena-gpu")]
     fn load_generated(
-        &mut self,
+        &self,
         source: &str,
         signature_table: SignatureTable,
     ) -> Result<Artifact, InitError> {
@@ -236,13 +256,15 @@ impl Runtime {
         let shared_object = super::artifact::compile(&cpp_path, dialect)?;
 
         let library = load_generated_library(shared_object.path())?;
-        let executor = Executor::new(library, &signature_table).map_err(|error| match error {
-            ExecutorError::LoadSymbol { symbol, source } => {
-                InitError::LoadSymbol { symbol, source }
-            }
-        })?;
+        let executor =
+            Executor::external(library, &signature_table).map_err(|error| match error {
+                ExecutorError::LoadSymbol { symbol, source } => {
+                    InitError::LoadSymbol { symbol, source }
+                }
+            })?;
         Ok(Artifact {
             gpu: self.gpu.clone(),
+            entry_points: entry_points(&signature_table),
             _shared_object: shared_object,
             executor,
             signatures: signature_table,
@@ -263,6 +285,7 @@ impl Runtime {
     pub fn mem_f32(&self, values: &[f32]) -> Result<MemOwn, MemError> {
         MemOwn::from_f32_slice(values, self.gpu.dialect())
     }
+
     /// Allocate an application-owned F32 device buffer initialized to zero.
     pub fn mem_f32_zeroed(&self, element_count: usize) -> Result<MemOwn, MemError> {
         let element_size = std::mem::size_of::<f32>();
@@ -290,6 +313,11 @@ impl Runtime {
 }
 
 impl Artifact {
+    /// Source-level functions compiled into this artifact, sorted by name.
+    pub fn entry_points(&self) -> &[EntryPoint] {
+        &self.entry_points
+    }
+
     /// Run a source-level `program` definition.
     pub fn exec<'a, const M: usize, const N: usize>(
         &self,
@@ -312,7 +340,12 @@ impl Artifact {
             .map(|values| values.try_into().expect("output arity already validated"))
     }
 
-    /// Run a source-level `program` with dynamically sized inputs and outputs.
+    /// Run a source-level `program` with dynamically sized
+    /// input and output collections.
+    ///
+    /// This is the public execution boundary for adapters such as SafeRuntime,
+    /// whose arities are known from a runtime protocol rather than const
+    /// generics.
     pub fn exec_values<'a>(
         &self,
         name: &str,
@@ -325,12 +358,43 @@ impl Artifact {
         self.exec_symbol(name, signature, args)
     }
 
+    /// Run a source-level program while conservatively bounding every device
+    /// allocation made by generated code during this invocation. Allocations
+    /// are charged cumulatively; generated frees do not refund the limit.
+    pub(crate) fn exec_values_with_generated_allocation_budget<'a>(
+        &self,
+        name: &str,
+        args: Vec<Value<'a>>,
+        byte_limit: u64,
+    ) -> Result<Vec<Value<'static>>, ExecError> {
+        let signature = self
+            .signatures
+            .get(name)
+            .ok_or_else(|| ExecError::UnknownSourceFunction(name.to_string()))?;
+        self.exec_symbol_with_generated_allocation_budget(name, signature, args, Some(byte_limit))
+    }
+
     fn exec_symbol<'a>(
         &self,
         name: &str,
         signature: &FunctionSignature,
         args: Vec<Value<'a>>,
     ) -> Result<Vec<Value<'static>>, ExecError> {
+        self.exec_symbol_with_generated_allocation_budget(name, signature, args, None)
+    }
+
+    fn exec_symbol_with_generated_allocation_budget<'a>(
+        &self,
+        name: &str,
+        signature: &FunctionSignature,
+        args: Vec<Value<'a>>,
+        allocation_budget: Option<u64>,
+    ) -> Result<Vec<Value<'static>>, ExecError> {
+        // Reject unsupported limits while the caller's owned inputs are still
+        // Rust values, before transferring them across the generated-code ABI.
+        if allocation_budget.is_some() && !self.executor.supports_allocation_budget() {
+            return Err(ExecError::AllocationBudgetUnavailable);
+        }
         // Check input arity lines up with what's in the function signature.
         if signature.inputs.len() != args.len() {
             return Err(ExecError::InputArityMismatch {
@@ -383,13 +447,29 @@ impl Artifact {
             })
             .collect::<Vec<_>>();
 
-        self.executor
-            .call(&signature.symbol, &raw_inputs, &mut raw_outputs);
+        match allocation_budget {
+            Some(byte_limit) => self.executor.call_with_generated_allocation_budget(
+                &signature.symbol,
+                &raw_inputs,
+                &mut raw_outputs,
+                byte_limit,
+            ),
+            None => self
+                .executor
+                .call(&signature.symbol, &raw_inputs, &mut raw_outputs),
+        }
 
-        raw_outputs
+        // Re-establish Rust ownership before the synchronization boundary. If
+        // synchronization reports a device fault, dropping `outputs` still
+        // attempts to release every allocation returned by generated code.
+        let outputs = raw_outputs
             .into_iter()
             .map(|output| self.resolve_output(output))
-            .collect()
+            .collect::<Result<Vec<_>, _>>()?;
+        self.gpu
+            .synchronize()
+            .map_err(|error| ExecError::GpuSynchronization(error.to_string()))?;
+        Ok(outputs)
     }
 
     fn resolve_output(&self, output: AbiValue) -> Result<Value<'static>, ExecError> {

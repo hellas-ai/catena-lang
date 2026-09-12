@@ -40,7 +40,7 @@ const SOURCE: &str = r#"
 "#;
 
 fn main() -> anyhow::Result<()> {
-    let mut runtime = Runtime::new(configured_gpu_dialect()?)?;
+    let runtime = Runtime::new(configured_gpu_dialect()?)?;
     let artifact = runtime.load_sources(stdlib::sources().chain([SOURCE]))?;
 
     let owned = runtime.mem_u64(&[3, 5])?;

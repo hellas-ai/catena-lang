@@ -21,7 +21,7 @@ const ARRAY_HEAD_PLUS_ONE: &str = r#"
 
 fn main() -> anyhow::Result<()> {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let mut runtime = Runtime::new(configured_gpu_dialect()?)?;
+    let runtime = Runtime::new(configured_gpu_dialect()?)?;
     let artifact =
         runtime.load(stdlib::paths_from(&root).chain([root.join("examples/example.hex")]))?;
     let plus_one = runtime.load_sources(stdlib::sources().chain([ARRAY_HEAD_PLUS_ONE]))?;
@@ -48,6 +48,7 @@ fn main() -> anyhow::Result<()> {
 
     // Execute array-head-u64 with values above
     let input = runtime.mem_u64(&values)?;
+    drop(runtime);
     let [head] = artifact.exec("array-head-u64", [input.as_ref().into()])?;
     let Value::U64(head) = head else {
         anyhow::bail!("array-head-u64 returned non-u64 value: {head:?}");

@@ -122,7 +122,7 @@ We propose the following additional primitives involving closures:
     if (A => B) ● (A => B) ● Bool ● A -> B
 
 In addition, we want _user code_ to be able to use closures
-(this is important for lowering catgrad programs, since we use `Ix n => Dtype`
+(this is important for lowering tensor programs, since we use `Ix n => Dtype`
 as the lowered type of a tensor with type `(Shape, Dtype)`.)
 
 How should closure conversion work for these? We'll start with the 3 primitives above,

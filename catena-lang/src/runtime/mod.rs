@@ -56,6 +56,8 @@ pub mod runtime;
 
 /// Compile generated GPU C++ to a shared object.
 mod artifact;
+mod backend;
+pub use backend::Backend;
 
 /// Marshal catena values into the C ABI and invoke compiled symbols
 mod executor;
@@ -67,10 +69,12 @@ mod signature;
 //mod tests;
 
 pub use artifact::ArtifactError;
+pub(crate) use artifact::RuntimeId;
 pub use mem::MemError;
 pub use mem::MemOwn;
 pub use mem::MemRef;
 pub use runtime::{Artifact, ExecError, InitError, Runtime};
+pub use signature::EntryPoint;
 #[cfg(feature = "experimental-catena-gpu")]
 pub use signature::GeneratedFunction;
 pub use value::Value;

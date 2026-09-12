@@ -210,10 +210,9 @@ materializec.borrow-topk-f32[N, R, O] :
 ```
 
 The two unindexed values are `columns` and `k`. The operation requires
-`columns > 0`, `N = R × columns`, `O = R × k`, and `1 ≤ k ≤ 8`.
-It temporarily borrows the source, returns its unchanged owner, and emits
-row-major top-`k` column indices. Callers requiring `k` valid indices per row
-must additionally ensure `k ≤ columns`.
+`columns > 0`, `N = R × columns`, `O = R × k`, and
+`1 ≤ k ≤ min(8, columns)`. It temporarily borrows the source, returns its
+unchanged owner, and emits row-major top-`k` column indices.
 
 Values are ranked in descending IEEE-bit total order after canonicalizing both
 signed zeros to `+0.0`; equal ordering keys retain the lower column index.
@@ -244,11 +243,3 @@ lengths 257, 2048, and 6144, including cancellation-sensitive values and
 signed zero. The maximum-active-lane argument is part of the feature's
 determinism requirement; increasing the supported reduction length requires
 re-establishing it.
-
-## GPU module save/load hook
-
-`CATENA_GPU_MODULE_SAVE=<path>` copies a newly compiled GPU module to `path`.
-`CATENA_GPU_MODULE_LOAD=<path>` loads that module instead of invoking the GPU
-compiler. This opt-in runtime hook supports profiling tools that cannot safely
-nest a `hipcc` invocation; normal runtime construction does not use it, and
-the caller is responsible for cache validity.

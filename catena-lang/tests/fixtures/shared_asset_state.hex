@@ -1,0 +1,42 @@
+# Read the old private state before replacing it with this step's prompt+weight.
+(def program shared-state-next-at :
+  ([capacity n.] {
+    ({cap.ref [.capacity] u64} buf val)
+    ({({({[.capacity] u64} :) (u64 val)} *) ([.n] ix val)} *)
+  })
+  ->
+  ([capacity n.] (u64 val))
+= ([state packed.]
+  ([.packed] *.elim [environment _index.])
+  ([.environment] *.elim [state-len delta.])
+  ([.state-len] u64.assert-nz ix.zero [first.])
+  ({[.first state]} ix [previous.])
+  ({[.previous delta]} u64.add)
+))
+
+(def program shared-state-test :
+  {(cap.ref mem) (cap.own mem) (u64 val) (u64 val) (cap.ref mem)}
+  ->
+  {(cap.own mem) (cap.own mem) (cap.own mem)}
+= ([tokens state _capacity _position weight.]
+  ([.tokens] causal-test-head [first-token.])
+  ([.weight] causal-test-head [weight-value.])
+  ({[.first-token weight-value]} u64.add [delta.])
+  ([.state] mem.cast.u64 [state-len state-buffer.])
+  (const.u64.0x0000000000000001 u64.name [one.])
+  ({
+    [.state-buffer] [.state-len] [.one]
+    ({[.state-len] [.delta]} *.intro)
+    ({([.state-len] :.param) ([.one] :.param)} name.shared-state-next-at)
+  } materializec.borrow [borrowed-state next-buffer.])
+  ({
+    [.borrowed-state] [.state-len] const.u64.0x0000000000000000
+    [.state-len] [.delta]
+    (([.state-len] :.param) name.causal-test-next-at)
+  } materializec.into [updated-state.])
+  ({[.state-len] [.updated-state]} buf.to-mem [state-result.])
+  ({[.one] [.next-buffer]} buf.to-mem [next-token.])
+  (const.u64.0x0000000000000010 u64.name [vocabulary.])
+  ([.vocabulary] causal-test-logits [logits.])
+  {[.state-result] [.logits] [.next-token]}
+))

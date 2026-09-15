@@ -713,7 +713,7 @@ fn materialize_borrow_topk_f32_is_stable_and_canonicalizes_zero() -> anyhow::Res
 fn materialize_borrow_topk_f32_parallel_path_matches_stable_key_order() -> anyhow::Result<()> {
     let runtime = runtime_with(SOURCE)?;
 
-    for columns in [128_usize, 129] {
+    for columns in [127_usize, 128, 129, 255, 256, 257] {
         let values = (0..columns)
             .map(|index| match index % 11 {
                 0 => -0.0,

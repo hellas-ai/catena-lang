@@ -1451,9 +1451,9 @@ pub(in crate::codegen) fn render_borrow_topk_f32_kernel(
     out.push_str("    uint64_t row = (uint64_t)blockIdx.x;\n");
     out.push_str("    if (row >= rows) { return; }\n");
     out.push_str("    uint64_t row_base = row * columns;\n");
-    out.push_str("    if (columns <= 128) {\n");
-    out.push_str("        __shared__ uint32_t sort_keys[128];\n");
-    out.push_str("        __shared__ uint64_t sort_indices[128];\n");
+    out.push_str("    if (columns <= 256) {\n");
+    out.push_str("        __shared__ uint32_t sort_keys[256];\n");
+    out.push_str("        __shared__ uint64_t sort_indices[256];\n");
     out.push_str("        uint32_t lane = (uint32_t)threadIdx.x;\n");
     out.push_str("        uint32_t candidate_key = 0;\n");
     out.push_str("        uint64_t candidate_index = UINT64_MAX;\n");
@@ -1470,7 +1470,7 @@ pub(in crate::codegen) fn render_borrow_topk_f32_kernel(
     out.push_str("        sort_keys[lane] = candidate_key;\n");
     out.push_str("        sort_indices[lane] = candidate_index;\n");
     out.push_str("        __syncthreads();\n");
-    out.push_str("        for (uint32_t size = 2; size <= 128; size <<= 1) {\n");
+    out.push_str("        for (uint32_t size = 2; size <= (uint32_t)blockDim.x; size <<= 1) {\n");
     out.push_str("            for (uint32_t stride = size >> 1; stride != 0; stride >>= 1) {\n");
     out.push_str("                uint32_t partner = lane ^ stride;\n");
     out.push_str("                if (partner > lane) {\n");
@@ -1565,7 +1565,7 @@ pub(in crate::codegen) fn render_borrow_topk_f32_call(
         index_output.name
     ));
     out.push_str(&format!(
-        "        {kernel_name}<<<dim3({rows}), dim3(128)>>>(\n            {}, {rows}, {columns}, {k}, {}_data);\n",
+        "        {kernel_name}<<<dim3({rows}), dim3(({columns}) <= 128 ? 128 : (({columns}) <= 256 ? 256 : 128))>>>(\n            {}, {rows}, {columns}, {k}, {}_data);\n",
         value_expr(source),
         index_output.name
     ));

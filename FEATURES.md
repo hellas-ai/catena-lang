@@ -473,6 +473,18 @@ outputs remain BF16. Gate and up products have independent F32 accumulators;
 supported AMD targets use packed BF16 dot instructions, and each final sum is
 rounded once.
 
+## `materializec.borrow-routed-native-bf16-gemm-wmma-pair`
+
+This primitive has the same signature, ownership contract, weight layout, and
+output layout as `materializec.borrow-routed-native-bf16-gemv-pair`. On HIP
+gfx11, route sets with at least 16 routes per expert are grouped stably by
+expert and evaluated in 16-row by 16-column rocWMMA tiles. Gate and up share
+each input tile, accumulate independently in F32, and are scattered back to
+the original `[row, slot, output-feature]` order before returning.
+
+Grouping storage is temporary and stream ordered. Smaller or unaligned shapes,
+models with more than 256 experts, and CUDA use the packed-BF16 SIMT kernel.
+
 ## `materializec.borrow-routed-native-bf16-gemv-residual`
 
 ```text

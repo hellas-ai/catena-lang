@@ -277,6 +277,15 @@ fn render_module_body(
                 dialect,
             )?;
             out.push('\n');
+        } else if assignment.op.as_str() == "materializec.borrow-routed-native-bf16-gemm-wmma-pair"
+        {
+            materializec::render_borrow_routed_native_bf16_gemm_wmma_pair_kernels(
+                out,
+                &materializec::kernel_name(&module.entry.name, assignment)?,
+                assignment,
+                dialect,
+            )?;
+            out.push('\n');
         } else if assignment.op.as_str() == "materializec.borrow-routed-native-bf16-gemv-residual" {
             materializec::render_borrow_routed_native_bf16_gemv_residual_kernel(
                 out,
@@ -546,7 +555,20 @@ fn render_assignment(
         }
         "materializec.borrow-routed-native-bf16-gemv-pair" => {
             materializec::render_borrow_routed_native_bf16_gemv_pair_call(
-                out, function, assignment, dialect,
+                out,
+                function,
+                assignment,
+                dialect,
+                materializec::RoutedNativeBf16PairBackend::Simt,
+            )?
+        }
+        "materializec.borrow-routed-native-bf16-gemm-wmma-pair" => {
+            materializec::render_borrow_routed_native_bf16_gemv_pair_call(
+                out,
+                function,
+                assignment,
+                dialect,
+                materializec::RoutedNativeBf16PairBackend::Wmma,
             )?
         }
         "materializec.borrow-routed-native-bf16-gemv-residual" => {

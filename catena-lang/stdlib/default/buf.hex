@@ -297,6 +297,31 @@
       ({cap.own [.n] bf16} buf val)
     }})
 
+  # Matrix-core routed counterpart. Large route sets are grouped by expert
+  # internally; its ownership and output layout match the native GEMV.
+  (arr materializec.borrow-routed-native-bf16-gemm-wmma-pair :
+    {[input-cap gate-cap up-cap selected-cap n k.]
+      ({cap.own [.input-cap] bf16} buf val)
+      ({[.input-cap] u64} :)
+      ({cap.ref [.gate-cap] bf16} buf val)
+      ({[.gate-cap] u64} :)
+      ({cap.ref [.up-cap] bf16} buf val)
+      ({[.up-cap] u64} :)
+      ({cap.own [.selected-cap] u64} buf val)
+      ({[.selected-cap] u64} :)
+      ({[.n] u64} :)
+      ({[.k] u64} :)
+      (u64 val)
+      (u64 val)
+    }
+    ->
+    {[input-cap gate-cap up-cap selected-cap n k.] {
+      ({cap.own [.input-cap] bf16} buf val)
+      ({cap.own [.selected-cap] u64} buf val)
+      ({cap.own [.n] bf16} buf val)
+      ({cap.own [.n] bf16} buf val)
+    }})
+
   # Paired dense BF16 GEMV which returns the input owner.
   (arr materializec.borrow-native-bf16-gemv-pair :
     {[input-cap gate-cap up-cap n k.]

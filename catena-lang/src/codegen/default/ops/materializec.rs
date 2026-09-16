@@ -864,7 +864,7 @@ pub(in crate::codegen) fn render_borrow_routed_native_bf16_gemv_pair_kernel(
     out.push_str(&format!(
         "__global__ void {kernel_name}(const catena_bf16_t *input, const catena_bf16_t *gate_weight, const catena_bf16_t *up_weight, const uint64_t *selected, catena_bf16_t *gate_out, catena_bf16_t *up_out, uint64_t output_len, uint64_t reduction_len, uint64_t slots, uint64_t output_features, uint64_t expert_count) {{\n"
     ));
-    out.push_str("    uint64_t output_index = (uint64_t)blockIdx.x;\n");
+    out.push_str("    uint64_t output_index = (uint64_t)blockIdx.x + (uint64_t)blockIdx.y * (uint64_t)gridDim.x;\n");
     out.push_str("    if (output_index >= output_len) { return; }\n");
     out.push_str("    uint64_t active_width = slots * output_features;\n");
     out.push_str("    uint64_t row = output_index / active_width;\n");
@@ -959,7 +959,7 @@ pub(in crate::codegen) fn render_borrow_routed_native_bf16_gemv_residual_kernel(
     let _ = borrow_routed_bf16_gemv_residual_parts(assignment)?;
 
     out.push_str(&format!("__global__ void {kernel_name}(const catena_bf16_t *active, const catena_bf16_t *down_weight, const uint64_t *selected, const catena_bf16_t *residual, catena_bf16_t *out, uint64_t output_len, uint64_t reduction_len, uint64_t slots, uint64_t intermediate, uint64_t output_features, uint64_t expert_count) {{\n"));
-    out.push_str("    uint64_t output_index = (uint64_t)blockIdx.x;\n");
+    out.push_str("    uint64_t output_index = (uint64_t)blockIdx.x + (uint64_t)blockIdx.y * (uint64_t)gridDim.x;\n");
     out.push_str("    if (output_index >= output_len) { return; }\n");
     out.push_str("    uint64_t row = output_index / output_features;\n");
     out.push_str("    uint64_t output_feature = output_index % output_features;\n");
@@ -1953,7 +1953,7 @@ pub(in crate::codegen) fn render_borrow_routed_native_bf16_gemv_pair_call(
     for output in [gate_output, up_output] {
         out.push_str(&format!("        catena_host_gpu_check({}((void **)&{}_data, ({output_len}) * sizeof(catena_bf16_t), nullptr));\n", dialect.device_alloc_async_fn(), output.name));
     }
-    out.push_str(&format!("        {kernel_name}<<<dim3({output_len}), dim3(256)>>>(\n            {}, {}, {}, {}, {}_data, {}_data, {output_len}, {reduction_len}, {slots}, {output_features}, {prefix}_expert_count);\n", value_expr(input), value_expr(gate_weight), value_expr(up_weight), value_expr(selected), gate_output.name, up_output.name));
+    out.push_str(&format!("        const uint64_t {prefix}_max_blocks_x = UINT32_MAX / 256u;\n        uint64_t {prefix}_blocks_x = ({output_len}) < {prefix}_max_blocks_x ? ({output_len}) : {prefix}_max_blocks_x;\n        uint64_t {prefix}_blocks_y = ({output_len}) / {prefix}_blocks_x + ((({output_len}) % {prefix}_blocks_x) != 0);\n        catena_assert({prefix}_blocks_y <= UINT32_MAX);\n        {kernel_name}<<<dim3((uint32_t){prefix}_blocks_x, (uint32_t){prefix}_blocks_y), dim3(256)>>>(\n            {}, {}, {}, {}, {}_data, {}_data, {output_len}, {reduction_len}, {slots}, {output_features}, {prefix}_expert_count);\n", value_expr(input), value_expr(gate_weight), value_expr(up_weight), value_expr(selected), gate_output.name, up_output.name));
     out.push_str("    }\n");
     out.push_str(&format!(
         "    {} = {};\n    {} = {};\n    {} = {}_data;\n    {} = {}_data;\n",
@@ -2032,7 +2032,7 @@ pub(in crate::codegen) fn render_borrow_routed_native_bf16_gemv_residual_call(
         output.name
     ));
     out.push_str(&format!("    if (({output_len}) != 0) {{\n        catena_host_gpu_check({}((void **)&{}_data, ({output_len}) * sizeof(catena_bf16_t), nullptr));\n", dialect.device_alloc_async_fn(), output.name));
-    out.push_str(&format!("        {kernel_name}<<<dim3({output_len}), dim3(256)>>>(\n            {}, {}, {}, {}, {}_data, {output_len}, {reduction_len}, {slots}, {intermediate}, {output_features}, {prefix}_expert_count);\n    }}\n", value_expr(active), value_expr(down), value_expr(selected), value_expr(residual), output.name));
+    out.push_str(&format!("        const uint64_t {prefix}_max_blocks_x = UINT32_MAX / 256u;\n        uint64_t {prefix}_blocks_x = ({output_len}) < {prefix}_max_blocks_x ? ({output_len}) : {prefix}_max_blocks_x;\n        uint64_t {prefix}_blocks_y = ({output_len}) / {prefix}_blocks_x + ((({output_len}) % {prefix}_blocks_x) != 0);\n        catena_assert({prefix}_blocks_y <= UINT32_MAX);\n        {kernel_name}<<<dim3((uint32_t){prefix}_blocks_x, (uint32_t){prefix}_blocks_y), dim3(256)>>>(\n            {}, {}, {}, {}, {}_data, {output_len}, {reduction_len}, {slots}, {intermediate}, {output_features}, {prefix}_expert_count);\n    }}\n", value_expr(active), value_expr(down), value_expr(selected), value_expr(residual), output.name));
     out.push_str(&format!(
         "    {} = {};\n    {} = {};\n    {} = {};\n    {} = {}_data;\n",
         active_output.name,

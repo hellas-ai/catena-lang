@@ -1,5 +1,43 @@
 # Catena performance features
 
+## Naming and lifecycle status
+
+The names are compositional. `materializec` marks an explicit materialization,
+`borrow` returns a temporarily borrowed owner, `native-bf16` keeps activation
+and result storage in BF16, `routed` selects MoE weights per route, `gemv` is
+the SIMT/small-batch path, `gemm-wmma` uses matrix-core instructions,
+`gemm-blas` calls the platform BLAS library, `pair` produces gate and up
+together, and `residual` includes residual addition. The `f32` suffix denotes
+F32 storage for storage-specific operations, but denotes F32 accumulation for
+the reduction and softmax operations, which also accept BF16 storage.
+
+All added operations remain supported compiler APIs. Only
+`materializec.reduce-f32-pair` is no longer emitted by the supported Qwen
+templates; it is superseded there, not removed or compiler-deprecated. The
+SIMT operations marked as fallbacks remain necessary for decode, small or
+unaligned inputs, unsupported devices, and runs without matrix cores.
+
+| Added operation or family | Main reason for existing | Current status |
+| --- | --- | --- |
+| `materializec.into` | Update a range of persistent KV or recurrent state without copying its previous contents | Active |
+| `materializec.borrow` | Read persistent state while preserving its linear owner | Active |
+| `materializec.reduce-f32` | Deterministic cooperative F32 reduction with F32 or BF16 result storage | Active |
+| `materializec.borrow-reduce-f32` | Apply the same reduction while returning a borrowed source owner | Active |
+| `materializec.reduce-f32-pair` | Share addressing and launch work between two deterministic reductions | Superseded in Qwen templates; retained and tested |
+| `materializec.softmax-f32` | Normalize F32 or BF16 attention rows with F32 arithmetic | Active |
+| `materializec.borrow-argmax-f32`, `materializec.borrow-argmax-bf16` | Select a token on the GPU without copying vocabulary logits to the host | Active F32/BF16 variants |
+| `materializec.borrow-topk-f32` | Perform stable GPU MoE expert selection for routers through 256 columns | Active |
+| `materializec.bf16-gemv`, `materializec.bf16-gemm-wmma`, `materializec.bf16-gemm-blas` | Provide SIMT, matrix-core, and vendor-library backends for ordinary BF16 projections | Active; GEMV is also the accelerated paths' fallback |
+| `materializec.borrow-native-bf16-gemv-pair`, `materializec.borrow-native-bf16-gemm-wmma-pair`, `materializec.borrow-native-bf16-gemm-blas-pair` | Compute dense or shared-expert gate/up projections from one BF16 input | Active; GEMV is also the accelerated paths' fallback |
+| `materializec.borrow-routed-bf16-gemv-pair` | Compute routed gate/up for F32 graphs using BF16 expert weights | Active in F32 model graphs |
+| `materializec.borrow-gated-delta-net-f32`, `materializec.borrow-gated-delta-net-bf16` | Fuse a complete Qwen3.5/3.6 recurrent DeltaNet scan | Active F32/BF16 variants |
+| `materializec.borrow-cached-context-f32`, `materializec.borrow-cached-context-bf16` | Tile the probability-times-V half of exact cached attention | Active F32/BF16 variants |
+| `materializec.borrow-routed-native-bf16-gemv-pair`, `materializec.borrow-routed-native-bf16-gemm-wmma-pair` | Compute native-BF16 routed gate/up with SIMT or grouped HIP matrix cores | Active; GEMV remains the decode/CUDA/shape fallback |
+| `materializec.borrow-routed-native-bf16-gemv-residual`, `materializec.borrow-routed-native-bf16-gemm-wmma-residual` | Compute native-BF16 routed down projection, slot combination, and residual addition | Active; GEMV remains the decode/CUDA/shape fallback |
+
+`Runtime::mem_bf16_zeroed` and the GPU module save/load hook documented below
+are supporting runtime facilities rather than Catena primitives.
+
 ## `materializec.into`
 
 ```text
@@ -484,6 +522,20 @@ the original `[row, slot, output-feature]` order before returning.
 
 Grouping storage is temporary and stream ordered. Smaller or unaligned shapes,
 models with more than 256 experts, and CUDA use the packed-BF16 SIMT kernel.
+
+## `materializec.borrow-routed-native-bf16-gemm-wmma-residual`
+
+This is the HIP matrix-core counterpart of
+`materializec.borrow-routed-native-bf16-gemv-residual`, with the same inputs,
+outputs, and ownership contract. Large route sets are grouped stably by expert
+and each expert's down projection is evaluated in 16-row by 16-column rocWMMA
+tiles. F32 per-route contributions are scattered to original route order, then
+a separate kernel adds slots in ascending order, adds the residual, and rounds
+once to BF16. No atomics or scheduling-dependent reductions are used.
+
+The grouped path requires at most 256 experts, at least 16 routes per expert on
+average, and 16-aligned intermediate and output dimensions. Other shapes and
+CUDA use the native-BF16 SIMT implementation.
 
 ## `materializec.borrow-routed-native-bf16-gemv-residual`
 

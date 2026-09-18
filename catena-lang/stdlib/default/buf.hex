@@ -412,6 +412,32 @@
       ({cap.own [.n] bf16} buf val)
     }})
 
+  # HIP matrix-core routed down projection with the same ownership contract.
+  # Large route sets are grouped by expert and small shapes retain SIMT.
+  (arr materializec.borrow-routed-native-bf16-gemm-wmma-residual :
+    {[active-cap down-cap selected-cap residual-cap n k.]
+      ({cap.own [.active-cap] bf16} buf val)
+      ({[.active-cap] u64} :)
+      ({cap.ref [.down-cap] bf16} buf val)
+      ({[.down-cap] u64} :)
+      ({cap.own [.selected-cap] u64} buf val)
+      ({[.selected-cap] u64} :)
+      ({cap.own [.residual-cap] bf16} buf val)
+      ({[.residual-cap] u64} :)
+      ({[.n] u64} :)
+      ({[.k] u64} :)
+      (u64 val)
+      (u64 val)
+      (u64 val)
+    }
+    ->
+    {[active-cap down-cap selected-cap residual-cap n k.] {
+      ({cap.own [.active-cap] bf16} buf val)
+      ({cap.own [.selected-cap] u64} buf val)
+      ({cap.own [.residual-cap] bf16} buf val)
+      ({cap.own [.n] bf16} buf val)
+    }})
+
   # Multiply a row-major BF16 input matrix by the transpose of a row-major
   # BF16 weight matrix. Products use the target's packed BF16 dot operation
   # where available, accumulate in F32, and round the result once to BF16.

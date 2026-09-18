@@ -1156,6 +1156,140 @@ pub(in crate::codegen) fn render_borrow_routed_native_bf16_gemv_residual_kernel(
     Ok(())
 }
 
+pub(in crate::codegen) fn render_borrow_routed_native_bf16_gemm_wmma_residual_kernels(
+    out: &mut String,
+    kernel_name: &str,
+    assignment: &GpuAssign,
+    dialect: GpuDialect,
+) -> Result<(), GpuRenderError> {
+    render_borrow_routed_native_bf16_gemv_residual_kernel(
+        out,
+        &format!("{kernel_name}_simt"),
+        assignment,
+        dialect,
+    )?;
+    if dialect != GpuDialect::Hip {
+        return Ok(());
+    }
+
+    out.push_str(
+        "#if !defined(__HIP_DEVICE_COMPILE__) || defined(__gfx1100__) || defined(__gfx1101__) || defined(__gfx1102__) || defined(__gfx1103__) || defined(__gfx1150__) || defined(__gfx1151__) || defined(__gfx1152__) || defined(__gfx1153__)\n#include <rocwmma/rocwmma.hpp>\n",
+    );
+    let source = r#"
+__global__ void __KERNEL___group(
+    const uint64_t *selected, uint64_t route_count, uint64_t expert_count,
+    uint64_t *offsets, uint64_t *permutation) {
+    __shared__ uint64_t counts[256];
+    uint64_t expert = (uint64_t)threadIdx.x;
+    uint64_t count = 0;
+    if (expert < expert_count) {
+        for (uint64_t route = 0; route < route_count; ++route) {
+            count += selected[route] == expert;
+        }
+    }
+    counts[threadIdx.x] = count;
+    __syncthreads();
+    if (threadIdx.x == 0) {
+        offsets[0] = 0;
+        for (uint64_t index = 0; index < expert_count; ++index) {
+            offsets[index + 1] = offsets[index] + counts[index];
+        }
+        catena_assert(offsets[expert_count] == route_count);
+    }
+    __syncthreads();
+    if (expert < expert_count) {
+        uint64_t output = offsets[expert];
+        for (uint64_t route = 0; route < route_count; ++route) {
+            if (selected[route] == expert) {
+                permutation[output++] = route;
+            }
+        }
+    }
+}
+
+__global__ void __KERNEL__(
+    const catena_bf16_t *active, const catena_bf16_t *down_weight,
+    const uint64_t *offsets, const uint64_t *permutation,
+    float *route_output, uint64_t intermediate, uint64_t output_features) {
+    using frag_a_t = rocwmma::fragment<rocwmma::matrix_a, 16, 16, 16, catena_bf16_t, rocwmma::row_major>;
+    using frag_b_t = rocwmma::fragment<rocwmma::matrix_b, 16, 16, 16, catena_bf16_t, rocwmma::col_major>;
+    using frag_c_t = rocwmma::fragment<rocwmma::accumulator, 16, 16, 16, float>;
+
+    uint64_t expert = (uint64_t)blockIdx.y;
+    uint64_t column_base = (uint64_t)blockIdx.x * 16;
+    uint64_t route_begin = offsets[expert];
+    uint64_t route_end = offsets[expert + 1];
+    __shared__ catena_bf16_t tile_a[16 * 16];
+    __shared__ catena_bf16_t tile_b[16 * 16];
+    __shared__ float tile_c[16 * 16];
+
+    for (uint64_t route_base = route_begin; route_base < route_end; route_base += 16) {
+        frag_a_t a;
+        frag_b_t b;
+        frag_c_t c;
+        rocwmma::fill_fragment(c, 0.0f);
+        for (uint64_t k_base = 0; k_base < intermediate; k_base += 16) {
+            for (uint32_t flat = threadIdx.x; flat < 256; flat += blockDim.x) {
+                uint32_t tile_row = flat >> 4;
+                uint32_t tile_column = flat & 15;
+                uint64_t grouped_route = route_base + tile_row;
+                uint64_t k = k_base + tile_column;
+                if (grouped_route < route_end && k < intermediate) {
+                    uint64_t route = permutation[grouped_route];
+                    tile_a[flat] = active[route * intermediate + k];
+                } else {
+                    tile_a[flat] = catena_bf16_from_f32(0.0f);
+                }
+                uint64_t column = column_base + tile_row;
+                if (column < output_features && k < intermediate) {
+                    tile_b[flat] =
+                        down_weight[(expert * output_features + column) * intermediate + k];
+                } else {
+                    tile_b[flat] = catena_bf16_from_f32(0.0f);
+                }
+            }
+            __syncthreads();
+            rocwmma::load_matrix_sync(a, tile_a, 16);
+            rocwmma::load_matrix_sync(b, tile_b, 16);
+            rocwmma::mma_sync(c, a, b, c);
+            __syncthreads();
+        }
+        rocwmma::store_matrix_sync(tile_c, c, 16, rocwmma::mem_row_major);
+        __syncthreads();
+        for (uint32_t flat = threadIdx.x; flat < 256; flat += blockDim.x) {
+            uint64_t grouped_route = route_base + (flat >> 4);
+            uint64_t column = column_base + (flat & 15);
+            if (grouped_route < route_end && column < output_features) {
+                uint64_t route = permutation[grouped_route];
+                route_output[route * output_features + column] = tile_c[flat];
+            }
+        }
+        __syncthreads();
+    }
+}
+
+__global__ void __KERNEL___combine(
+    const float *route_output, const catena_bf16_t *residual,
+    catena_bf16_t *out, uint64_t output_len, uint64_t slots,
+    uint64_t output_features) {
+    uint64_t output_index = (uint64_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (output_index >= output_len) {
+        return;
+    }
+    uint64_t row = output_index / output_features;
+    uint64_t column = output_index % output_features;
+    float sum = catena_bf16_to_f32(residual[output_index]);
+    for (uint64_t slot = 0; slot < slots; ++slot) {
+        sum += route_output[(row * slots + slot) * output_features + column];
+    }
+    out[output_index] = catena_bf16_from_f32(sum);
+}
+"#;
+    out.push_str(&source.replace("__KERNEL__", kernel_name));
+    out.push_str("#endif\n");
+    Ok(())
+}
+
 pub(in crate::codegen) fn render_bf16_gemv_kernel(
     out: &mut String,
     kernel_name: &str,
@@ -2136,11 +2270,18 @@ pub(in crate::codegen) fn render_borrow_routed_native_bf16_gemv_pair_call(
     Ok(())
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(in crate::codegen) enum RoutedNativeBf16ResidualBackend {
+    Simt,
+    Wmma,
+}
+
 pub(in crate::codegen) fn render_borrow_routed_native_bf16_gemv_residual_call(
     out: &mut String,
     function: &GpuFunction,
     assignment: &GpuAssign,
     dialect: GpuDialect,
+    backend: RoutedNativeBf16ResidualBackend,
 ) -> Result<(), GpuRenderError> {
     let [active_output, selected_output, residual_output, output] = assignment.outputs.as_slice()
     else {
@@ -2195,11 +2336,40 @@ pub(in crate::codegen) fn render_borrow_routed_native_bf16_gemv_residual_call(
         "    uint64_t {prefix}_expert_count = ({down_capacity}) / {prefix}_expert_stride;\n"
     ));
     out.push_str(&format!(
+        "    catena_assert(({output_features}) == 0 || ({selected_capacity}) <= UINT64_MAX / ({output_features}));\n"
+    ));
+    out.push_str(&format!(
         "    catena_bf16_t *{}_data = nullptr;\n",
         output.name
     ));
     out.push_str(&format!("    if (({output_len}) != 0) {{\n        catena_host_gpu_check({}((void **)&{}_data, ({output_len}) * sizeof(catena_bf16_t), nullptr));\n", dialect.device_alloc_async_fn(), output.name));
-    out.push_str(&format!("        const uint64_t {prefix}_max_blocks_x = UINT32_MAX / 256u;\n        uint64_t {prefix}_blocks_x = ({output_len}) < {prefix}_max_blocks_x ? ({output_len}) : {prefix}_max_blocks_x;\n        uint64_t {prefix}_blocks_y = ({output_len}) / {prefix}_blocks_x + ((({output_len}) % {prefix}_blocks_x) != 0);\n        catena_assert({prefix}_blocks_y <= UINT32_MAX);\n        {kernel_name}<<<dim3((uint32_t){prefix}_blocks_x, (uint32_t){prefix}_blocks_y), dim3(256)>>>(\n            {}, {}, {}, {}, {}_data, {output_len}, {reduction_len}, {slots}, {intermediate}, {output_features}, {prefix}_expert_count);\n    }}\n", value_expr(active), value_expr(down), value_expr(selected), value_expr(residual), output.name));
+    let simt_kernel_name = match backend {
+        RoutedNativeBf16ResidualBackend::Simt => kernel_name.clone(),
+        RoutedNativeBf16ResidualBackend::Wmma => format!("{kernel_name}_simt"),
+    };
+    let simt_call = format!(
+        "        const uint64_t {prefix}_max_blocks_x = UINT32_MAX / 256u;\n        uint64_t {prefix}_blocks_x = ({output_len}) < {prefix}_max_blocks_x ? ({output_len}) : {prefix}_max_blocks_x;\n        uint64_t {prefix}_blocks_y = ({output_len}) / {prefix}_blocks_x + ((({output_len}) % {prefix}_blocks_x) != 0);\n        catena_assert({prefix}_blocks_y <= UINT32_MAX);\n        {simt_kernel_name}<<<dim3((uint32_t){prefix}_blocks_x, (uint32_t){prefix}_blocks_y), dim3(256)>>>(\n            {}, {}, {}, {}, {}_data, {output_len}, {reduction_len}, {slots}, {intermediate}, {output_features}, {prefix}_expert_count);\n",
+        value_expr(active),
+        value_expr(down),
+        value_expr(selected),
+        value_expr(residual),
+        output.name,
+    );
+    if backend == RoutedNativeBf16ResidualBackend::Wmma && dialect == GpuDialect::Hip {
+        out.push_str(&format!(
+            "        if ({prefix}_expert_count != 0 && {prefix}_expert_count <= 256 && ({selected_capacity}) >= {prefix}_expert_count * 16 && (({intermediate}) & 15) == 0 && (({output_features}) & 15) == 0) {{\n            uint64_t *{prefix}_offsets = nullptr;\n            uint64_t *{prefix}_permutation = nullptr;\n            float *{prefix}_route_output = nullptr;\n            uint64_t {prefix}_route_output_len = ({selected_capacity}) * ({output_features});\n            catena_host_gpu_check({alloc}((void **)&{prefix}_offsets, ({prefix}_expert_count + 1) * sizeof(uint64_t), nullptr));\n            catena_host_gpu_check({alloc}((void **)&{prefix}_permutation, ({selected_capacity}) * sizeof(uint64_t), nullptr));\n            catena_host_gpu_check({alloc}((void **)&{prefix}_route_output, {prefix}_route_output_len * sizeof(float), nullptr));\n            {kernel_name}_group<<<dim3(1), dim3(256)>>>(\n                {}, {selected_capacity}, {prefix}_expert_count, {prefix}_offsets, {prefix}_permutation);\n            {kernel_name}<<<dim3((({output_features}) + 15) / 16, {prefix}_expert_count), dim3(32)>>>(\n                {}, {}, {prefix}_offsets, {prefix}_permutation, {prefix}_route_output, {intermediate}, {output_features});\n            {kernel_name}_combine<<<dim3((({output_len}) + 255) / 256), dim3(256)>>>(\n                {prefix}_route_output, {}, {}_data, {output_len}, {slots}, {output_features});\n            catena_host_gpu_check({free}({prefix}_offsets, nullptr));\n            catena_host_gpu_check({free}({prefix}_permutation, nullptr));\n            catena_host_gpu_check({free}({prefix}_route_output, nullptr));\n        }} else {{\n{simt_call}        }}\n",
+            value_expr(selected),
+            value_expr(active),
+            value_expr(down),
+            value_expr(residual),
+            output.name,
+            alloc = dialect.device_alloc_async_fn(),
+            free = dialect.device_free_async_fn(),
+        ));
+    } else {
+        out.push_str(&simt_call);
+    }
+    out.push_str("    }\n");
     out.push_str(&format!(
         "    {} = {};\n    {} = {};\n    {} = {};\n    {} = {}_data;\n",
         active_output.name,

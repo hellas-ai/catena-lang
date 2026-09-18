@@ -88,6 +88,7 @@ fn function_directly_requires_host(function: &GpuFunction) -> bool {
                 | "materializec.borrow-routed-native-bf16-gemv-pair"
                 | "materializec.borrow-routed-native-bf16-gemm-wmma-pair"
                 | "materializec.borrow-routed-native-bf16-gemv-residual"
+                | "materializec.borrow-routed-native-bf16-gemm-wmma-residual"
                 | "materializec.bf16-gemv"
                 | "materializec.bf16-gemm-wmma"
                 | "materializec.bf16-gemm-blas"

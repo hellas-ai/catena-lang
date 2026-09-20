@@ -310,6 +310,22 @@ impl Runtime {
         self.gpu.zero(data, byte_len)?;
         Ok(memory)
     }
+
+    /// Deep-copy mutable state; the source and copy must never alias.
+    pub(crate) fn copy_memory(&self, source: &MemOwn) -> Result<MemOwn, MemError> {
+        let byte_len =
+            usize::try_from(source.byte_len()).map_err(|_| MemError::LengthTooLarge {
+                byte_len: source.byte_len(),
+            })?;
+        let data = self.gpu.allocate(byte_len)?;
+        // SAFETY: this allocation was created above by the same GPU API.
+        let memory =
+            unsafe { MemOwn::from_raw_parts_with_gpu(data, byte_len as u64, self.gpu.clone()) };
+        self.gpu
+            .copy_device_to_device(memory.as_ptr(), source.as_ptr().cast_const(), byte_len)?;
+        self.gpu.synchronize()?;
+        Ok(memory)
+    }
 }
 
 impl Artifact {

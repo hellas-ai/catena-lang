@@ -4,7 +4,7 @@ use anyhow::{Context, Result, bail, ensure};
 
 use super::{
     assets::AssetStore,
-    protocol::{WireAssetSlice, WireModelBinding},
+    protocol::{WireAssetSlice, WireModelBinding, WirePrefixRequest},
 };
 use crate::runtime::{Artifact, EntryPoint, ExecError, MemOwn, Runtime, Value, ValueKind};
 
@@ -106,6 +106,27 @@ struct Generation {
     state_byte_len: u64,
     capacity: u64,
     position: u64,
+    prefix: Option<WirePrefixRequest>,
+    // Charge both mutable state and its retained snapshot to each forward.
+    reserved_cache_bytes: u64,
+}
+
+struct PrefixCheckpoint {
+    model: u64,
+    capacity: u64,
+    chunk_tokens: u32,
+    tokens: Vec<u32>,
+    states: Vec<MemOwn>,
+}
+
+impl PrefixCheckpoint {
+    fn matches(&self, model: u64, capacity: u64, request: &WirePrefixRequest) -> bool {
+        self.model == model
+            && self.capacity == capacity
+            && self.chunk_tokens == request.chunk_tokens
+            && self.tokens.len() < request.prompt_tokens.len()
+            && request.prompt_tokens.starts_with(&self.tokens)
+    }
 }
 
 pub(super) struct ResidentStore {
@@ -113,6 +134,8 @@ pub(super) struct ResidentStore {
     generations: HashMap<u64, Generation>,
     next_model: u64,
     next_generation: u64,
+    // At most one checkpoint in this worker, including across model switches.
+    prefix_cache: Option<PrefixCheckpoint>,
 }
 
 impl ResidentStore {
@@ -122,6 +145,7 @@ impl ResidentStore {
             generations: HashMap::new(),
             next_model: 1,
             next_generation: 1,
+            prefix_cache: None,
         }
     }
 
@@ -167,7 +191,8 @@ impl ResidentStore {
         runtime: &Runtime,
         model: u64,
         capacity: u64,
-    ) -> Result<u64> {
+        prefix: Option<WirePrefixRequest>,
+    ) -> Result<(u64, u32)> {
         ensure!(
             self.generations.len() < MAX_RESIDENT_GENERATIONS,
             "session already has the maximum of {MAX_RESIDENT_GENERATIONS} resident generations"
@@ -193,10 +218,56 @@ impl ResidentStore {
             model_spec.generation_device_allocation_budget_bytes,
         )?;
 
-        let mut states = Vec::with_capacity(state_byte_lens.len());
-        for byte_len in state_byte_lens {
-            states.push(runtime.mem_zeroed_bytes(byte_len)?);
+        if let Some(request) = &prefix {
+            ensure!(
+                request.chunk_tokens > 0 && u64::from(request.chunk_tokens) <= capacity,
+                "prefill chunk must be in 1..=capacity"
+            );
+            ensure!(
+                !request.prompt_tokens.is_empty()
+                    && request.prompt_tokens.len() < capacity as usize,
+                "cached generation prompt must fit below capacity"
+            );
+            ensure!(
+                request
+                    .prompt_tokens
+                    .iter()
+                    .all(|token| u64::from(*token) < model_spec.vocabulary_size),
+                "cached prompt contains an invalid token"
+            );
         }
+        let minimum = minimum_generation_device_bytes(
+            &model_spec.state_byte_multipliers,
+            capacity,
+            model_spec.vocabulary_size,
+        )?;
+        let cache_enabled = prefix.as_ref().is_some_and(|request| {
+            request.max_cache_bytes > 0
+                && state_byte_len <= request.max_cache_bytes
+                && minimum.checked_add(state_byte_len).is_some_and(|total| {
+                    total <= model_spec.generation_device_allocation_budget_bytes
+                })
+        });
+        let restore = cache_enabled
+            && self
+                .prefix_cache
+                .as_ref()
+                .is_some_and(|cache| cache.matches(model, capacity, prefix.as_ref().unwrap()));
+        let (states, position) = if restore {
+            let cache = self.prefix_cache.as_ref().unwrap();
+            (
+                copy_states(runtime, &cache.states)?,
+                cache.tokens.len() as u64,
+            )
+        } else {
+            // Free a previous checkpoint before allocating this generation.
+            self.prefix_cache = None;
+            let mut states = Vec::with_capacity(state_byte_lens.len());
+            for byte_len in state_byte_lens {
+                states.push(runtime.mem_zeroed_bytes(byte_len)?);
+            }
+            (states, 0)
+        };
 
         let id = take_id(&mut self.next_generation, "generation")?;
         self.generations.insert(
@@ -206,10 +277,12 @@ impl ResidentStore {
                 states,
                 state_byte_len,
                 capacity,
-                position: 0,
+                position,
+                prefix: if cache_enabled { prefix } else { None },
+                reserved_cache_bytes: if cache_enabled { state_byte_len } else { 0 },
             },
         );
-        Ok(id)
+        Ok((id, position as u32))
     }
 
     pub(super) fn step_generation(
@@ -227,11 +300,35 @@ impl ResidentStore {
             .models
             .get(&generation_state.model)
             .with_context(|| format!("unknown resident model {}", generation_state.model))?;
-        let result = forward(runtime, assets, model, &mut generation_state, tokens);
-        if result.is_ok() {
-            self.generations.insert(generation, generation_state);
+        if let Some(prefix) = &generation_state.prefix {
+            let start = generation_state.position as usize;
+            if start < prefix.prompt_tokens.len() {
+                let end = (start + prefix.chunk_tokens as usize).min(prefix.prompt_tokens.len());
+                ensure!(
+                    tokens == prefix.prompt_tokens[start..end],
+                    "prefill batch differs from the declared fixed schedule"
+                );
+            }
         }
-        result
+        let result = forward(runtime, assets, model, &mut generation_state, tokens)?;
+        if let Some(prefix) = &generation_state.prefix {
+            let checkpoint = (prefix.prompt_tokens.len() - 1) / prefix.chunk_tokens as usize
+                * prefix.chunk_tokens as usize;
+            if checkpoint > 0 && generation_state.position as usize == checkpoint {
+                // Deep copies preserve every byte, including arbitrary state outside
+                // the logical prefix. Never rewind a position on mutated decode state.
+                self.prefix_cache = None;
+                self.prefix_cache = Some(PrefixCheckpoint {
+                    model: generation_state.model,
+                    capacity: generation_state.capacity,
+                    chunk_tokens: prefix.chunk_tokens,
+                    tokens: prefix.prompt_tokens[..checkpoint].to_vec(),
+                    states: copy_states(runtime, &generation_state.states)?,
+                });
+            }
+        }
+        self.generations.insert(generation, generation_state);
+        Ok(result)
     }
 
     pub(super) fn release_generation(&mut self, generation: u64) {
@@ -239,10 +336,33 @@ impl ResidentStore {
     }
 
     pub(super) fn release_model(&mut self, model: u64) {
+        if self
+            .prefix_cache
+            .as_ref()
+            .is_some_and(|cache| cache.model == model)
+        {
+            self.prefix_cache = None;
+        }
         self.models.remove(&model);
         self.generations
             .retain(|_, generation| generation.model != model);
     }
+}
+
+fn copy_states(runtime: &Runtime, states: &[MemOwn]) -> Result<Vec<MemOwn>> {
+    states
+        .iter()
+        .map(|state| {
+            runtime.copy_memory(state).map_err(|error| match &error {
+                crate::runtime::MemError::GpuOperation { operation, .. }
+                    if *operation != "allocate device memory" =>
+                {
+                    FatalGpuSynchronization(error.to_string()).into()
+                }
+                _ => error.into(),
+            })
+        })
+        .collect()
 }
 
 fn generation_state_layout(
@@ -441,7 +561,7 @@ fn forward(
     );
     let token_count = u64::try_from(tokens.len()).context("token count exceeds u64")?;
     let generated_allocation_budget = remaining_generated_allocation_budget(
-        generation.state_byte_len,
+        generation.state_byte_len + generation.reserved_cache_bytes,
         token_count,
         model.generation_device_allocation_budget_bytes,
     )?;
@@ -716,6 +836,8 @@ mod tests {
                 state_byte_len: 0,
                 capacity: 8,
                 position: 0,
+                prefix: None,
+                reserved_cache_bytes: 0,
             },
         );
 
@@ -731,6 +853,8 @@ mod tests {
                 state_byte_len: 0,
                 capacity: 8,
                 position: 0,
+                prefix: None,
+                reserved_cache_bytes: 0,
             },
         );
         store.release_model(7);

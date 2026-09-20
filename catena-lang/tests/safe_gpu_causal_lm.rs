@@ -3,7 +3,7 @@ use std::{fs::File, io::Write, sync::mpsc, thread, time::Duration};
 use catena_lang::safe_gpu::{
     Backend, GpuDialect, Session, SessionTimeouts,
     causal_lm::{
-        GenerationControl, GenerationError, GenerationTermination, ModelConfig,
+        GenerationControl, GenerationError, GenerationOptions, GenerationTermination, ModelConfig,
         minimum_generation_device_bytes,
     },
     run_worker_if_requested,
@@ -123,6 +123,7 @@ fn main() -> anyhow::Result<()> {
             catena_lang::safe_runtime::ResidentError::Unavailable { .. }
         ))
     ));
+    verify_chunked_prefix_cache(dialect)?;
     verify_known_insufficient_envelope_preserves_session(dialect)?;
     verify_generated_allocation_overflow_isolation(dialect)?;
     verify_generic_fault_isolation(dialect)?;
@@ -228,4 +229,83 @@ fn weight_file(first: u64) -> anyhow::Result<File> {
     temporary.close()?;
     anyhow::ensure!(!path.exists(), "temporary asset path still exists");
     Ok(file)
+}
+
+fn verify_chunked_prefix_cache(dialect: GpuDialect) -> anyhow::Result<()> {
+    let mut session = Session::new(dialect)?;
+    let source = [SOURCE, include_str!("fixtures/shared_asset_state.hex")].join("\n");
+    let program = session.prepare(&source)?;
+    let asset = session.attach([0x68; 32], weight_file(1)?)?;
+    let slices = [session.slice(&asset, 0, 8)?];
+    let model = session.bind_causal_lm(
+        &program,
+        ModelConfig {
+            entry_point: "shared-state-test",
+            asset_slices: &slices,
+            state_byte_multipliers: &[8],
+            vocabulary_size: 16,
+            maximum_capacity: 16,
+            generation_device_allocation_budget_bytes: 2_048,
+        },
+    )?;
+    let options = GenerationOptions {
+        capacity: 16,
+        prefill_chunk_tokens: 2,
+        prefix_cache_max_bytes: 128,
+    };
+    let generate = |prompt: &[u32], options| {
+        model.generate_tokens_streaming_with_options(prompt, 2, &[], options, |_| {
+            Ok(GenerationControl::Continue)
+        })
+    };
+    let cold = generate(
+        &[1, 2, 3, 4],
+        GenerationOptions {
+            prefix_cache_max_bytes: 0,
+            ..options
+        },
+    )?;
+    let first = generate(&[1, 2, 3, 4], options)?;
+    anyhow::ensure!(first.generated_tokens == cold.generated_tokens);
+    anyhow::ensure!(first.stats.reused_prompt_tokens == 0);
+    // The program mutates all state bytes in place on every call. Restoring
+    // aliased state, or rewinding decode state, would produce different tokens.
+    let repeat = generate(&[1, 2, 3, 4], options)?;
+    anyhow::ensure!(repeat.generated_tokens == cold.generated_tokens);
+    anyhow::ensure!(repeat.stats.reused_prompt_tokens == 2);
+    anyhow::ensure!(repeat.stats.prefill_steps == 1);
+    let extended = generate(&[1, 2, 3, 4, 1, 2], options)?;
+    anyhow::ensure!(extended.stats.reused_prompt_tokens == 2);
+    let cold_extended = generate(
+        &[1, 2, 3, 4, 1, 2],
+        GenerationOptions {
+            prefix_cache_max_bytes: 0,
+            ..options
+        },
+    )?;
+    anyhow::ensure!(extended.generated_tokens == cold_extended.generated_tokens);
+    let _ = generate(&[1, 2, 3, 4], options)?;
+    let changed = generate(&[2, 2, 3, 4], options)?;
+    anyhow::ensure!(changed.stats.reused_prompt_tokens == 0);
+    let capacity = generate(
+        &[2, 2, 3, 4],
+        GenerationOptions {
+            capacity: 15,
+            ..options
+        },
+    )?;
+    anyhow::ensure!(capacity.stats.reused_prompt_tokens == 0);
+    let chunks = generate(
+        &[2, 2, 3, 4],
+        GenerationOptions {
+            capacity: 15,
+            prefill_chunk_tokens: 1,
+            ..options
+        },
+    )?;
+    anyhow::ensure!(chunks.stats.reused_prompt_tokens == 0);
+    eprintln!(
+        "chunked prefix cache: repeated/extended prompts match cold runs; state copies and policy misses verified"
+    );
+    Ok(())
 }

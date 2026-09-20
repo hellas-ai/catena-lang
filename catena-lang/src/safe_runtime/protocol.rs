@@ -45,6 +45,7 @@ pub(super) enum Request {
     StartGeneration {
         model: u64,
         capacity: u64,
+        prefix: Option<WirePrefixRequest>,
     },
     StepGeneration {
         generation: u64,
@@ -84,11 +85,19 @@ pub(super) enum Response {
 #[derive(Debug, Serialize, Deserialize)]
 pub(super) enum ResidentResponse {
     ModelBound(u64),
-    GenerationStarted(u64),
+    GenerationStarted { id: u64, reused_prompt_tokens: u32 },
     Token(u32),
     GenerationReleased(u64),
     ModelReleased(u64),
     ArtifactReleased(usize),
+}
+
+/// A fixed forward-call schedule; only exact prior batch prefixes can be reused.
+#[derive(Debug, Serialize, Deserialize)]
+pub(crate) struct WirePrefixRequest {
+    pub(crate) prompt_tokens: Vec<u32>,
+    pub(crate) chunk_tokens: u32,
+    pub(crate) max_cache_bytes: u64,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

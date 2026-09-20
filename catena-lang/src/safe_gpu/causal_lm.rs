@@ -20,7 +20,7 @@ use crate::{
     runtime::RuntimeId,
     safe_runtime::{
         ResidentAssetSlice, ResidentError, ResidentGeneration, ResidentModel, ResidentModelBinding,
-        SafeRuntime, resident::validate_model_spec,
+        SafeRuntime, WirePrefixRequest, resident::validate_model_spec,
     },
 };
 
@@ -92,6 +92,20 @@ impl BindError {
     }
 }
 
+/// Explicit forward-call semantics for chunked prefill. Both capacity and
+/// chunk boundaries are visible to arbitrary Catena programs; callers must
+/// commit this policy alongside their model, rather than silently applying it
+/// to requests using the original whole-prompt API.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GenerationOptions {
+    pub capacity: u64,
+    pub prefill_chunk_tokens: u32,
+    /// Extra state retained by this worker, bounded to one checkpoint across
+    /// all resident models. Zero disables caching without changing execution.
+    /// Active state plus this checkpoint still share the model's device budget.
+    pub prefix_cache_max_bytes: u64,
+}
+
 /// The caller's decision after receiving one generated token.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GenerationControl {
@@ -124,11 +138,18 @@ pub struct GenerationStats {
     pub prompt_tokens: usize,
     pub cached_tokens: usize,
     pub generated_tokens: usize,
+    /// Prompt tokens skipped by restoring a byte-for-byte state checkpoint.
+    pub reused_prompt_tokens: usize,
+    /// Number of prompt forward calls actually evaluated for this request.
+    pub prefill_steps: usize,
 }
 
 impl GenerationStats {
     pub fn prompt_tokens_per_second(self) -> f64 {
-        rate(self.prompt_tokens, self.prompt_eval_time)
+        rate(
+            self.prompt_tokens - self.reused_prompt_tokens,
+            self.prompt_eval_time,
+        )
     }
 
     pub fn cached_tokens_per_second(self) -> f64 {
@@ -144,8 +165,10 @@ impl fmt::Display for GenerationStats {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(
             formatter,
-            "prompt eval: {} token(s) in {:.2?} ({:.2} tok/s)",
-            self.prompt_tokens,
+            "prompt eval: {} token(s), {} reused, {} step(s) in {:.2?} ({:.2} tok/s)",
+            self.prompt_tokens - self.reused_prompt_tokens,
+            self.reused_prompt_tokens,
+            self.prefill_steps,
             self.prompt_eval_time,
             self.prompt_tokens_per_second()
         )?;
@@ -345,7 +368,7 @@ impl Model {
         )?;
         let handle = self
             .runtime
-            .start_resident_generation(self.resident, capacity)?;
+            .start_resident_generation(self.resident, capacity, None)?;
         let mut generation = ActiveGeneration {
             runtime: &self.runtime,
             handle: Some(handle),
@@ -357,6 +380,84 @@ impl Model {
             |tokens| Ok(generation.forward(tokens)?),
             emit,
         );
+        let released = generation.finish();
+        match (result, released) {
+            (Ok(_), Err(error)) => Err(error.into()),
+            (Err(primary), Err(release)) => Err(GenerationError::ReleaseAfterFailure {
+                primary: Box::new(primary),
+                release,
+            }),
+            (result, Ok(())) => result,
+        }
+    }
+
+    /// Generate under a fixed, explicit prefill schedule with optional prefix
+    /// reuse. Cold and warm requests execute identical batches at identical
+    /// capacity. A hit restores independent copies of every mutable state byte.
+    /// The most recent checkpoint is before the final prefill chunk; final
+    /// prompt evaluation and token callbacks always execute for this request.
+    pub fn generate_tokens_streaming_with_options(
+        &self,
+        prompt_tokens: &[u32],
+        max_new_tokens: u32,
+        stop_tokens: &[u32],
+        options: GenerationOptions,
+        emit: impl FnMut(u32) -> AnyResult<GenerationControl>,
+    ) -> Result<TokenGenerationResult, GenerationError> {
+        let Some(required) = validate_generation_request(
+            prompt_tokens,
+            stop_tokens,
+            max_new_tokens,
+            self.vocabulary_size,
+            self.maximum_capacity,
+        )?
+        else {
+            return Ok(empty_generation_result());
+        };
+        invalid(
+            options.capacity >= required && options.capacity <= self.maximum_capacity,
+            "fixed generation capacity must fit prompt plus output and the model maximum",
+        )?;
+        invalid(
+            options.prefill_chunk_tokens > 0
+                && u64::from(options.prefill_chunk_tokens) <= options.capacity,
+            "prefill chunk must be in 1..=fixed capacity",
+        )?;
+        validate_generation_device_envelope(
+            &self.state_byte_multipliers,
+            options.capacity,
+            self.vocabulary_size,
+            self.generation_device_allocation_budget_bytes,
+        )?;
+        let handle = self.runtime.start_resident_generation(
+            self.resident,
+            options.capacity,
+            Some(WirePrefixRequest {
+                prompt_tokens: prompt_tokens.to_vec(),
+                chunk_tokens: options.prefill_chunk_tokens,
+                max_cache_bytes: options.prefix_cache_max_bytes,
+            }),
+        )?;
+        let reused = handle.reused_prompt_tokens as usize;
+        let mut generation = ActiveGeneration {
+            runtime: &self.runtime,
+            handle: Some(handle),
+        };
+        let result = if reused >= prompt_tokens.len()
+            || reused % options.prefill_chunk_tokens as usize != 0
+        {
+            Err(ResidentError::UnexpectedResponse.into())
+        } else {
+            generate_tokens_with_prefill(
+                prompt_tokens,
+                max_new_tokens as usize,
+                |token| stop_tokens.contains(&token),
+                |tokens| Ok(generation.forward(tokens)?),
+                emit,
+                reused,
+                options.prefill_chunk_tokens as usize,
+            )
+        };
         let released = generation.finish();
         match (result, released) {
             (Ok(_), Err(error)) => Err(error.into()),
@@ -472,16 +573,42 @@ fn validate_generation_device_envelope(
 fn generate_tokens_with(
     prompt_tokens: &[u32],
     max_new_tokens: usize,
+    is_stop: impl FnMut(u32) -> bool,
+    forward: impl FnMut(&[u32]) -> Result<u32, GenerationError>,
+    emit: impl FnMut(u32) -> AnyResult<GenerationControl>,
+) -> Result<TokenGenerationResult, GenerationError> {
+    generate_tokens_with_prefill(
+        prompt_tokens,
+        max_new_tokens,
+        is_stop,
+        forward,
+        emit,
+        0,
+        prompt_tokens.len(),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn generate_tokens_with_prefill(
+    prompt_tokens: &[u32],
+    max_new_tokens: usize,
     mut is_stop: impl FnMut(u32) -> bool,
     mut forward: impl FnMut(&[u32]) -> Result<u32, GenerationError>,
     mut emit: impl FnMut(u32) -> AnyResult<GenerationControl>,
+    reused_prompt_tokens: usize,
+    prefill_chunk_tokens: usize,
 ) -> Result<TokenGenerationResult, GenerationError> {
     debug_assert!(!prompt_tokens.is_empty());
     debug_assert!(max_new_tokens > 0);
 
     let started = Instant::now();
     let prompt_started = Instant::now();
-    let mut next_token = forward(prompt_tokens)?;
+    let mut next_token = 0;
+    let mut prefill_steps = 0;
+    for chunk in prompt_tokens[reused_prompt_tokens..].chunks(prefill_chunk_tokens) {
+        next_token = forward(chunk)?;
+        prefill_steps += 1;
+    }
     let prompt_eval_time = prompt_started.elapsed();
     let mut cached_eval_time = Duration::ZERO;
     let mut cached_tokens = 0;
@@ -503,6 +630,8 @@ fn generate_tokens_with(
                 prompt_eval_time,
                 cached_eval_time,
                 prompt_tokens.len(),
+                reused_prompt_tokens,
+                prefill_steps,
                 cached_tokens,
                 generated_tokens,
                 GenerationTermination::StopToken(next_token),
@@ -515,6 +644,8 @@ fn generate_tokens_with(
                 prompt_eval_time,
                 cached_eval_time,
                 prompt_tokens.len(),
+                reused_prompt_tokens,
+                prefill_steps,
                 cached_tokens,
                 generated_tokens,
                 GenerationTermination::Cancelled,
@@ -527,17 +658,22 @@ fn generate_tokens_with(
         prompt_eval_time,
         cached_eval_time,
         prompt_tokens.len(),
+        reused_prompt_tokens,
+        prefill_steps,
         cached_tokens,
         generated_tokens,
         GenerationTermination::MaxNewTokens,
     ))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn generation_result(
     started: Instant,
     prompt_eval_time: Duration,
     cached_eval_time: Duration,
     prompt_tokens: usize,
+    reused_prompt_tokens: usize,
+    prefill_steps: usize,
     cached_tokens: usize,
     generated_tokens: Vec<u32>,
     termination: GenerationTermination,
@@ -548,6 +684,8 @@ fn generation_result(
             prompt_eval_time,
             cached_eval_time,
             prompt_tokens,
+            reused_prompt_tokens,
+            prefill_steps,
             cached_tokens,
             generated_tokens: generated_tokens.len(),
         },
@@ -567,6 +705,8 @@ fn empty_generation_result() -> TokenGenerationResult {
             prompt_tokens: 0,
             cached_tokens: 0,
             generated_tokens: 0,
+            reused_prompt_tokens: 0,
+            prefill_steps: 0,
         },
     }
 }

@@ -33,6 +33,7 @@ mod assets;
 mod fd_transport;
 mod ipc;
 mod protocol;
+pub(crate) use protocol::WirePrefixRequest;
 pub(crate) mod resident;
 
 use self::{
@@ -412,6 +413,7 @@ pub(crate) struct ResidentModel {
 #[derive(Debug)]
 pub(crate) struct ResidentGeneration {
     pub(crate) id: u64,
+    pub(crate) reused_prompt_tokens: u32,
     deadline: ProcessGroupDeadline,
     timeout: Duration,
     _operation: SessionOperationLease,
@@ -1388,6 +1390,7 @@ impl SafeRuntime {
         &self,
         model: ResidentModel,
         capacity: u64,
+        prefix: Option<protocol::WirePrefixRequest>,
     ) -> Result<ResidentGeneration, ResidentError> {
         let operation = self.begin_generation().map_err(map_resident_worker_error)?;
         let mut worker = self.resident_worker()?;
@@ -1404,19 +1407,24 @@ impl SafeRuntime {
                     &Request::StartGeneration {
                         model: model.id,
                         capacity,
+                        prefix,
                     },
                     deadline,
                 )
             },
         );
         match response {
-            Ok(Response::Resident(Ok(ResidentResponse::GenerationStarted(id)))) => {
+            Ok(Response::Resident(Ok(ResidentResponse::GenerationStarted {
+                id,
+                reused_prompt_tokens,
+            }))) => {
                 // Only the worker acknowledgement commits generation startup.
                 // Wake model destructors that waited rather than risking a
                 // queued release being discarded by a healthy start failure.
                 operation.open_model_release_deferrals();
                 Ok(ResidentGeneration {
                     id,
+                    reused_prompt_tokens,
                     deadline,
                     timeout,
                     _operation: operation,
@@ -1998,11 +2006,23 @@ fn run_child_loop(
                     .map_err(|error| error.to_string());
                 write_response(&mut writer, &Response::Resident(result))?;
             }
-            Request::StartGeneration { model, capacity } => {
-                let result = resident
-                    .start_generation(&runtime, model, capacity)
-                    .map(ResidentResponse::GenerationStarted)
-                    .map_err(|error| error.to_string());
+            Request::StartGeneration {
+                model,
+                capacity,
+                prefix,
+            } => {
+                let result = match resident.start_generation(&runtime, model, capacity, prefix) {
+                    Ok((id, reused_prompt_tokens)) => Ok(ResidentResponse::GenerationStarted {
+                        id,
+                        reused_prompt_tokens,
+                    }),
+                    Err(error) => {
+                        if let Some(error) = resident::gpu_synchronization(&error) {
+                            return Err(ChildMainError::GpuSynchronization(error.to_string()));
+                        }
+                        Err(error.to_string())
+                    }
+                };
                 write_response(&mut writer, &Response::Resident(result))?;
             }
             Request::StepGeneration { generation, tokens } => {

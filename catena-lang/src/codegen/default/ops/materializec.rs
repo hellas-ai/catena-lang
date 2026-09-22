@@ -954,31 +954,32 @@ pub(in crate::codegen) fn render_borrow_routed_native_bf16_gemm_wmma_pair_kernel
 __global__ void __KERNEL___group(
     const uint64_t *selected, uint64_t route_count, uint64_t expert_count,
     uint64_t *offsets, uint64_t *permutation) {
-    __shared__ uint64_t counts[256];
-    uint64_t expert = (uint64_t)threadIdx.x;
-    uint64_t count = 0;
-    if (expert < expert_count) {
-        for (uint64_t route = 0; route < route_count; ++route) {
-            count += selected[route] == expert;
-        }
+    uint64_t expert = (uint64_t)blockIdx.x;
+    uint32_t lane = threadIdx.x;
+    uint64_t offset = 0;
+    for (uint64_t route_base = 0; route_base < route_count; route_base += 32) {
+        uint64_t route = route_base + lane;
+        unsigned long long lower = __ballot(
+            route < route_count && selected[route] < expert);
+        offset += (uint64_t)__popcll(lower);
     }
-    counts[threadIdx.x] = count;
-    __syncthreads();
-    if (threadIdx.x == 0) {
-        offsets[0] = 0;
-        for (uint64_t index = 0; index < expert_count; ++index) {
-            offsets[index + 1] = offsets[index] + counts[index];
+    if (lane == 0) {
+        offsets[expert] = offset;
+    }
+    uint64_t written = 0;
+    for (uint64_t route_base = 0; route_base < route_count; route_base += 32) {
+        uint64_t route = route_base + lane;
+        bool matches = route < route_count && selected[route] == expert;
+        unsigned long long match_mask = __ballot(matches);
+        unsigned long long preceding = lane == 0 ? 0 : ((1ull << lane) - 1);
+        if (matches) {
+            permutation[offset + written + (uint64_t)__popcll(match_mask & preceding)] = route;
         }
+        written += (uint64_t)__popcll(match_mask);
+    }
+    if (lane == 0 && expert + 1 == expert_count) {
+        offsets[expert_count] = offset + written;
         catena_assert(offsets[expert_count] == route_count);
-    }
-    __syncthreads();
-    if (expert < expert_count) {
-        uint64_t output = offsets[expert];
-        for (uint64_t route = 0; route < route_count; ++route) {
-            if (selected[route] == expert) {
-                permutation[output++] = route;
-            }
-        }
     }
 }
 
@@ -1198,31 +1199,32 @@ pub(in crate::codegen) fn render_borrow_routed_native_bf16_gemm_wmma_residual_ke
 __global__ void __KERNEL___group(
     const uint64_t *selected, uint64_t route_count, uint64_t expert_count,
     uint64_t *offsets, uint64_t *permutation) {
-    __shared__ uint64_t counts[256];
-    uint64_t expert = (uint64_t)threadIdx.x;
-    uint64_t count = 0;
-    if (expert < expert_count) {
-        for (uint64_t route = 0; route < route_count; ++route) {
-            count += selected[route] == expert;
-        }
+    uint64_t expert = (uint64_t)blockIdx.x;
+    uint32_t lane = threadIdx.x;
+    uint64_t offset = 0;
+    for (uint64_t route_base = 0; route_base < route_count; route_base += 32) {
+        uint64_t route = route_base + lane;
+        unsigned long long lower = __ballot(
+            route < route_count && selected[route] < expert);
+        offset += (uint64_t)__popcll(lower);
     }
-    counts[threadIdx.x] = count;
-    __syncthreads();
-    if (threadIdx.x == 0) {
-        offsets[0] = 0;
-        for (uint64_t index = 0; index < expert_count; ++index) {
-            offsets[index + 1] = offsets[index] + counts[index];
+    if (lane == 0) {
+        offsets[expert] = offset;
+    }
+    uint64_t written = 0;
+    for (uint64_t route_base = 0; route_base < route_count; route_base += 32) {
+        uint64_t route = route_base + lane;
+        bool matches = route < route_count && selected[route] == expert;
+        unsigned long long match_mask = __ballot(matches);
+        unsigned long long preceding = lane == 0 ? 0 : ((1ull << lane) - 1);
+        if (matches) {
+            permutation[offset + written + (uint64_t)__popcll(match_mask & preceding)] = route;
         }
+        written += (uint64_t)__popcll(match_mask);
+    }
+    if (lane == 0 && expert + 1 == expert_count) {
+        offsets[expert_count] = offset + written;
         catena_assert(offsets[expert_count] == route_count);
-    }
-    __syncthreads();
-    if (expert < expert_count) {
-        uint64_t output = offsets[expert];
-        for (uint64_t route = 0; route < route_count; ++route) {
-            if (selected[route] == expert) {
-                permutation[output++] = route;
-            }
-        }
     }
 }
 
@@ -2279,7 +2281,7 @@ pub(in crate::codegen) fn render_borrow_routed_native_bf16_gemv_pair_call(
     );
     if backend == RoutedNativeBf16PairBackend::Wmma && dialect == GpuDialect::Hip {
         out.push_str(&format!(
-            "        if ({prefix}_expert_count != 0 && {prefix}_expert_count <= 256 && ({selected_capacity}) >= {prefix}_expert_count * 16 && (({reduction_len}) & 15) == 0 && (({output_features}) & 15) == 0) {{\n            uint64_t *{prefix}_offsets = nullptr;\n            uint64_t *{prefix}_permutation = nullptr;\n            catena_host_gpu_check({alloc}((void **)&{prefix}_offsets, ({prefix}_expert_count + 1) * sizeof(uint64_t), nullptr));\n            catena_host_gpu_check({alloc}((void **)&{prefix}_permutation, ({selected_capacity}) * sizeof(uint64_t), nullptr));\n            {kernel_name}_group<<<dim3(1), dim3(256)>>>(\n                {}, {selected_capacity}, {prefix}_expert_count, {prefix}_offsets, {prefix}_permutation);\n            {kernel_name}<<<dim3((({output_features}) + 63) / 64, {prefix}_expert_count), dim3(128)>>>(\n                {}, {}, {}, {prefix}_offsets, {prefix}_permutation, {}_data, {}_data, {reduction_len}, {slots}, {output_features});\n            catena_host_gpu_check({free}({prefix}_offsets, nullptr));\n            catena_host_gpu_check({free}({prefix}_permutation, nullptr));\n        }} else {{\n{simt_call}        }}\n",
+            "        if ({prefix}_expert_count != 0 && {prefix}_expert_count <= 256 && ({selected_capacity}) >= {prefix}_expert_count * 16 && (({reduction_len}) & 15) == 0 && (({output_features}) & 15) == 0) {{\n            uint64_t *{prefix}_offsets = nullptr;\n            uint64_t *{prefix}_permutation = nullptr;\n            catena_host_gpu_check({alloc}((void **)&{prefix}_offsets, ({prefix}_expert_count + 1) * sizeof(uint64_t), nullptr));\n            catena_host_gpu_check({alloc}((void **)&{prefix}_permutation, ({selected_capacity}) * sizeof(uint64_t), nullptr));\n            {kernel_name}_group<<<dim3({prefix}_expert_count), dim3(32)>>>(\n                {}, {selected_capacity}, {prefix}_expert_count, {prefix}_offsets, {prefix}_permutation);\n            {kernel_name}<<<dim3((({output_features}) + 63) / 64, {prefix}_expert_count), dim3(128)>>>(\n                {}, {}, {}, {prefix}_offsets, {prefix}_permutation, {}_data, {}_data, {reduction_len}, {slots}, {output_features});\n            catena_host_gpu_check({free}({prefix}_offsets, nullptr));\n            catena_host_gpu_check({free}({prefix}_permutation, nullptr));\n        }} else {{\n{simt_call}        }}\n",
             value_expr(selected),
             value_expr(input),
             value_expr(gate_weight),
@@ -2394,7 +2396,7 @@ pub(in crate::codegen) fn render_borrow_routed_native_bf16_gemv_residual_call(
     );
     if backend == RoutedNativeBf16ResidualBackend::Wmma && dialect == GpuDialect::Hip {
         out.push_str(&format!(
-            "        if ({prefix}_expert_count != 0 && {prefix}_expert_count <= 256 && ({selected_capacity}) >= {prefix}_expert_count * 16 && (({intermediate}) & 15) == 0 && (({output_features}) & 15) == 0) {{\n            uint64_t *{prefix}_offsets = nullptr;\n            uint64_t *{prefix}_permutation = nullptr;\n            float *{prefix}_route_output = nullptr;\n            uint64_t {prefix}_route_output_len = ({selected_capacity}) * ({output_features});\n            catena_host_gpu_check({alloc}((void **)&{prefix}_offsets, ({prefix}_expert_count + 1) * sizeof(uint64_t), nullptr));\n            catena_host_gpu_check({alloc}((void **)&{prefix}_permutation, ({selected_capacity}) * sizeof(uint64_t), nullptr));\n            catena_host_gpu_check({alloc}((void **)&{prefix}_route_output, {prefix}_route_output_len * sizeof(float), nullptr));\n            {kernel_name}_group<<<dim3(1), dim3(256)>>>(\n                {}, {selected_capacity}, {prefix}_expert_count, {prefix}_offsets, {prefix}_permutation);\n            {kernel_name}<<<dim3((({output_features}) + 127) / 128, {prefix}_expert_count), dim3(128)>>>(\n                {}, {}, {prefix}_offsets, {prefix}_permutation, {prefix}_route_output, {intermediate}, {output_features});\n            {kernel_name}_combine<<<dim3((({output_len}) + 255) / 256), dim3(256)>>>(\n                {prefix}_route_output, {}, {}_data, {output_len}, {slots}, {output_features});\n            catena_host_gpu_check({free}({prefix}_offsets, nullptr));\n            catena_host_gpu_check({free}({prefix}_permutation, nullptr));\n            catena_host_gpu_check({free}({prefix}_route_output, nullptr));\n        }} else {{\n{simt_call}        }}\n",
+            "        if ({prefix}_expert_count != 0 && {prefix}_expert_count <= 256 && ({selected_capacity}) >= {prefix}_expert_count * 16 && (({intermediate}) & 15) == 0 && (({output_features}) & 15) == 0) {{\n            uint64_t *{prefix}_offsets = nullptr;\n            uint64_t *{prefix}_permutation = nullptr;\n            float *{prefix}_route_output = nullptr;\n            uint64_t {prefix}_route_output_len = ({selected_capacity}) * ({output_features});\n            catena_host_gpu_check({alloc}((void **)&{prefix}_offsets, ({prefix}_expert_count + 1) * sizeof(uint64_t), nullptr));\n            catena_host_gpu_check({alloc}((void **)&{prefix}_permutation, ({selected_capacity}) * sizeof(uint64_t), nullptr));\n            catena_host_gpu_check({alloc}((void **)&{prefix}_route_output, {prefix}_route_output_len * sizeof(float), nullptr));\n            {kernel_name}_group<<<dim3({prefix}_expert_count), dim3(32)>>>(\n                {}, {selected_capacity}, {prefix}_expert_count, {prefix}_offsets, {prefix}_permutation);\n            {kernel_name}<<<dim3((({output_features}) + 127) / 128, {prefix}_expert_count), dim3(128)>>>(\n                {}, {}, {prefix}_offsets, {prefix}_permutation, {prefix}_route_output, {intermediate}, {output_features});\n            {kernel_name}_combine<<<dim3((({output_len}) + 255) / 256), dim3(256)>>>(\n                {prefix}_route_output, {}, {}_data, {output_len}, {slots}, {output_features});\n            catena_host_gpu_check({free}({prefix}_offsets, nullptr));\n            catena_host_gpu_check({free}({prefix}_permutation, nullptr));\n            catena_host_gpu_check({free}({prefix}_route_output, nullptr));\n        }} else {{\n{simt_call}        }}\n",
             value_expr(selected),
             value_expr(active),
             value_expr(down),

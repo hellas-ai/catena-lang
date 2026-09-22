@@ -993,25 +993,30 @@ __global__ void __KERNEL__(
     using frag_c_t = rocwmma::fragment<rocwmma::accumulator, 16, 16, 16, float>;
 
     uint64_t expert = (uint64_t)blockIdx.y;
-    uint64_t column_base = (uint64_t)blockIdx.x * 16;
+    uint64_t column_base = (uint64_t)blockIdx.x * 64;
     uint64_t route_begin = offsets[expert];
     uint64_t route_end = offsets[expert + 1];
-    __shared__ catena_bf16_t tile_a[16 * 16];
-    __shared__ catena_bf16_t tile_gate_b[16 * 16];
-    __shared__ catena_bf16_t tile_up_b[16 * 16];
-    __shared__ float tile_gate_c[16 * 16];
-    __shared__ float tile_up_c[16 * 16];
+    uint32_t wave = threadIdx.x / 32;
+    uint32_t lane = threadIdx.x % 32;
+    __shared__ catena_bf16_t tile_a[64 * 16];
+    __shared__ catena_bf16_t tile_gate_b[64 * 16];
+    __shared__ catena_bf16_t tile_up_b[64 * 16];
+    __shared__ float tile_gate_c[4 * 16 * 16];
+    __shared__ float tile_up_c[4 * 16 * 16];
 
-    for (uint64_t route_base = route_begin; route_base < route_end; route_base += 16) {
+    for (uint64_t route_base = route_begin; route_base < route_end; route_base += 64) {
         frag_a_t a;
-        frag_b_t gate_b;
-        frag_b_t up_b;
-        frag_c_t gate_c;
-        frag_c_t up_c;
-        rocwmma::fill_fragment(gate_c, 0.0f);
-        rocwmma::fill_fragment(up_c, 0.0f);
+        frag_b_t gate_b[4];
+        frag_b_t up_b[4];
+        frag_c_t gate_c[4];
+        frag_c_t up_c[4];
+        #pragma unroll
+        for (uint32_t fragment = 0; fragment < 4; ++fragment) {
+            rocwmma::fill_fragment(gate_c[fragment], 0.0f);
+            rocwmma::fill_fragment(up_c[fragment], 0.0f);
+        }
         for (uint64_t k_base = 0; k_base < reduction_len; k_base += 16) {
-            for (uint32_t flat = threadIdx.x; flat < 256; flat += blockDim.x) {
+            for (uint32_t flat = threadIdx.x; flat < 64 * 16; flat += blockDim.x) {
                 uint32_t tile_row = flat >> 4;
                 uint32_t tile_column = flat & 15;
                 uint64_t grouped_route = route_base + tile_row;
@@ -1034,28 +1039,42 @@ __global__ void __KERNEL__(
                 }
             }
             __syncthreads();
-            rocwmma::load_matrix_sync(a, tile_a, 16);
-            rocwmma::load_matrix_sync(gate_b, tile_gate_b, 16);
-            rocwmma::load_matrix_sync(up_b, tile_up_b, 16);
-            rocwmma::mma_sync(gate_c, a, gate_b, gate_c);
-            rocwmma::mma_sync(up_c, a, up_b, up_c);
+            rocwmma::load_matrix_sync(a, tile_a + wave * 16 * 16, 16);
+            #pragma unroll
+            for (uint32_t fragment = 0; fragment < 4; ++fragment) {
+                rocwmma::load_matrix_sync(
+                    gate_b[fragment], tile_gate_b + fragment * 16 * 16, 16);
+                rocwmma::load_matrix_sync(
+                    up_b[fragment], tile_up_b + fragment * 16 * 16, 16);
+                rocwmma::mma_sync(
+                    gate_c[fragment], a, gate_b[fragment], gate_c[fragment]);
+                rocwmma::mma_sync(
+                    up_c[fragment], a, up_b[fragment], up_c[fragment]);
+            }
             __syncthreads();
         }
-        rocwmma::store_matrix_sync(tile_gate_c, gate_c, 16, rocwmma::mem_row_major);
-        rocwmma::store_matrix_sync(tile_up_c, up_c, 16, rocwmma::mem_row_major);
-        __syncthreads();
-        for (uint32_t flat = threadIdx.x; flat < 256; flat += blockDim.x) {
-            uint64_t grouped_route = route_base + (flat >> 4);
-            uint64_t column = column_base + (flat & 15);
-            if (grouped_route < route_end && column < output_features) {
-                uint64_t route = permutation[grouped_route];
-                gate_out[route * output_features + column] =
-                    catena_bf16_from_f32(tile_gate_c[flat]);
-                up_out[route * output_features + column] =
-                    catena_bf16_from_f32(tile_up_c[flat]);
+        #pragma unroll
+        for (uint32_t fragment = 0; fragment < 4; ++fragment) {
+            rocwmma::store_matrix_sync(
+                tile_gate_c + wave * 16 * 16, gate_c[fragment], 16,
+                rocwmma::mem_row_major);
+            rocwmma::store_matrix_sync(
+                tile_up_c + wave * 16 * 16, up_c[fragment], 16,
+                rocwmma::mem_row_major);
+            __syncthreads();
+            for (uint32_t flat = lane; flat < 16 * 16; flat += 32) {
+                uint64_t grouped_route = route_base + wave * 16 + (flat >> 4);
+                uint64_t column = column_base + fragment * 16 + (flat & 15);
+                if (grouped_route < route_end && column < output_features) {
+                    uint64_t route = permutation[grouped_route];
+                    gate_out[route * output_features + column] =
+                        catena_bf16_from_f32(tile_gate_c[wave * 16 * 16 + flat]);
+                    up_out[route * output_features + column] =
+                        catena_bf16_from_f32(tile_up_c[wave * 16 * 16 + flat]);
+                }
             }
+            __syncthreads();
         }
-        __syncthreads();
     }
 }
 "#;
@@ -1216,20 +1235,25 @@ __global__ void __KERNEL__(
     using frag_c_t = rocwmma::fragment<rocwmma::accumulator, 16, 16, 16, float>;
 
     uint64_t expert = (uint64_t)blockIdx.y;
-    uint64_t column_base = (uint64_t)blockIdx.x * 16;
+    uint64_t column_base = (uint64_t)blockIdx.x * 128;
     uint64_t route_begin = offsets[expert];
     uint64_t route_end = offsets[expert + 1];
-    __shared__ catena_bf16_t tile_a[16 * 16];
-    __shared__ catena_bf16_t tile_b[16 * 16];
-    __shared__ float tile_c[16 * 16];
+    uint32_t wave = threadIdx.x / 32;
+    uint32_t lane = threadIdx.x % 32;
+    __shared__ catena_bf16_t tile_a[64 * 16];
+    __shared__ catena_bf16_t tile_b[128 * 16];
+    __shared__ float tile_c[4 * 16 * 16];
 
-    for (uint64_t route_base = route_begin; route_base < route_end; route_base += 16) {
+    for (uint64_t route_base = route_begin; route_base < route_end; route_base += 64) {
         frag_a_t a;
-        frag_b_t b;
-        frag_c_t c;
-        rocwmma::fill_fragment(c, 0.0f);
+        frag_b_t b[8];
+        frag_c_t c[8];
+        #pragma unroll
+        for (uint32_t fragment = 0; fragment < 8; ++fragment) {
+            rocwmma::fill_fragment(c[fragment], 0.0f);
+        }
         for (uint64_t k_base = 0; k_base < intermediate; k_base += 16) {
-            for (uint32_t flat = threadIdx.x; flat < 256; flat += blockDim.x) {
+            for (uint32_t flat = threadIdx.x; flat < 64 * 16; flat += blockDim.x) {
                 uint32_t tile_row = flat >> 4;
                 uint32_t tile_column = flat & 15;
                 uint64_t grouped_route = route_base + tile_row;
@@ -1240,6 +1264,11 @@ __global__ void __KERNEL__(
                 } else {
                     tile_a[flat] = catena_bf16_from_f32(0.0f);
                 }
+            }
+            for (uint32_t flat = threadIdx.x; flat < 128 * 16; flat += blockDim.x) {
+                uint32_t tile_row = flat >> 4;
+                uint32_t tile_column = flat & 15;
+                uint64_t k = k_base + tile_column;
                 uint64_t column = column_base + tile_row;
                 if (column < output_features && k < intermediate) {
                     tile_b[flat] =
@@ -1249,22 +1278,32 @@ __global__ void __KERNEL__(
                 }
             }
             __syncthreads();
-            rocwmma::load_matrix_sync(a, tile_a, 16);
-            rocwmma::load_matrix_sync(b, tile_b, 16);
-            rocwmma::mma_sync(c, a, b, c);
+            rocwmma::load_matrix_sync(a, tile_a + wave * 16 * 16, 16);
+            #pragma unroll
+            for (uint32_t fragment = 0; fragment < 8; ++fragment) {
+                rocwmma::load_matrix_sync(
+                    b[fragment], tile_b + fragment * 16 * 16, 16);
+                rocwmma::mma_sync(c[fragment], a, b[fragment], c[fragment]);
+            }
             __syncthreads();
         }
-        rocwmma::store_matrix_sync(tile_c, c, 16, rocwmma::mem_row_major);
-        __syncthreads();
-        for (uint32_t flat = threadIdx.x; flat < 256; flat += blockDim.x) {
-            uint64_t grouped_route = route_base + (flat >> 4);
-            uint64_t column = column_base + (flat & 15);
-            if (grouped_route < route_end && column < output_features) {
-                uint64_t route = permutation[grouped_route];
-                route_output[route * output_features + column] = tile_c[flat];
+        #pragma unroll
+        for (uint32_t fragment = 0; fragment < 8; ++fragment) {
+            rocwmma::store_matrix_sync(
+                tile_c + wave * 16 * 16, c[fragment], 16,
+                rocwmma::mem_row_major);
+            __syncthreads();
+            for (uint32_t flat = lane; flat < 16 * 16; flat += 32) {
+                uint64_t grouped_route = route_base + wave * 16 + (flat >> 4);
+                uint64_t column = column_base + fragment * 16 + (flat & 15);
+                if (grouped_route < route_end && column < output_features) {
+                    uint64_t route = permutation[grouped_route];
+                    route_output[route * output_features + column] =
+                        tile_c[wave * 16 * 16 + flat];
+                }
             }
+            __syncthreads();
         }
-        __syncthreads();
     }
 }
 
@@ -1399,27 +1438,25 @@ fn render_bf16_gemm_wmma_kernel(out: &mut String, kernel_name: &str, dialect: Gp
     out.push_str(&format!(
         "    using frag_c_t = {namespace}::fragment<{accumulator}, 16, 16, 16, float>;\n"
     ));
-    out.push_str("    uint64_t row_base = (uint64_t)blockIdx.y * 16;\n    uint64_t column_base = (uint64_t)blockIdx.x * 16;\n");
-    out.push_str("    __shared__ catena_bf16_t tile_a[16 * 16];\n    __shared__ catena_bf16_t tile_b[16 * 16];\n    __shared__ float tile_c[16 * 16];\n");
+    out.push_str("    uint64_t row_base = (uint64_t)blockIdx.y * 128;\n    uint64_t column_base = (uint64_t)blockIdx.x * 128;\n    uint32_t wave = threadIdx.x / 32;\n    uint32_t lane = threadIdx.x % 32;\n");
+    out.push_str("    __shared__ catena_bf16_t tile_a[128 * 16];\n    __shared__ catena_bf16_t tile_b[128 * 16];\n    __shared__ float tile_c[8 * 16 * 16];\n");
     out.push_str(&format!(
-        "    frag_a_t a; frag_b_t b; frag_c_t c;\n    {namespace}::fill_fragment(c, 0.0f);\n"
+        "    frag_a_t a; frag_b_t b[8]; frag_c_t c[8];\n    #pragma unroll\n    for (uint32_t fragment = 0; fragment < 8; ++fragment) {{ {namespace}::fill_fragment(c[fragment], 0.0f); }}\n"
     ));
-    out.push_str("    for (uint64_t k_base = 0; k_base < reduction_len; k_base += 16) {\n        for (uint32_t flat = threadIdx.x; flat < 256; flat += blockDim.x) {\n");
+    out.push_str("    for (uint64_t k_base = 0; k_base < reduction_len; k_base += 16) {\n        for (uint32_t flat = threadIdx.x; flat < 128 * 16; flat += blockDim.x) {\n");
     out.push_str("            uint32_t tile_row = flat >> 4; uint32_t tile_column = flat & 15;\n            uint64_t row = row_base + tile_row; uint64_t k = k_base + tile_column;\n");
     out.push_str("            tile_a[flat] = (row < rows && k < reduction_len) ? input[(input_row + row) * reduction_len + k] : catena_bf16_from_f32(0.0f);\n");
     out.push_str("            uint64_t column = column_base + tile_row;\n            tile_b[flat] = (column < output_features && k < reduction_len) ? weight[column * reduction_len + k] : catena_bf16_from_f32(0.0f);\n");
-    out.push_str(&format!("        }}\n        __syncthreads();\n        {namespace}::load_matrix_sync(a, tile_a, 16);\n        {namespace}::load_matrix_sync(b, tile_b, 16);\n        {namespace}::mma_sync(c, a, b, c);\n        __syncthreads();\n    }}\n"));
-    out.push_str(&format!(
-        "    {namespace}::store_matrix_sync(tile_c, c, 16, {store_layout});\n    __syncthreads();\n"
-    ));
-    out.push_str("    for (uint32_t flat = threadIdx.x; flat < 256; flat += blockDim.x) {\n        uint64_t row = row_base + (flat >> 4); uint64_t column = column_base + (flat & 15);\n        if (row < rows && column < output_features) out[row * output_features + column] = catena_bf16_from_f32(tile_c[flat]);\n    }\n}\n");
+    out.push_str(&format!("        }}\n        __syncthreads();\n        {namespace}::load_matrix_sync(a, tile_a + wave * 16 * 16, 16);\n        #pragma unroll\n        for (uint32_t fragment = 0; fragment < 8; ++fragment) {{\n            {namespace}::load_matrix_sync(b[fragment], tile_b + fragment * 16 * 16, 16);\n            {namespace}::mma_sync(c[fragment], a, b[fragment], c[fragment]);\n        }}\n        __syncthreads();\n    }}\n"));
+    out.push_str(&format!("    #pragma unroll\n    for (uint32_t fragment = 0; fragment < 8; ++fragment) {{\n        {namespace}::store_matrix_sync(tile_c + wave * 16 * 16, c[fragment], 16, {store_layout});\n        __syncthreads();\n        for (uint32_t flat = lane; flat < 16 * 16; flat += 32) {{\n            uint64_t row = row_base + wave * 16 + (flat >> 4);\n            uint64_t column = column_base + fragment * 16 + (flat & 15);\n            if (row < rows && column < output_features) {{\n                out[row * output_features + column] = catena_bf16_from_f32(tile_c[wave * 16 * 16 + flat]);\n            }}\n        }}\n        __syncthreads();\n    }}\n}}\n"));
     if dialect == GpuDialect::Hip {
         out.push_str("#endif\n");
     }
 }
 
-/// Render an opt-in BF16 GEMM. HIP gfx11 and CUDA sm80+ execute one wave/warp
-/// per 16x16 output tile; the companion SIMT kernel handles small inputs.
+/// Render an opt-in BF16 GEMM. HIP gfx11 and CUDA sm80+ cooperatively execute a
+/// 128x128 output tile with eight waves/warps; the companion SIMT kernel handles
+/// small inputs.
 pub(in crate::codegen) fn render_bf16_gemm_wmma_kernels(
     out: &mut String,
     kernel_name: &str,
@@ -2105,7 +2142,7 @@ pub(in crate::codegen) fn render_borrow_native_bf16_gemm_pair_call(
         }
         NativeBf16PairBackend::Wmma => {
             out.push_str(&format!(
-                "        if ({prefix}_rows >= 64) {{\n            {kernel_name}_gate<<<dim3((({output_features}) + 15) / 16, ({prefix}_rows + 15) / 16), dim3(32)>>>(\n                {}, {}, {}_data, {prefix}_rows, {reduction_len}, {input_row}, {output_features});\n            {kernel_name}_up<<<dim3((({output_features}) + 15) / 16, ({prefix}_rows + 15) / 16), dim3(32)>>>(\n                {}, {}, {}_data, {prefix}_rows, {reduction_len}, {input_row}, {output_features});\n        }} else {{\n            {kernel_name}_simt<<<dim3({output_len}), dim3(256)>>>(\n                {}, {}, {}, {}_data, {}_data, {output_len}, {reduction_len}, {input_row}, {output_features});\n        }}\n",
+                "        if ({prefix}_rows >= 64) {{\n            {kernel_name}_gate<<<dim3((({output_features}) + 127) / 128, ({prefix}_rows + 127) / 128), dim3(256)>>>(\n                {}, {}, {}_data, {prefix}_rows, {reduction_len}, {input_row}, {output_features});\n            {kernel_name}_up<<<dim3((({output_features}) + 127) / 128, ({prefix}_rows + 127) / 128), dim3(256)>>>(\n                {}, {}, {}_data, {prefix}_rows, {reduction_len}, {input_row}, {output_features});\n        }} else {{\n            {kernel_name}_simt<<<dim3({output_len}), dim3(256)>>>(\n                {}, {}, {}, {}_data, {}_data, {output_len}, {reduction_len}, {input_row}, {output_features});\n        }}\n",
                 value_expr(input),
                 value_expr(gate_weight),
                 gate_output.name,
@@ -2242,7 +2279,7 @@ pub(in crate::codegen) fn render_borrow_routed_native_bf16_gemv_pair_call(
     );
     if backend == RoutedNativeBf16PairBackend::Wmma && dialect == GpuDialect::Hip {
         out.push_str(&format!(
-            "        if ({prefix}_expert_count != 0 && {prefix}_expert_count <= 256 && ({selected_capacity}) >= {prefix}_expert_count * 16 && (({reduction_len}) & 15) == 0 && (({output_features}) & 15) == 0) {{\n            uint64_t *{prefix}_offsets = nullptr;\n            uint64_t *{prefix}_permutation = nullptr;\n            catena_host_gpu_check({alloc}((void **)&{prefix}_offsets, ({prefix}_expert_count + 1) * sizeof(uint64_t), nullptr));\n            catena_host_gpu_check({alloc}((void **)&{prefix}_permutation, ({selected_capacity}) * sizeof(uint64_t), nullptr));\n            {kernel_name}_group<<<dim3(1), dim3(256)>>>(\n                {}, {selected_capacity}, {prefix}_expert_count, {prefix}_offsets, {prefix}_permutation);\n            {kernel_name}<<<dim3((({output_features}) + 15) / 16, {prefix}_expert_count), dim3(32)>>>(\n                {}, {}, {}, {prefix}_offsets, {prefix}_permutation, {}_data, {}_data, {reduction_len}, {slots}, {output_features});\n            catena_host_gpu_check({free}({prefix}_offsets, nullptr));\n            catena_host_gpu_check({free}({prefix}_permutation, nullptr));\n        }} else {{\n{simt_call}        }}\n",
+            "        if ({prefix}_expert_count != 0 && {prefix}_expert_count <= 256 && ({selected_capacity}) >= {prefix}_expert_count * 16 && (({reduction_len}) & 15) == 0 && (({output_features}) & 15) == 0) {{\n            uint64_t *{prefix}_offsets = nullptr;\n            uint64_t *{prefix}_permutation = nullptr;\n            catena_host_gpu_check({alloc}((void **)&{prefix}_offsets, ({prefix}_expert_count + 1) * sizeof(uint64_t), nullptr));\n            catena_host_gpu_check({alloc}((void **)&{prefix}_permutation, ({selected_capacity}) * sizeof(uint64_t), nullptr));\n            {kernel_name}_group<<<dim3(1), dim3(256)>>>(\n                {}, {selected_capacity}, {prefix}_expert_count, {prefix}_offsets, {prefix}_permutation);\n            {kernel_name}<<<dim3((({output_features}) + 63) / 64, {prefix}_expert_count), dim3(128)>>>(\n                {}, {}, {}, {prefix}_offsets, {prefix}_permutation, {}_data, {}_data, {reduction_len}, {slots}, {output_features});\n            catena_host_gpu_check({free}({prefix}_offsets, nullptr));\n            catena_host_gpu_check({free}({prefix}_permutation, nullptr));\n        }} else {{\n{simt_call}        }}\n",
             value_expr(selected),
             value_expr(input),
             value_expr(gate_weight),
@@ -2357,7 +2394,7 @@ pub(in crate::codegen) fn render_borrow_routed_native_bf16_gemv_residual_call(
     );
     if backend == RoutedNativeBf16ResidualBackend::Wmma && dialect == GpuDialect::Hip {
         out.push_str(&format!(
-            "        if ({prefix}_expert_count != 0 && {prefix}_expert_count <= 256 && ({selected_capacity}) >= {prefix}_expert_count * 16 && (({intermediate}) & 15) == 0 && (({output_features}) & 15) == 0) {{\n            uint64_t *{prefix}_offsets = nullptr;\n            uint64_t *{prefix}_permutation = nullptr;\n            float *{prefix}_route_output = nullptr;\n            uint64_t {prefix}_route_output_len = ({selected_capacity}) * ({output_features});\n            catena_host_gpu_check({alloc}((void **)&{prefix}_offsets, ({prefix}_expert_count + 1) * sizeof(uint64_t), nullptr));\n            catena_host_gpu_check({alloc}((void **)&{prefix}_permutation, ({selected_capacity}) * sizeof(uint64_t), nullptr));\n            catena_host_gpu_check({alloc}((void **)&{prefix}_route_output, {prefix}_route_output_len * sizeof(float), nullptr));\n            {kernel_name}_group<<<dim3(1), dim3(256)>>>(\n                {}, {selected_capacity}, {prefix}_expert_count, {prefix}_offsets, {prefix}_permutation);\n            {kernel_name}<<<dim3((({output_features}) + 15) / 16, {prefix}_expert_count), dim3(32)>>>(\n                {}, {}, {prefix}_offsets, {prefix}_permutation, {prefix}_route_output, {intermediate}, {output_features});\n            {kernel_name}_combine<<<dim3((({output_len}) + 255) / 256), dim3(256)>>>(\n                {prefix}_route_output, {}, {}_data, {output_len}, {slots}, {output_features});\n            catena_host_gpu_check({free}({prefix}_offsets, nullptr));\n            catena_host_gpu_check({free}({prefix}_permutation, nullptr));\n            catena_host_gpu_check({free}({prefix}_route_output, nullptr));\n        }} else {{\n{simt_call}        }}\n",
+            "        if ({prefix}_expert_count != 0 && {prefix}_expert_count <= 256 && ({selected_capacity}) >= {prefix}_expert_count * 16 && (({intermediate}) & 15) == 0 && (({output_features}) & 15) == 0) {{\n            uint64_t *{prefix}_offsets = nullptr;\n            uint64_t *{prefix}_permutation = nullptr;\n            float *{prefix}_route_output = nullptr;\n            uint64_t {prefix}_route_output_len = ({selected_capacity}) * ({output_features});\n            catena_host_gpu_check({alloc}((void **)&{prefix}_offsets, ({prefix}_expert_count + 1) * sizeof(uint64_t), nullptr));\n            catena_host_gpu_check({alloc}((void **)&{prefix}_permutation, ({selected_capacity}) * sizeof(uint64_t), nullptr));\n            catena_host_gpu_check({alloc}((void **)&{prefix}_route_output, {prefix}_route_output_len * sizeof(float), nullptr));\n            {kernel_name}_group<<<dim3(1), dim3(256)>>>(\n                {}, {selected_capacity}, {prefix}_expert_count, {prefix}_offsets, {prefix}_permutation);\n            {kernel_name}<<<dim3((({output_features}) + 127) / 128, {prefix}_expert_count), dim3(128)>>>(\n                {}, {}, {prefix}_offsets, {prefix}_permutation, {prefix}_route_output, {intermediate}, {output_features});\n            {kernel_name}_combine<<<dim3((({output_len}) + 255) / 256), dim3(256)>>>(\n                {prefix}_route_output, {}, {}_data, {output_len}, {slots}, {output_features});\n            catena_host_gpu_check({free}({prefix}_offsets, nullptr));\n            catena_host_gpu_check({free}({prefix}_permutation, nullptr));\n            catena_host_gpu_check({free}({prefix}_route_output, nullptr));\n        }} else {{\n{simt_call}        }}\n",
             value_expr(selected),
             value_expr(active),
             value_expr(down),
@@ -2495,7 +2532,7 @@ pub(in crate::codegen) fn render_bf16_gemm_wmma_call(
     out.push_str(&format!("    catena_assert(({reduction_len}) != 0);\n    catena_assert(({input_capacity}) % ({reduction_len}) == 0);\n    uint64_t {name}_input_rows = ({input_capacity}) / ({reduction_len});\n    catena_assert(({output_features}) != 0);\n    catena_assert({name}_len % ({output_features}) == 0);\n    uint64_t {name}_rows = {name}_len / ({output_features});\n"));
     out.push_str(&format!("    catena_assert(({input_row}) <= {name}_input_rows && {name}_rows <= {name}_input_rows - ({input_row}));\n    catena_assert(({output_features}) <= UINT64_MAX / ({reduction_len}));\n    catena_assert(({weight_capacity}) == ({output_features}) * ({reduction_len}));\n"));
     out.push_str(&format!("    if ({name}_len != 0) {{\n        catena_host_gpu_check({}((void **)&{name}_data, {name}_len * sizeof(catena_bf16_t), nullptr));\n", dialect.device_alloc_async_fn()));
-    out.push_str(&format!("        if ({name}_rows >= 64) {{\n            {kernel_name}<<<dim3((({output_features}) + 15) / 16, ({name}_rows + 15) / 16), dim3(32)>>>(\n                {}, {}, {name}_data, {name}_rows, {reduction_len}, {input_row}, {output_features});\n        }} else\n", value_expr(input), value_expr(weight)));
+    out.push_str(&format!("        if ({name}_rows >= 64) {{\n            {kernel_name}<<<dim3((({output_features}) + 127) / 128, ({name}_rows + 127) / 128), dim3(256)>>>(\n                {}, {}, {name}_data, {name}_rows, {reduction_len}, {input_row}, {output_features});\n        }} else\n", value_expr(input), value_expr(weight)));
     out.push_str(&format!("        {{\n            {kernel_name}_simt<<<dim3({name}_len), dim3(256)>>>(\n                {}, {}, {name}_data, {name}_len, {reduction_len}, {input_row}, {output_features});\n        }}\n    }}\n    {name} = {name}_data;\n", value_expr(input), value_expr(weight)));
     Ok(())
 }

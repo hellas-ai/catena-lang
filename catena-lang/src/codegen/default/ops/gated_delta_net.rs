@@ -148,40 +148,6 @@ __global__ void {name}({storage_type} *state, uint64_t state_offset,
     ));
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn renders_a_single_token_scan_loop_for_hip() {
-        let mut source = String::new();
-        render_kernel(&mut source, "scan", GpuDialect::Hip, StorageType::F32);
-        assert!(source.contains("for (uint64_t t = 0; t < tokens; ++t)"));
-        assert!(source.contains("state[state_base + i] = s[r]"));
-        assert!(source.contains("__shfl_down(value, offset, width)"));
-        assert!(!source.contains("__shfl_down_sync"));
-    }
-
-    #[test]
-    fn renders_cuda_synchronous_shuffle() {
-        let mut source = String::new();
-        render_kernel(&mut source, "scan", GpuDialect::Cuda, StorageType::F32);
-        assert!(source.contains("__shfl_down_sync(0xffffffffu"));
-        assert!(source.contains("__shfl_sync(0xffffffffu, prediction"));
-    }
-
-    #[test]
-    fn renders_bf16_storage_with_f32_recurrence() {
-        let mut source = String::new();
-        render_kernel(&mut source, "scan", GpuDialect::Hip, StorageType::Bf16);
-        assert!(source.contains("catena_bf16_t *state"));
-        assert!(source.contains("catena_bf16_to_f32(state[state_base + i])"));
-        assert!(source.contains("float s[4]"));
-        assert!(source.contains("catena_bf16_from_f32(output * scale)"));
-        assert!(source.contains("catena_bf16_from_f32(s[r])"));
-    }
-}
-
 pub(in crate::codegen) fn render_call(
     out: &mut String,
     function: &GpuFunction,
@@ -247,4 +213,38 @@ pub(in crate::codegen) fn render_call(
     }
     out.push_str(&format!("    {result} = {result}_data;\n"));
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn renders_a_single_token_scan_loop_for_hip() {
+        let mut source = String::new();
+        render_kernel(&mut source, "scan", GpuDialect::Hip, StorageType::F32);
+        assert!(source.contains("for (uint64_t t = 0; t < tokens; ++t)"));
+        assert!(source.contains("state[state_base + i] = s[r]"));
+        assert!(source.contains("__shfl_down(value, offset, width)"));
+        assert!(!source.contains("__shfl_down_sync"));
+    }
+
+    #[test]
+    fn renders_cuda_synchronous_shuffle() {
+        let mut source = String::new();
+        render_kernel(&mut source, "scan", GpuDialect::Cuda, StorageType::F32);
+        assert!(source.contains("__shfl_down_sync(0xffffffffu"));
+        assert!(source.contains("__shfl_sync(0xffffffffu, prediction"));
+    }
+
+    #[test]
+    fn renders_bf16_storage_with_f32_recurrence() {
+        let mut source = String::new();
+        render_kernel(&mut source, "scan", GpuDialect::Hip, StorageType::Bf16);
+        assert!(source.contains("catena_bf16_t *state"));
+        assert!(source.contains("catena_bf16_to_f32(state[state_base + i])"));
+        assert!(source.contains("float s[4]"));
+        assert!(source.contains("catena_bf16_from_f32(output * scale)"));
+        assert!(source.contains("catena_bf16_from_f32(s[r])"));
+    }
 }

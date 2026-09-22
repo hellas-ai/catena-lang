@@ -8,7 +8,9 @@ use crate::codegen::default::{
     components::{input_components, single_value, value_expr},
     gpu_placement::{GpuFunctionPlacement, function_placement, function_placements},
     lower_types::{CType, LoweredType},
-    ops::{cached_context, gated_delta_net, ifc, materializec, reducec, row_major},
+    ops::{
+        cached_attention, cached_context, gated_delta_net, ifc, materializec, reducec, row_major,
+    },
     prelude::render_gpu_prelude,
     render_utils::{c_type, invalid_inputs, invalid_outputs, param_decl},
     runtime_type,
@@ -220,6 +222,20 @@ fn render_module_body(
                 out,
                 &materializec::kernel_name(&module.entry.name, assignment)?,
                 assignment,
+            )?;
+            out.push('\n');
+        } else if matches!(
+            assignment.op.as_str(),
+            "materializec.borrow-cached-attention-bf16"
+                | "materializec.borrow-cached-attention-bf16-wmma"
+        ) {
+            cached_attention::render_kernel(
+                out,
+                &cached_attention::kernel_name(&module.entry, assignment)?,
+                assignment,
+                dialect,
+                assignment.op.as_str() == "materializec.borrow-cached-attention-bf16-wmma"
+                    && dialect == GpuDialect::Hip,
             )?;
             out.push('\n');
         } else if assignment.op.as_str() == "materializec.borrow-cached-context-f32" {
@@ -517,6 +533,15 @@ fn render_assignment(
         "materializec.borrow-reduce-f32" => {
             materializec::render_borrow_reduce_f32_call(out, function, assignment, dialect)?
         }
+        "materializec.borrow-cached-attention-bf16"
+        | "materializec.borrow-cached-attention-bf16-wmma" => cached_attention::render_call(
+            out,
+            function,
+            assignment,
+            dialect,
+            assignment.op.as_str() == "materializec.borrow-cached-attention-bf16-wmma"
+                && dialect == GpuDialect::Hip,
+        )?,
         "materializec.borrow-cached-context-f32" => cached_context::render_call(
             out,
             function,

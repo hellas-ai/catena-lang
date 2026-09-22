@@ -152,6 +152,44 @@
       ({cap.own [.output-cap] f32} buf val)
     }})
 
+  # Fused BF16 cached attention: Q.K, online softmax, and V in one kernel.
+  # Query rows must already have rotary position encoding applied.
+  (arr materializec.borrow-cached-attention-bf16 :
+    {[cache-cap query-cap output-cap.]
+      ({cap.own [.cache-cap] bf16} buf val)
+      ({[.cache-cap] u64} :)
+      ({cap.own [.query-cap] bf16} buf val)
+      ({[.query-cap] u64} :)
+      ({[.output-cap] u64} :)
+      (u64 val) (u64 val) (u64 val) (u64 val)
+      (u64 val) (u64 val) (u64 val) (f32 val)
+    }
+    ->
+    {[cache-cap query-cap output-cap.] {
+      ({cap.own [.cache-cap] bf16} buf val)
+      ({cap.own [.query-cap] bf16} buf val)
+      ({cap.own [.output-cap] bf16} buf val)
+    }})
+
+  # Matching HIP matrix-core implementation. It preserves the same ownership
+  # and layout contract while using rocWMMA for tiled Q.K products.
+  (arr materializec.borrow-cached-attention-bf16-wmma :
+    {[cache-cap query-cap output-cap.]
+      ({cap.own [.cache-cap] bf16} buf val)
+      ({[.cache-cap] u64} :)
+      ({cap.own [.query-cap] bf16} buf val)
+      ({[.query-cap] u64} :)
+      ({[.output-cap] u64} :)
+      (u64 val) (u64 val) (u64 val) (u64 val)
+      (u64 val) (u64 val) (u64 val) (f32 val)
+    }
+    ->
+    {[cache-cap query-cap output-cap.] {
+      ({cap.own [.cache-cap] bf16} buf val)
+      ({cap.own [.query-cap] bf16} buf val)
+      ({cap.own [.output-cap] bf16} buf val)
+    }})
+
   # BF16-storage counterpart; products accumulate in F32 and each context
   # channel is rounded once when stored.
   (arr materializec.borrow-cached-context-bf16 :

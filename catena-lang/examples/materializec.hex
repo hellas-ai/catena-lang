@@ -668,3 +668,34 @@
     ({[.output-count] [.output]} buf.to-mem)
   }
 ))
+
+(def program materialize-borrow-cached-attention-bf16 :
+  {(cap.own mem) (cap.own mem)}
+  ->
+  {(cap.own mem) (cap.own mem) (cap.own mem)}
+= ([cache query.]
+  ([.cache] mem.cast.bf16 [cache-count cache-buffer.])
+  ([.query] mem.cast.bf16 [query-count query-buffer.])
+  (const.u64.0x0000000000000024 u64.name [output-count.])
+  (const.u64.0x0000000000000009 [sequence.])
+  (const.u64.0x000000000000000A [history.])
+  (const.u64.0x000000000000000A [capacity.])
+  (const.u64.0x0000000000000000 [layer.])
+  (const.u64.0x0000000000000002 [query-heads.])
+  (const.u64.0x0000000000000001 [key-value-heads.])
+  (const.u64.0x0000000000000002 [head-dim.])
+  (const.u32.0x3F800000 u32.bitcast-f32 [scale.])
+  {
+    [.cache-buffer] [.cache-count]
+    [.query-buffer] [.query-count]
+    [.output-count]
+    [.sequence] [.history] [.capacity] [.layer]
+    [.query-heads] [.key-value-heads] [.head-dim] [.scale]
+  } materializec.borrow-cached-attention-bf16
+    [cache-after query-after output.]
+  {
+    ({[.cache-count] [.cache-after]} buf.to-mem)
+    ({[.query-count] [.query-after]} buf.to-mem)
+    ({[.output-count] [.output]} buf.to-mem)
+  }
+))

@@ -123,9 +123,10 @@ pub(in crate::codegen) fn render_kernel(
     uint64_t value_channel_base = layer * layer_stride + plane_stride
         + key_value_head * head_dim + channel;
     uint64_t probability_base = row * history;
+    uint64_t causal_keys = history - sequence + row / query_heads + 1;
     float sum = 0.0f;
     if (active) {{
-        for (uint64_t key_position = key_lane; key_position < history; key_position += 8) {{
+        for (uint64_t key_position = key_lane; key_position < causal_keys; key_position += 8) {{
             sum += {probability} * {value};
         }}
     }}
@@ -173,7 +174,8 @@ pub(in crate::codegen) fn render_call(
         dim = e(11)
     ));
     out.push_str(&format!(
-        "    catena_assert(({capacity}) != 0 && ({history}) <= ({capacity}));\n",
+        "    catena_assert(({capacity}) != 0 && ({sequence}) <= ({history}) && ({history}) <= ({capacity}));\n",
+        sequence = e(5),
         history = e(6),
         capacity = e(7)
     ));

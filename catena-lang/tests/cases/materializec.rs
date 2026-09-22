@@ -364,6 +364,44 @@ fn materialize_borrow_cached_context_bf16_accumulates_in_f32() -> anyhow::Result
 }
 
 #[test]
+fn materialize_borrow_cached_attention_bf16_respects_causal_rows() -> anyhow::Result<()> {
+    let runtime = runtime_with(SOURCE)?;
+    let mut cache_values = vec![0.0_f32; 20];
+    for position in 0..10 {
+        cache_values.push(2.0 * position as f32);
+        cache_values.push(2.0 * position as f32 + 2.0);
+    }
+    let cache_values = cache_values
+        .into_iter()
+        .map(half::bf16::from_f32)
+        .map(half::bf16::to_bits)
+        .collect::<Vec<_>>();
+    let cache = runtime.mem_u16(&cache_values)?;
+    let query = runtime.mem_u16(&[0_u16; 36])?;
+    let [_cache_after, _query_after, output] = runtime.exec(
+        "materialize-borrow-cached-attention-bf16",
+        [cache.into(), query.into()],
+    )?;
+    let Value::MemOwn(output) = output else {
+        anyhow::bail!("fused cached attention returned non-memory output: {output:?}");
+    };
+    let mut expected = Vec::with_capacity(36);
+    for token in 0..9 {
+        for _head in 0..2 {
+            expected.push(token as f32 + 1.0);
+            expected.push(token as f32 + 3.0);
+        }
+    }
+    let expected = expected
+        .into_iter()
+        .map(half::bf16::from_f32)
+        .map(half::bf16::to_bits)
+        .collect::<Vec<_>>();
+    assert_eq!(output.to_u16_vec(), expected);
+    Ok(())
+}
+
+#[test]
 fn materialize_softmax_f32_normalizes_rows_in_place() -> anyhow::Result<()> {
     let runtime = runtime_with(SOURCE)?;
     let input = runtime.mem_f32(&[0.0, 1.0, 2.0, f32::NEG_INFINITY, 3.0, 3.0])?;

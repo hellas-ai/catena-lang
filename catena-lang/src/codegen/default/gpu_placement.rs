@@ -81,6 +81,8 @@ fn function_directly_requires_host(function: &GpuFunction) -> bool {
                 | "materializec.borrow-reduce-f32"
                 | "materializec.borrow-cached-context-f32"
                 | "materializec.borrow-cached-context-bf16"
+                | "materializec.borrow-cached-attention-bf16"
+                | "materializec.borrow-cached-attention-bf16-wmma"
                 | "materializec.borrow-routed-bf16-gemv-pair"
                 | "materializec.borrow-native-bf16-gemv-pair"
                 | "materializec.borrow-native-bf16-gemm-wmma-pair"

@@ -32,6 +32,7 @@ unaligned inputs, unsupported devices, and runs without matrix cores.
 | `materializec.borrow-routed-bf16-gemv-pair` | Compute routed gate/up for F32 graphs using BF16 expert weights | Active in F32 model graphs |
 | `materializec.borrow-gated-delta-net-f32`, `materializec.borrow-gated-delta-net-bf16` | Fuse a complete Qwen3.5/3.6 recurrent DeltaNet scan | Active F32/BF16 variants |
 | `materializec.borrow-cached-context-f32`, `materializec.borrow-cached-context-bf16` | Tile the probability-times-V half of exact cached attention | Active F32/BF16 variants |
+| `materializec.borrow-cached-attention-bf16`, `materializec.borrow-cached-attention-bf16-wmma` | Fuse tiled Q·K, online softmax, and V for BF16 cached full attention without quadratic intermediates | Experimental HIP SIMT/rocWMMA paths |
 | `materializec.borrow-routed-native-bf16-gemv-pair`, `materializec.borrow-routed-native-bf16-gemm-wmma-pair` | Compute native-BF16 routed gate/up with SIMT or grouped HIP matrix cores | Active; GEMV remains the decode/CUDA/shape fallback |
 | `materializec.borrow-routed-native-bf16-gemv-residual`, `materializec.borrow-routed-native-bf16-gemm-wmma-residual` | Compute native-BF16 routed down projection, slot combination, and residual addition | Active; GEMV remains the decode/CUDA/shape fallback |
 
@@ -482,14 +483,34 @@ materializec.borrow-cached-context-{f32,bf16}[C, P, O] :
 `[query-position, query-head, key-position]`, and output is
 `[query-position, query-head, channel]`. Capacity and overflow checks prove
 that all three layouts fit; query heads must be divisible by KV heads,
-`history ≤ token_capacity`, and `1 ≤ head_dim ≤ 1024`.
+`sequence ≤ history ≤ token_capacity`, and `1 ≤ head_dim ≤ 1024`.
 
 A `32 × 8` block assigns adjacent threads to 32 contiguous value channels
 while eight key lanes traverse history. It reduces a fixed `8 × 32` F32
 shared tile, giving coalesced V-cache reads and 1 KiB shared memory per block
 instead of history-sized dynamic shared memory. BF16 loads are widened and
 each completed context channel is rounded once. This is still exact global
-attention and therefore still visits all `history` values.
+attention and therefore still visits every causal key up to each query row.
+
+## Fused BF16 cached attention
+
+`materializec.borrow-cached-attention-bf16` accepts owned BF16 cache and
+already rotary-encoded query buffers with their capacities, an output capacity,
+the seven cached-context layout scalars above, and an F32 attention scale. It
+returns both owners and a BF16 context buffer. A 256-thread HIP block handles
+eight tokens and two query heads, reusing each shared-memory K/V tile across
+16 query/head rows. Keys advance in 32-row tiles; wave-parallel F32 online
+softmax and F32 V accumulation replace the former single-row, eight-key loop.
+Sequence-one decode retains the vector kernel.
+
+`materializec.borrow-cached-attention-bf16-wmma` has the same type and layout
+contract. For prompts of at least 1024 tokens with a head dimension divisible
+by 16, it uses rocWMMA 16×16×16 BF16 operations with F32 accumulation for Q·K;
+softmax and P·V remain tiled SIMT/F32. Shorter and unsupported shapes dispatch
+to the SIMT tile. Both variants stop at each query's causal boundary, round
+only final context, and allocate neither scores nor probabilities. They are
+deterministic for a fixed device/compiler but need not match staged attention
+bit-for-bit.
 
 ## `materializec.borrow-routed-native-bf16-gemv-pair`
 

@@ -1,4 +1,11 @@
-use super::{gpu_support::StorageType, projection::ProjectionPlan};
+use crate::codegen::{GpuAssign, GpuDialect, GpuFunction, gpu::GpuRenderError};
+
+use super::{
+    cached_attention, cached_context, gated_delta_net,
+    gpu_support::StorageType,
+    materializec,
+    projection::{ProjectionBackend, ProjectionPlan, ProjectionStorage, RoutedProjectionBackend},
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::codegen) enum OptimizedOperation {
@@ -43,6 +50,206 @@ impl OptimizedOperation {
 
     pub(in crate::codegen) fn uses_blas(self) -> bool {
         matches!(self, Self::Projection(plan) if plan.uses_blas())
+    }
+
+    pub(in crate::codegen) fn render_kernels(
+        self,
+        out: &mut String,
+        function: &GpuFunction,
+        assignment: &GpuAssign,
+        dialect: GpuDialect,
+    ) -> Result<(), GpuRenderError> {
+        match self {
+            Self::CachedAttention { matrix_core } => cached_attention::render_kernel(
+                out,
+                &cached_attention::kernel_name(function, assignment)?,
+                assignment,
+                dialect,
+                matrix_core && dialect == GpuDialect::Hip,
+            ),
+            Self::CachedContext(storage) => cached_context::render_kernel(
+                out,
+                &cached_context::kernel_name(function, assignment)?,
+                assignment,
+                storage,
+            ),
+            Self::Projection(plan) => {
+                let kernel_name = materializec::kernel_name(&function.name, assignment)?;
+                match plan {
+                    ProjectionPlan::Dense(ProjectionBackend::Simt) => {
+                        materializec::render_bf16_gemv_kernel(
+                            out,
+                            &kernel_name,
+                            assignment,
+                            dialect,
+                        )
+                    }
+                    ProjectionPlan::Dense(ProjectionBackend::Wmma) => {
+                        materializec::render_bf16_gemm_wmma_kernels(
+                            out,
+                            &kernel_name,
+                            assignment,
+                            dialect,
+                        )
+                    }
+                    ProjectionPlan::Dense(ProjectionBackend::Blas) => {
+                        materializec::render_bf16_gemm_blas_kernels(
+                            out,
+                            &kernel_name,
+                            assignment,
+                            dialect,
+                        )
+                    }
+                    ProjectionPlan::DensePair(ProjectionBackend::Simt) => {
+                        materializec::render_borrow_native_bf16_gemv_pair_kernel(
+                            out,
+                            &kernel_name,
+                            assignment,
+                            dialect,
+                        )
+                    }
+                    ProjectionPlan::DensePair(ProjectionBackend::Wmma) => {
+                        materializec::render_borrow_native_bf16_gemm_wmma_pair_kernels(
+                            out,
+                            &kernel_name,
+                            assignment,
+                            dialect,
+                        )
+                    }
+                    ProjectionPlan::DensePair(ProjectionBackend::Blas) => {
+                        materializec::render_borrow_native_bf16_gemm_blas_pair_kernels(
+                            out,
+                            &kernel_name,
+                            assignment,
+                            dialect,
+                        )
+                    }
+                    ProjectionPlan::RoutedPairSimt(ProjectionStorage::F32Activations) => {
+                        materializec::render_borrow_routed_bf16_gemv_pair_kernel(
+                            out,
+                            &kernel_name,
+                            assignment,
+                        )
+                    }
+                    ProjectionPlan::RoutedPairSimt(ProjectionStorage::NativeBf16) => {
+                        materializec::render_borrow_routed_native_bf16_gemv_pair_kernel(
+                            out,
+                            &kernel_name,
+                            assignment,
+                            dialect,
+                        )
+                    }
+                    ProjectionPlan::RoutedPairWmma => {
+                        materializec::render_borrow_routed_native_bf16_gemm_wmma_pair_kernels(
+                            out,
+                            &kernel_name,
+                            assignment,
+                            dialect,
+                        )
+                    }
+                    ProjectionPlan::RoutedResidual(RoutedProjectionBackend::Simt) => {
+                        materializec::render_borrow_routed_native_bf16_gemv_residual_kernel(
+                            out,
+                            &kernel_name,
+                            assignment,
+                            dialect,
+                        )
+                    }
+                    ProjectionPlan::RoutedResidual(RoutedProjectionBackend::Wmma) => {
+                        materializec::render_borrow_routed_native_bf16_gemm_wmma_residual_kernels(
+                            out,
+                            &kernel_name,
+                            assignment,
+                            dialect,
+                        )
+                    }
+                }
+            }
+            Self::GatedDeltaNet(storage) => {
+                gated_delta_net::render_kernel(
+                    out,
+                    &gated_delta_net::kernel_name(function, assignment)?,
+                    dialect,
+                    storage,
+                );
+                Ok(())
+            }
+        }
+    }
+
+    pub(in crate::codegen) fn render_call(
+        self,
+        out: &mut String,
+        function: &GpuFunction,
+        assignment: &GpuAssign,
+        dialect: GpuDialect,
+    ) -> Result<(), GpuRenderError> {
+        match self {
+            Self::CachedAttention { matrix_core } => cached_attention::render_call(
+                out,
+                function,
+                assignment,
+                dialect,
+                matrix_core && dialect == GpuDialect::Hip,
+            ),
+            Self::CachedContext(storage) => {
+                cached_context::render_call(out, function, assignment, dialect, storage)
+            }
+            Self::Projection(plan) => match plan {
+                ProjectionPlan::Dense(ProjectionBackend::Simt) => {
+                    materializec::render_bf16_gemv_call(out, function, assignment, dialect)
+                }
+                ProjectionPlan::Dense(ProjectionBackend::Wmma) => {
+                    materializec::render_bf16_gemm_wmma_call(out, function, assignment, dialect)
+                }
+                ProjectionPlan::Dense(ProjectionBackend::Blas) => {
+                    materializec::render_bf16_gemm_blas_call(out, function, assignment, dialect)
+                }
+                ProjectionPlan::DensePair(backend) => {
+                    materializec::render_borrow_native_bf16_gemm_pair_call(
+                        out, function, assignment, dialect, backend,
+                    )
+                }
+                ProjectionPlan::RoutedPairSimt(ProjectionStorage::F32Activations) => {
+                    materializec::render_borrow_routed_bf16_gemv_pair_call(
+                        out, function, assignment, dialect,
+                    )
+                }
+                ProjectionPlan::RoutedPairSimt(ProjectionStorage::NativeBf16) => {
+                    materializec::render_borrow_routed_native_bf16_gemv_pair_call(
+                        out,
+                        function,
+                        assignment,
+                        dialect,
+                        ProjectionBackend::Simt,
+                    )
+                }
+                ProjectionPlan::RoutedPairWmma => {
+                    materializec::render_borrow_routed_native_bf16_gemv_pair_call(
+                        out,
+                        function,
+                        assignment,
+                        dialect,
+                        ProjectionBackend::Wmma,
+                    )
+                }
+                ProjectionPlan::RoutedResidual(backend) => {
+                    materializec::render_borrow_routed_native_bf16_gemv_residual_call(
+                        out,
+                        function,
+                        assignment,
+                        dialect,
+                        match backend {
+                            RoutedProjectionBackend::Simt => ProjectionBackend::Simt,
+                            RoutedProjectionBackend::Wmma => ProjectionBackend::Wmma,
+                        },
+                    )
+                }
+            },
+            Self::GatedDeltaNet(storage) => {
+                gated_delta_net::render_call(out, function, assignment, dialect, storage)
+            }
+        }
     }
 }
 

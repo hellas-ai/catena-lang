@@ -8,11 +8,7 @@ use crate::codegen::default::{
     components::{input_components, single_value, value_expr},
     gpu_placement::{GpuFunctionPlacement, function_placement, function_placements},
     lower_types::{CType, LoweredType},
-    ops::{
-        cached_attention, cached_context, gated_delta_net, gpu_support::StorageType, ifc,
-        materializec, optimized::OptimizedOperation, projection::ProjectionBackend, reducec,
-        row_major,
-    },
+    ops::{ifc, materializec, optimized::OptimizedOperation, reducec, row_major},
     prelude::render_gpu_prelude,
     render_utils::{c_type, invalid_inputs, invalid_outputs, param_decl},
     runtime_type,
@@ -172,6 +168,11 @@ fn render_module_body(
     // Materialization is represented in the dataflow body as one assignment, but GPU codegen needs an
     // auxiliary `__global__` kernel in addition to the host wrapper function.
     for assignment in &module.entry.assignments {
+        if let Some(operation) = OptimizedOperation::from_operation(assignment.op.as_str()) {
+            operation.render_kernels(out, &module.entry, assignment, dialect)?;
+            out.push('\n');
+            continue;
+        }
         if assignment.op.as_str() == "gpu.materialize" {
             render_materialize_kernel(
                 out,
@@ -223,142 +224,6 @@ fn render_module_body(
                 &materializec::kernel_name(&module.entry.name, assignment)?,
                 assignment,
             )?;
-            out.push('\n');
-        } else if matches!(
-            assignment.op.as_str(),
-            "materializec.borrow-cached-attention-bf16"
-                | "materializec.borrow-cached-attention-bf16-wmma"
-        ) {
-            cached_attention::render_kernel(
-                out,
-                &cached_attention::kernel_name(&module.entry, assignment)?,
-                assignment,
-                dialect,
-                assignment.op.as_str() == "materializec.borrow-cached-attention-bf16-wmma"
-                    && dialect == GpuDialect::Hip,
-            )?;
-            out.push('\n');
-        } else if assignment.op.as_str() == "materializec.borrow-cached-context-f32" {
-            cached_context::render_kernel(
-                out,
-                &cached_context::kernel_name(&module.entry, assignment)?,
-                assignment,
-                StorageType::F32,
-            )?;
-            out.push('\n');
-        } else if assignment.op.as_str() == "materializec.borrow-cached-context-bf16" {
-            cached_context::render_kernel(
-                out,
-                &cached_context::kernel_name(&module.entry, assignment)?,
-                assignment,
-                StorageType::Bf16,
-            )?;
-            out.push('\n');
-        } else if assignment.op.as_str() == "materializec.borrow-routed-bf16-gemv-pair" {
-            materializec::render_borrow_routed_bf16_gemv_pair_kernel(
-                out,
-                &materializec::kernel_name(&module.entry.name, assignment)?,
-                assignment,
-            )?;
-            out.push('\n');
-        } else if assignment.op.as_str() == "materializec.borrow-native-bf16-gemv-pair" {
-            materializec::render_borrow_native_bf16_gemv_pair_kernel(
-                out,
-                &materializec::kernel_name(&module.entry.name, assignment)?,
-                assignment,
-                dialect,
-            )?;
-            out.push('\n');
-        } else if assignment.op.as_str() == "materializec.borrow-native-bf16-gemm-wmma-pair" {
-            materializec::render_borrow_native_bf16_gemm_wmma_pair_kernels(
-                out,
-                &materializec::kernel_name(&module.entry.name, assignment)?,
-                assignment,
-                dialect,
-            )?;
-            out.push('\n');
-        } else if assignment.op.as_str() == "materializec.borrow-native-bf16-gemm-blas-pair" {
-            materializec::render_borrow_native_bf16_gemm_blas_pair_kernels(
-                out,
-                &materializec::kernel_name(&module.entry.name, assignment)?,
-                assignment,
-                dialect,
-            )?;
-            out.push('\n');
-        } else if assignment.op.as_str() == "materializec.borrow-routed-native-bf16-gemv-pair" {
-            materializec::render_borrow_routed_native_bf16_gemv_pair_kernel(
-                out,
-                &materializec::kernel_name(&module.entry.name, assignment)?,
-                assignment,
-                dialect,
-            )?;
-            out.push('\n');
-        } else if assignment.op.as_str() == "materializec.borrow-routed-native-bf16-gemm-wmma-pair"
-        {
-            materializec::render_borrow_routed_native_bf16_gemm_wmma_pair_kernels(
-                out,
-                &materializec::kernel_name(&module.entry.name, assignment)?,
-                assignment,
-                dialect,
-            )?;
-            out.push('\n');
-        } else if assignment.op.as_str() == "materializec.borrow-routed-native-bf16-gemv-residual" {
-            materializec::render_borrow_routed_native_bf16_gemv_residual_kernel(
-                out,
-                &materializec::kernel_name(&module.entry.name, assignment)?,
-                assignment,
-                dialect,
-            )?;
-            out.push('\n');
-        } else if assignment.op.as_str()
-            == "materializec.borrow-routed-native-bf16-gemm-wmma-residual"
-        {
-            materializec::render_borrow_routed_native_bf16_gemm_wmma_residual_kernels(
-                out,
-                &materializec::kernel_name(&module.entry.name, assignment)?,
-                assignment,
-                dialect,
-            )?;
-            out.push('\n');
-        } else if assignment.op.as_str() == "materializec.bf16-gemv" {
-            materializec::render_bf16_gemv_kernel(
-                out,
-                &materializec::kernel_name(&module.entry.name, assignment)?,
-                assignment,
-                dialect,
-            )?;
-            out.push('\n');
-        } else if assignment.op.as_str() == "materializec.bf16-gemm-wmma" {
-            materializec::render_bf16_gemm_wmma_kernels(
-                out,
-                &materializec::kernel_name(&module.entry.name, assignment)?,
-                assignment,
-                dialect,
-            )?;
-            out.push('\n');
-        } else if assignment.op.as_str() == "materializec.bf16-gemm-blas" {
-            materializec::render_bf16_gemm_blas_kernels(
-                out,
-                &materializec::kernel_name(&module.entry.name, assignment)?,
-                assignment,
-                dialect,
-            )?;
-            out.push('\n');
-        } else if assignment.op.as_str() == "materializec.borrow-gated-delta-net-f32" {
-            gated_delta_net::render_kernel(
-                out,
-                &gated_delta_net::kernel_name(&module.entry, assignment)?,
-                dialect,
-                StorageType::F32,
-            );
-            out.push('\n');
-        } else if assignment.op.as_str() == "materializec.borrow-gated-delta-net-bf16" {
-            gated_delta_net::render_kernel(
-                out,
-                &gated_delta_net::kernel_name(&module.entry, assignment)?,
-                dialect,
-                StorageType::Bf16,
-            );
             out.push('\n');
         } else if assignment.op.as_str() == "materializec.reduce-f32" {
             materializec::render_reduce_f32_kernel(
@@ -514,6 +379,10 @@ fn render_assignment(
         return Ok(());
     }
 
+    if let Some(operation) = OptimizedOperation::from_operation(assignment.op.as_str()) {
+        return operation.render_call(out, function, assignment, dialect);
+    }
+
     match assignment.op.as_str() {
         "bool.ifc" => ifc::render(out, assignment)?,
         "eval" => render_eval(out, assignment)?,
@@ -532,104 +401,6 @@ fn render_assignment(
         }
         "materializec.borrow-reduce-f32" => {
             materializec::render_borrow_reduce_f32_call(out, function, assignment, dialect)?
-        }
-        "materializec.borrow-cached-attention-bf16"
-        | "materializec.borrow-cached-attention-bf16-wmma" => cached_attention::render_call(
-            out,
-            function,
-            assignment,
-            dialect,
-            assignment.op.as_str() == "materializec.borrow-cached-attention-bf16-wmma"
-                && dialect == GpuDialect::Hip,
-        )?,
-        "materializec.borrow-cached-context-f32" => {
-            cached_context::render_call(out, function, assignment, dialect, StorageType::F32)?
-        }
-        "materializec.borrow-cached-context-bf16" => {
-            cached_context::render_call(out, function, assignment, dialect, StorageType::Bf16)?
-        }
-        "materializec.borrow-routed-bf16-gemv-pair" => {
-            materializec::render_borrow_routed_bf16_gemv_pair_call(
-                out, function, assignment, dialect,
-            )?
-        }
-        "materializec.borrow-native-bf16-gemv-pair" => {
-            materializec::render_borrow_native_bf16_gemm_pair_call(
-                out,
-                function,
-                assignment,
-                dialect,
-                ProjectionBackend::Simt,
-            )?
-        }
-        "materializec.borrow-native-bf16-gemm-wmma-pair" => {
-            materializec::render_borrow_native_bf16_gemm_pair_call(
-                out,
-                function,
-                assignment,
-                dialect,
-                ProjectionBackend::Wmma,
-            )?
-        }
-        "materializec.borrow-native-bf16-gemm-blas-pair" => {
-            materializec::render_borrow_native_bf16_gemm_pair_call(
-                out,
-                function,
-                assignment,
-                dialect,
-                ProjectionBackend::Blas,
-            )?
-        }
-        "materializec.borrow-routed-native-bf16-gemv-pair" => {
-            materializec::render_borrow_routed_native_bf16_gemv_pair_call(
-                out,
-                function,
-                assignment,
-                dialect,
-                ProjectionBackend::Simt,
-            )?
-        }
-        "materializec.borrow-routed-native-bf16-gemm-wmma-pair" => {
-            materializec::render_borrow_routed_native_bf16_gemv_pair_call(
-                out,
-                function,
-                assignment,
-                dialect,
-                ProjectionBackend::Wmma,
-            )?
-        }
-        "materializec.borrow-routed-native-bf16-gemv-residual" => {
-            materializec::render_borrow_routed_native_bf16_gemv_residual_call(
-                out,
-                function,
-                assignment,
-                dialect,
-                ProjectionBackend::Simt,
-            )?
-        }
-        "materializec.borrow-routed-native-bf16-gemm-wmma-residual" => {
-            materializec::render_borrow_routed_native_bf16_gemv_residual_call(
-                out,
-                function,
-                assignment,
-                dialect,
-                ProjectionBackend::Wmma,
-            )?
-        }
-        "materializec.bf16-gemv" => {
-            materializec::render_bf16_gemv_call(out, function, assignment, dialect)?
-        }
-        "materializec.bf16-gemm-wmma" => {
-            materializec::render_bf16_gemm_wmma_call(out, function, assignment, dialect)?
-        }
-        "materializec.bf16-gemm-blas" => {
-            materializec::render_bf16_gemm_blas_call(out, function, assignment, dialect)?
-        }
-        "materializec.borrow-gated-delta-net-f32" => {
-            gated_delta_net::render_call(out, function, assignment, dialect, StorageType::F32)?
-        }
-        "materializec.borrow-gated-delta-net-bf16" => {
-            gated_delta_net::render_call(out, function, assignment, dialect, StorageType::Bf16)?
         }
         "materializec.reduce-f32" => {
             materializec::render_reduce_f32_call(out, function, assignment, dialect)?

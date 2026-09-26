@@ -1,7 +1,4 @@
-use super::{
-    gpu_support::StorageType,
-    projection::{ProjectionBackend, ProjectionPlan},
-};
+use super::{gpu_support::StorageType, projection::ProjectionPlan};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::codegen) enum OptimizedOperation {
@@ -39,19 +36,13 @@ impl OptimizedOperation {
 
     pub(in crate::codegen) fn validates_materializec_producer(self) -> bool {
         match self {
-            Self::Projection(plan) => plan.native_bf16,
+            Self::Projection(plan) => plan.validates_materializec_producer(),
             _ => true,
         }
     }
 
     pub(in crate::codegen) fn uses_blas(self) -> bool {
-        matches!(
-            self,
-            Self::Projection(ProjectionPlan {
-                backend: ProjectionBackend::Blas,
-                ..
-            })
-        )
+        matches!(self, Self::Projection(plan) if plan.uses_blas())
     }
 }
 

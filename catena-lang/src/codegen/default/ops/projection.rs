@@ -6,24 +6,20 @@ pub(in crate::codegen) enum ProjectionBackend {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::codegen) enum ProjectionTopology {
-    Dense,
-    Routed,
+pub(in crate::codegen) enum ProjectionStorage {
+    F32Activations,
+    NativeBf16,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::codegen) enum ProjectionOutputs {
-    Single,
-    Pair,
-    Residual,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::codegen) struct ProjectionPlan {
-    pub backend: ProjectionBackend,
-    pub topology: ProjectionTopology,
-    pub outputs: ProjectionOutputs,
-    pub native_bf16: bool,
+pub(in crate::codegen) enum ProjectionPlan {
+    Dense(ProjectionBackend),
+    DensePair(ProjectionBackend),
+    RoutedPair {
+        backend: ProjectionBackend,
+        storage: ProjectionStorage,
+    },
+    RoutedResidual(ProjectionBackend),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -126,79 +122,57 @@ __global__ void __KERNEL___group(
 impl ProjectionPlan {
     pub(in crate::codegen) fn from_operation(operation: &str) -> Option<Self> {
         use ProjectionBackend::{Blas, Simt, Wmma};
-        use ProjectionOutputs::{Pair, Residual, Single};
-        use ProjectionTopology::{Dense, Routed};
+        use ProjectionStorage::{F32Activations, NativeBf16};
 
         let plan = match operation {
-            "materializec.bf16-gemv" => Self {
+            "materializec.bf16-gemv" => Self::Dense(Simt),
+            "materializec.bf16-gemm-wmma" => Self::Dense(Wmma),
+            "materializec.bf16-gemm-blas" => Self::Dense(Blas),
+            "materializec.borrow-native-bf16-gemv-pair" => Self::DensePair(Simt),
+            "materializec.borrow-native-bf16-gemm-wmma-pair" => Self::DensePair(Wmma),
+            "materializec.borrow-native-bf16-gemm-blas-pair" => Self::DensePair(Blas),
+            "materializec.borrow-routed-bf16-gemv-pair" => Self::RoutedPair {
                 backend: Simt,
-                topology: Dense,
-                outputs: Single,
-                native_bf16: true,
+                storage: F32Activations,
             },
-            "materializec.bf16-gemm-wmma" => Self {
+            "materializec.borrow-routed-native-bf16-gemv-pair" => Self::RoutedPair {
+                backend: Simt,
+                storage: NativeBf16,
+            },
+            "materializec.borrow-routed-native-bf16-gemm-wmma-pair" => Self::RoutedPair {
                 backend: Wmma,
-                topology: Dense,
-                outputs: Single,
-                native_bf16: true,
+                storage: NativeBf16,
             },
-            "materializec.bf16-gemm-blas" => Self {
-                backend: Blas,
-                topology: Dense,
-                outputs: Single,
-                native_bf16: true,
-            },
-            "materializec.borrow-native-bf16-gemv-pair" => Self {
-                backend: Simt,
-                topology: Dense,
-                outputs: Pair,
-                native_bf16: true,
-            },
-            "materializec.borrow-native-bf16-gemm-wmma-pair" => Self {
-                backend: Wmma,
-                topology: Dense,
-                outputs: Pair,
-                native_bf16: true,
-            },
-            "materializec.borrow-native-bf16-gemm-blas-pair" => Self {
-                backend: Blas,
-                topology: Dense,
-                outputs: Pair,
-                native_bf16: true,
-            },
-            "materializec.borrow-routed-bf16-gemv-pair" => Self {
-                backend: Simt,
-                topology: Routed,
-                outputs: Pair,
-                native_bf16: false,
-            },
-            "materializec.borrow-routed-native-bf16-gemv-pair" => Self {
-                backend: Simt,
-                topology: Routed,
-                outputs: Pair,
-                native_bf16: true,
-            },
-            "materializec.borrow-routed-native-bf16-gemm-wmma-pair" => Self {
-                backend: Wmma,
-                topology: Routed,
-                outputs: Pair,
-                native_bf16: true,
-            },
-            "materializec.borrow-routed-native-bf16-gemv-residual" => Self {
-                backend: Simt,
-                topology: Routed,
-                outputs: Residual,
-                native_bf16: true,
-            },
-            "materializec.borrow-routed-native-bf16-gemm-wmma-residual" => Self {
-                backend: Wmma,
-                topology: Routed,
-                outputs: Residual,
-                native_bf16: true,
-            },
+            "materializec.borrow-routed-native-bf16-gemv-residual" => Self::RoutedResidual(Simt),
+            "materializec.borrow-routed-native-bf16-gemm-wmma-residual" => {
+                Self::RoutedResidual(Wmma)
+            }
             _ => return None,
         };
         Some(plan)
+    }
+
+    pub(in crate::codegen) fn backend(self) -> ProjectionBackend {
+        match self {
+            Self::Dense(backend)
+            | Self::DensePair(backend)
+            | Self::RoutedPair { backend, .. }
+            | Self::RoutedResidual(backend) => backend,
+        }
+    }
+
+    pub(in crate::codegen) fn validates_materializec_producer(self) -> bool {
+        !matches!(
+            self,
+            Self::RoutedPair {
+                storage: ProjectionStorage::F32Activations,
+                ..
+            }
+        )
+    }
+
+    pub(in crate::codegen) fn uses_blas(self) -> bool {
+        self.backend() == ProjectionBackend::Blas
     }
 }
 
@@ -207,22 +181,65 @@ mod tests {
     use super::*;
 
     #[test]
-    fn projection_names_map_to_orthogonal_execution_properties() {
-        let routed_down = ProjectionPlan::from_operation(
-            "materializec.borrow-routed-native-bf16-gemm-wmma-residual",
-        )
-        .unwrap();
-        assert_eq!(routed_down.backend, ProjectionBackend::Wmma);
-        assert_eq!(routed_down.topology, ProjectionTopology::Routed);
-        assert_eq!(routed_down.outputs, ProjectionOutputs::Residual);
-        assert!(routed_down.native_bf16);
+    fn projection_names_map_to_valid_families() {
+        use ProjectionBackend::{Blas, Simt, Wmma};
+        use ProjectionStorage::{F32Activations, NativeBf16};
 
-        let dense_pair =
-            ProjectionPlan::from_operation("materializec.borrow-native-bf16-gemm-blas-pair")
-                .unwrap();
-        assert_eq!(dense_pair.backend, ProjectionBackend::Blas);
-        assert_eq!(dense_pair.topology, ProjectionTopology::Dense);
-        assert_eq!(dense_pair.outputs, ProjectionOutputs::Pair);
+        let cases = [
+            ("materializec.bf16-gemv", ProjectionPlan::Dense(Simt)),
+            ("materializec.bf16-gemm-wmma", ProjectionPlan::Dense(Wmma)),
+            ("materializec.bf16-gemm-blas", ProjectionPlan::Dense(Blas)),
+            (
+                "materializec.borrow-native-bf16-gemv-pair",
+                ProjectionPlan::DensePair(Simt),
+            ),
+            (
+                "materializec.borrow-native-bf16-gemm-wmma-pair",
+                ProjectionPlan::DensePair(Wmma),
+            ),
+            (
+                "materializec.borrow-native-bf16-gemm-blas-pair",
+                ProjectionPlan::DensePair(Blas),
+            ),
+            (
+                "materializec.borrow-routed-bf16-gemv-pair",
+                ProjectionPlan::RoutedPair {
+                    backend: Simt,
+                    storage: F32Activations,
+                },
+            ),
+            (
+                "materializec.borrow-routed-native-bf16-gemv-pair",
+                ProjectionPlan::RoutedPair {
+                    backend: Simt,
+                    storage: NativeBf16,
+                },
+            ),
+            (
+                "materializec.borrow-routed-native-bf16-gemm-wmma-pair",
+                ProjectionPlan::RoutedPair {
+                    backend: Wmma,
+                    storage: NativeBf16,
+                },
+            ),
+            (
+                "materializec.borrow-routed-native-bf16-gemv-residual",
+                ProjectionPlan::RoutedResidual(Simt),
+            ),
+            (
+                "materializec.borrow-routed-native-bf16-gemm-wmma-residual",
+                ProjectionPlan::RoutedResidual(Wmma),
+            ),
+        ];
+        for (name, expected) in cases {
+            assert_eq!(
+                ProjectionPlan::from_operation(name),
+                Some(expected),
+                "{name}"
+            );
+        }
+        assert!(!cases[6].1.validates_materializec_producer());
+        assert!(cases[5].1.uses_blas());
     }
 
     #[test]

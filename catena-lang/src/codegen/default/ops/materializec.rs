@@ -29,7 +29,7 @@ use crate::codegen::default::{
     gpu::{GpuRenderError, render_function_application},
     lower_types::{CType, LoweredType},
     ops::gpu_support::{hip_gfx11_guard, hip_wmma_include_guard},
-    ops::projection::ProjectionBackend,
+    ops::projection::{MmaTileSpec, ProjectionBackend},
     render_utils::{c_type, invalid_outputs, param_decl},
     runtime_type,
 };
@@ -1410,6 +1410,12 @@ pub(in crate::codegen) fn render_bf16_gemv_kernel(
 }
 
 fn render_bf16_gemm_wmma_kernel(out: &mut String, kernel_name: &str, dialect: GpuDialect) {
+    let tile = MmaTileSpec::DENSE;
+    let tile_rows = tile.rows;
+    let tile_columns = tile.columns;
+    let tile_reduction = tile.reduction;
+    let waves = tile.waves;
+    let fragments = tile.column_fragments();
     let (namespace, include, matrix_a, matrix_b, accumulator, row_major, col_major, store_layout) =
         match dialect {
             GpuDialect::Hip => (
@@ -1437,22 +1443,22 @@ fn render_bf16_gemm_wmma_kernel(out: &mut String, kernel_name: &str, dialect: Gp
     out.push_str(&format!(
         "__global__ void {kernel_name}(const catena_bf16_t *input, const catena_bf16_t *weight, catena_bf16_t *out, uint64_t rows, uint64_t reduction_len, uint64_t input_row, uint64_t output_features) {{\n"
     ));
-    out.push_str(&format!("    using frag_a_t = {namespace}::fragment<{matrix_a}, 16, 16, 16, catena_bf16_t, {row_major}>;\n"));
-    out.push_str(&format!("    using frag_b_t = {namespace}::fragment<{matrix_b}, 16, 16, 16, catena_bf16_t, {col_major}>;\n"));
+    out.push_str(&format!("    using frag_a_t = {namespace}::fragment<{matrix_a}, 16, 16, {tile_reduction}, catena_bf16_t, {row_major}>;\n"));
+    out.push_str(&format!("    using frag_b_t = {namespace}::fragment<{matrix_b}, 16, 16, {tile_reduction}, catena_bf16_t, {col_major}>;\n"));
     out.push_str(&format!(
-        "    using frag_c_t = {namespace}::fragment<{accumulator}, 16, 16, 16, float>;\n"
+        "    using frag_c_t = {namespace}::fragment<{accumulator}, 16, 16, {tile_reduction}, float>;\n"
     ));
-    out.push_str("    uint64_t row_base = (uint64_t)blockIdx.y * 128;\n    uint64_t column_base = (uint64_t)blockIdx.x * 128;\n    uint32_t wave = threadIdx.x / 32;\n    uint32_t lane = threadIdx.x % 32;\n");
-    out.push_str("    __shared__ catena_bf16_t tile_a[128 * 16];\n    __shared__ catena_bf16_t tile_b[128 * 16];\n    __shared__ float tile_c[8 * 16 * 16];\n");
+    out.push_str(&format!("    uint64_t row_base = (uint64_t)blockIdx.y * {tile_rows};\n    uint64_t column_base = (uint64_t)blockIdx.x * {tile_columns};\n    uint32_t wave = threadIdx.x / 32;\n    uint32_t lane = threadIdx.x % 32;\n"));
+    out.push_str(&format!("    __shared__ catena_bf16_t tile_a[{tile_rows} * {tile_reduction}];\n    __shared__ catena_bf16_t tile_b[{tile_columns} * {tile_reduction}];\n    __shared__ float tile_c[{waves} * 16 * 16];\n"));
     out.push_str(&format!(
-        "    frag_a_t a; frag_b_t b[8]; frag_c_t c[8];\n    #pragma unroll\n    for (uint32_t fragment = 0; fragment < 8; ++fragment) {{ {namespace}::fill_fragment(c[fragment], 0.0f); }}\n"
+        "    frag_a_t a; frag_b_t b[{fragments}]; frag_c_t c[{fragments}];\n    #pragma unroll\n    for (uint32_t fragment = 0; fragment < {fragments}; ++fragment) {{ {namespace}::fill_fragment(c[fragment], 0.0f); }}\n"
     ));
-    out.push_str("    for (uint64_t k_base = 0; k_base < reduction_len; k_base += 16) {\n        for (uint32_t flat = threadIdx.x; flat < 128 * 16; flat += blockDim.x) {\n");
+    out.push_str(&format!("    for (uint64_t k_base = 0; k_base < reduction_len; k_base += {tile_reduction}) {{\n        for (uint32_t flat = threadIdx.x; flat < {tile_rows} * {tile_reduction}; flat += blockDim.x) {{\n"));
     out.push_str("            uint32_t tile_row = flat >> 4; uint32_t tile_column = flat & 15;\n            uint64_t row = row_base + tile_row; uint64_t k = k_base + tile_column;\n");
     out.push_str("            tile_a[flat] = (row < rows && k < reduction_len) ? input[(input_row + row) * reduction_len + k] : catena_bf16_from_f32(0.0f);\n");
     out.push_str("            uint64_t column = column_base + tile_row;\n            tile_b[flat] = (column < output_features && k < reduction_len) ? weight[column * reduction_len + k] : catena_bf16_from_f32(0.0f);\n");
-    out.push_str(&format!("        }}\n        __syncthreads();\n        {namespace}::load_matrix_sync(a, tile_a + wave * 16 * 16, 16);\n        #pragma unroll\n        for (uint32_t fragment = 0; fragment < 8; ++fragment) {{\n            {namespace}::load_matrix_sync(b[fragment], tile_b + fragment * 16 * 16, 16);\n            {namespace}::mma_sync(c[fragment], a, b[fragment], c[fragment]);\n        }}\n        __syncthreads();\n    }}\n"));
-    out.push_str(&format!("    #pragma unroll\n    for (uint32_t fragment = 0; fragment < 8; ++fragment) {{\n        {namespace}::store_matrix_sync(tile_c + wave * 16 * 16, c[fragment], 16, {store_layout});\n        __syncthreads();\n        for (uint32_t flat = lane; flat < 16 * 16; flat += 32) {{\n            uint64_t row = row_base + wave * 16 + (flat >> 4);\n            uint64_t column = column_base + fragment * 16 + (flat & 15);\n            if (row < rows && column < output_features) {{\n                out[row * output_features + column] = catena_bf16_from_f32(tile_c[wave * 16 * 16 + flat]);\n            }}\n        }}\n        __syncthreads();\n    }}\n}}\n"));
+    out.push_str(&format!("        }}\n        __syncthreads();\n        {namespace}::load_matrix_sync(a, tile_a + wave * 16 * {tile_reduction}, {tile_reduction});\n        #pragma unroll\n        for (uint32_t fragment = 0; fragment < {fragments}; ++fragment) {{\n            {namespace}::load_matrix_sync(b[fragment], tile_b + fragment * 16 * {tile_reduction}, {tile_reduction});\n            {namespace}::mma_sync(c[fragment], a, b[fragment], c[fragment]);\n        }}\n        __syncthreads();\n    }}\n"));
+    out.push_str(&format!("    #pragma unroll\n    for (uint32_t fragment = 0; fragment < {fragments}; ++fragment) {{\n        {namespace}::store_matrix_sync(tile_c + wave * 16 * 16, c[fragment], 16, {store_layout});\n        __syncthreads();\n        for (uint32_t flat = lane; flat < 16 * 16; flat += 32) {{\n            uint64_t row = row_base + wave * 16 + (flat >> 4);\n            uint64_t column = column_base + fragment * 16 + (flat & 15);\n            if (row < rows && column < output_features) {{\n                out[row * output_features + column] = catena_bf16_from_f32(tile_c[wave * 16 * 16 + flat]);\n            }}\n        }}\n        __syncthreads();\n    }}\n}}\n"));
     if dialect == GpuDialect::Hip {
         out.push_str("#endif\n");
     }
@@ -2090,6 +2096,11 @@ pub(in crate::codegen) fn render_borrow_native_bf16_gemm_pair_call(
     let output_features = value_expr(output_features);
     let kernel_name = kernel_name(&function.name, assignment)?;
     let prefix = &gate_output.name;
+    let tile = MmaTileSpec::DENSE;
+    let tile_rows = tile.rows;
+    let tile_columns = tile.columns;
+    let tile_threads = tile.threads;
+    let minimum_rows = tile.minimum_rows;
 
     out.push_str(&format!("    catena_assert(({reduction_len}) != 0);\n"));
     out.push_str(&format!(
@@ -2139,7 +2150,7 @@ pub(in crate::codegen) fn render_borrow_native_bf16_gemm_pair_call(
         }
         ProjectionBackend::Wmma => {
             out.push_str(&format!(
-                "        if ({prefix}_rows >= 64) {{\n            {kernel_name}_gate<<<dim3((({output_features}) + 127) / 128, ({prefix}_rows + 127) / 128), dim3(256)>>>(\n                {}, {}, {}_data, {prefix}_rows, {reduction_len}, {input_row}, {output_features});\n            {kernel_name}_up<<<dim3((({output_features}) + 127) / 128, ({prefix}_rows + 127) / 128), dim3(256)>>>(\n                {}, {}, {}_data, {prefix}_rows, {reduction_len}, {input_row}, {output_features});\n        }} else {{\n            {kernel_name}_simt<<<dim3({output_len}), dim3(256)>>>(\n                {}, {}, {}, {}_data, {}_data, {output_len}, {reduction_len}, {input_row}, {output_features});\n        }}\n",
+                "        if ({prefix}_rows >= {minimum_rows}) {{\n            {kernel_name}_gate<<<dim3((({output_features}) + {tile_columns} - 1) / {tile_columns}, ({prefix}_rows + {tile_rows} - 1) / {tile_rows}), dim3({tile_threads})>>>(\n                {}, {}, {}_data, {prefix}_rows, {reduction_len}, {input_row}, {output_features});\n            {kernel_name}_up<<<dim3((({output_features}) + {tile_columns} - 1) / {tile_columns}, ({prefix}_rows + {tile_rows} - 1) / {tile_rows}), dim3({tile_threads})>>>(\n                {}, {}, {}_data, {prefix}_rows, {reduction_len}, {input_row}, {output_features});\n        }} else {{\n            {kernel_name}_simt<<<dim3({output_len}), dim3(256)>>>(\n                {}, {}, {}, {}_data, {}_data, {output_len}, {reduction_len}, {input_row}, {output_features});\n        }}\n",
                 value_expr(input),
                 value_expr(gate_weight),
                 gate_output.name,
@@ -2513,13 +2524,18 @@ pub(in crate::codegen) fn render_bf16_gemm_wmma_call(
     let output_features = value_expr(output_features);
     let kernel_name = kernel_name(&function.name, assignment)?;
     let name = &output.name;
+    let tile = MmaTileSpec::DENSE;
+    let tile_rows = tile.rows;
+    let tile_columns = tile.columns;
+    let tile_threads = tile.threads;
+    let minimum_rows = tile.minimum_rows;
     out.push_str(&format!(
         "    uint64_t {name}_len = {output_len};\n    catena_bf16_t *{name}_data = nullptr;\n"
     ));
     out.push_str(&format!("    catena_assert(({reduction_len}) != 0);\n    catena_assert(({input_capacity}) % ({reduction_len}) == 0);\n    uint64_t {name}_input_rows = ({input_capacity}) / ({reduction_len});\n    catena_assert(({output_features}) != 0);\n    catena_assert({name}_len % ({output_features}) == 0);\n    uint64_t {name}_rows = {name}_len / ({output_features});\n"));
     out.push_str(&format!("    catena_assert(({input_row}) <= {name}_input_rows && {name}_rows <= {name}_input_rows - ({input_row}));\n    catena_assert(({output_features}) <= UINT64_MAX / ({reduction_len}));\n    catena_assert(({weight_capacity}) == ({output_features}) * ({reduction_len}));\n"));
     out.push_str(&format!("    if ({name}_len != 0) {{\n        catena_host_gpu_check({}((void **)&{name}_data, {name}_len * sizeof(catena_bf16_t), nullptr));\n", dialect.device_alloc_async_fn()));
-    out.push_str(&format!("        if ({name}_rows >= 64) {{\n            {kernel_name}<<<dim3((({output_features}) + 127) / 128, ({name}_rows + 127) / 128), dim3(256)>>>(\n                {}, {}, {name}_data, {name}_rows, {reduction_len}, {input_row}, {output_features});\n        }} else\n", value_expr(input), value_expr(weight)));
+    out.push_str(&format!("        if ({name}_rows >= {minimum_rows}) {{\n            {kernel_name}<<<dim3((({output_features}) + {tile_columns} - 1) / {tile_columns}, ({name}_rows + {tile_rows} - 1) / {tile_rows}), dim3({tile_threads})>>>(\n                {}, {}, {name}_data, {name}_rows, {reduction_len}, {input_row}, {output_features});\n        }} else\n", value_expr(input), value_expr(weight)));
     out.push_str(&format!("        {{\n            {kernel_name}_simt<<<dim3({name}_len), dim3(256)>>>(\n                {}, {}, {name}_data, {name}_len, {reduction_len}, {input_row}, {output_features});\n        }}\n    }}\n    {name} = {name}_data;\n", value_expr(input), value_expr(weight)));
     Ok(())
 }

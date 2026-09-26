@@ -26,6 +26,31 @@ pub(in crate::codegen) struct ProjectionPlan {
     pub native_bf16: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::codegen) struct MmaTileSpec {
+    pub rows: u32,
+    pub columns: u32,
+    pub reduction: u32,
+    pub waves: u32,
+    pub threads: u32,
+    pub minimum_rows: u32,
+}
+
+impl MmaTileSpec {
+    pub const DENSE: Self = Self {
+        rows: 128,
+        columns: 128,
+        reduction: 16,
+        waves: 8,
+        threads: 256,
+        minimum_rows: 64,
+    };
+
+    pub const fn column_fragments(self) -> u32 {
+        self.columns / 16
+    }
+}
+
 impl ProjectionPlan {
     pub(in crate::codegen) fn from_operation(operation: &str) -> Option<Self> {
         use ProjectionBackend::{Blas, Simt, Wmma};
@@ -131,5 +156,16 @@ mod tests {
     #[test]
     fn non_projection_operations_are_not_classified() {
         assert!(ProjectionPlan::from_operation("materializec.softmax-f32").is_none());
+    }
+
+    #[test]
+    fn dense_tile_preserves_the_tuned_launch_shape() {
+        assert_eq!(MmaTileSpec::DENSE.rows, 128);
+        assert_eq!(MmaTileSpec::DENSE.columns, 128);
+        assert_eq!(MmaTileSpec::DENSE.reduction, 16);
+        assert_eq!(MmaTileSpec::DENSE.waves, 8);
+        assert_eq!(MmaTileSpec::DENSE.threads, 256);
+        assert_eq!(MmaTileSpec::DENSE.minimum_rows, 64);
+        assert_eq!(MmaTileSpec::DENSE.column_fragments(), 8);
     }
 }

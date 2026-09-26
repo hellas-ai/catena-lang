@@ -9,8 +9,11 @@ use crate::codegen::default::{
     gpu_placement::{GpuFunctionPlacement, function_placement, function_placements},
     lower_types::{CType, LoweredType},
     ops::{
-        cached_attention, cached_context, gated_delta_net, gpu_support::StorageType, ifc,
-        materializec, reducec, row_major,
+        cached_attention, cached_context, gated_delta_net,
+        gpu_support::StorageType,
+        ifc, materializec,
+        projection::{ProjectionBackend, ProjectionPlan},
+        reducec, row_major,
     },
     prelude::render_gpu_prelude,
     render_utils::{c_type, invalid_inputs, invalid_outputs, param_decl},
@@ -157,10 +160,8 @@ pub fn render_modules(
 
 fn function_uses_blas(function: &GpuFunction) -> bool {
     function.assignments.iter().any(|assignment| {
-        matches!(
-            assignment.op.as_str(),
-            "materializec.bf16-gemm-blas" | "materializec.borrow-native-bf16-gemm-blas-pair"
-        )
+        ProjectionPlan::from_operation(assignment.op.as_str())
+            .is_some_and(|plan| plan.backend == ProjectionBackend::Blas)
     })
 }
 
@@ -560,7 +561,7 @@ fn render_assignment(
                 function,
                 assignment,
                 dialect,
-                materializec::NativeBf16PairBackend::Simt,
+                ProjectionBackend::Simt,
             )?
         }
         "materializec.borrow-native-bf16-gemm-wmma-pair" => {
@@ -569,7 +570,7 @@ fn render_assignment(
                 function,
                 assignment,
                 dialect,
-                materializec::NativeBf16PairBackend::Wmma,
+                ProjectionBackend::Wmma,
             )?
         }
         "materializec.borrow-native-bf16-gemm-blas-pair" => {
@@ -578,7 +579,7 @@ fn render_assignment(
                 function,
                 assignment,
                 dialect,
-                materializec::NativeBf16PairBackend::Blas,
+                ProjectionBackend::Blas,
             )?
         }
         "materializec.borrow-routed-native-bf16-gemv-pair" => {
@@ -587,7 +588,7 @@ fn render_assignment(
                 function,
                 assignment,
                 dialect,
-                materializec::RoutedNativeBf16PairBackend::Simt,
+                ProjectionBackend::Simt,
             )?
         }
         "materializec.borrow-routed-native-bf16-gemm-wmma-pair" => {
@@ -596,7 +597,7 @@ fn render_assignment(
                 function,
                 assignment,
                 dialect,
-                materializec::RoutedNativeBf16PairBackend::Wmma,
+                ProjectionBackend::Wmma,
             )?
         }
         "materializec.borrow-routed-native-bf16-gemv-residual" => {
@@ -605,7 +606,7 @@ fn render_assignment(
                 function,
                 assignment,
                 dialect,
-                materializec::RoutedNativeBf16ResidualBackend::Simt,
+                ProjectionBackend::Simt,
             )?
         }
         "materializec.borrow-routed-native-bf16-gemm-wmma-residual" => {
@@ -614,7 +615,7 @@ fn render_assignment(
                 function,
                 assignment,
                 dialect,
-                materializec::RoutedNativeBf16ResidualBackend::Wmma,
+                ProjectionBackend::Wmma,
             )?
         }
         "materializec.bf16-gemv" => {

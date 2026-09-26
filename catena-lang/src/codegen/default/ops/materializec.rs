@@ -29,6 +29,7 @@ use crate::codegen::default::{
     gpu::{GpuRenderError, render_function_application},
     lower_types::{CType, LoweredType},
     ops::gpu_support::{hip_gfx11_guard, hip_wmma_include_guard},
+    ops::projection::ProjectionBackend,
     render_utils::{c_type, invalid_outputs, param_decl},
     runtime_type,
 };
@@ -2058,19 +2059,12 @@ pub(in crate::codegen) fn render_borrow_routed_bf16_gemv_pair_call(
     Ok(())
 }
 
-#[derive(Clone, Copy)]
-pub(in crate::codegen) enum NativeBf16PairBackend {
-    Simt,
-    Wmma,
-    Blas,
-}
-
 pub(in crate::codegen) fn render_borrow_native_bf16_gemm_pair_call(
     out: &mut String,
     function: &GpuFunction,
     assignment: &GpuAssign,
     dialect: GpuDialect,
-    backend: NativeBf16PairBackend,
+    backend: ProjectionBackend,
 ) -> Result<(), GpuRenderError> {
     let [input_output, gate_output, up_output] = assignment.outputs.as_slice() else {
         return Err(invalid_outputs(assignment, 3));
@@ -2133,7 +2127,7 @@ pub(in crate::codegen) fn render_borrow_native_bf16_gemm_pair_call(
         ));
     }
     match backend {
-        NativeBf16PairBackend::Simt => {
+        ProjectionBackend::Simt => {
             out.push_str(&format!(
                 "        {kernel_name}<<<dim3({output_len}), dim3(256)>>>(\n            {}, {}, {}, {}_data, {}_data, {output_len}, {reduction_len}, {input_row}, {output_features});\n",
                 value_expr(input),
@@ -2143,7 +2137,7 @@ pub(in crate::codegen) fn render_borrow_native_bf16_gemm_pair_call(
                 up_output.name,
             ));
         }
-        NativeBf16PairBackend::Wmma => {
+        ProjectionBackend::Wmma => {
             out.push_str(&format!(
                 "        if ({prefix}_rows >= 64) {{\n            {kernel_name}_gate<<<dim3((({output_features}) + 127) / 128, ({prefix}_rows + 127) / 128), dim3(256)>>>(\n                {}, {}, {}_data, {prefix}_rows, {reduction_len}, {input_row}, {output_features});\n            {kernel_name}_up<<<dim3((({output_features}) + 127) / 128, ({prefix}_rows + 127) / 128), dim3(256)>>>(\n                {}, {}, {}_data, {prefix}_rows, {reduction_len}, {input_row}, {output_features});\n        }} else {{\n            {kernel_name}_simt<<<dim3({output_len}), dim3(256)>>>(\n                {}, {}, {}, {}_data, {}_data, {output_len}, {reduction_len}, {input_row}, {output_features});\n        }}\n",
                 value_expr(input),
@@ -2159,7 +2153,7 @@ pub(in crate::codegen) fn render_borrow_native_bf16_gemm_pair_call(
                 up_output.name,
             ));
         }
-        NativeBf16PairBackend::Blas => {
+        ProjectionBackend::Blas => {
             out.push_str(&format!(
                 "        if ({prefix}_rows >= 64) {{\n            catena_assert(({output_features}) <= INT32_MAX && {prefix}_rows <= INT32_MAX && ({reduction_len}) <= INT32_MAX);\n            const float {prefix}_alpha = 1.0f;\n            const float {prefix}_beta = 0.0f;\n"
             ));
@@ -2194,18 +2188,12 @@ pub(in crate::codegen) fn render_borrow_native_bf16_gemm_pair_call(
     Ok(())
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(in crate::codegen) enum RoutedNativeBf16PairBackend {
-    Simt,
-    Wmma,
-}
-
 pub(in crate::codegen) fn render_borrow_routed_native_bf16_gemv_pair_call(
     out: &mut String,
     function: &GpuFunction,
     assignment: &GpuAssign,
     dialect: GpuDialect,
-    backend: RoutedNativeBf16PairBackend,
+    backend: ProjectionBackend,
 ) -> Result<(), GpuRenderError> {
     let [input_output, selected_output, gate_output, up_output] = assignment.outputs.as_slice()
     else {
@@ -2268,8 +2256,9 @@ pub(in crate::codegen) fn render_borrow_routed_native_bf16_gemv_pair_call(
         out.push_str(&format!("        catena_host_gpu_check({}((void **)&{}_data, ({output_len}) * sizeof(catena_bf16_t), nullptr));\n", dialect.device_alloc_async_fn(), output.name));
     }
     let simt_kernel_name = match backend {
-        RoutedNativeBf16PairBackend::Simt => kernel_name.clone(),
-        RoutedNativeBf16PairBackend::Wmma => format!("{kernel_name}_simt"),
+        ProjectionBackend::Simt => kernel_name.clone(),
+        ProjectionBackend::Wmma => format!("{kernel_name}_simt"),
+        ProjectionBackend::Blas => unreachable!("routed BLAS projections are not supported"),
     };
     let simt_call = format!(
         "        const uint64_t {prefix}_max_blocks_x = UINT32_MAX / 256u;\n        uint64_t {prefix}_blocks_x = ({output_len}) < {prefix}_max_blocks_x ? ({output_len}) : {prefix}_max_blocks_x;\n        uint64_t {prefix}_blocks_y = ({output_len}) / {prefix}_blocks_x + ((({output_len}) % {prefix}_blocks_x) != 0);\n        catena_assert({prefix}_blocks_y <= UINT32_MAX);\n        {simt_kernel_name}<<<dim3((uint32_t){prefix}_blocks_x, (uint32_t){prefix}_blocks_y), dim3(256)>>>(\n            {}, {}, {}, {}, {}_data, {}_data, {output_len}, {reduction_len}, {slots}, {output_features}, {prefix}_expert_count);\n",
@@ -2280,7 +2269,7 @@ pub(in crate::codegen) fn render_borrow_routed_native_bf16_gemv_pair_call(
         gate_output.name,
         up_output.name,
     );
-    if backend == RoutedNativeBf16PairBackend::Wmma && dialect == GpuDialect::Hip {
+    if backend == ProjectionBackend::Wmma && dialect == GpuDialect::Hip {
         out.push_str(&format!(
             "        if ({prefix}_expert_count != 0 && {prefix}_expert_count <= {ROUTED_MAX_EXPERTS} && ({selected_capacity}) >= {prefix}_expert_count * {ROUTED_MIN_ROUTES_PER_EXPERT} && (({reduction_len}) & 15) == 0 && (({output_features}) & 15) == 0) {{\n            uint64_t *{prefix}_offsets = nullptr;\n            uint64_t *{prefix}_permutation = nullptr;\n            catena_host_gpu_check({alloc}((void **)&{prefix}_offsets, ({prefix}_expert_count + 1) * sizeof(uint64_t), nullptr));\n            catena_host_gpu_check({alloc}((void **)&{prefix}_permutation, ({selected_capacity}) * sizeof(uint64_t), nullptr));\n            {kernel_name}_group<<<dim3({prefix}_expert_count), dim3(32)>>>(\n                {}, {selected_capacity}, {prefix}_expert_count, {prefix}_offsets, {prefix}_permutation);\n            {kernel_name}<<<dim3((({output_features}) + 63) / 64, {prefix}_expert_count), dim3(128)>>>(\n                {}, {}, {}, {prefix}_offsets, {prefix}_permutation, {}_data, {}_data, {reduction_len}, {slots}, {output_features});\n            catena_host_gpu_check({free}({prefix}_offsets, nullptr));\n            catena_host_gpu_check({free}({prefix}_permutation, nullptr));\n        }} else {{\n{simt_call}        }}\n",
             value_expr(selected),
@@ -2310,18 +2299,12 @@ pub(in crate::codegen) fn render_borrow_routed_native_bf16_gemv_pair_call(
     Ok(())
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(in crate::codegen) enum RoutedNativeBf16ResidualBackend {
-    Simt,
-    Wmma,
-}
-
 pub(in crate::codegen) fn render_borrow_routed_native_bf16_gemv_residual_call(
     out: &mut String,
     function: &GpuFunction,
     assignment: &GpuAssign,
     dialect: GpuDialect,
-    backend: RoutedNativeBf16ResidualBackend,
+    backend: ProjectionBackend,
 ) -> Result<(), GpuRenderError> {
     let [active_output, selected_output, residual_output, output] = assignment.outputs.as_slice()
     else {
@@ -2384,8 +2367,9 @@ pub(in crate::codegen) fn render_borrow_routed_native_bf16_gemv_residual_call(
     ));
     out.push_str(&format!("    if (({output_len}) != 0) {{\n        catena_host_gpu_check({}((void **)&{}_data, ({output_len}) * sizeof(catena_bf16_t), nullptr));\n", dialect.device_alloc_async_fn(), output.name));
     let simt_kernel_name = match backend {
-        RoutedNativeBf16ResidualBackend::Simt => kernel_name.clone(),
-        RoutedNativeBf16ResidualBackend::Wmma => format!("{kernel_name}_simt"),
+        ProjectionBackend::Simt => kernel_name.clone(),
+        ProjectionBackend::Wmma => format!("{kernel_name}_simt"),
+        ProjectionBackend::Blas => unreachable!("routed BLAS projections are not supported"),
     };
     let simt_call = format!(
         "        const uint64_t {prefix}_max_blocks_x = UINT32_MAX / 256u;\n        uint64_t {prefix}_blocks_x = ({output_len}) < {prefix}_max_blocks_x ? ({output_len}) : {prefix}_max_blocks_x;\n        uint64_t {prefix}_blocks_y = ({output_len}) / {prefix}_blocks_x + ((({output_len}) % {prefix}_blocks_x) != 0);\n        catena_assert({prefix}_blocks_y <= UINT32_MAX);\n        {simt_kernel_name}<<<dim3((uint32_t){prefix}_blocks_x, (uint32_t){prefix}_blocks_y), dim3(256)>>>(\n            {}, {}, {}, {}, {}_data, {output_len}, {reduction_len}, {slots}, {intermediate}, {output_features}, {prefix}_expert_count);\n",
@@ -2395,7 +2379,7 @@ pub(in crate::codegen) fn render_borrow_routed_native_bf16_gemv_residual_call(
         value_expr(residual),
         output.name,
     );
-    if backend == RoutedNativeBf16ResidualBackend::Wmma && dialect == GpuDialect::Hip {
+    if backend == ProjectionBackend::Wmma && dialect == GpuDialect::Hip {
         out.push_str(&format!(
             "        if ({prefix}_expert_count != 0 && {prefix}_expert_count <= {ROUTED_MAX_EXPERTS} && ({selected_capacity}) >= {prefix}_expert_count * {ROUTED_MIN_ROUTES_PER_EXPERT} && (({intermediate}) & 15) == 0 && (({output_features}) & 15) == 0) {{\n            uint64_t *{prefix}_offsets = nullptr;\n            uint64_t *{prefix}_permutation = nullptr;\n            float *{prefix}_route_output = nullptr;\n            uint64_t {prefix}_route_output_len = ({selected_capacity}) * ({output_features});\n            catena_host_gpu_check({alloc}((void **)&{prefix}_offsets, ({prefix}_expert_count + 1) * sizeof(uint64_t), nullptr));\n            catena_host_gpu_check({alloc}((void **)&{prefix}_permutation, ({selected_capacity}) * sizeof(uint64_t), nullptr));\n            catena_host_gpu_check({alloc}((void **)&{prefix}_route_output, {prefix}_route_output_len * sizeof(float), nullptr));\n            {kernel_name}_group<<<dim3({prefix}_expert_count), dim3(32)>>>(\n                {}, {selected_capacity}, {prefix}_expert_count, {prefix}_offsets, {prefix}_permutation);\n            {kernel_name}<<<dim3((({output_features}) + 127) / 128, {prefix}_expert_count), dim3(128)>>>(\n                {}, {}, {prefix}_offsets, {prefix}_permutation, {prefix}_route_output, {intermediate}, {output_features});\n            {kernel_name}_combine<<<dim3((({output_len}) + 255) / 256), dim3(256)>>>(\n                {prefix}_route_output, {}, {}_data, {output_len}, {slots}, {output_features});\n            catena_host_gpu_check({free}({prefix}_offsets, nullptr));\n            catena_host_gpu_check({free}({prefix}_permutation, nullptr));\n            catena_host_gpu_check({free}({prefix}_route_output, nullptr));\n        }} else {{\n{simt_call}        }}\n",
             value_expr(selected),

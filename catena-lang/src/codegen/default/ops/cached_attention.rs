@@ -7,69 +7,51 @@ use crate::codegen::{
     runtime_type,
 };
 
+const QUERY_ROWS: u64 = 8;
+const HEADS_PER_TILE: u64 = 2;
+const THREADS: u64 = 256;
+const WAVE_SIZE: u64 = 32;
+const MAX_HEAD_DIMENSION: u64 = 256;
+const VECTOR_SEQUENCE_LIMIT: u64 = 8;
+const WMMA_SEQUENCE_THRESHOLD: u64 = 1024;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct AttentionTileSpec {
-    query_rows: u64,
     key_columns: u64,
-    heads: u64,
-    threads: u64,
-    wave_size: u64,
-    max_head_dimension: u64,
     score_buffers: u64,
 }
 
 impl AttentionTileSpec {
     const SIMT: Self = Self {
-        query_rows: 8,
         key_columns: 32,
-        heads: 2,
-        threads: 256,
-        wave_size: 32,
-        max_head_dimension: 256,
         score_buffers: 1,
     };
 
     const WMMA: Self = Self {
-        query_rows: 8,
         key_columns: 16,
-        heads: 2,
-        threads: 256,
-        wave_size: 32,
-        max_head_dimension: 256,
         score_buffers: 2,
     };
 
     const fn bf16_elements_per_dimension(self) -> u64 {
-        self.heads * self.query_rows + 2 * self.key_columns
+        HEADS_PER_TILE * QUERY_ROWS + 2 * self.key_columns
     }
 
     const fn score_elements(self) -> u64 {
-        self.score_buffers * self.heads * self.query_rows * self.key_columns
+        self.score_buffers * HEADS_PER_TILE * QUERY_ROWS * self.key_columns
     }
 
-    const fn waves(self) -> u64 {
-        self.threads / self.wave_size
+    const fn waves() -> u64 {
+        THREADS / WAVE_SIZE
     }
 
-    const fn rows_per_wave(self) -> u64 {
-        self.heads * self.query_rows / self.waves()
+    const fn rows_per_wave() -> u64 {
+        HEADS_PER_TILE * QUERY_ROWS / Self::waves()
     }
 
-    const fn channel_parts(self) -> u64 {
-        self.max_head_dimension / self.wave_size
+    const fn channel_parts() -> u64 {
+        MAX_HEAD_DIMENSION / WAVE_SIZE
     }
 }
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct AttentionDispatchPolicy {
-    vector_sequence_limit: u64,
-    wmma_sequence_threshold: u64,
-}
-
-const ATTENTION_DISPATCH: AttentionDispatchPolicy = AttentionDispatchPolicy {
-    vector_sequence_limit: 8,
-    wmma_sequence_threshold: 1024,
-};
 
 fn parts(assignment: &GpuAssign) -> Result<[&GpuValue; 13], GpuRenderError> {
     let components = input_components(assignment)?;
@@ -350,14 +332,14 @@ __global__ void {name}_tiled(
     }}
 }}
 "#,
-        query_rows = tile.query_rows,
+        query_rows = QUERY_ROWS,
         key_columns = tile.key_columns,
-        heads = tile.heads,
-        threads = tile.threads,
-        vector_keys = tile.waves(),
-        rows_per_wave = tile.rows_per_wave(),
-        waves = tile.waves(),
-        channel_parts = tile.channel_parts(),
+        heads = HEADS_PER_TILE,
+        threads = THREADS,
+        vector_keys = AttentionTileSpec::waves(),
+        rows_per_wave = AttentionTileSpec::rows_per_wave(),
+        waves = AttentionTileSpec::waves(),
+        channel_parts = AttentionTileSpec::channel_parts(),
     ));
     Ok(())
 }
@@ -510,13 +492,13 @@ fn render_wmma_kernel(out: &mut String, name: &str, tile: AttentionTileSpec) {
     }}
 }}
 "#,
-        query_rows = tile.query_rows,
+        query_rows = QUERY_ROWS,
         key_columns = tile.key_columns,
-        heads = tile.heads,
-        threads = tile.threads,
-        rows_per_wave = tile.rows_per_wave(),
-        waves = tile.waves(),
-        channel_parts = tile.channel_parts(),
+        heads = HEADS_PER_TILE,
+        threads = THREADS,
+        rows_per_wave = AttentionTileSpec::rows_per_wave(),
+        waves = AttentionTileSpec::waves(),
+        channel_parts = AttentionTileSpec::channel_parts(),
     ));
 }
 
@@ -534,12 +516,12 @@ pub(in crate::codegen) fn render_call(
     let output = &outputs[2].name;
     let simt = AttentionTileSpec::SIMT;
     let wmma = AttentionTileSpec::WMMA;
-    let launch = |kernel: &str, shared: &str, tile: AttentionTileSpec| {
+    let launch = |kernel: &str, shared: &str| {
         format!(
             "{kernel}<<<dim3((({sequence}) + {query_rows_minus_one}) / {query_rows}, ({kvh}) * {output}_head_tiles), dim3({threads}), {output}_{shared}_shared_bytes>>>({cache}, {query}, {output}_data, {sequence}, {history}, {capacity}, {layer}, {qh}, {kvh}, {dim}, {scale});",
-            query_rows_minus_one = tile.query_rows - 1,
-            query_rows = tile.query_rows,
-            threads = tile.threads,
+            query_rows_minus_one = QUERY_ROWS - 1,
+            query_rows = QUERY_ROWS,
+            threads = THREADS,
             sequence = e(5),
             kvh = e(10),
             cache = e(0),
@@ -552,14 +534,14 @@ pub(in crate::codegen) fn render_call(
             scale = e(12),
         )
     };
-    let simt_launch = launch(&format!("{name}_tiled"), "simt", simt);
+    let simt_launch = launch(&format!("{name}_tiled"), "simt");
     let prefill_launch = if matrix_core {
-        let wmma_launch = launch(&format!("{name}_wmma"), "wmma", wmma);
+        let wmma_launch = launch(&format!("{name}_wmma"), "wmma");
         format!(
             "if (({sequence}) < {wmma_sequence_threshold} || ({dim}) % 16 != 0) {{ {simt_launch} }} else {{ {wmma_launch} }}",
             sequence = e(5),
             dim = e(11),
-            wmma_sequence_threshold = ATTENTION_DISPATCH.wmma_sequence_threshold,
+            wmma_sequence_threshold = WMMA_SEQUENCE_THRESHOLD,
         )
     } else {
         simt_launch
@@ -604,12 +586,12 @@ pub(in crate::codegen) fn render_call(
         alloc = dialect.device_alloc_async_fn(), cache_out = outputs[0].name,
         query_out = outputs[1].name,
         prefill_launch = prefill_launch,
-        heads_minus_one = simt.heads - 1, heads = simt.heads,
+        heads_minus_one = HEADS_PER_TILE - 1, heads = HEADS_PER_TILE,
         simt_bf16 = simt.bf16_elements_per_dimension(), simt_scores = simt.score_elements(),
         wmma_bf16 = wmma.bf16_elements_per_dimension(), wmma_scores = wmma.score_elements(),
-        vector_sequence_limit = ATTENTION_DISPATCH.vector_sequence_limit,
-        threads = simt.threads,
-        max_head_dimension = simt.max_head_dimension,
+        vector_sequence_limit = VECTOR_SEQUENCE_LIMIT,
+        threads = THREADS,
+        max_head_dimension = MAX_HEAD_DIMENSION,
     ));
     Ok(())
 }
@@ -620,18 +602,21 @@ mod tests {
 
     #[test]
     fn optimized_attention_dispatch_contract_is_stable() {
-        assert_eq!(ATTENTION_DISPATCH.vector_sequence_limit, 8);
-        assert_eq!(ATTENTION_DISPATCH.wmma_sequence_threshold, 1024);
-        assert_eq!(AttentionTileSpec::SIMT.query_rows, 8);
+        assert_eq!(VECTOR_SEQUENCE_LIMIT, 8);
+        assert_eq!(WMMA_SEQUENCE_THRESHOLD, 1024);
+        assert_eq!(QUERY_ROWS, 8);
         assert_eq!(AttentionTileSpec::SIMT.key_columns, 32);
         assert_eq!(AttentionTileSpec::WMMA.key_columns, 16);
-        assert_eq!(AttentionTileSpec::SIMT.heads, 2);
+        assert_eq!(HEADS_PER_TILE, 2);
+        assert_eq!(THREADS, 256);
+        assert_eq!(WAVE_SIZE, 32);
+        assert_eq!(MAX_HEAD_DIMENSION, 256);
         assert_eq!(AttentionTileSpec::SIMT.bf16_elements_per_dimension(), 80);
         assert_eq!(AttentionTileSpec::SIMT.score_elements(), 512);
         assert_eq!(AttentionTileSpec::WMMA.bf16_elements_per_dimension(), 48);
         assert_eq!(AttentionTileSpec::WMMA.score_elements(), 512);
-        assert_eq!(AttentionTileSpec::SIMT.waves(), 8);
-        assert_eq!(AttentionTileSpec::SIMT.rows_per_wave(), 2);
-        assert_eq!(AttentionTileSpec::SIMT.channel_parts(), 8);
+        assert_eq!(AttentionTileSpec::waves(), 8);
+        assert_eq!(AttentionTileSpec::rows_per_wave(), 2);
+        assert_eq!(AttentionTileSpec::channel_parts(), 8);
     }
 }

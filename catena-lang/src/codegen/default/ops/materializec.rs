@@ -29,7 +29,9 @@ use crate::codegen::default::{
     gpu::{GpuRenderError, render_function_application},
     lower_types::{CType, LoweredType},
     ops::gpu_support::{hip_gfx11_guard, hip_wmma_include_guard},
-    ops::projection::{MmaTileSpec, ProjectionBackend, render_stable_route_grouping},
+    ops::projection::{
+        MmaTileSpec, ProjectionBackend, render_routed_tile_template, render_stable_route_grouping,
+    },
     render_utils::{c_type, invalid_outputs, param_decl},
     runtime_type,
 };
@@ -966,30 +968,30 @@ __global__ void __KERNEL__(
     using frag_c_t = rocwmma::fragment<rocwmma::accumulator, 16, 16, 16, float>;
 
     uint64_t expert = (uint64_t)blockIdx.y;
-    uint64_t column_base = (uint64_t)blockIdx.x * 64;
+    uint64_t column_base = (uint64_t)blockIdx.x * __TILE_COLUMNS__;
     uint64_t route_begin = offsets[expert];
     uint64_t route_end = offsets[expert + 1];
     uint32_t wave = threadIdx.x / 32;
     uint32_t lane = threadIdx.x % 32;
-    __shared__ catena_bf16_t tile_a[64 * 16];
-    __shared__ catena_bf16_t tile_gate_b[64 * 16];
-    __shared__ catena_bf16_t tile_up_b[64 * 16];
-    __shared__ float tile_gate_c[4 * 16 * 16];
-    __shared__ float tile_up_c[4 * 16 * 16];
+    __shared__ catena_bf16_t tile_a[__TILE_ROWS__ * __TILE_REDUCTION__];
+    __shared__ catena_bf16_t tile_gate_b[__TILE_COLUMNS__ * __TILE_REDUCTION__];
+    __shared__ catena_bf16_t tile_up_b[__TILE_COLUMNS__ * __TILE_REDUCTION__];
+    __shared__ float tile_gate_c[__TILE_WAVES__ * 16 * 16];
+    __shared__ float tile_up_c[__TILE_WAVES__ * 16 * 16];
 
-    for (uint64_t route_base = route_begin; route_base < route_end; route_base += 64) {
+    for (uint64_t route_base = route_begin; route_base < route_end; route_base += __TILE_ROWS__) {
         frag_a_t a;
-        frag_b_t gate_b[4];
-        frag_b_t up_b[4];
-        frag_c_t gate_c[4];
-        frag_c_t up_c[4];
+        frag_b_t gate_b[__TILE_FRAGMENTS__];
+        frag_b_t up_b[__TILE_FRAGMENTS__];
+        frag_c_t gate_c[__TILE_FRAGMENTS__];
+        frag_c_t up_c[__TILE_FRAGMENTS__];
         #pragma unroll
-        for (uint32_t fragment = 0; fragment < 4; ++fragment) {
+        for (uint32_t fragment = 0; fragment < __TILE_FRAGMENTS__; ++fragment) {
             rocwmma::fill_fragment(gate_c[fragment], 0.0f);
             rocwmma::fill_fragment(up_c[fragment], 0.0f);
         }
-        for (uint64_t k_base = 0; k_base < reduction_len; k_base += 16) {
-            for (uint32_t flat = threadIdx.x; flat < 64 * 16; flat += blockDim.x) {
+        for (uint64_t k_base = 0; k_base < reduction_len; k_base += __TILE_REDUCTION__) {
+            for (uint32_t flat = threadIdx.x; flat < __TILE_ROWS__ * __TILE_REDUCTION__; flat += blockDim.x) {
                 uint32_t tile_row = flat >> 4;
                 uint32_t tile_column = flat & 15;
                 uint64_t grouped_route = route_base + tile_row;
@@ -1014,7 +1016,7 @@ __global__ void __KERNEL__(
             __syncthreads();
             rocwmma::load_matrix_sync(a, tile_a + wave * 16 * 16, 16);
             #pragma unroll
-            for (uint32_t fragment = 0; fragment < 4; ++fragment) {
+            for (uint32_t fragment = 0; fragment < __TILE_FRAGMENTS__; ++fragment) {
                 rocwmma::load_matrix_sync(
                     gate_b[fragment], tile_gate_b + fragment * 16 * 16, 16);
                 rocwmma::load_matrix_sync(
@@ -1027,7 +1029,7 @@ __global__ void __KERNEL__(
             __syncthreads();
         }
         #pragma unroll
-        for (uint32_t fragment = 0; fragment < 4; ++fragment) {
+        for (uint32_t fragment = 0; fragment < __TILE_FRAGMENTS__; ++fragment) {
             rocwmma::store_matrix_sync(
                 tile_gate_c + wave * 16 * 16, gate_c[fragment], 16,
                 rocwmma::mem_row_major);
@@ -1052,7 +1054,7 @@ __global__ void __KERNEL__(
 }
 
 "#;
-    out.push_str(&source.replace("__KERNEL__", kernel_name));
+    render_routed_tile_template(out, source, kernel_name, MmaTileSpec::ROUTED_PAIR);
     out.push_str("#endif\n");
     Ok(())
 }
@@ -1177,25 +1179,25 @@ __global__ void __KERNEL__(
     using frag_c_t = rocwmma::fragment<rocwmma::accumulator, 16, 16, 16, float>;
 
     uint64_t expert = (uint64_t)blockIdx.y;
-    uint64_t column_base = (uint64_t)blockIdx.x * 128;
+    uint64_t column_base = (uint64_t)blockIdx.x * __TILE_COLUMNS__;
     uint64_t route_begin = offsets[expert];
     uint64_t route_end = offsets[expert + 1];
     uint32_t wave = threadIdx.x / 32;
     uint32_t lane = threadIdx.x % 32;
-    __shared__ catena_bf16_t tile_a[64 * 16];
-    __shared__ catena_bf16_t tile_b[128 * 16];
-    __shared__ float tile_c[4 * 16 * 16];
+    __shared__ catena_bf16_t tile_a[__TILE_ROWS__ * __TILE_REDUCTION__];
+    __shared__ catena_bf16_t tile_b[__TILE_COLUMNS__ * __TILE_REDUCTION__];
+    __shared__ float tile_c[__TILE_WAVES__ * 16 * 16];
 
-    for (uint64_t route_base = route_begin; route_base < route_end; route_base += 64) {
+    for (uint64_t route_base = route_begin; route_base < route_end; route_base += __TILE_ROWS__) {
         frag_a_t a;
-        frag_b_t b[8];
-        frag_c_t c[8];
+        frag_b_t b[__TILE_FRAGMENTS__];
+        frag_c_t c[__TILE_FRAGMENTS__];
         #pragma unroll
-        for (uint32_t fragment = 0; fragment < 8; ++fragment) {
+        for (uint32_t fragment = 0; fragment < __TILE_FRAGMENTS__; ++fragment) {
             rocwmma::fill_fragment(c[fragment], 0.0f);
         }
-        for (uint64_t k_base = 0; k_base < intermediate; k_base += 16) {
-            for (uint32_t flat = threadIdx.x; flat < 64 * 16; flat += blockDim.x) {
+        for (uint64_t k_base = 0; k_base < intermediate; k_base += __TILE_REDUCTION__) {
+            for (uint32_t flat = threadIdx.x; flat < __TILE_ROWS__ * __TILE_REDUCTION__; flat += blockDim.x) {
                 uint32_t tile_row = flat >> 4;
                 uint32_t tile_column = flat & 15;
                 uint64_t grouped_route = route_base + tile_row;
@@ -1207,7 +1209,7 @@ __global__ void __KERNEL__(
                     tile_a[flat] = catena_bf16_from_f32(0.0f);
                 }
             }
-            for (uint32_t flat = threadIdx.x; flat < 128 * 16; flat += blockDim.x) {
+            for (uint32_t flat = threadIdx.x; flat < __TILE_COLUMNS__ * __TILE_REDUCTION__; flat += blockDim.x) {
                 uint32_t tile_row = flat >> 4;
                 uint32_t tile_column = flat & 15;
                 uint64_t k = k_base + tile_column;
@@ -1222,7 +1224,7 @@ __global__ void __KERNEL__(
             __syncthreads();
             rocwmma::load_matrix_sync(a, tile_a + wave * 16 * 16, 16);
             #pragma unroll
-            for (uint32_t fragment = 0; fragment < 8; ++fragment) {
+            for (uint32_t fragment = 0; fragment < __TILE_FRAGMENTS__; ++fragment) {
                 rocwmma::load_matrix_sync(
                     b[fragment], tile_b + fragment * 16 * 16, 16);
                 rocwmma::mma_sync(c[fragment], a, b[fragment], c[fragment]);
@@ -1230,7 +1232,7 @@ __global__ void __KERNEL__(
             __syncthreads();
         }
         #pragma unroll
-        for (uint32_t fragment = 0; fragment < 8; ++fragment) {
+        for (uint32_t fragment = 0; fragment < __TILE_FRAGMENTS__; ++fragment) {
             rocwmma::store_matrix_sync(
                 tile_c + wave * 16 * 16, c[fragment], 16,
                 rocwmma::mem_row_major);
@@ -1266,7 +1268,7 @@ __global__ void __KERNEL___combine(
     out[output_index] = catena_bf16_from_f32(sum);
 }
 "#;
-    out.push_str(&source.replace("__KERNEL__", kernel_name));
+    render_routed_tile_template(out, source, kernel_name, MmaTileSpec::ROUTED_DOWN);
     out.push_str("#endif\n");
     Ok(())
 }

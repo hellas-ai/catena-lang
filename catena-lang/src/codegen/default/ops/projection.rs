@@ -46,9 +46,43 @@ impl MmaTileSpec {
         minimum_rows: 64,
     };
 
+    pub const ROUTED_PAIR: Self = Self {
+        rows: 64,
+        columns: 64,
+        reduction: 16,
+        waves: 4,
+        threads: 128,
+        minimum_rows: 4,
+    };
+
+    pub const ROUTED_DOWN: Self = Self {
+        rows: 64,
+        columns: 128,
+        reduction: 16,
+        waves: 4,
+        threads: 128,
+        minimum_rows: 4,
+    };
+
     pub const fn column_fragments(self) -> u32 {
         self.columns / 16
     }
+}
+
+pub(in crate::codegen) fn render_routed_tile_template(
+    out: &mut String,
+    source: &str,
+    kernel_name: &str,
+    tile: MmaTileSpec,
+) {
+    let rendered = source
+        .replace("__KERNEL__", kernel_name)
+        .replace("__TILE_ROWS__", &tile.rows.to_string())
+        .replace("__TILE_COLUMNS__", &tile.columns.to_string())
+        .replace("__TILE_REDUCTION__", &tile.reduction.to_string())
+        .replace("__TILE_WAVES__", &tile.waves.to_string())
+        .replace("__TILE_FRAGMENTS__", &tile.column_fragments().to_string());
+    out.push_str(&rendered);
 }
 
 pub(in crate::codegen) fn render_stable_route_grouping(out: &mut String, kernel_name: &str) {
@@ -205,6 +239,30 @@ mod tests {
         assert_eq!(MmaTileSpec::DENSE.threads, 256);
         assert_eq!(MmaTileSpec::DENSE.minimum_rows, 64);
         assert_eq!(MmaTileSpec::DENSE.column_fragments(), 8);
+    }
+
+    #[test]
+    fn routed_tiles_preserve_pair_and_down_shapes() {
+        assert_eq!(MmaTileSpec::ROUTED_PAIR.rows, 64);
+        assert_eq!(MmaTileSpec::ROUTED_PAIR.columns, 64);
+        assert_eq!(MmaTileSpec::ROUTED_PAIR.column_fragments(), 4);
+        assert_eq!(MmaTileSpec::ROUTED_DOWN.rows, 64);
+        assert_eq!(MmaTileSpec::ROUTED_DOWN.columns, 128);
+        assert_eq!(MmaTileSpec::ROUTED_DOWN.column_fragments(), 8);
+        assert_eq!(MmaTileSpec::ROUTED_PAIR.threads, 128);
+        assert_eq!(MmaTileSpec::ROUTED_DOWN.threads, 128);
+    }
+
+    #[test]
+    fn routed_template_substitutes_compile_time_tile_values() {
+        let mut source = String::new();
+        render_routed_tile_template(
+            &mut source,
+            "__KERNEL__ __TILE_ROWS__ __TILE_COLUMNS__ __TILE_REDUCTION__ __TILE_WAVES__ __TILE_FRAGMENTS__",
+            "routed",
+            MmaTileSpec::ROUTED_DOWN,
+        );
+        assert_eq!(source, "routed 64 128 16 4 8");
     }
 
     #[test]

@@ -536,7 +536,7 @@ rounded once.
 
 This primitive has the same signature, ownership contract, weight layout, and
 output layout as `materializec.borrow-routed-native-bf16-gemv-pair`. On HIP
-gfx11, route sets with at least 16 routes per expert are grouped stably by
+gfx11, route sets with at least 4 routes per expert are grouped stably by
 expert and evaluated in 16-row by 16-column rocWMMA tiles. Gate and up share
 each input tile, accumulate independently in F32, and are scattered back to
 the original `[row, slot, output-feature]` order before returning.
@@ -554,7 +554,7 @@ tiles. F32 per-route contributions are scattered to original route order, then
 a separate kernel adds slots in ascending order, adds the residual, and rounds
 once to BF16. No atomics or scheduling-dependent reductions are used.
 
-The grouped path requires at most 256 experts, at least 16 routes per expert on
+The grouped path requires at most 256 experts, at least 4 routes per expert on
 average, and 16-aligned intermediate and output dimensions. Other shapes and
 CUDA use the native-BF16 SIMT implementation.
 

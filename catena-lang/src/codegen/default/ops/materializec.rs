@@ -32,6 +32,9 @@ use crate::codegen::default::{
     runtime_type,
 };
 
+const ROUTED_MAX_EXPERTS: u64 = 256;
+const ROUTED_MIN_ROUTES_PER_EXPERT: u64 = 4;
+
 pub(in crate::codegen) fn render_kernel(
     out: &mut String,
     kernel_name: &str,
@@ -2282,7 +2285,7 @@ pub(in crate::codegen) fn render_borrow_routed_native_bf16_gemv_pair_call(
     );
     if backend == RoutedNativeBf16PairBackend::Wmma && dialect == GpuDialect::Hip {
         out.push_str(&format!(
-            "        if ({prefix}_expert_count != 0 && {prefix}_expert_count <= 256 && ({selected_capacity}) >= {prefix}_expert_count * 4 && (({reduction_len}) & 15) == 0 && (({output_features}) & 15) == 0) {{\n            uint64_t *{prefix}_offsets = nullptr;\n            uint64_t *{prefix}_permutation = nullptr;\n            catena_host_gpu_check({alloc}((void **)&{prefix}_offsets, ({prefix}_expert_count + 1) * sizeof(uint64_t), nullptr));\n            catena_host_gpu_check({alloc}((void **)&{prefix}_permutation, ({selected_capacity}) * sizeof(uint64_t), nullptr));\n            {kernel_name}_group<<<dim3({prefix}_expert_count), dim3(32)>>>(\n                {}, {selected_capacity}, {prefix}_expert_count, {prefix}_offsets, {prefix}_permutation);\n            {kernel_name}<<<dim3((({output_features}) + 63) / 64, {prefix}_expert_count), dim3(128)>>>(\n                {}, {}, {}, {prefix}_offsets, {prefix}_permutation, {}_data, {}_data, {reduction_len}, {slots}, {output_features});\n            catena_host_gpu_check({free}({prefix}_offsets, nullptr));\n            catena_host_gpu_check({free}({prefix}_permutation, nullptr));\n        }} else {{\n{simt_call}        }}\n",
+            "        if ({prefix}_expert_count != 0 && {prefix}_expert_count <= {ROUTED_MAX_EXPERTS} && ({selected_capacity}) >= {prefix}_expert_count * {ROUTED_MIN_ROUTES_PER_EXPERT} && (({reduction_len}) & 15) == 0 && (({output_features}) & 15) == 0) {{\n            uint64_t *{prefix}_offsets = nullptr;\n            uint64_t *{prefix}_permutation = nullptr;\n            catena_host_gpu_check({alloc}((void **)&{prefix}_offsets, ({prefix}_expert_count + 1) * sizeof(uint64_t), nullptr));\n            catena_host_gpu_check({alloc}((void **)&{prefix}_permutation, ({selected_capacity}) * sizeof(uint64_t), nullptr));\n            {kernel_name}_group<<<dim3({prefix}_expert_count), dim3(32)>>>(\n                {}, {selected_capacity}, {prefix}_expert_count, {prefix}_offsets, {prefix}_permutation);\n            {kernel_name}<<<dim3((({output_features}) + 63) / 64, {prefix}_expert_count), dim3(128)>>>(\n                {}, {}, {}, {prefix}_offsets, {prefix}_permutation, {}_data, {}_data, {reduction_len}, {slots}, {output_features});\n            catena_host_gpu_check({free}({prefix}_offsets, nullptr));\n            catena_host_gpu_check({free}({prefix}_permutation, nullptr));\n        }} else {{\n{simt_call}        }}\n",
             value_expr(selected),
             value_expr(input),
             value_expr(gate_weight),
@@ -2397,7 +2400,7 @@ pub(in crate::codegen) fn render_borrow_routed_native_bf16_gemv_residual_call(
     );
     if backend == RoutedNativeBf16ResidualBackend::Wmma && dialect == GpuDialect::Hip {
         out.push_str(&format!(
-            "        if ({prefix}_expert_count != 0 && {prefix}_expert_count <= 256 && ({selected_capacity}) >= {prefix}_expert_count * 4 && (({intermediate}) & 15) == 0 && (({output_features}) & 15) == 0) {{\n            uint64_t *{prefix}_offsets = nullptr;\n            uint64_t *{prefix}_permutation = nullptr;\n            float *{prefix}_route_output = nullptr;\n            uint64_t {prefix}_route_output_len = ({selected_capacity}) * ({output_features});\n            catena_host_gpu_check({alloc}((void **)&{prefix}_offsets, ({prefix}_expert_count + 1) * sizeof(uint64_t), nullptr));\n            catena_host_gpu_check({alloc}((void **)&{prefix}_permutation, ({selected_capacity}) * sizeof(uint64_t), nullptr));\n            catena_host_gpu_check({alloc}((void **)&{prefix}_route_output, {prefix}_route_output_len * sizeof(float), nullptr));\n            {kernel_name}_group<<<dim3({prefix}_expert_count), dim3(32)>>>(\n                {}, {selected_capacity}, {prefix}_expert_count, {prefix}_offsets, {prefix}_permutation);\n            {kernel_name}<<<dim3((({output_features}) + 127) / 128, {prefix}_expert_count), dim3(128)>>>(\n                {}, {}, {prefix}_offsets, {prefix}_permutation, {prefix}_route_output, {intermediate}, {output_features});\n            {kernel_name}_combine<<<dim3((({output_len}) + 255) / 256), dim3(256)>>>(\n                {prefix}_route_output, {}, {}_data, {output_len}, {slots}, {output_features});\n            catena_host_gpu_check({free}({prefix}_offsets, nullptr));\n            catena_host_gpu_check({free}({prefix}_permutation, nullptr));\n            catena_host_gpu_check({free}({prefix}_route_output, nullptr));\n        }} else {{\n{simt_call}        }}\n",
+            "        if ({prefix}_expert_count != 0 && {prefix}_expert_count <= {ROUTED_MAX_EXPERTS} && ({selected_capacity}) >= {prefix}_expert_count * {ROUTED_MIN_ROUTES_PER_EXPERT} && (({intermediate}) & 15) == 0 && (({output_features}) & 15) == 0) {{\n            uint64_t *{prefix}_offsets = nullptr;\n            uint64_t *{prefix}_permutation = nullptr;\n            float *{prefix}_route_output = nullptr;\n            uint64_t {prefix}_route_output_len = ({selected_capacity}) * ({output_features});\n            catena_host_gpu_check({alloc}((void **)&{prefix}_offsets, ({prefix}_expert_count + 1) * sizeof(uint64_t), nullptr));\n            catena_host_gpu_check({alloc}((void **)&{prefix}_permutation, ({selected_capacity}) * sizeof(uint64_t), nullptr));\n            catena_host_gpu_check({alloc}((void **)&{prefix}_route_output, {prefix}_route_output_len * sizeof(float), nullptr));\n            {kernel_name}_group<<<dim3({prefix}_expert_count), dim3(32)>>>(\n                {}, {selected_capacity}, {prefix}_expert_count, {prefix}_offsets, {prefix}_permutation);\n            {kernel_name}<<<dim3((({output_features}) + 127) / 128, {prefix}_expert_count), dim3(128)>>>(\n                {}, {}, {prefix}_offsets, {prefix}_permutation, {prefix}_route_output, {intermediate}, {output_features});\n            {kernel_name}_combine<<<dim3((({output_len}) + 255) / 256), dim3(256)>>>(\n                {prefix}_route_output, {}, {}_data, {output_len}, {slots}, {output_features});\n            catena_host_gpu_check({free}({prefix}_offsets, nullptr));\n            catena_host_gpu_check({free}({prefix}_permutation, nullptr));\n            catena_host_gpu_check({free}({prefix}_route_output, nullptr));\n        }} else {{\n{simt_call}        }}\n",
             value_expr(selected),
             value_expr(active),
             value_expr(down),
@@ -3454,5 +3457,11 @@ mod tests {
 
         assert!(out.contains("value = i;"));
         assert!(!out.contains("program_ix_to_u64"));
+    }
+
+    #[test]
+    fn optimized_projection_dispatch_contract_is_stable() {
+        assert_eq!(ROUTED_MAX_EXPERTS, 256);
+        assert_eq!(ROUTED_MIN_ROUTES_PER_EXPERT, 4);
     }
 }

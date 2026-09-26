@@ -7,6 +7,17 @@ use crate::codegen::{
     runtime_type,
 };
 
+const VECTOR_SEQUENCE_LIMIT: u64 = 8;
+const WMMA_SEQUENCE_THRESHOLD: u64 = 1024;
+#[cfg(test)]
+const QUERY_TILE: u64 = 8;
+#[cfg(test)]
+const SIMT_KEY_TILE: u64 = 32;
+#[cfg(test)]
+const WMMA_KEY_TILE: u64 = 16;
+#[cfg(test)]
+const HEADS_PER_TILE: u64 = 2;
+
 fn parts(assignment: &GpuAssign) -> Result<[&GpuValue; 13], GpuRenderError> {
     let components = input_components(assignment)?;
     if components.len() != 13 {
@@ -467,7 +478,7 @@ pub(in crate::codegen) fn render_call(
     let prefill_launch = if matrix_core {
         let wmma_launch = launch(&format!("{name}_wmma"), "wmma");
         format!(
-            "if (({sequence}) < 1024 || ({dim}) % 16 != 0) {{ {simt_launch} }} else {{ {wmma_launch} }}",
+            "if (({sequence}) < {WMMA_SEQUENCE_THRESHOLD} || ({dim}) % 16 != 0) {{ {simt_launch} }} else {{ {wmma_launch} }}",
             sequence = e(5),
             dim = e(11),
         )
@@ -499,7 +510,7 @@ pub(in crate::codegen) fn render_call(
          catena_bf16_t *{output}_data = nullptr;\n\
          if (({output_count}) != 0) {{\n\
              catena_host_gpu_check({alloc}((void **)&{output}_data, ({output_count}) * sizeof(catena_bf16_t), nullptr));\n\
-             if (({sequence}) < 8) {{\n\
+             if (({sequence}) < {VECTOR_SEQUENCE_LIMIT}) {{\n\
                  {name}_vector<<<dim3({output}_rows), dim3(256)>>>({cache}, {query}, {output}_data, {sequence}, {history}, {capacity}, {layer}, {qh}, {kvh}, {dim}, {scale});\n\
              }} else {{\n\
                  {prefill_launch}\n\
@@ -516,4 +527,19 @@ pub(in crate::codegen) fn render_call(
         prefill_launch = prefill_launch,
     ));
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn optimized_attention_dispatch_contract_is_stable() {
+        assert_eq!(VECTOR_SEQUENCE_LIMIT, 8);
+        assert_eq!(WMMA_SEQUENCE_THRESHOLD, 1024);
+        assert_eq!(QUERY_TILE, 8);
+        assert_eq!(SIMT_KEY_TILE, 32);
+        assert_eq!(WMMA_KEY_TILE, 16);
+        assert_eq!(HEADS_PER_TILE, 2);
+    }
 }

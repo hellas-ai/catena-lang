@@ -3,47 +3,12 @@ use crate::codegen::{
     components::{input_components, output_components, single_value, value_expr},
     gpu::GpuRenderError,
     lower_types::CType,
+    ops::gpu_support::StorageType,
     render_utils::{invalid_inputs, invalid_outputs},
     runtime_type,
 };
 
 type Parts<'a> = [&'a GpuValue; 12];
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::codegen) enum StorageType {
-    F32,
-    Bf16,
-}
-
-impl StorageType {
-    fn c_type(self) -> &'static str {
-        match self {
-            Self::F32 => "float",
-            Self::Bf16 => "catena_bf16_t",
-        }
-    }
-
-    fn load(self, expression: &str) -> String {
-        match self {
-            Self::F32 => expression.to_owned(),
-            Self::Bf16 => format!("catena_bf16_to_f32({expression})"),
-        }
-    }
-
-    fn store(self, expression: &str) -> String {
-        match self {
-            Self::F32 => expression.to_owned(),
-            Self::Bf16 => format!("catena_bf16_from_f32({expression})"),
-        }
-    }
-
-    fn element_type(self) -> CType {
-        match self {
-            Self::F32 => CType::F32,
-            Self::Bf16 => CType::BF16,
-        }
-    }
-}
 
 fn parts(assignment: &GpuAssign) -> Result<Parts<'_>, GpuRenderError> {
     let components = input_components(assignment)?;

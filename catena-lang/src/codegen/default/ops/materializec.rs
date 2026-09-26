@@ -28,6 +28,7 @@ use crate::codegen::default::{
     },
     gpu::{GpuRenderError, render_function_application},
     lower_types::{CType, LoweredType},
+    ops::gpu_support::{hip_gfx11_guard, hip_wmma_include_guard},
     render_utils::{c_type, invalid_outputs, param_decl},
     runtime_type,
 };
@@ -786,7 +787,7 @@ pub(in crate::codegen) fn render_borrow_native_bf16_gemv_pair_kernel(
     out.push_str("    float gate_sum = 0.0f;\n    float up_sum = 0.0f;\n");
     out.push_str("    uint64_t pair_count = reduction_len >> 1;\n");
     if dialect == GpuDialect::Hip {
-        out.push_str("#if defined(__gfx1100__) || defined(__gfx1101__) || defined(__gfx1102__) || defined(__gfx1103__) || defined(__gfx1150__) || defined(__gfx1151__) || defined(__gfx1152__) || defined(__gfx1153__)\n");
+        out.push_str(&hip_gfx11_guard());
         out.push_str(
             "    typedef __bf16 catena_native_bf16x2_t __attribute__((ext_vector_type(2)));\n",
         );
@@ -795,7 +796,7 @@ pub(in crate::codegen) fn render_borrow_native_bf16_gemv_pair_kernel(
     out.push_str("    for (uint64_t pair = (uint64_t)threadIdx.x; pair < pair_count; pair += (uint64_t)blockDim.x) {\n");
     match dialect {
         GpuDialect::Hip => {
-            out.push_str("#if defined(__gfx1100__) || defined(__gfx1101__) || defined(__gfx1102__) || defined(__gfx1103__) || defined(__gfx1150__) || defined(__gfx1151__) || defined(__gfx1152__) || defined(__gfx1153__)\n");
+            out.push_str(&hip_gfx11_guard());
             out.push_str("        union { uint32_t bits; catena_native_bf16x2_t values; } input_pair, gate_pair, up_pair;\n");
             out.push_str("        __builtin_memcpy(&input_pair.bits, input + input_base + (pair << 1), sizeof(uint32_t));\n");
             out.push_str("        __builtin_memcpy(&gate_pair.bits, gate_weight + weight_base + (pair << 1), sizeof(uint32_t));\n");
@@ -883,7 +884,7 @@ pub(in crate::codegen) fn render_borrow_routed_native_bf16_gemv_pair_kernel(
     out.push_str("    float gate_sum = 0.0f;\n    float up_sum = 0.0f;\n");
     out.push_str("    uint64_t pair_count = reduction_len >> 1;\n");
     if dialect == GpuDialect::Hip {
-        out.push_str("#if defined(__gfx1100__) || defined(__gfx1101__) || defined(__gfx1102__) || defined(__gfx1103__) || defined(__gfx1150__) || defined(__gfx1151__) || defined(__gfx1152__) || defined(__gfx1153__)\n");
+        out.push_str(&hip_gfx11_guard());
         out.push_str(
             "    typedef __bf16 catena_native_bf16x2_t __attribute__((ext_vector_type(2)));\n",
         );
@@ -892,7 +893,7 @@ pub(in crate::codegen) fn render_borrow_routed_native_bf16_gemv_pair_kernel(
     out.push_str("    for (uint64_t pair = (uint64_t)threadIdx.x; pair < pair_count; pair += (uint64_t)blockDim.x) {\n");
     match dialect {
         GpuDialect::Hip => {
-            out.push_str("#if defined(__gfx1100__) || defined(__gfx1101__) || defined(__gfx1102__) || defined(__gfx1103__) || defined(__gfx1150__) || defined(__gfx1151__) || defined(__gfx1152__) || defined(__gfx1153__)\n");
+            out.push_str(&hip_gfx11_guard());
             out.push_str("        union { uint32_t bits; catena_native_bf16x2_t values; } input_pair, gate_pair, up_pair;\n");
             out.push_str("        __builtin_memcpy(&input_pair.bits, input + input_base + (pair << 1), sizeof(uint32_t));\n");
             out.push_str("        __builtin_memcpy(&gate_pair.bits, gate_weight + weight_base + (pair << 1), sizeof(uint32_t));\n");
@@ -950,9 +951,7 @@ pub(in crate::codegen) fn render_borrow_routed_native_bf16_gemm_wmma_pair_kernel
         return Ok(());
     }
 
-    out.push_str(
-        "#if !defined(__HIP_DEVICE_COMPILE__) || defined(__gfx1100__) || defined(__gfx1101__) || defined(__gfx1102__) || defined(__gfx1103__) || defined(__gfx1150__) || defined(__gfx1151__) || defined(__gfx1152__) || defined(__gfx1153__)\n#include <rocwmma/rocwmma.hpp>\n",
-    );
+    out.push_str(&hip_wmma_include_guard());
     let source = r#"
 __global__ void __KERNEL___group(
     const uint64_t *selected, uint64_t route_count, uint64_t expert_count,
@@ -1124,7 +1123,7 @@ pub(in crate::codegen) fn render_borrow_routed_native_bf16_gemv_residual_kernel(
     out.push_str("    float sum = 0.0f;\n");
     out.push_str("    uint64_t pair_count = reduction_len >> 1;\n");
     if dialect == GpuDialect::Hip {
-        out.push_str("#if defined(__gfx1100__) || defined(__gfx1101__) || defined(__gfx1102__) || defined(__gfx1103__) || defined(__gfx1150__) || defined(__gfx1151__) || defined(__gfx1152__) || defined(__gfx1153__)\n");
+        out.push_str(&hip_gfx11_guard());
         out.push_str(
             "    typedef __bf16 catena_native_bf16x2_t __attribute__((ext_vector_type(2)));\n",
         );
@@ -1139,7 +1138,7 @@ pub(in crate::codegen) fn render_borrow_routed_native_bf16_gemv_residual_kernel(
     out.push_str("        uint64_t weight_base = (expert * output_features + output_feature) * intermediate + channel;\n");
     match dialect {
         GpuDialect::Hip => {
-            out.push_str("#if defined(__gfx1100__) || defined(__gfx1101__) || defined(__gfx1102__) || defined(__gfx1103__) || defined(__gfx1150__) || defined(__gfx1151__) || defined(__gfx1152__) || defined(__gfx1153__)\n");
+            out.push_str(&hip_gfx11_guard());
             out.push_str("        if (channel + 1 < intermediate) {\n");
             out.push_str("            union { uint32_t bits; catena_native_bf16x2_t values; } active_pair, weight_pair;\n");
             out.push_str("            __builtin_memcpy(&active_pair.bits, active + active_base + flat, sizeof(uint32_t));\n");
@@ -1196,9 +1195,7 @@ pub(in crate::codegen) fn render_borrow_routed_native_bf16_gemm_wmma_residual_ke
         return Ok(());
     }
 
-    out.push_str(
-        "#if !defined(__HIP_DEVICE_COMPILE__) || defined(__gfx1100__) || defined(__gfx1101__) || defined(__gfx1102__) || defined(__gfx1103__) || defined(__gfx1150__) || defined(__gfx1151__) || defined(__gfx1152__) || defined(__gfx1153__)\n#include <rocwmma/rocwmma.hpp>\n",
-    );
+    out.push_str(&hip_wmma_include_guard());
     let source = r#"
 __global__ void __KERNEL___group(
     const uint64_t *selected, uint64_t route_count, uint64_t expert_count,
@@ -1366,7 +1363,7 @@ pub(in crate::codegen) fn render_bf16_gemv_kernel(
     out.push_str("    float sum = 0.0f;\n");
     out.push_str("    uint64_t pair_count = reduction_len >> 1;\n");
     if dialect == GpuDialect::Hip {
-        out.push_str("#if defined(__gfx1100__) || defined(__gfx1101__) || defined(__gfx1102__) || defined(__gfx1103__) || defined(__gfx1150__) || defined(__gfx1151__) || defined(__gfx1152__) || defined(__gfx1153__)\n");
+        out.push_str(&hip_gfx11_guard());
         out.push_str(
             "    typedef __bf16 catena_native_bf16x2_t __attribute__((ext_vector_type(2)));\n",
         );
@@ -1375,7 +1372,7 @@ pub(in crate::codegen) fn render_bf16_gemv_kernel(
     out.push_str("    for (uint64_t pair = (uint64_t)threadIdx.x; pair < pair_count; pair += (uint64_t)blockDim.x) {\n");
     match dialect {
         GpuDialect::Hip => {
-            out.push_str("#if defined(__gfx1100__) || defined(__gfx1101__) || defined(__gfx1102__) || defined(__gfx1103__) || defined(__gfx1150__) || defined(__gfx1151__) || defined(__gfx1152__) || defined(__gfx1153__)\n");
+            out.push_str(&hip_gfx11_guard());
             out.push_str("        union { uint32_t bits; catena_native_bf16x2_t values; } input_pair, weight_pair;\n");
             out.push_str("        __builtin_memcpy(&input_pair.bits, input + input_base + (pair << 1), sizeof(uint32_t));\n");
             out.push_str("        __builtin_memcpy(&weight_pair.bits, weight + weight_base + (pair << 1), sizeof(uint32_t));\n");
@@ -1416,7 +1413,7 @@ fn render_bf16_gemm_wmma_kernel(out: &mut String, kernel_name: &str, dialect: Gp
         match dialect {
             GpuDialect::Hip => (
                 "rocwmma",
-                "#if !defined(__HIP_DEVICE_COMPILE__) || defined(__gfx1100__) || defined(__gfx1101__) || defined(__gfx1102__) || defined(__gfx1103__) || defined(__gfx1150__) || defined(__gfx1151__) || defined(__gfx1152__) || defined(__gfx1153__)\n#include <rocwmma/rocwmma.hpp>\n",
+                hip_wmma_include_guard(),
                 "rocwmma::matrix_a",
                 "rocwmma::matrix_b",
                 "rocwmma::accumulator",
@@ -1426,7 +1423,7 @@ fn render_bf16_gemm_wmma_kernel(out: &mut String, kernel_name: &str, dialect: Gp
             ),
             GpuDialect::Cuda => (
                 "nvcuda::wmma",
-                "#include <mma.h>\n",
+                "#include <mma.h>\n".to_owned(),
                 "nvcuda::wmma::matrix_a",
                 "nvcuda::wmma::matrix_b",
                 "nvcuda::wmma::accumulator",
@@ -1435,7 +1432,7 @@ fn render_bf16_gemm_wmma_kernel(out: &mut String, kernel_name: &str, dialect: Gp
                 "nvcuda::wmma::mem_row_major",
             ),
         };
-    out.push_str(include);
+    out.push_str(&include);
     out.push_str(&format!(
         "__global__ void {kernel_name}(const catena_bf16_t *input, const catena_bf16_t *weight, catena_bf16_t *out, uint64_t rows, uint64_t reduction_len, uint64_t input_row, uint64_t output_features) {{\n"
     ));

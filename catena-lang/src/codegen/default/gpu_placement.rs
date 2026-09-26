@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, HashSet};
 
-use crate::codegen::default::{GpuFunction, GpuModuleMap};
+use crate::codegen::default::{GpuFunction, GpuModuleMap, ops::optimized::OptimizedOperation};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum GpuFunctionPlacement {
@@ -69,38 +69,22 @@ pub(super) fn function_placement(
 
 fn function_directly_requires_host(function: &GpuFunction) -> bool {
     function.assignments.iter().any(|assignment| {
-        matches!(
-            assignment.op.as_str(),
-            "gpu.materialize"
-                | "materializec"
-                | "materializec.into"
-                | "materializec.borrow"
-                | "materializec.borrow-argmax-f32"
-                | "materializec.borrow-argmax-bf16"
-                | "materializec.borrow-topk-f32"
-                | "materializec.borrow-reduce-f32"
-                | "materializec.borrow-cached-context-f32"
-                | "materializec.borrow-cached-context-bf16"
-                | "materializec.borrow-cached-attention-bf16"
-                | "materializec.borrow-cached-attention-bf16-wmma"
-                | "materializec.borrow-routed-bf16-gemv-pair"
-                | "materializec.borrow-native-bf16-gemv-pair"
-                | "materializec.borrow-native-bf16-gemm-wmma-pair"
-                | "materializec.borrow-native-bf16-gemm-blas-pair"
-                | "materializec.borrow-routed-native-bf16-gemv-pair"
-                | "materializec.borrow-routed-native-bf16-gemm-wmma-pair"
-                | "materializec.borrow-routed-native-bf16-gemv-residual"
-                | "materializec.borrow-routed-native-bf16-gemm-wmma-residual"
-                | "materializec.bf16-gemv"
-                | "materializec.bf16-gemm-wmma"
-                | "materializec.bf16-gemm-blas"
-                | "materializec.borrow-gated-delta-net-f32"
-                | "materializec.borrow-gated-delta-net-bf16"
-                | "materializec.reduce-f32"
-                | "materializec.reduce-f32-pair"
-                | "materializec.softmax-f32"
-                | "buf.free"
-        )
+        OptimizedOperation::from_operation(assignment.op.as_str()).is_some()
+            || matches!(
+                assignment.op.as_str(),
+                "gpu.materialize"
+                    | "materializec"
+                    | "materializec.into"
+                    | "materializec.borrow"
+                    | "materializec.borrow-argmax-f32"
+                    | "materializec.borrow-argmax-bf16"
+                    | "materializec.borrow-topk-f32"
+                    | "materializec.borrow-reduce-f32"
+                    | "materializec.reduce-f32"
+                    | "materializec.reduce-f32-pair"
+                    | "materializec.softmax-f32"
+                    | "buf.free"
+            )
     })
 }
 

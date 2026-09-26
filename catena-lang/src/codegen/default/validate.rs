@@ -4,7 +4,7 @@ use hexpr::Operation;
 
 use crate::{
     check::AnnotatedTerm,
-    codegen::default::{CodegenError, GpuValue},
+    codegen::default::{CodegenError, GpuValue, ops::optimized::OptimizedOperation},
     pass::record_boundary_sizes::OperationWithBoundarySizes,
 };
 
@@ -14,33 +14,24 @@ pub(super) fn assignment(
     op: &Operation,
     inputs: &[GpuValue],
 ) -> Result<(), CodegenError> {
-    match op.as_str() {
+    let ordinary_materializec = matches!(
+        op.as_str(),
         "materializec"
-        | "materializec.into"
-        | "materializec.borrow"
-        | "materializec.borrow-argmax-f32"
-        | "materializec.borrow-argmax-bf16"
-        | "materializec.borrow-reduce-f32"
-        | "materializec.borrow-cached-context-f32"
-        | "materializec.borrow-cached-context-bf16"
-        | "materializec.borrow-cached-attention-bf16"
-        | "materializec.borrow-cached-attention-bf16-wmma"
-        | "materializec.bf16-gemv"
-        | "materializec.bf16-gemm-wmma"
-        | "materializec.bf16-gemm-blas"
-        | "materializec.borrow-native-bf16-gemv-pair"
-        | "materializec.borrow-native-bf16-gemm-wmma-pair"
-        | "materializec.borrow-native-bf16-gemm-blas-pair"
-        | "materializec.borrow-routed-native-bf16-gemv-pair"
-        | "materializec.borrow-routed-native-bf16-gemm-wmma-pair"
-        | "materializec.borrow-routed-native-bf16-gemv-residual"
-        | "materializec.borrow-routed-native-bf16-gemm-wmma-residual"
-        | "materializec.borrow-gated-delta-net-f32"
-        | "materializec.borrow-gated-delta-net-bf16"
-        | "materializec.reduce-f32"
-        | "materializec.reduce-f32-pair"
-        | "materializec.softmax-f32" => materializec_producer(definitions, caller, inputs),
-        _ => Ok(()),
+            | "materializec.into"
+            | "materializec.borrow"
+            | "materializec.borrow-argmax-f32"
+            | "materializec.borrow-argmax-bf16"
+            | "materializec.borrow-reduce-f32"
+            | "materializec.reduce-f32"
+            | "materializec.reduce-f32-pair"
+            | "materializec.softmax-f32"
+    );
+    let optimized_materializec = OptimizedOperation::from_operation(op.as_str())
+        .is_some_and(OptimizedOperation::validates_materializec_producer);
+    if ordinary_materializec || optimized_materializec {
+        materializec_producer(definitions, caller, inputs)
+    } else {
+        Ok(())
     }
 }
 
@@ -91,36 +82,20 @@ fn first_materialize_op_in_call_chain(
 }
 
 fn is_materialize_op(op: &Operation) -> bool {
-    matches!(
-        op.as_str(),
-        "materialize"
-            | "materializec"
-            | "materializec.into"
-            | "materializec.borrow"
-            | "materializec.borrow-argmax-f32"
-            | "materializec.borrow-argmax-bf16"
-            | "materializec.borrow-topk-f32"
-            | "materializec.borrow-reduce-f32"
-            | "materializec.borrow-cached-context-f32"
-            | "materializec.borrow-cached-context-bf16"
-            | "materializec.borrow-cached-attention-bf16"
-            | "materializec.borrow-cached-attention-bf16-wmma"
-            | "materializec.borrow-routed-bf16-gemv-pair"
-            | "materializec.borrow-native-bf16-gemv-pair"
-            | "materializec.borrow-native-bf16-gemm-wmma-pair"
-            | "materializec.borrow-native-bf16-gemm-blas-pair"
-            | "materializec.borrow-routed-native-bf16-gemv-pair"
-            | "materializec.borrow-routed-native-bf16-gemm-wmma-pair"
-            | "materializec.borrow-routed-native-bf16-gemv-residual"
-            | "materializec.borrow-routed-native-bf16-gemm-wmma-residual"
-            | "materializec.bf16-gemv"
-            | "materializec.bf16-gemm-wmma"
-            | "materializec.bf16-gemm-blas"
-            | "materializec.borrow-gated-delta-net-f32"
-            | "materializec.borrow-gated-delta-net-bf16"
-            | "materializec.reduce-f32"
-            | "materializec.reduce-f32-pair"
-            | "materializec.softmax-f32"
-            | "gpu.materialize"
-    )
+    OptimizedOperation::from_operation(op.as_str()).is_some()
+        || matches!(
+            op.as_str(),
+            "materialize"
+                | "materializec"
+                | "materializec.into"
+                | "materializec.borrow"
+                | "materializec.borrow-argmax-f32"
+                | "materializec.borrow-argmax-bf16"
+                | "materializec.borrow-topk-f32"
+                | "materializec.borrow-reduce-f32"
+                | "materializec.reduce-f32"
+                | "materializec.reduce-f32-pair"
+                | "materializec.softmax-f32"
+                | "gpu.materialize"
+        )
 }

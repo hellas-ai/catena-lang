@@ -9,11 +9,9 @@ use crate::codegen::default::{
     gpu_placement::{GpuFunctionPlacement, function_placement, function_placements},
     lower_types::{CType, LoweredType},
     ops::{
-        cached_attention, cached_context, gated_delta_net,
-        gpu_support::StorageType,
-        ifc, materializec,
-        projection::{ProjectionBackend, ProjectionPlan},
-        reducec, row_major,
+        cached_attention, cached_context, gated_delta_net, gpu_support::StorageType, ifc,
+        materializec, optimized::OptimizedOperation, projection::ProjectionBackend, reducec,
+        row_major,
     },
     prelude::render_gpu_prelude,
     render_utils::{c_type, invalid_inputs, invalid_outputs, param_decl},
@@ -160,8 +158,8 @@ pub fn render_modules(
 
 fn function_uses_blas(function: &GpuFunction) -> bool {
     function.assignments.iter().any(|assignment| {
-        ProjectionPlan::from_operation(assignment.op.as_str())
-            .is_some_and(|plan| plan.backend == ProjectionBackend::Blas)
+        OptimizedOperation::from_operation(assignment.op.as_str())
+            .is_some_and(OptimizedOperation::uses_blas)
     })
 }
 

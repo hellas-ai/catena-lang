@@ -39,6 +39,40 @@ unaligned inputs, unsupported devices, and runs without matrix cores.
 `Runtime::mem_bf16_zeroed` and the GPU module save/load hook documented below
 are supporting runtime facilities rather than Catena primitives.
 
+## Optimized-kernel implementation families
+
+The operation names above remain the compiler-facing API, but the GPU backend
+no longer treats every spelling as an unrelated implementation. An
+`OptimizedOperation` registry classifies cached attention, cached context,
+gated DeltaNet, and projection operations once and supplies the common
+validation, host-placement, and BLAS-linkage properties. Adding a storage or
+backend variant therefore does not require copying its name into independent
+compiler policy tables.
+
+Projection operations are described by a `ProjectionPlan` with orthogonal
+backend (`Simt`, `Wmma`, or `Blas`), topology (`Dense` or `Routed`), output
+shape (`Single`, `Pair`, or `Residual`), and native-BF16 properties. Tuned
+matrix-core shapes remain explicit through `MmaTileSpec`: dense projection,
+routed gate/up, and routed down each keep their measured tile, wave, thread,
+and minimum-row values. The dense renderer and both routed renderers consume
+those specifications rather than embedding parallel copies of the constants.
+The routed pair and down kernels also share one stable expert-grouping source
+template, preserving source-order routes and deterministic slot combination.
+
+Fused attention similarly has separate SIMT and rocWMMA `AttentionTileSpec`
+values plus one `AttentionDispatchPolicy`. Query/key tile sizes, heads per
+tile, workgroup size, per-wave ownership, shared-memory sizes, and the
+vector/SIMT/WMMA thresholds are derived from those definitions. The vector,
+SIMT, and rocWMMA arithmetic bodies remain specialized because they have
+materially different data movement and instruction requirements.
+
+Storage conversions and HIP capability guards are shared by cached context,
+DeltaNet, and projection generation. This organization deliberately
+parameterizes policy and repeated source fragments while retaining separate
+high-performance leaf kernels. It adds no aliases or replacement operation
+names and changes no lifecycle status: `materializec.reduce-f32-pair` remains
+the only operation currently superseded by the supported Qwen templates.
+
 ## `materializec.into`
 
 ```text

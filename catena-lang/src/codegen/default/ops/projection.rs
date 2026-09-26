@@ -51,6 +51,44 @@ impl MmaTileSpec {
     }
 }
 
+pub(in crate::codegen) fn render_stable_route_grouping(out: &mut String, kernel_name: &str) {
+    let source = r#"
+__global__ void __KERNEL___group(
+    const uint64_t *selected, uint64_t route_count, uint64_t expert_count,
+    uint64_t *offsets, uint64_t *permutation) {
+    uint64_t expert = (uint64_t)blockIdx.x;
+    uint32_t lane = threadIdx.x;
+    uint64_t offset = 0;
+    for (uint64_t route_base = 0; route_base < route_count; route_base += 32) {
+        uint64_t route = route_base + lane;
+        unsigned long long lower = __ballot(
+            route < route_count && selected[route] < expert);
+        offset += (uint64_t)__popcll(lower);
+    }
+    if (lane == 0) {
+        offsets[expert] = offset;
+    }
+    uint64_t written = 0;
+    for (uint64_t route_base = 0; route_base < route_count; route_base += 32) {
+        uint64_t route = route_base + lane;
+        bool matches = route < route_count && selected[route] == expert;
+        unsigned long long match_mask = __ballot(matches);
+        unsigned long long preceding = lane == 0 ? 0 : ((1ull << lane) - 1);
+        if (matches) {
+            permutation[offset + written + (uint64_t)__popcll(match_mask & preceding)] = route;
+        }
+        written += (uint64_t)__popcll(match_mask);
+    }
+    if (lane == 0 && expert + 1 == expert_count) {
+        offsets[expert_count] = offset + written;
+        catena_assert(offsets[expert_count] == route_count);
+    }
+}
+
+"#;
+    out.push_str(&source.replace("__KERNEL__", kernel_name));
+}
+
 impl ProjectionPlan {
     pub(in crate::codegen) fn from_operation(operation: &str) -> Option<Self> {
         use ProjectionBackend::{Blas, Simt, Wmma};
@@ -167,5 +205,15 @@ mod tests {
         assert_eq!(MmaTileSpec::DENSE.threads, 256);
         assert_eq!(MmaTileSpec::DENSE.minimum_rows, 64);
         assert_eq!(MmaTileSpec::DENSE.column_fragments(), 8);
+    }
+
+    #[test]
+    fn stable_route_grouping_is_rendered_once_from_a_shared_template() {
+        let mut source = String::new();
+        render_stable_route_grouping(&mut source, "routes");
+        assert!(source.contains("__global__ void routes_group("));
+        assert!(source.contains("selected[route] < expert"));
+        assert!(source.contains("selected[route] == expert"));
+        assert!(source.contains("offsets[expert_count] == route_count"));
     }
 }

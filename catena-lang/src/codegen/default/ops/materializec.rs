@@ -29,7 +29,7 @@ use crate::codegen::default::{
     gpu::{GpuRenderError, render_function_application},
     lower_types::{CType, LoweredType},
     ops::gpu_support::{hip_gfx11_guard, hip_wmma_include_guard},
-    ops::projection::{MmaTileSpec, ProjectionBackend},
+    ops::projection::{MmaTileSpec, ProjectionBackend, render_stable_route_grouping},
     render_utils::{c_type, invalid_outputs, param_decl},
     runtime_type,
 };
@@ -953,39 +953,8 @@ pub(in crate::codegen) fn render_borrow_routed_native_bf16_gemm_wmma_pair_kernel
     }
 
     out.push_str(&hip_wmma_include_guard());
+    render_stable_route_grouping(out, kernel_name);
     let source = r#"
-__global__ void __KERNEL___group(
-    const uint64_t *selected, uint64_t route_count, uint64_t expert_count,
-    uint64_t *offsets, uint64_t *permutation) {
-    uint64_t expert = (uint64_t)blockIdx.x;
-    uint32_t lane = threadIdx.x;
-    uint64_t offset = 0;
-    for (uint64_t route_base = 0; route_base < route_count; route_base += 32) {
-        uint64_t route = route_base + lane;
-        unsigned long long lower = __ballot(
-            route < route_count && selected[route] < expert);
-        offset += (uint64_t)__popcll(lower);
-    }
-    if (lane == 0) {
-        offsets[expert] = offset;
-    }
-    uint64_t written = 0;
-    for (uint64_t route_base = 0; route_base < route_count; route_base += 32) {
-        uint64_t route = route_base + lane;
-        bool matches = route < route_count && selected[route] == expert;
-        unsigned long long match_mask = __ballot(matches);
-        unsigned long long preceding = lane == 0 ? 0 : ((1ull << lane) - 1);
-        if (matches) {
-            permutation[offset + written + (uint64_t)__popcll(match_mask & preceding)] = route;
-        }
-        written += (uint64_t)__popcll(match_mask);
-    }
-    if (lane == 0 && expert + 1 == expert_count) {
-        offsets[expert_count] = offset + written;
-        catena_assert(offsets[expert_count] == route_count);
-    }
-}
-
 __global__ void __KERNEL__(
     const catena_bf16_t *input, const catena_bf16_t *gate_weight,
     const catena_bf16_t *up_weight, const uint64_t *offsets,
@@ -1197,39 +1166,8 @@ pub(in crate::codegen) fn render_borrow_routed_native_bf16_gemm_wmma_residual_ke
     }
 
     out.push_str(&hip_wmma_include_guard());
+    render_stable_route_grouping(out, kernel_name);
     let source = r#"
-__global__ void __KERNEL___group(
-    const uint64_t *selected, uint64_t route_count, uint64_t expert_count,
-    uint64_t *offsets, uint64_t *permutation) {
-    uint64_t expert = (uint64_t)blockIdx.x;
-    uint32_t lane = threadIdx.x;
-    uint64_t offset = 0;
-    for (uint64_t route_base = 0; route_base < route_count; route_base += 32) {
-        uint64_t route = route_base + lane;
-        unsigned long long lower = __ballot(
-            route < route_count && selected[route] < expert);
-        offset += (uint64_t)__popcll(lower);
-    }
-    if (lane == 0) {
-        offsets[expert] = offset;
-    }
-    uint64_t written = 0;
-    for (uint64_t route_base = 0; route_base < route_count; route_base += 32) {
-        uint64_t route = route_base + lane;
-        bool matches = route < route_count && selected[route] == expert;
-        unsigned long long match_mask = __ballot(matches);
-        unsigned long long preceding = lane == 0 ? 0 : ((1ull << lane) - 1);
-        if (matches) {
-            permutation[offset + written + (uint64_t)__popcll(match_mask & preceding)] = route;
-        }
-        written += (uint64_t)__popcll(match_mask);
-    }
-    if (lane == 0 && expert + 1 == expert_count) {
-        offsets[expert_count] = offset + written;
-        catena_assert(offsets[expert_count] == route_count);
-    }
-}
-
 __global__ void __KERNEL__(
     const catena_bf16_t *active, const catena_bf16_t *down_weight,
     const uint64_t *offsets, const uint64_t *permutation,

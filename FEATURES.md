@@ -45,26 +45,28 @@ The operation names above remain the compiler-facing API, but the GPU backend
 no longer treats every spelling as an unrelated implementation. An
 `OptimizedOperation` registry classifies cached attention, cached context,
 gated DeltaNet, and projection operations once and supplies the common
-validation, host-placement, and BLAS-linkage properties. Adding a storage or
-backend variant therefore does not require copying its name into independent
-compiler policy tables.
+validation, host-placement, BLAS-linkage, auxiliary-kernel rendering, and call
+rendering behavior. Optimized primitive spellings occur only in this registry
+or its projection classifier, rather than being copied into GPU dispatch
+tables.
 
-Projection operations are described by a `ProjectionPlan` with orthogonal
-backend (`Simt`, `Wmma`, or `Blas`), topology (`Dense` or `Routed`), output
-shape (`Single`, `Pair`, or `Residual`), and native-BF16 properties. Tuned
-matrix-core shapes remain explicit through `MmaTileSpec`: dense projection,
-routed gate/up, and routed down each keep their measured tile, wave, thread,
-and minimum-row values. The dense renderer and both routed renderers consume
-those specifications rather than embedding parallel copies of the constants.
-The routed pair and down kernels also share one stable expert-grouping source
-template, preserving source-order routes and deterministic slot combination.
+`ProjectionPlan` represents only supported families: dense single, dense
+pair, routed SIMT pair with explicit activation storage, native-BF16 routed
+WMMA pair, and routed residual with a SIMT or WMMA backend. Unsupported routed
+BLAS and F32-activation WMMA combinations therefore cannot be constructed.
+Tuned matrix-core shapes remain explicit through `MmaTileSpec`: dense
+projection, routed gate/up, and routed down each keep their measured tile,
+wave, thread, and minimum-row values. The routed pair and down kernels also
+share one stable expert-grouping source template, preserving source-order
+routes and deterministic slot combination.
 
-Fused attention similarly has separate SIMT and rocWMMA `AttentionTileSpec`
-values plus one `AttentionDispatchPolicy`. Query/key tile sizes, heads per
-tile, workgroup size, per-wave ownership, shared-memory sizes, and the
-vector/SIMT/WMMA thresholds are derived from those definitions. The vector,
-SIMT, and rocWMMA arithmetic bodies remain specialized because they have
-materially different data movement and instruction requirements.
+Fused attention keeps shared query rows, heads per tile, workgroup size, wave
+width, maximum head dimension, and dispatch thresholds as named invariants.
+The SIMT and rocWMMA `AttentionTileSpec` values contain only the key width and
+score-buffer count that actually differ. Launch geometry and shared-memory
+sizes are derived from those values. The vector, SIMT, and rocWMMA arithmetic
+bodies remain specialized because they have materially different data
+movement and instruction requirements.
 
 Storage conversions and HIP capability guards are shared by cached context,
 DeltaNet, and projection generation. This organization deliberately

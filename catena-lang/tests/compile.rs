@@ -10,7 +10,8 @@
 //! not create a runtime or execute a program; runtime behavior belongs in `runtime.rs`.
 
 use catena_lang::{
-    compile::{compile, compile_sources},
+    codegen,
+    compile::compile,
     report::CompileReport,
     runtime::{GpuDialect, ValueKind},
 };
@@ -45,10 +46,17 @@ fn compile_through_closure_conversion_with_sources(
 }
 
 #[test]
-fn compile_sources_produces_a_runtime_module() -> anyhow::Result<()> {
-    let module = compile_sources(
+fn codegen_produces_a_runtime_module() -> anyhow::Result<()> {
+    let raw = RawTheorySet::from_texts(
         catena_lang::stdlib::sources()
             .chain(["(def program identity : (u64 val) -> (u64 val) = [value])"]),
+    )?;
+    let report = compile(raw)?;
+    let module = codegen::runtime_module(
+        report
+            .gpu_modules
+            .as_ref()
+            .expect("successful compilation should contain generated modules"),
         GpuDialect::Hip,
     )?;
 

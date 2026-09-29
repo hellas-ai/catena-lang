@@ -254,7 +254,7 @@ fn generate_gpu_modules(terms: &CodegenTermMap) -> Result<GpuModuleMap, CodegenE
 }
 
 /// Render dialect-independent GPU modules into the runtime boundary format.
-pub(crate) fn runtime_module(
+pub fn runtime_module(
     modules: &GpuModuleMap,
     dialect: GpuDialect,
 ) -> Result<RuntimeModule, gpu::GpuRenderError> {

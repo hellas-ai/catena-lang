@@ -1,11 +1,29 @@
 use catena_lang::{
-    compile::compile_sources,
-    runtime::{Artifact, ExecError, GpuDialect, InitError, MemRef, Runtime, Value, ValueKind},
+    codegen,
+    compile::compile,
+    runtime::{
+        Artifact, ExecError, GpuDialect, InitError, MemRef, Runtime, RuntimeModule, Value,
+        ValueKind,
+    },
     stdlib,
 };
+use metacat::theory::RawTheorySet;
 use std::ops::Deref;
 
 const GPU_DIALECT_ENV: &str = "CATENA_GPU_DIALECT";
+
+fn compile_sources(
+    sources: impl IntoIterator<Item = &'static str>,
+    dialect: GpuDialect,
+) -> anyhow::Result<RuntimeModule> {
+    let raw = RawTheorySet::from_texts(sources)?;
+    let report = compile(raw)?;
+    let modules = report
+        .gpu_modules
+        .as_ref()
+        .expect("successful compilation should contain generated modules");
+    Ok(codegen::runtime_module(modules, dialect)?)
+}
 
 /// Create a runtime with a provided user source file
 fn runtime_with(source: &'static str) -> anyhow::Result<TestRuntime> {

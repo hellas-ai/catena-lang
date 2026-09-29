@@ -10,10 +10,12 @@
 use std::env;
 
 use catena_lang::{
-    compile::compile_sources,
+    codegen,
+    compile::compile,
     runtime::{GpuDialect, Runtime, Value},
     stdlib,
 };
+use metacat::theory::RawTheorySet;
 
 const GPU_DIALECT_ENV: &str = "CATENA_GPU_DIALECT";
 
@@ -41,7 +43,14 @@ const SOURCE: &str = r#"
 
 fn main() -> anyhow::Result<()> {
     let dialect = configured_gpu_dialect()?;
-    let module = compile_sources(stdlib::sources().chain([SOURCE]), dialect)?;
+    let report = compile(RawTheorySet::from_texts(stdlib::sources().chain([SOURCE]))?)?;
+    let module = codegen::runtime_module(
+        report
+            .gpu_modules
+            .as_ref()
+            .expect("successful compilation should contain generated modules"),
+        dialect,
+    )?;
     let mut runtime = Runtime::new(dialect)?;
     let artifact = runtime.load(module)?;
 

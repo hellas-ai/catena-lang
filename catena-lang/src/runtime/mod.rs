@@ -5,14 +5,25 @@
 //!
 //! ```no_run
 //! use catena_lang::{
-//!     compile::compile_sources,
+//!     codegen,
+//!     compile::compile,
 //!     runtime::{GpuDialect, Runtime, Value},
 //!     stdlib,
 //! };
+//! use metacat::theory::RawTheorySet;
 //!
 //! fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     let mut runtime = Runtime::new(GpuDialect::Hip)?;
-//!     let module = compile_sources(stdlib::sources().chain([PROGRAM]), runtime.dialect())?;
+//!     let report = compile(RawTheorySet::from_texts(
+//!         stdlib::sources().chain([PROGRAM]),
+//!     )?)?;
+//!     let module = codegen::runtime_module(
+//!         report
+//!             .gpu_modules
+//!             .as_ref()
+//!             .expect("successful compilation should contain generated modules"),
+//!         runtime.dialect(),
+//!     )?;
 //!     let artifact = runtime.load(module)?;
 //!     let [result] = artifact.exec("add-one", [41_u64.into()])?;
 //!     let Value::U64(sum) = result else {

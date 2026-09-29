@@ -26,10 +26,12 @@ here's how to run a program that adds two `u64` values:
 
 ```rust
 use catena_lang::{
-    compile::compile_sources,
+    codegen,
+    compile::compile,
     runtime::{GpuDialect, Runtime, Value},
     stdlib,
 };
+use metacat::theory::RawTheorySet;
 
 fn main() -> anyhow::Result<()> {
     // programs in hexpr notation: https://github.com/hellas-ai/hexpr
@@ -41,7 +43,16 @@ fn main() -> anyhow::Result<()> {
         ))
     "#;
 
-    let module = compile_sources(stdlib::sources().chain([source]), GpuDialect::Hip)?;
+    let report = compile(RawTheorySet::from_texts(
+        stdlib::sources().chain([source]),
+    )?)?;
+    let module = codegen::runtime_module(
+        report
+            .gpu_modules
+            .as_ref()
+            .expect("successful compilation should contain generated modules"),
+        GpuDialect::Hip,
+    )?;
     let mut runtime = Runtime::new(GpuDialect::Hip)?;
     let artifact = runtime.load(module)?;
     let [result] = artifact.exec("two-plus-two", [])?;

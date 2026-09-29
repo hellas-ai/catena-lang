@@ -13,10 +13,9 @@ use serde::{Deserialize, Serialize};
 use super::artifact::{ArtifactError, SharedObject};
 use super::executor::{AbiValue, Executor, ExecutorError};
 use super::mem::{MemError, MemOwn};
-#[cfg(feature = "experimental-catena-gpu")]
-use super::signature::{GeneratedFunction, generated_signatures};
 use super::{
-    signature::{FunctionSignature, SignatureTable, signatures},
+    GeneratedFunction, GeneratedProgram,
+    signature::{FunctionSignature, SignatureTable, generated_functions, generated_signatures},
     value::{Value, ValueKind},
 };
 use crate::codegen::{GpuDialect, gpu::GpuRenderError, gpu::render_modules};
@@ -89,6 +88,11 @@ pub enum InitError {
     },
     #[error("Function '{name}' has unsupported cap.ref output at index {index}")]
     UnsupportedRefOutput { name: String, index: usize },
+    #[error("generated program targets {program:?}, but this runtime uses {runtime:?}")]
+    IncompatibleProgramDialect {
+        runtime: GpuDialect,
+        program: GpuDialect,
+    },
     #[error(transparent)]
     Mem(#[from] MemError),
 }
@@ -132,13 +136,12 @@ impl Runtime {
     }
 
     /// The GPU dialect used by this runtime.
-    #[cfg(feature = "experimental-catena-gpu")]
     pub fn dialect(&self) -> GpuDialect {
         self.gpu.dialect()
     }
 
-    /// Compile Catena programs from paths into a new artifact.
-    pub fn load<I>(&mut self, paths: I) -> Result<Artifact, InitError>
+    /// Compile Catena programs from paths and load them into a new artifact.
+    pub fn load_paths<I>(&mut self, paths: I) -> Result<Artifact, InitError>
     where
         I: IntoIterator<Item = PathBuf>,
     {
@@ -162,55 +165,37 @@ impl Runtime {
             .gpu_modules
             .as_ref()
             .ok_or(InitError::MissingGpuModules)?;
-        let signature_table = signatures(modules);
-        if let Some((name, index)) = ref_output(&signature_table) {
-            return Err(InitError::UnsupportedRefOutput { name, index });
-        }
-
-        let report_dir = tempfile::Builder::new()
-            .prefix("catena-report-")
-            .tempdir()
-            .map_err(|source| InitError::CreateBuildDir {
-                path: std::env::temp_dir(),
-                source,
-            })?;
-        let cpp_path = report_dir.path().join("module.cpp");
         let rendered = render_modules(modules, dialect)
             .map_err(|source| InitError::RenderGpu { dialect, source })?;
-        fs::write(&cpp_path, rendered).map_err(|source| InitError::WriteGeneratedSource {
-            path: cpp_path.clone(),
-            source,
-        })?;
-        let shared_object = super::artifact::compile(&cpp_path, dialect)?;
-
-        let library = load_generated_library(shared_object.path())?;
-        let executor = Executor::new(library, &signature_table).map_err(|error| match error {
-            ExecutorError::LoadSymbol { symbol, source } => {
-                InitError::LoadSymbol { symbol, source }
-            }
-        })?;
-        Ok(Artifact {
-            gpu: self.gpu.clone(),
-            _shared_object: shared_object,
-            executor,
-            signatures: signature_table,
-        })
+        self.load(GeneratedProgram::new(
+            dialect,
+            rendered,
+            generated_functions(modules),
+        ))
     }
 
-    /// Compile and load generated GPU source with its public entry-point ABI.
-    ///
-    /// This lets another Catena compiler reuse the runtime without depending on
-    /// catena-lang's compiler or code-generation representation.
-    #[cfg(feature = "experimental-catena-gpu")]
+    /// Compile a generated program and load its public entry points.
+    pub fn load(&mut self, program: GeneratedProgram) -> Result<Artifact, InitError> {
+        let dialect = self.gpu.dialect();
+        if program.dialect != dialect {
+            return Err(InitError::IncompatibleProgramDialect {
+                runtime: dialect,
+                program: program.dialect,
+            });
+        }
+        self.load_generated(&program.source, generated_signatures(program.functions))
+    }
+
+    /// Compatibility wrapper for callers that have separate source and ABI metadata.
+    #[deprecated(note = "construct a GeneratedProgram and call Runtime::load")]
     pub fn load_generated_source(
         &mut self,
         source: &str,
         functions: impl IntoIterator<Item = GeneratedFunction>,
     ) -> Result<Artifact, InitError> {
-        self.load_generated(source, generated_signatures(functions))
+        self.load(GeneratedProgram::new(self.gpu.dialect(), source, functions))
     }
 
-    #[cfg(feature = "experimental-catena-gpu")]
     fn load_generated(
         &mut self,
         source: &str,

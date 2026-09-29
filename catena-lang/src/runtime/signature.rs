@@ -2,18 +2,8 @@ use std::collections::HashMap;
 
 use crate::{
     codegen::{GpuModuleMap, lower_types::CType},
-    runtime::value::ValueKind,
+    runtime::{GeneratedFunction, value::ValueKind},
 };
-
-/// C ABI metadata for one entry point in generated GPU source.
-#[cfg(feature = "experimental-catena-gpu")]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct GeneratedFunction {
-    pub source_name: String,
-    pub symbol: String,
-    pub inputs: Vec<ValueKind>,
-    pub outputs: Vec<ValueKind>,
-}
 
 #[derive(Debug, Clone)]
 pub(super) struct FunctionSignature {
@@ -25,7 +15,6 @@ pub(super) struct FunctionSignature {
 /// Source-level program names and their generated C ABI signatures.
 pub(super) type SignatureTable = HashMap<String, FunctionSignature>;
 
-#[cfg(feature = "experimental-catena-gpu")]
 pub(super) fn generated_signatures(
     functions: impl IntoIterator<Item = GeneratedFunction>,
 ) -> SignatureTable {
@@ -44,49 +33,40 @@ pub(super) fn generated_signatures(
         .collect()
 }
 
-pub(super) fn signatures(modules: &GpuModuleMap) -> SignatureTable {
-    let mut signatures = HashMap::new();
-    for module in modules.values() {
-        let Some(source_name) = &module.source_name else {
-            continue;
-        };
-        let Some(inputs) = module
-            .entry
-            .sources
-            .iter()
-            .map(|var| {
-                let ty = crate::codegen::runtime_type(var)
-                    .expect("GpuFunction sources should be runtime-lowered");
-                value_kind(ty)
-            })
-            .collect::<Option<Vec<_>>>()
-        else {
-            continue;
-        };
-        let Some(outputs) = module
-            .entry
-            .targets
-            .iter()
-            .map(|var| {
-                let ty = crate::codegen::runtime_type(var)
-                    .expect("GpuFunction targets should be runtime-lowered");
-                value_kind(ty)
-            })
-            .collect::<Option<Vec<_>>>()
-        else {
-            continue;
-        };
+pub(super) fn generated_functions(modules: &GpuModuleMap) -> Vec<GeneratedFunction> {
+    modules
+        .values()
+        .filter_map(|module| {
+            let source_name = module.source_name.as_ref()?;
+            let inputs = module
+                .entry
+                .sources
+                .iter()
+                .map(|var| {
+                    let ty = crate::codegen::runtime_type(var)
+                        .expect("GpuFunction sources should be runtime-lowered");
+                    value_kind(ty)
+                })
+                .collect::<Option<Vec<_>>>()?;
+            let outputs = module
+                .entry
+                .targets
+                .iter()
+                .map(|var| {
+                    let ty = crate::codegen::runtime_type(var)
+                        .expect("GpuFunction targets should be runtime-lowered");
+                    value_kind(ty)
+                })
+                .collect::<Option<Vec<_>>>()?;
 
-        signatures.insert(
-            source_name.to_string(),
-            FunctionSignature {
+            Some(GeneratedFunction {
+                source_name: source_name.to_string(),
                 symbol: module.entry.name.clone(),
                 inputs,
                 outputs,
-            },
-        );
-    }
-    signatures
+            })
+        })
+        .collect()
 }
 
 fn value_kind(ty: &CType) -> Option<ValueKind> {

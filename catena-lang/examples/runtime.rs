@@ -23,7 +23,7 @@ fn main() -> anyhow::Result<()> {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let mut runtime = Runtime::new(configured_gpu_dialect()?)?;
     let artifact =
-        runtime.load(stdlib::paths_from(&root).chain([root.join("examples/example.hex")]))?;
+        runtime.load_paths(stdlib::paths_from(&root).chain([root.join("examples/example.hex")]))?;
     let plus_one = runtime.load_sources(stdlib::sources().chain([ARRAY_HEAD_PLUS_ONE]))?;
 
     let [result] = artifact.exec("two-times-two", [])?;

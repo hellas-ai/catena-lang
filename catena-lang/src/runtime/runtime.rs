@@ -14,7 +14,7 @@ use super::artifact::{ArtifactError, SharedObject};
 use super::executor::{AbiValue, Executor, ExecutorError};
 use super::mem::{MemError, MemOwn};
 use super::{
-    GeneratedFunction, GeneratedProgram,
+    GeneratedFunction, RuntimeModule,
     signature::{FunctionSignature, SignatureTable, generated_functions, generated_signatures},
     value::{Value, ValueKind},
 };
@@ -88,10 +88,10 @@ pub enum InitError {
     },
     #[error("Function '{name}' has unsupported cap.ref output at index {index}")]
     UnsupportedRefOutput { name: String, index: usize },
-    #[error("generated program targets {program:?}, but this runtime uses {runtime:?}")]
-    IncompatibleProgramDialect {
+    #[error("runtime module targets {module:?}, but this runtime uses {runtime:?}")]
+    IncompatibleModuleDialect {
         runtime: GpuDialect,
-        program: GpuDialect,
+        module: GpuDialect,
     },
     #[error(transparent)]
     Mem(#[from] MemError),
@@ -167,33 +167,33 @@ impl Runtime {
             .ok_or(InitError::MissingGpuModules)?;
         let rendered = render_modules(modules, dialect)
             .map_err(|source| InitError::RenderGpu { dialect, source })?;
-        self.load(GeneratedProgram::new(
+        self.load(RuntimeModule::new(
             dialect,
             rendered,
             generated_functions(modules),
         ))
     }
 
-    /// Compile a generated program and load its public entry points.
-    pub fn load(&mut self, program: GeneratedProgram) -> Result<Artifact, InitError> {
+    /// Compile a rendered runtime module and load its public entry points.
+    pub fn load(&mut self, module: RuntimeModule) -> Result<Artifact, InitError> {
         let dialect = self.gpu.dialect();
-        if program.dialect != dialect {
-            return Err(InitError::IncompatibleProgramDialect {
+        if module.dialect != dialect {
+            return Err(InitError::IncompatibleModuleDialect {
                 runtime: dialect,
-                program: program.dialect,
+                module: module.dialect,
             });
         }
-        self.load_generated(&program.source, generated_signatures(program.functions))
+        self.load_generated(&module.source, generated_signatures(module.functions))
     }
 
     /// Compatibility wrapper for callers that have separate source and ABI metadata.
-    #[deprecated(note = "construct a GeneratedProgram and call Runtime::load")]
+    #[deprecated(note = "construct a RuntimeModule and call Runtime::load")]
     pub fn load_generated_source(
         &mut self,
         source: &str,
         functions: impl IntoIterator<Item = GeneratedFunction>,
     ) -> Result<Artifact, InitError> {
-        self.load(GeneratedProgram::new(self.gpu.dialect(), source, functions))
+        self.load(RuntimeModule::new(self.gpu.dialect(), source, functions))
     }
 
     fn load_generated(

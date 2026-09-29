@@ -27,7 +27,7 @@
 //! ## Quick reference
 //!
 //! - [`Runtime::new`] creates a process-local GPU context.
-//! - [`Runtime::load`] compiles a [`GeneratedProgram`] into an [`Artifact`].
+//! - [`Runtime::load`] compiles a [`RuntimeModule`] into an [`Artifact`].
 //! - [`Runtime::load_paths`] and [`Runtime::load_sources`] are compiler convenience methods.
 //! - [`Artifact::exec`] calls a program from a compiled artifact with [`Value`] inputs.
 //! - [`Runtime::mem_u16`], [`Runtime::mem_u64`], and [`Runtime::mem_f32`] copy host slices into owned device memory.
@@ -55,8 +55,8 @@ pub mod mem;
 /// Compile and run catena programs
 pub mod runtime;
 
-/// Generated source and public entry-point metadata accepted by the runtime.
-mod program;
+/// Rendered source and public entry-point metadata accepted by the runtime.
+mod runtime_module;
 
 /// Compile generated GPU C++ to a shared object.
 mod artifact;
@@ -74,7 +74,7 @@ pub use artifact::ArtifactError;
 pub use mem::MemError;
 pub use mem::MemOwn;
 pub use mem::MemRef;
-pub use program::{GeneratedFunction, GeneratedProgram};
 pub use runtime::{Artifact, ExecError, InitError, Runtime};
+pub use runtime_module::{GeneratedFunction, RuntimeModule};
 pub use value::Value;
 pub use value::ValueKind;

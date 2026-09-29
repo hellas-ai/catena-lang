@@ -7,9 +7,8 @@
 use std::{ffi::c_void, sync::Arc};
 
 use crate::{
-    codegen::GpuDialect,
     gpu::{GpuApi, IPC_HANDLE_BYTES, RawIpcMemHandle},
-    runtime::{MemError, MemOwn, MemRef, Runtime},
+    runtime::{GpuDialect, MemError, MemOwn, MemRef, Runtime},
 };
 
 /// Opaque identity for one allocation generation.

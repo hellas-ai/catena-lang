@@ -8,7 +8,7 @@ use std::{
 
 use thiserror::Error;
 
-use crate::codegen::GpuDialect;
+use super::GpuDialect;
 
 #[derive(Debug, Error)]
 pub enum ArtifactError {

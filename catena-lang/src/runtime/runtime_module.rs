@@ -1,8 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::codegen::GpuDialect;
-
-use super::ValueKind;
+use super::{GpuDialect, ValueKind};
 
 /// Rendered GPU source and the public ABI required to execute it.
 ///

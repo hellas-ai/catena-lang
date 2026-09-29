@@ -10,8 +10,8 @@
 use std::env;
 
 use catena_lang::{
-    codegen::GpuDialect,
-    runtime::{Runtime, Value},
+    compile::compile_sources,
+    runtime::{GpuDialect, Runtime, Value},
     stdlib,
 };
 
@@ -40,8 +40,10 @@ const SOURCE: &str = r#"
 "#;
 
 fn main() -> anyhow::Result<()> {
-    let mut runtime = Runtime::new(configured_gpu_dialect()?)?;
-    let artifact = runtime.load_sources(stdlib::sources().chain([SOURCE]))?;
+    let dialect = configured_gpu_dialect()?;
+    let module = compile_sources(stdlib::sources().chain([SOURCE]), dialect)?;
+    let mut runtime = Runtime::new(dialect)?;
+    let artifact = runtime.load(module)?;
 
     let owned = runtime.mem_u64(&[3, 5])?;
     let borrowed = runtime.mem_u64(&[8, 13])?;

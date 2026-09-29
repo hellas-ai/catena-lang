@@ -3,7 +3,7 @@ use std::io::{self, Read, Write};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use thiserror::Error;
 
-use crate::{codegen::GpuDialect, runtime::ExecError};
+use crate::runtime::{ExecError, GpuDialect, RuntimeModule};
 
 const MAX_FRAME_LEN: usize = 64 * 1024 * 1024;
 
@@ -12,8 +12,8 @@ pub(super) enum Request {
     Initialize {
         dialect: GpuDialect,
     },
-    LoadSources {
-        sources: Vec<String>,
+    LoadModule {
+        module: RuntimeModule,
     },
     Execute {
         artifact: usize,
@@ -171,6 +171,25 @@ mod tests {
             } if artifact == expected_artifact && name == "f" && buffers.is_empty()
                 && matches!(args.as_slice(), [WireValue::U64(7)])
         ));
+    }
+
+    #[test]
+    fn runtime_module_round_trips() {
+        let expected = RuntimeModule::new(GpuDialect::Hip, "generated source", []);
+        let mut bytes = Vec::new();
+        write_frame(
+            &mut bytes,
+            &Request::LoadModule {
+                module: expected.clone(),
+            },
+        )
+        .unwrap();
+
+        let Some(Request::LoadModule { module }) = read_frame(&mut bytes.as_slice()).unwrap()
+        else {
+            panic!("decoded the wrong request kind");
+        };
+        assert_eq!(module, expected);
     }
 
     #[test]

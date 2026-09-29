@@ -7,8 +7,7 @@ use std::{
 
 use thiserror::Error;
 
-use super::executor::CatenaMem;
-use crate::codegen::GpuDialect;
+use super::{GpuDialect, executor::CatenaMem};
 use crate::gpu::GpuApi;
 
 #[derive(Debug, Error)]

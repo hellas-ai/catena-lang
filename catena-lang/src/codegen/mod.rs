@@ -23,7 +23,6 @@ use metacat::{
     theory::TheoryId,
 };
 use open_hypergraphs::lax::NodeId;
-use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{
@@ -42,6 +41,8 @@ use crate::{
     runtime::{GeneratedFunction, RuntimeModule, ValueKind},
 };
 
+pub use crate::runtime::GpuDialect;
+
 pub type GpuModuleMap = BTreeMap<Operation, GpuModule>;
 type CodegenOperation = OperationWithBoundarySizes<Operation>;
 type CodegenTerm = AnnotatedTerm<CodegenOperation>;
@@ -55,12 +56,6 @@ pub enum CodegenKind {
     /// The existing GPU C++ code generator.
     #[default]
     Gpu,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum GpuDialect {
-    Hip,
-    Cuda,
 }
 
 impl GpuDialect {

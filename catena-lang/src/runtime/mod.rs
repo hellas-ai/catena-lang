@@ -5,14 +5,15 @@
 //!
 //! ```no_run
 //! use catena_lang::{
-//!     codegen::GpuDialect,
-//!     runtime::{Runtime, Value},
+//!     compile::compile_sources,
+//!     runtime::{GpuDialect, Runtime, Value},
 //!     stdlib,
 //! };
 //!
 //! fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     let mut runtime = Runtime::new(GpuDialect::Hip)?;
-//!     let artifact = runtime.load_sources(stdlib::sources().chain([PROGRAM]))?;
+//!     let module = compile_sources(stdlib::sources().chain([PROGRAM]), runtime.dialect())?;
+//!     let artifact = runtime.load(module)?;
 //!     let [result] = artifact.exec("add-one", [41_u64.into()])?;
 //!     let Value::U64(sum) = result else {
 //!         panic!("`add-one` returned an unexpected value: {result:?}");
@@ -28,7 +29,6 @@
 //!
 //! - [`Runtime::new`] creates a process-local GPU context.
 //! - [`Runtime::load`] compiles a [`RuntimeModule`] into an [`Artifact`].
-//! - [`Runtime::load_paths`] and [`Runtime::load_sources`] are compiler convenience methods.
 //! - [`Artifact::exec`] calls a program from a compiled artifact with [`Value`] inputs.
 //! - [`Runtime::mem_u16`], [`Runtime::mem_u64`], and [`Runtime::mem_f32`] copy host slices into owned device memory.
 //! ### [`Value`] and Memory
@@ -48,6 +48,9 @@
 
 /// Public API for creating values to pass into generated catena code
 pub mod value;
+
+/// GPU platform targeted by generated source and runtime resources.
+mod dialect;
 
 /// Helpers for creating and freeing Catena memory values on program boundaries
 pub mod mem;
@@ -71,6 +74,7 @@ mod signature;
 //mod tests;
 
 pub use artifact::ArtifactError;
+pub use dialect::GpuDialect;
 pub use mem::MemError;
 pub use mem::MemOwn;
 pub use mem::MemRef;

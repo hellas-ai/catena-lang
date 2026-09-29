@@ -1,8 +1,8 @@
 use std::{env, path::PathBuf};
 
 use catena_lang::{
-    codegen::GpuDialect,
-    runtime::{Runtime, Value},
+    compile::{compile_paths, compile_sources},
+    runtime::{GpuDialect, Runtime, Value},
     stdlib,
 };
 
@@ -21,10 +21,15 @@ const ARRAY_HEAD_PLUS_ONE: &str = r#"
 
 fn main() -> anyhow::Result<()> {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let mut runtime = Runtime::new(configured_gpu_dialect()?)?;
-    let artifact =
-        runtime.load_paths(stdlib::paths_from(&root).chain([root.join("examples/example.hex")]))?;
-    let plus_one = runtime.load_sources(stdlib::sources().chain([ARRAY_HEAD_PLUS_ONE]))?;
+    let dialect = configured_gpu_dialect()?;
+    let artifact_module = compile_paths(
+        stdlib::paths_from(&root).chain([root.join("examples/example.hex")]),
+        dialect,
+    )?;
+    let plus_one_module = compile_sources(stdlib::sources().chain([ARRAY_HEAD_PLUS_ONE]), dialect)?;
+    let mut runtime = Runtime::new(dialect)?;
+    let artifact = runtime.load(artifact_module)?;
+    let plus_one = runtime.load(plus_one_module)?;
 
     let [result] = artifact.exec("two-times-two", [])?;
     let Value::U64(result) = result else {

@@ -1,4 +1,7 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::PathBuf,
+};
 
 use hexpr::Operation;
 use metacat::theory::{RawTheorySet, Theory, TheoryId, TheorySet};
@@ -13,7 +16,16 @@ use crate::{
         PassError, forget_closures::ForgetClosuresError, inline_definitions::InlineDefinitionsError,
     },
     report::CompileReport,
+    runtime::{GpuDialect, RuntimeModule},
 };
+
+#[derive(Debug, Error)]
+pub enum CompileModuleError {
+    #[error("Failed to parse program: {0}")]
+    Parse(#[from] metacat::theory::ast::ParseRawError),
+    #[error(transparent)]
+    Compile(#[from] CompileFailure),
+}
 
 #[derive(Debug, Error)]
 #[error("{cause}")]
@@ -59,6 +71,53 @@ pub enum CompileError {
 /// Compile all definitions from the input raw theories and collect intermediate data.
 pub fn compile(raw_theories: RawTheorySet) -> Result<CompileReport, CompileFailure> {
     compile_with_codegen(raw_theories, CodegenKind::default())
+}
+
+/// Compile Catena source files into a rendered module ready for [`crate::runtime::Runtime`].
+pub fn compile_paths<I>(paths: I, dialect: GpuDialect) -> Result<RuntimeModule, CompileModuleError>
+where
+    I: IntoIterator<Item = PathBuf>,
+{
+    Ok(compile_module(RawTheorySet::from_files(paths)?, dialect)?)
+}
+
+/// Compile in-memory Catena sources into a rendered runtime module.
+pub fn compile_sources<'a, I>(
+    sources: I,
+    dialect: GpuDialect,
+) -> Result<RuntimeModule, CompileModuleError>
+where
+    I: IntoIterator<Item = &'a str>,
+{
+    Ok(compile_module(RawTheorySet::from_texts(sources)?, dialect)?)
+}
+
+/// Compile parsed theories with the default code generator into a runtime module.
+pub fn compile_module(
+    raw_theories: RawTheorySet,
+    dialect: GpuDialect,
+) -> Result<RuntimeModule, CompileFailure> {
+    compile_module_with_codegen(raw_theories, CodegenKind::default(), dialect)
+}
+
+/// Compile parsed theories with the selected code generator into a runtime module.
+pub fn compile_module_with_codegen(
+    raw_theories: RawTheorySet,
+    codegen: CodegenKind,
+    dialect: GpuDialect,
+) -> Result<RuntimeModule, CompileFailure> {
+    let report = compile_with_codegen(raw_theories, codegen)?;
+    let rendered = crate::codegen::runtime_module(
+        report
+            .gpu_modules
+            .as_ref()
+            .expect("successful compilation should contain generated modules"),
+        dialect,
+    );
+    rendered.map_err(|source| CompileFailure {
+        report,
+        cause: CompileError::Codegen(CodegenError::Render(source)),
+    })
 }
 
 /// Compile using the selected code generator and collect intermediate data.

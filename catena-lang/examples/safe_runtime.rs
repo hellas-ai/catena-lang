@@ -1,8 +1,8 @@
 use std::env;
 
 use catena_lang::{
-    codegen::GpuDialect,
-    runtime::{MemOwn, Value},
+    compile::compile_sources,
+    runtime::{GpuDialect, MemOwn, Value},
     safe_runtime::{SafeExecError, SafeRuntime, run_safe_runtime_child_if_requested},
     stdlib,
 };
@@ -21,13 +21,18 @@ fn main() -> anyhow::Result<()> {
     }
 
     let dialect = configured_gpu_dialect()?;
+    let artifact_module = compile_sources(
+        stdlib::sources().chain([
+            include_str!("example.hex"),
+            include_str!("materializec.hex"),
+            OWNED_SOURCE,
+        ]),
+        dialect,
+    )?;
+    let add_one_module = compile_sources(stdlib::sources().chain([ADD_ONE_SOURCE]), dialect)?;
     let mut runtime = SafeRuntime::new(dialect)?;
-    let artifact = runtime.load_sources(stdlib::sources().chain([
-        include_str!("example.hex"),
-        include_str!("materializec.hex"),
-        OWNED_SOURCE,
-    ]))?;
-    let add_one = runtime.load_sources(stdlib::sources().chain([ADD_ONE_SOURCE]))?;
+    let artifact = runtime.load(artifact_module)?;
+    let add_one = runtime.load(add_one_module)?;
 
     let [added] = add_one.exec("add-one", [41_u64.into()])?;
     anyhow::ensure!(matches!(added, Value::U64(42)));

@@ -1,6 +1,6 @@
 use catena_lang::{
-    codegen::GpuDialect,
-    runtime::{Artifact, ExecError, InitError, MemRef, Runtime, Value, ValueKind},
+    compile::compile_sources,
+    runtime::{Artifact, ExecError, GpuDialect, InitError, MemRef, Runtime, Value, ValueKind},
     stdlib,
 };
 use std::ops::Deref;
@@ -9,16 +9,20 @@ const GPU_DIALECT_ENV: &str = "CATENA_GPU_DIALECT";
 
 /// Create a runtime with a provided user source file
 fn runtime_with(source: &'static str) -> anyhow::Result<TestRuntime> {
-    let mut runtime = Runtime::new(configured_gpu_dialect()?)?;
-    let artifact = runtime.load_sources(stdlib::sources().chain([source]))?;
+    let dialect = configured_gpu_dialect()?;
+    let module = compile_sources(stdlib::sources().chain([source]), dialect)?;
+    let mut runtime = Runtime::new(dialect)?;
+    let artifact = runtime.load(module)?;
     Ok(TestRuntime { runtime, artifact })
 }
 
 fn runtime_with_sources(
     sources: impl IntoIterator<Item = &'static str>,
 ) -> anyhow::Result<TestRuntime> {
-    let mut runtime = Runtime::new(configured_gpu_dialect()?)?;
-    let artifact = runtime.load_sources(stdlib::sources().chain(sources))?;
+    let dialect = configured_gpu_dialect()?;
+    let module = compile_sources(stdlib::sources().chain(sources), dialect)?;
+    let mut runtime = Runtime::new(dialect)?;
+    let artifact = runtime.load(module)?;
     Ok(TestRuntime { runtime, artifact })
 }
 
@@ -82,8 +86,14 @@ fn multiple_artifacts_resolve_same_function_independently() -> anyhow::Result<()
 
     let dialect = configured_gpu_dialect()?;
     let mut runtime = Runtime::new(dialect)?;
-    let identity = runtime.load_sources(stdlib::sources().chain([IDENTITY]))?;
-    let add_one = runtime.load_sources(stdlib::sources().chain([ADD_ONE]))?;
+    let identity = runtime.load(compile_sources(
+        stdlib::sources().chain([IDENTITY]),
+        dialect,
+    )?)?;
+    let add_one = runtime.load(compile_sources(
+        stdlib::sources().chain([ADD_ONE]),
+        dialect,
+    )?)?;
 
     let [first] = identity.exec("inspect", [41_u64.into()])?;
     let [second] = add_one.exec("inspect", [41_u64.into()])?;
@@ -887,9 +897,13 @@ fn mem_own_identity_transfers_and_returns_owned_memory_regression() -> anyhow::R
 #[test]
 fn cap_ref_outputs_are_rejected_during_initialization() -> anyhow::Result<()> {
     let mut runtime = Runtime::new(configured_gpu_dialect()?)?;
-    let result = runtime.load_sources(stdlib::sources().chain([r#"
+    let module = compile_sources(
+        stdlib::sources().chain([r#"
         (def program mem-ref-identity : (cap.ref mem) -> (cap.ref mem) = [memory])
-        "#]));
+        "#]),
+        runtime.dialect(),
+    )?;
+    let result = runtime.load(module);
 
     assert!(matches!(
         result,

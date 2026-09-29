@@ -14,14 +14,11 @@ use super::artifact::{ArtifactError, SharedObject};
 use super::executor::{AbiValue, Executor, ExecutorError};
 use super::mem::{MemError, MemOwn};
 use super::{
-    GeneratedFunction, RuntimeModule,
+    GeneratedFunction, GpuDialect, RuntimeModule,
     signature::{FunctionSignature, SignatureTable, generated_signatures},
     value::{Value, ValueKind},
 };
-use crate::codegen::{CodegenKind, GpuDialect, gpu::GpuRenderError};
-use crate::compile::CompileFailure;
 use crate::gpu::GpuApi;
-use metacat::theory::RawTheorySet;
 
 /// A process-local GPU context for compiling artifacts and allocating memory.
 #[derive(Debug)]
@@ -48,18 +45,6 @@ pub struct Artifact {
 
 #[derive(Debug, Error)]
 pub enum InitError {
-    #[error("Failed to parse program: {0}")]
-    Parse(#[from] metacat::theory::ast::ParseRawError),
-    #[error(transparent)]
-    Compile(#[from] CompileFailure),
-    #[error("compile report did not contain GPU modules")]
-    MissingGpuModules,
-    #[error("failed to render generated {dialect:?} source: {source}")]
-    RenderGpu {
-        dialect: GpuDialect,
-        #[source]
-        source: GpuRenderError,
-    },
     #[error("failed to write generated GPU source to {path}: {source}")]
     WriteGeneratedSource {
         path: PathBuf,
@@ -138,36 +123,6 @@ impl Runtime {
     /// The GPU dialect used by this runtime.
     pub fn dialect(&self) -> GpuDialect {
         self.gpu.dialect()
-    }
-
-    /// Compile Catena programs from paths and load them into a new artifact.
-    pub fn load_paths<I>(&mut self, paths: I) -> Result<Artifact, InitError>
-    where
-        I: IntoIterator<Item = PathBuf>,
-    {
-        let raw_theories = metacat::theory::RawTheorySet::from_files(paths)?;
-        self.load_raw_theories(raw_theories)
-    }
-
-    /// Compile in-memory Catena sources into a new artifact.
-    pub fn load_sources<'a, I>(&mut self, sources: I) -> Result<Artifact, InitError>
-    where
-        I: IntoIterator<Item = &'a str>,
-    {
-        let raw_theories = RawTheorySet::from_texts(sources)?;
-        self.load_raw_theories(raw_theories)
-    }
-
-    fn load_raw_theories(&mut self, raw_theories: RawTheorySet) -> Result<Artifact, InitError> {
-        let dialect = self.gpu.dialect();
-        let report = crate::compile::compile_with_codegen(raw_theories, CodegenKind::default())?;
-        let modules = report
-            .gpu_modules
-            .as_ref()
-            .ok_or(InitError::MissingGpuModules)?;
-        let module = crate::codegen::runtime_module(modules, dialect)
-            .map_err(|source| InitError::RenderGpu { dialect, source })?;
-        self.load(module)
     }
 
     /// Compile a rendered runtime module and load its public entry points.

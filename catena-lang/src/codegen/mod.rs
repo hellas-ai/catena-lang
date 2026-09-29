@@ -49,6 +49,14 @@ type CodegenTermMap = TheoryTermMap<CodegenOperation>;
 
 const PROGRAM_THEORY: &str = "program";
 
+/// Selects the code generator used after the shared compiler passes.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum CodegenKind {
+    /// The existing GPU C++ code generator.
+    #[default]
+    Gpu,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum GpuDialect {
     Hip,
@@ -177,13 +185,26 @@ struct CodegenState<'a> {
 }
 
 /// Generate a rendered runtime module for all program entry points.
-pub fn codegen(terms: &CodegenTermMap, dialect: GpuDialect) -> Result<RuntimeModule, CodegenError> {
-    let modules = generate_modules(terms)?;
+pub fn codegen(
+    kind: CodegenKind,
+    terms: &CodegenTermMap,
+    dialect: GpuDialect,
+) -> Result<RuntimeModule, CodegenError> {
+    let modules = generate_modules(kind, terms)?;
     Ok(runtime_module(&modules, dialect)?)
 }
 
 /// Lower all functions into the dialect-independent GPU module representation.
-pub(crate) fn generate_modules(terms: &CodegenTermMap) -> Result<GpuModuleMap, CodegenError> {
+pub(crate) fn generate_modules(
+    kind: CodegenKind,
+    terms: &CodegenTermMap,
+) -> Result<GpuModuleMap, CodegenError> {
+    match kind {
+        CodegenKind::Gpu => generate_gpu_modules(terms),
+    }
+}
+
+fn generate_gpu_modules(terms: &CodegenTermMap) -> Result<GpuModuleMap, CodegenError> {
     let theory_id = TheoryId(
         PROGRAM_THEORY
             .parse()

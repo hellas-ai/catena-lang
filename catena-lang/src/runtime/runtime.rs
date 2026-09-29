@@ -18,7 +18,7 @@ use super::{
     signature::{FunctionSignature, SignatureTable, generated_signatures},
     value::{Value, ValueKind},
 };
-use crate::codegen::{GpuDialect, gpu::GpuRenderError};
+use crate::codegen::{CodegenKind, GpuDialect, gpu::GpuRenderError};
 use crate::compile::CompileFailure;
 use crate::gpu::GpuApi;
 use metacat::theory::RawTheorySet;
@@ -160,7 +160,7 @@ impl Runtime {
 
     fn load_raw_theories(&mut self, raw_theories: RawTheorySet) -> Result<Artifact, InitError> {
         let dialect = self.gpu.dialect();
-        let report = crate::compile::compile(raw_theories)?;
+        let report = crate::compile::compile_with_codegen(raw_theories, CodegenKind::default())?;
         let modules = report
             .gpu_modules
             .as_ref()

@@ -31,7 +31,6 @@ half = "2"
 [features]
 default = ["svg-reports"]
 runtime-tests = []
-experimental-catena-gpu = []
 svg-reports = ["dep:open-hypergraphs-dot"]
 
 [[example]]

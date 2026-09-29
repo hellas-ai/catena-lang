@@ -1,9 +1,0 @@
-(theory type nat {
-  (arr * : 2 -> 1)
-  (arr 1 : 0 -> 1)
-})
-
-(theory program type {
-  (arr *.intro : [a b] -> *)
-  (arr *.elim : * -> [a b])
-})

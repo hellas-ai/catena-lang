@@ -14,13 +14,11 @@ use super::artifact::{ArtifactError, SharedObject};
 use super::executor::{AbiValue, Executor, ExecutorError};
 use super::mem::{MemError, MemOwn};
 use super::{
-    signature::{FunctionSignature, SignatureTable, signatures},
+    GeneratedFunction, GpuDialect, RuntimeModule,
+    signature::{FunctionSignature, SignatureTable, generated_signatures},
     value::{Value, ValueKind},
 };
-use crate::codegen::{GpuDialect, gpu::GpuRenderError, gpu::render_modules};
-use crate::compile::CompileFailure;
 use crate::gpu::GpuApi;
-use metacat::theory::RawTheorySet;
 
 /// A process-local GPU context for compiling artifacts and allocating memory.
 #[derive(Debug)]
@@ -47,18 +45,6 @@ pub struct Artifact {
 
 #[derive(Debug, Error)]
 pub enum InitError {
-    #[error("Failed to parse program: {0}")]
-    Parse(#[from] metacat::theory::ast::ParseRawError),
-    #[error(transparent)]
-    Compile(#[from] CompileFailure),
-    #[error("compile report did not contain GPU modules")]
-    MissingGpuModules,
-    #[error("failed to render generated {dialect:?} source: {source}")]
-    RenderGpu {
-        dialect: GpuDialect,
-        #[source]
-        source: GpuRenderError,
-    },
     #[error("failed to write generated GPU source to {path}: {source}")]
     WriteGeneratedSource {
         path: PathBuf,
@@ -87,6 +73,11 @@ pub enum InitError {
     },
     #[error("Function '{name}' has unsupported cap.ref output at index {index}")]
     UnsupportedRefOutput { name: String, index: usize },
+    #[error("runtime module targets {module:?}, but this runtime uses {runtime:?}")]
+    IncompatibleModuleDialect {
+        runtime: GpuDialect,
+        module: GpuDialect,
+    },
     #[error(transparent)]
     Mem(#[from] MemError),
 }
@@ -129,32 +120,39 @@ impl Runtime {
         })
     }
 
-    /// Compile Catena programs from paths into a new artifact.
-    pub fn load<I>(&mut self, paths: I) -> Result<Artifact, InitError>
-    where
-        I: IntoIterator<Item = PathBuf>,
-    {
-        let raw_theories = metacat::theory::RawTheorySet::from_files(paths)?;
-        self.load_raw_theories(raw_theories)
+    /// The GPU dialect used by this runtime.
+    pub fn dialect(&self) -> GpuDialect {
+        self.gpu.dialect()
     }
 
-    /// Compile in-memory Catena sources into a new artifact.
-    pub fn load_sources<'a, I>(&mut self, sources: I) -> Result<Artifact, InitError>
-    where
-        I: IntoIterator<Item = &'a str>,
-    {
-        let raw_theories = RawTheorySet::from_texts(sources)?;
-        self.load_raw_theories(raw_theories)
-    }
-
-    fn load_raw_theories(&mut self, raw_theories: RawTheorySet) -> Result<Artifact, InitError> {
+    /// Compile a rendered runtime module and load its public entry points.
+    pub fn load(&mut self, module: RuntimeModule) -> Result<Artifact, InitError> {
         let dialect = self.gpu.dialect();
-        let report = crate::compile::compile(raw_theories)?;
-        let modules = report
-            .gpu_modules
-            .as_ref()
-            .ok_or(InitError::MissingGpuModules)?;
-        let signature_table = signatures(modules);
+        if module.dialect != dialect {
+            return Err(InitError::IncompatibleModuleDialect {
+                runtime: dialect,
+                module: module.dialect,
+            });
+        }
+        self.load_generated(&module.source, generated_signatures(module.functions))
+    }
+
+    /// Compatibility wrapper for callers that have separate source and ABI metadata.
+    #[deprecated(note = "construct a RuntimeModule and call Runtime::load")]
+    pub fn load_generated_source(
+        &mut self,
+        source: &str,
+        functions: impl IntoIterator<Item = GeneratedFunction>,
+    ) -> Result<Artifact, InitError> {
+        self.load(RuntimeModule::new(self.gpu.dialect(), source, functions))
+    }
+
+    fn load_generated(
+        &mut self,
+        source: &str,
+        signature_table: SignatureTable,
+    ) -> Result<Artifact, InitError> {
+        let dialect = self.gpu.dialect();
         if let Some((name, index)) = ref_output(&signature_table) {
             return Err(InitError::UnsupportedRefOutput { name, index });
         }
@@ -167,9 +165,7 @@ impl Runtime {
                 source,
             })?;
         let cpp_path = report_dir.path().join("module.cpp");
-        let rendered = render_modules(modules, dialect)
-            .map_err(|source| InitError::RenderGpu { dialect, source })?;
-        fs::write(&cpp_path, rendered).map_err(|source| InitError::WriteGeneratedSource {
+        fs::write(&cpp_path, source).map_err(|source| InitError::WriteGeneratedSource {
             path: cpp_path.clone(),
             source,
         })?;

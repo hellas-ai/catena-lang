@@ -23,7 +23,6 @@ use metacat::{
     theory::TheoryId,
 };
 use open_hypergraphs::lax::NodeId;
-use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{
@@ -39,7 +38,10 @@ use crate::{
     pass::record_boundary_sizes::OperationWithBoundarySizes,
     prefixes::NAME_PREFIX,
     report::TheoryTermMap,
+    runtime::{GeneratedFunction, RuntimeModule, ValueKind},
 };
+
+pub use crate::runtime::GpuDialect;
 
 pub type GpuModuleMap = BTreeMap<Operation, GpuModule>;
 type CodegenOperation = OperationWithBoundarySizes<Operation>;
@@ -48,10 +50,12 @@ type CodegenTermMap = TheoryTermMap<CodegenOperation>;
 
 const PROGRAM_THEORY: &str = "program";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum GpuDialect {
-    Hip,
-    Cuda,
+/// Selects the code generator used after the shared compiler passes.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum CodegenKind {
+    /// The existing GPU C++ code generator.
+    #[default]
+    Gpu,
 }
 
 impl GpuDialect {
@@ -175,8 +179,27 @@ struct CodegenState<'a> {
     next_specialization_id: usize,
 }
 
-/// Codegen for all functions, producing per-definition GPU modules.
-pub fn codegen(terms: &CodegenTermMap) -> Result<GpuModuleMap, CodegenError> {
+/// Generate a rendered runtime module for all program entry points.
+pub fn codegen(
+    kind: CodegenKind,
+    terms: &CodegenTermMap,
+    dialect: GpuDialect,
+) -> Result<RuntimeModule, CodegenError> {
+    let modules = generate_modules(kind, terms)?;
+    Ok(runtime_module(&modules, dialect)?)
+}
+
+/// Lower all functions into the dialect-independent GPU module representation.
+pub(crate) fn generate_modules(
+    kind: CodegenKind,
+    terms: &CodegenTermMap,
+) -> Result<GpuModuleMap, CodegenError> {
+    match kind {
+        CodegenKind::Gpu => generate_gpu_modules(terms),
+    }
+}
+
+fn generate_gpu_modules(terms: &CodegenTermMap) -> Result<GpuModuleMap, CodegenError> {
     let theory_id = TheoryId(
         PROGRAM_THEORY
             .parse()
@@ -230,6 +253,59 @@ pub fn codegen(terms: &CodegenTermMap) -> Result<GpuModuleMap, CodegenError> {
     Ok(state.modules)
 }
 
+/// Render dialect-independent GPU modules into the runtime boundary format.
+pub fn runtime_module(
+    modules: &GpuModuleMap,
+    dialect: GpuDialect,
+) -> Result<RuntimeModule, gpu::GpuRenderError> {
+    Ok(RuntimeModule::new(
+        dialect,
+        gpu::render_modules(modules, dialect)?,
+        generated_functions(modules),
+    ))
+}
+
+fn generated_functions(modules: &GpuModuleMap) -> Vec<GeneratedFunction> {
+    modules
+        .values()
+        .filter_map(|module| {
+            let source_name = module.source_name.as_ref()?;
+            let inputs = module
+                .entry
+                .sources
+                .iter()
+                .map(|var| value_kind(runtime_type(var)?))
+                .collect::<Option<Vec<_>>>()?;
+            let outputs = module
+                .entry
+                .targets
+                .iter()
+                .map(|var| value_kind(runtime_type(var)?))
+                .collect::<Option<Vec<_>>>()?;
+
+            Some(GeneratedFunction {
+                source_name: source_name.to_string(),
+                symbol: module.entry.name.clone(),
+                inputs,
+                outputs,
+            })
+        })
+        .collect()
+}
+
+fn value_kind(ty: &CType) -> Option<ValueKind> {
+    match ty {
+        CType::Bool => Some(ValueKind::Bool),
+        CType::U16 => Some(ValueKind::U16),
+        CType::U32 => Some(ValueKind::U32),
+        CType::U64 => Some(ValueKind::U64),
+        CType::F32 => Some(ValueKind::F32),
+        CType::Named(name) if name == "catena_mem_own_t" => Some(ValueKind::MemOwn),
+        CType::Named(name) if name == "catena_mem_ref_t" => Some(ValueKind::MemRef),
+        _ => None,
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum CodegenError {
     #[error(transparent)]
@@ -240,6 +316,8 @@ pub enum CodegenError {
     LowerType(#[from] LowerTypeError),
     #[error(transparent)]
     FnPtrSymbol(#[from] FnPtrSymbolError),
+    #[error(transparent)]
+    Render(#[from] gpu::GpuRenderError),
     #[error("definition `{0}` is used with non-monomorphic runtime interface")]
     NonMonomorphicUse(Operation),
     #[error(

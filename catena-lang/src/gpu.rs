@@ -7,8 +7,7 @@ use std::{
 
 use libloading::{Library, Symbol};
 
-use crate::codegen::GpuDialect;
-use crate::runtime::MemError;
+use crate::runtime::{GpuDialect, MemError};
 
 const MEMCPY_HOST_TO_DEVICE: c_int = 1;
 const MEMCPY_DEVICE_TO_HOST: c_int = 2;

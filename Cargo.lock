@@ -102,18 +102,6 @@ name = "catena-core"
 version = "0.1.0"
 
 [[package]]
-name = "catena-gpu"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "catena-lang",
- "hexpr",
- "metacat",
- "open-hypergraphs",
- "thiserror",
-]
-
-[[package]]
 name = "catena-lang"
 version = "0.1.0"
 dependencies = [

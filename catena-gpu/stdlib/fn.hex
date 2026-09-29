@@ -1,3 +1,0 @@
-(theory type nat {
-  (arr -> : 2 -> 1)
-})

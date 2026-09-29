@@ -1,6 +1,0 @@
-(def program implicit-2d-flatten : {[rows columns.]
-  ({({[.rows columns]} shape.2d)} ix val)
-} -> {[rows columns.]
-  ({({[.rows columns]} shape.2d)} ix val)
-  (u64 val)
-} = ix.1d.value)

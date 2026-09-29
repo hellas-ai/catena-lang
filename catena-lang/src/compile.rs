@@ -116,7 +116,7 @@ fn compile_into(report: &mut CompileReport) -> Result<(), CompileError> {
     let unpacked_products = crate::pass::unpack_products::run(&boundary_sizes)?;
     report.unpacked_products = Some(unpacked_products.clone());
 
-    let gpu_modules = crate::codegen::codegen(&unpacked_products)?;
+    let gpu_modules = crate::codegen::generate_modules(&unpacked_products)?;
     report.gpu_modules = Some(gpu_modules);
 
     Ok(())

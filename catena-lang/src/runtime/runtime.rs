@@ -15,10 +15,10 @@ use super::executor::{AbiValue, Executor, ExecutorError};
 use super::mem::{MemError, MemOwn};
 use super::{
     GeneratedFunction, RuntimeModule,
-    signature::{FunctionSignature, SignatureTable, generated_functions, generated_signatures},
+    signature::{FunctionSignature, SignatureTable, generated_signatures},
     value::{Value, ValueKind},
 };
-use crate::codegen::{GpuDialect, gpu::GpuRenderError, gpu::render_modules};
+use crate::codegen::{GpuDialect, gpu::GpuRenderError};
 use crate::compile::CompileFailure;
 use crate::gpu::GpuApi;
 use metacat::theory::RawTheorySet;
@@ -165,13 +165,9 @@ impl Runtime {
             .gpu_modules
             .as_ref()
             .ok_or(InitError::MissingGpuModules)?;
-        let rendered = render_modules(modules, dialect)
+        let module = crate::codegen::runtime_module(modules, dialect)
             .map_err(|source| InitError::RenderGpu { dialect, source })?;
-        self.load(RuntimeModule::new(
-            dialect,
-            rendered,
-            generated_functions(modules),
-        ))
+        self.load(module)
     }
 
     /// Compile a rendered runtime module and load its public entry points.

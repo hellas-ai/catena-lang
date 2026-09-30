@@ -1,7 +1,9 @@
 use crate::codegen::{GpuAssign, GpuDialect, GpuFunction, gpu::GpuRenderError};
 
 use super::{
-    cached_attention, cached_context, gated_delta_net,
+    cached_attention, cached_context,
+    diffusion::DiffusionOp,
+    gated_delta_net,
     gpu_support::StorageType,
     materializec,
     projection::{ProjectionBackend, ProjectionPlan, ProjectionStorage, RoutedProjectionBackend},
@@ -9,6 +11,7 @@ use super::{
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::codegen) enum OptimizedOperation {
+    Diffusion(DiffusionOp),
     CachedAttention { matrix_core: bool },
     CachedContext(StorageType),
     Projection(ProjectionPlan),
@@ -17,6 +20,14 @@ pub(in crate::codegen) enum OptimizedOperation {
 
 impl OptimizedOperation {
     pub(in crate::codegen) fn from_operation(operation: &str) -> Option<Self> {
+        if operation == "materializec.linear-bf16" {
+            return Some(Self::Projection(ProjectionPlan::Dense(
+                ProjectionBackend::Wmma,
+            )));
+        }
+        if let Some(op) = DiffusionOp::from_operation(operation) {
+            return Some(Self::Diffusion(op));
+        }
         if let Some(plan) = ProjectionPlan::from_operation(operation) {
             return Some(Self::Projection(plan));
         }
@@ -60,6 +71,7 @@ impl OptimizedOperation {
         dialect: GpuDialect,
     ) -> Result<(), GpuRenderError> {
         match self {
+            Self::Diffusion(op) => op.kernels(out, function, assignment),
             Self::CachedAttention { matrix_core } => cached_attention::render_kernel(
                 out,
                 &cached_attention::kernel_name(function, assignment)?,
@@ -185,6 +197,7 @@ impl OptimizedOperation {
         dialect: GpuDialect,
     ) -> Result<(), GpuRenderError> {
         match self {
+            Self::Diffusion(op) => op.call(out, function, assignment, dialect),
             Self::CachedAttention { matrix_core } => cached_attention::render_call(
                 out,
                 function,
@@ -260,6 +273,7 @@ mod tests {
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     enum Family {
+        Diffusion,
         CachedAttention(bool),
         CachedContext(StorageType),
         Projection,
@@ -268,6 +282,7 @@ mod tests {
 
     fn family(operation: OptimizedOperation) -> Family {
         match operation {
+            OptimizedOperation::Diffusion(_) => Family::Diffusion,
             OptimizedOperation::CachedAttention { matrix_core } => {
                 Family::CachedAttention(matrix_core)
             }

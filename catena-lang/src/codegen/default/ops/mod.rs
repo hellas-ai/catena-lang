@@ -8,3 +8,4 @@ pub(super) mod optimized;
 pub(super) mod projection;
 pub(super) mod reducec;
 pub(super) mod row_major;
+pub(super) mod diffusion;

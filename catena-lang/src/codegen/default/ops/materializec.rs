@@ -1454,6 +1454,7 @@ struct catena_blas_context_t {
     catena_blas_context_t() : handle(nullptr) {
         catena_host_blas_check(hipblasCreate(&handle));
         catena_host_blas_check(hipblasSetPointerMode(handle, HIPBLAS_POINTER_MODE_HOST));
+        catena_host_blas_check(hipblasSetAtomicsMode(handle, HIPBLAS_ATOMICS_NOT_ALLOWED));
         catena_host_blas_check(hipblasSetStream(handle, nullptr));
     }
 

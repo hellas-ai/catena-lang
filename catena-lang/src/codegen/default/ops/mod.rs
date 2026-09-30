@@ -1,5 +1,6 @@
 pub(super) mod cached_attention;
 pub(super) mod cached_context;
+pub(super) mod diffusion;
 pub(super) mod gated_delta_net;
 pub(super) mod gpu_support;
 pub(super) mod ifc;
@@ -8,4 +9,3 @@ pub(super) mod optimized;
 pub(super) mod projection;
 pub(super) mod reducec;
 pub(super) mod row_major;
-pub(super) mod diffusion;

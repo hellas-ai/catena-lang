@@ -1,5 +1,8 @@
 use std::path::{Path, PathBuf};
 
+mod bundles;
+pub use bundles::{BundleRegistry, SourceFile, StdlibBundle};
+
 /// Names of built in stdlib types and operations
 pub mod constants {
     // Type of the internal hom
@@ -64,6 +67,13 @@ pub const FILES: &[StdlibFile] = stdlib_files![
     "sum-bf16.hex",
     "nn.hex",
 ];
+
+/// Embedded bundles available by name. Dependencies are loaded before files.
+pub const BUNDLES: &[StdlibBundle] = &[StdlibBundle {
+    name: "default",
+    extends: &[],
+    files: FILES,
+}];
 
 pub fn sources() -> impl ExactSizeIterator<Item = &'static str> {
     FILES.iter().map(|file| file.source)

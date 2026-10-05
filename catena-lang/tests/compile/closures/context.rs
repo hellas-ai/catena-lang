@@ -62,7 +62,7 @@ fn pre_boundary_context_operations_are_not_recaptured() {
             })
             .map(|edge| edge.source_sizes.clone())
             .collect::<Vec<_>>();
-        assert_eq!(generated_sources, vec![vec![], vec![]]);
+        assert_eq!(generated_sources, vec![Vec::<usize>::new(); 2]);
         assert_fully_lowered(definition);
     }
 }

@@ -2,7 +2,7 @@
 
 Catena is a **deterministic array programming language**:
 
-- **Deterministic**: Programs produce bitwise identical results on all platforms 
+- **Deterministic**: Programs produce bitwise identical results on all platforms
 - **Secure**: It is safe to execute programs from third parties
 
 <h3> ⚠️ NOTE: Catena is alpha quality software⚠️</h3>

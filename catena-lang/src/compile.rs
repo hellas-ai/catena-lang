@@ -7,7 +7,7 @@ use thiserror::Error;
 use crate::{
     check::{CheckError, partial_definition_types},
     closure::ConversionError,
-    codegen::CodegenError,
+    codegen::{CodegenError, CodegenKind},
     elaborate::ElaborateError,
     pass::{
         PassError, forget_closures::ForgetClosuresError, inline_definitions::InlineDefinitionsError,
@@ -58,8 +58,16 @@ pub enum CompileError {
 
 /// Compile all definitions from the input raw theories and collect intermediate data.
 pub fn compile(raw_theories: RawTheorySet) -> Result<CompileReport, CompileFailure> {
+    compile_with_codegen(raw_theories, CodegenKind::default())
+}
+
+/// Compile using the selected code generator and collect intermediate data.
+pub fn compile_with_codegen(
+    raw_theories: RawTheorySet,
+    codegen: CodegenKind,
+) -> Result<CompileReport, CompileFailure> {
     let mut report = CompileReport::new(raw_theories);
-    if let Err(cause) = compile_into(&mut report) {
+    if let Err(cause) = compile_into(&mut report, codegen) {
         return Err(CompileFailure { report, cause });
     }
     Ok(report)
@@ -67,7 +75,7 @@ pub fn compile(raw_theories: RawTheorySet) -> Result<CompileReport, CompileFailu
 
 // Helper for `compile` which exists so `compile` can return
 // `Result<CompileReport, CompileFailure>`
-fn compile_into(report: &mut CompileReport) -> Result<(), CompileError> {
+fn compile_into(report: &mut CompileReport, codegen: CodegenKind) -> Result<(), CompileError> {
     let elaborated = crate::elaborate::elaborate(report.raw_theories.clone())?;
     report.elaborated = Some(elaborated.clone());
 
@@ -116,7 +124,7 @@ fn compile_into(report: &mut CompileReport) -> Result<(), CompileError> {
     let unpacked_products = crate::pass::unpack_products::run(&boundary_sizes)?;
     report.unpacked_products = Some(unpacked_products.clone());
 
-    let gpu_modules = crate::codegen::codegen(&unpacked_products)?;
+    let gpu_modules = crate::codegen::generate_modules(codegen, &unpacked_products)?;
     report.gpu_modules = Some(gpu_modules);
 
     Ok(())

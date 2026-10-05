@@ -8,7 +8,7 @@
 //! status and stderr.
 
 use std::{
-    env, fs,
+    env,
     io::{self, BufReader, Read},
     path::{Path, PathBuf},
     process::{Child, ChildStdin, ChildStdout, Command, ExitStatus, Stdio},
@@ -28,9 +28,9 @@ use self::{
         read_frame, write_frame,
     },
 };
-use crate::{
-    codegen::GpuDialect,
-    runtime::{Artifact as RuntimeArtifact, ExecError, MemError, MemOwn, Runtime, Value},
+use crate::runtime::{
+    Artifact as RuntimeArtifact, ExecError, GpuDialect, MemError, MemOwn, Runtime, RuntimeModule,
+    Value,
 };
 
 const CHILD_MODE_ENV: &str = "CATENA_SAFE_RUNTIME_CHILD";
@@ -40,12 +40,6 @@ const CHILD_MODE_ENV: &str = "CATENA_SAFE_RUNTIME_CHILD";
 pub enum SafeInitError {
     #[error("failed to identify the current executable: {0}")]
     CurrentExecutable(#[source] io::Error),
-    #[error("failed to read Catena source {path}: {source}")]
-    ReadSource {
-        path: PathBuf,
-        #[source]
-        source: io::Error,
-    },
     #[error("failed to spawn SafeRuntime child {executable}: {source}")]
     Spawn {
         executable: PathBuf,
@@ -56,7 +50,7 @@ pub enum SafeInitError {
     Transport(String),
     #[error("SafeRuntime child initialization failed: {0}")]
     RemoteInitialization(String),
-    #[error("SafeRuntime child failed to load sources: {0}")]
+    #[error("SafeRuntime child failed to load module: {0}")]
     RemoteLoad(String),
     #[error("SafeRuntime child returned an unexpected setup response")]
     UnexpectedResponse,
@@ -98,7 +92,7 @@ pub enum ChildMainError {
     AlreadyInitialized,
 }
 
-/// A process-isolated GPU context for compiling artifacts.
+/// A process-isolated GPU context for loading and executing artifacts.
 ///
 /// The host executable must call [`run_safe_runtime_child_if_requested`] before
 /// parsing arguments or writing to stdout. `SafeRuntime` respawns that same
@@ -146,37 +140,15 @@ impl SafeRuntime {
         }
     }
 
-    /// Compile Catena source paths into a new artifact.
-    pub fn load<I>(&mut self, paths: I) -> Result<Artifact, SafeInitError>
-    where
-        I: IntoIterator<Item = PathBuf>,
-    {
-        let sources = paths
-            .into_iter()
-            .map(|path| {
-                fs::read_to_string(&path)
-                    .map_err(|source| SafeInitError::ReadSource { path, source })
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        self.load_owned_sources(sources)
-    }
-
-    /// Compile in-memory Catena sources into a new artifact.
-    pub fn load_sources<'a, I>(&mut self, sources: I) -> Result<Artifact, SafeInitError>
-    where
-        I: IntoIterator<Item = &'a str>,
-    {
-        self.load_owned_sources(sources.into_iter().map(ToOwned::to_owned).collect())
-    }
-
-    fn load_owned_sources(&mut self, sources: Vec<String>) -> Result<Artifact, SafeInitError> {
+    /// Load a rendered runtime module into an isolated child process.
+    pub fn load(&mut self, module: RuntimeModule) -> Result<Artifact, SafeInitError> {
         let mut worker = self
             .session
             .worker
             .lock()
             .map_err(|_| SafeInitError::Transport("worker lock was poisoned".to_string()))?;
         worker
-            .send(&Request::LoadSources { sources })
+            .send(&Request::LoadModule { module })
             .map_err(map_init_worker_error)?;
 
         match worker.receive().map_err(map_init_worker_error)? {
@@ -408,9 +380,9 @@ fn run_child_loop(mut reader: impl Read, mut writer: impl io::Write) -> Result<(
     while let Some(request) = read_request(&mut reader)? {
         match request {
             Request::Initialize { .. } => return Err(ChildMainError::AlreadyInitialized),
-            Request::LoadSources { sources } => {
+            Request::LoadModule { module } => {
                 let result = runtime
-                    .load_sources(sources.iter().map(String::as_str))
+                    .load(module)
                     .map(|artifact| {
                         let id = artifacts.len();
                         artifacts.push(Some(artifact));

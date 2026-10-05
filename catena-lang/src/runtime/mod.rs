@@ -5,14 +5,26 @@
 //!
 //! ```no_run
 //! use catena_lang::{
-//!     codegen::GpuDialect,
-//!     runtime::{Runtime, Value},
+//!     codegen,
+//!     compile::compile,
+//!     runtime::{GpuDialect, Runtime, Value},
 //!     stdlib,
 //! };
+//! use metacat::theory::RawTheorySet;
 //!
 //! fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     let mut runtime = Runtime::new(GpuDialect::Hip)?;
-//!     let artifact = runtime.load_sources(stdlib::sources().chain([PROGRAM]))?;
+//!     let report = compile(RawTheorySet::from_texts(
+//!         stdlib::sources().chain([PROGRAM]),
+//!     )?)?;
+//!     let module = codegen::runtime_module(
+//!         report
+//!             .gpu_modules
+//!             .as_ref()
+//!             .expect("successful compilation should contain generated modules"),
+//!         runtime.dialect(),
+//!     )?;
+//!     let artifact = runtime.load(module)?;
 //!     let [result] = artifact.exec("add-one", [41_u64.into()])?;
 //!     let Value::U64(sum) = result else {
 //!         panic!("`add-one` returned an unexpected value: {result:?}");
@@ -27,7 +39,7 @@
 //! ## Quick reference
 //!
 //! - [`Runtime::new`] creates a process-local GPU context.
-//! - [`Runtime::load`] and [`Runtime::load_sources`] compile programs into an [`Artifact`].
+//! - [`Runtime::load`] compiles a [`RuntimeModule`] into an [`Artifact`].
 //! - [`Artifact::exec`] calls a program from a compiled artifact with [`Value`] inputs.
 //! - [`Runtime::mem_u16`], [`Runtime::mem_u64`], and [`Runtime::mem_f32`] copy host slices into owned device memory.
 //! ### [`Value`] and Memory
@@ -48,11 +60,17 @@
 /// Public API for creating values to pass into generated catena code
 pub mod value;
 
+/// GPU platform targeted by generated source and runtime resources.
+mod dialect;
+
 /// Helpers for creating and freeing Catena memory values on program boundaries
 pub mod mem;
 
 /// Compile and run catena programs
 pub mod runtime;
+
+/// Rendered source and public entry-point metadata accepted by the runtime.
+mod runtime_module;
 
 /// Compile generated GPU C++ to a shared object.
 mod artifact;
@@ -67,9 +85,11 @@ mod signature;
 //mod tests;
 
 pub use artifact::ArtifactError;
+pub use dialect::GpuDialect;
 pub use mem::MemError;
 pub use mem::MemOwn;
 pub use mem::MemRef;
 pub use runtime::{Artifact, ExecError, InitError, Runtime};
+pub use runtime_module::{GeneratedFunction, RuntimeModule};
 pub use value::Value;
 pub use value::ValueKind;

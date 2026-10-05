@@ -81,37 +81,3 @@ dependencies as follows:
 ```sh
 nix develop --command cargo run -p catena-lang --example runtime
 ```
-
-# Standard library bundles
-
-The current library lives in `catena-lang/stdlib/default/`. Its `stdlib.json`
-manifest is simply:
-
-```json
-{"name": "default"}
-```
-
-By default, a bundle loads every `.hex` file directly in its directory, sorted
-by filename. Subdirectories and other file types are ignored. The default
-library is embedded at build time using the same rule, so adding a `.hex` file
-does not require maintaining a file list.
-
-Put additional bundles in sibling folders, each with a `stdlib.json` containing
-its name. Optional `extends` lists bundle dependencies; optional `files` selects
-an explicit ordered file list instead of loading all `.hex` files.
-
-```sh
-# Use the embedded default bundle (also the behavior without selection flags)
-cargo run -p catena-lang -- program.hex -o report --stdlib default
-
-# Use a local bundle; its name must differ from embedded bundle names
-cargo run -p catena-lang -- program.hex -o report --stdlib-dir ./my-stdlib
-
-# Compile without library sources
-cargo run -p catena-lang -- program.hex -o report --no-stdlib
-```
-
-`--stdlib` and `--stdlib-dir` can be repeated. Explicit selections replace the
-implicit default; to extend it, use `"extends": ["default"]` in your manifest.
-Local dependencies must also be supplied with `--stdlib-dir`. Dependencies are
-loaded once, before their dependents; unknown names and cycles are errors.

@@ -1,0 +1,490 @@
+(theory program type {
+  (arr stdlib.gpu.memory.add_shared_slot
+    : (
+      [index__s843 element__s844 rest__s845 count__s848 . ]
+      {
+        (({[ . index__s843]} stdlib.gpu.memory.type.SlotName) val)
+        ({({[ . element__s844]} stdlib.numeric.sort.size_of) u32} :)
+        ({[ . count__s848] u32} :)
+        (({[ . rest__s845]} stdlib.gpu.memory.type.SharedLayout) val)
+      }
+    )
+    -> (
+      [index__s843 element__s844 rest__s845 count__s848 . ]
+      {
+        (
+          (
+            {
+              (
+                {
+                  (
+                    {
+                      ({[ . index__s843]} stdlib.gpu.memory.type.SlotName)
+                      [ . count__s848]
+                      [ . element__s844]
+                    }
+                    stdlib.gpu.memory.sort.Slot
+                  )
+                  [ . rest__s845]
+                }
+                list.Cons
+              )
+            }
+            stdlib.gpu.memory.type.SharedLayout
+          )
+          val
+        )
+      }
+    )
+  )
+
+  (arr stdlib.gpu.memory.empty_shared_layout
+    : ([] {1})
+    -> ([] {(({list.Nil} stdlib.gpu.memory.type.SharedLayout) val)})
+  )
+
+  (arr stdlib.gpu.memory.global_read
+    : (
+      [element__s786 blocks__s787 threads__s788 grid__s789 block__s790 count__s791 thread__s792 memory__s793 . ]
+      {
+        (
+          {
+            [ . thread__s792]
+            (
+              {[ . blocks__s787] [ . threads__s788] [ . grid__s789] [ . block__s790]}
+              stdlib.gpu.geometry.type.Thread
+            )
+          }
+          :
+        )
+        (
+          {[ . memory__s793] ({[ . count__s791] [ . element__s786]} stdlib.gpu.memory.type.Global)}
+          :
+        )
+        (({[ . count__s791]} stdlib.gpu.memory.type.Ix) val)
+        (
+          (
+            {
+              [ . blocks__s787]
+              [ . threads__s788]
+              [ . grid__s789]
+              [ . block__s790]
+              [ . count__s791]
+              [ . element__s786]
+              [ . thread__s792]
+              [ . memory__s793]
+              stdlib.gpu.memory.sort.All
+            }
+            stdlib.gpu.memory.prop.GlobalRead
+          )
+          |-
+        )
+      }
+    )
+    -> (
+      [element__s786 blocks__s787 threads__s788 grid__s789 block__s790 count__s791 thread__s792 memory__s793 . ]
+      {
+        ([ . element__s786] val)
+        (
+          (
+            {
+              [ . blocks__s787]
+              [ . threads__s788]
+              [ . grid__s789]
+              [ . block__s790]
+              [ . count__s791]
+              [ . element__s786]
+              [ . thread__s792]
+              [ . memory__s793]
+              stdlib.gpu.memory.sort.All
+            }
+            stdlib.gpu.memory.prop.GlobalRead
+          )
+          |-
+        )
+      }
+    )
+  )
+
+  (arr stdlib.gpu.memory.global_write
+    : (
+      [element__s828 blocks__s829 threads__s830 grid__s831 block__s832 thread__s833 count__s834 memory__s835 index__s836 . ]
+      {
+        (
+          {[ . memory__s835] ({[ . count__s834] [ . element__s828]} stdlib.gpu.memory.type.Global)}
+          :
+        )
+        ({[ . index__s836] ({[ . count__s834]} stdlib.gpu.memory.type.Ix)} :)
+        ([ . element__s828] val)
+        (
+          (
+            {
+              [ . blocks__s829]
+              [ . threads__s830]
+              [ . grid__s831]
+              [ . block__s832]
+              [ . count__s834]
+              [ . element__s828]
+              [ . thread__s833]
+              [ . memory__s835]
+              [ . index__s836]
+            }
+            stdlib.gpu.memory.prop.GlobalOwn
+          )
+          |-
+        )
+      }
+    )
+    -> (
+      [element__s828 blocks__s829 threads__s830 grid__s831 block__s832 thread__s833 count__s834 memory__s835 index__s836 . ]
+      {1}
+    )
+  )
+
+  (arr stdlib.gpu.memory.ix
+    : (
+      [count__s782 x__s783 . ]
+      {({[ . x__s783] u32} :) (({[ . x__s783] [ . count__s782]} prop.Less) |-)}
+    )
+    -> (
+      [count__s782 x__s783 . ]
+      {
+        (
+          {
+            ({[ . count__s782] [ . x__s783]} stdlib.gpu.memory.sort.At)
+            ({[ . count__s782]} stdlib.gpu.memory.type.Ix)
+          }
+          :
+        )
+      }
+    )
+  )
+
+  (arr stdlib.gpu.memory.reserve_shared
+    : (
+      [blocks__s850 threads__s851 layout__s852 grid__s853 shared_memory__s855 . ]
+      {
+        ({[ . grid__s853] ({[ . blocks__s850] [ . threads__s851]} stdlib.gpu.geometry.type.Grid)} :)
+        (({[ . layout__s852]} stdlib.gpu.memory.type.SharedLayout) val)
+      }
+    )
+    -> (
+      [blocks__s850 threads__s851 layout__s852 grid__s853 shared_memory__s855 . ]
+      {
+        (
+          {
+            [ . shared_memory__s855]
+            (
+              {[ . blocks__s850] [ . threads__s851] [ . grid__s853] [ . layout__s852]}
+              stdlib.gpu.memory.type.SharedMemory
+            )
+          }
+          :
+        )
+        (
+          (
+            {
+              (
+                {[ . blocks__s850] [ . threads__s851] [ . grid__s853] [ . layout__s852]}
+                stdlib.gpu.memory.type.SharedMemory
+              )
+              [ . shared_memory__s855]
+            }
+            stdlib.gpu.memory.prop.Available
+          )
+          |-
+        )
+      }
+    )
+  )
+
+  (arr stdlib.gpu.memory.shared_read
+    : (
+      [phase__s813 element__s814 blocks__s815 threads__s816 grid__s817 layout__s818 count__s819 memory__s820 block__s821 slot__s822 thread__s823 . ]
+      {
+        (
+          (
+            {
+              [ . blocks__s815]
+              [ . threads__s816]
+              [ . grid__s817]
+              [ . layout__s818]
+              [ . memory__s820]
+              [ . block__s821]
+              [ . slot__s822]
+              [ . count__s819]
+              [ . element__s814]
+            }
+            stdlib.gpu.memory.type.Shared
+          )
+          val
+        )
+        (({[ . count__s819]} stdlib.gpu.memory.type.Ix) val)
+        (
+          (
+            {
+              [ . blocks__s815]
+              [ . threads__s816]
+              [ . grid__s817]
+              [ . block__s821]
+              [ . layout__s818]
+              [ . phase__s813]
+              [ . thread__s823]
+              [ . memory__s820]
+              stdlib.gpu.memory.sort.All
+            }
+            stdlib.gpu.memory.prop.SharedRead
+          )
+          |-
+        )
+        (
+          (
+            {
+              [ . blocks__s815]
+              [ . threads__s816]
+              [ . grid__s817]
+              [ . layout__s818]
+              [ . memory__s820]
+              [ . block__s821]
+              [ . slot__s822]
+              stdlib.gpu.memory.sort.All
+            }
+            stdlib.gpu.memory.prop.Defined
+          )
+          |-
+        )
+      }
+    )
+    -> (
+      [phase__s813 element__s814 blocks__s815 threads__s816 grid__s817 layout__s818 count__s819 memory__s820 block__s821 slot__s822 thread__s823 . ]
+      {
+        ([ . element__s814] val)
+        (
+          (
+            {
+              [ . blocks__s815]
+              [ . threads__s816]
+              [ . grid__s817]
+              [ . block__s821]
+              [ . layout__s818]
+              [ . phase__s813]
+              [ . thread__s823]
+              [ . memory__s820]
+              stdlib.gpu.memory.sort.All
+            }
+            stdlib.gpu.memory.prop.SharedRead
+          )
+          |-
+        )
+        (
+          (
+            {
+              [ . blocks__s815]
+              [ . threads__s816]
+              [ . grid__s817]
+              [ . layout__s818]
+              [ . memory__s820]
+              [ . block__s821]
+              [ . slot__s822]
+              stdlib.gpu.memory.sort.All
+            }
+            stdlib.gpu.memory.prop.Defined
+          )
+          |-
+        )
+      }
+    )
+  )
+
+  (arr stdlib.gpu.memory.shared_slot
+    : (
+      [blocks__s765 threads__s766 grid__s767 layout__s768 index__s769 element__s770 memory__s772 block__s773 count__s774 . ]
+      {
+        (({[ . index__s769]} stdlib.gpu.memory.type.SlotName) val)
+        (
+          {
+            [ . memory__s772]
+            (
+              {[ . blocks__s765] [ . threads__s766] [ . grid__s767] [ . layout__s768]}
+              stdlib.gpu.memory.type.SharedMemory
+            )
+          }
+          :
+        )
+        (
+          {
+            [ . block__s773]
+            ({[ . blocks__s765] [ . threads__s766] [ . grid__s767]} stdlib.gpu.geometry.type.Block)
+          }
+          :
+        )
+        ({[ . count__s774] u32} :)
+      }
+    )
+    -> (
+      [blocks__s765 threads__s766 grid__s767 layout__s768 index__s769 element__s770 memory__s772 block__s773 count__s774 . ]
+      {
+        (
+          (
+            {
+              [ . blocks__s765]
+              [ . threads__s766]
+              [ . grid__s767]
+              [ . layout__s768]
+              [ . memory__s772]
+              [ . block__s773]
+              ({[ . index__s769]} stdlib.gpu.memory.type.SlotName)
+              [ . count__s774]
+              [ . element__s770]
+            }
+            stdlib.gpu.memory.type.Shared
+          )
+          val
+        )
+      }
+    )
+  )
+
+  (arr stdlib.gpu.memory.shared_write
+    : (
+      [phase__s796 element__s797 blocks__s798 threads__s799 grid__s800 layout__s801 count__s802 memory__s803 block__s804 slot__s805 thread__s806 index__s808 . ]
+      {
+        (
+          (
+            {
+              [ . blocks__s798]
+              [ . threads__s799]
+              [ . grid__s800]
+              [ . layout__s801]
+              [ . memory__s803]
+              [ . block__s804]
+              [ . slot__s805]
+              [ . count__s802]
+              [ . element__s797]
+            }
+            stdlib.gpu.memory.type.Shared
+          )
+          val
+        )
+        ({[ . index__s808] ({[ . count__s802]} stdlib.gpu.memory.type.Ix)} :)
+        ([ . element__s797] val)
+        (
+          (
+            {
+              [ . blocks__s798]
+              [ . threads__s799]
+              [ . grid__s800]
+              [ . block__s804]
+              [ . count__s802]
+              [ . layout__s801]
+              [ . phase__s796]
+              [ . thread__s806]
+              [ . index__s808]
+              [ . memory__s803]
+            }
+            stdlib.gpu.memory.prop.SharedOwn
+          )
+          |-
+        )
+      }
+    )
+    -> (
+      [phase__s796 element__s797 blocks__s798 threads__s799 grid__s800 layout__s801 count__s802 memory__s803 block__s804 slot__s805 thread__s806 index__s808 . ]
+      {
+        1
+        (
+          (
+            {
+              [ . blocks__s798]
+              [ . threads__s799]
+              [ . grid__s800]
+              [ . block__s804]
+              [ . count__s802]
+              [ . layout__s801]
+              [ . phase__s796]
+              [ . thread__s806]
+              [ . index__s808]
+              [ . memory__s803]
+            }
+            stdlib.gpu.memory.prop.SharedOwn
+          )
+          |-
+        )
+        (
+          (
+            {
+              [ . blocks__s798]
+              [ . threads__s799]
+              [ . grid__s800]
+              [ . layout__s801]
+              [ . count__s802]
+              [ . memory__s803]
+              [ . block__s804]
+              [ . slot__s805]
+              [ . index__s808]
+            }
+            stdlib.gpu.memory.prop.Written
+          )
+          |-
+        )
+      }
+    )
+  )
+
+  (arr stdlib.gpu.memory.size
+    : (
+      [count__s778 element__s779 . ]
+      {(({[ . count__s778] [ . element__s779]} stdlib.gpu.memory.type.Global) val)}
+    )
+    -> ([count__s778 element__s779 . ] {({[ . count__s778] u32} :)})
+  )
+
+  (arr stdlib.gpu.memory.slot_name
+    : ([index__s694 . ] {({[ . index__s694] u32} :)})
+    -> ([index__s694 . ] {(({[ . index__s694]} stdlib.gpu.memory.type.SlotName) val)})
+  )
+})
+
+(theory type nat {
+  (arr stdlib.gpu.memory.prop.Available : 2 -> 1)
+
+  (arr stdlib.gpu.memory.prop.Defined : 8 -> 1)
+
+  (arr stdlib.gpu.memory.prop.GlobalOwn : 9 -> 1)
+
+  (arr stdlib.gpu.memory.prop.GlobalRead : 9 -> 1)
+
+  (arr stdlib.gpu.memory.prop.SharedOwn : 10 -> 1)
+
+  (arr stdlib.gpu.memory.prop.SharedRead : 9 -> 1)
+
+  (arr stdlib.gpu.memory.prop.Written : 9 -> 1)
+
+  (arr stdlib.gpu.memory.sort.All : 0 -> 1)
+
+  (arr stdlib.gpu.memory.sort.At : 2 -> 1)
+
+  (arr stdlib.gpu.memory.sort.Phase : 0 -> 1)
+
+  (arr stdlib.gpu.memory.sort.ReadPhase : 0 -> 1)
+
+  (arr stdlib.gpu.memory.sort.Region : 0 -> 1)
+
+  (arr stdlib.gpu.memory.sort.SharedSlot : 0 -> 1)
+
+  (arr stdlib.gpu.memory.sort.Slot : 3 -> 1)
+
+  (arr stdlib.gpu.memory.sort.WritePhase : 0 -> 1)
+
+  (arr stdlib.gpu.memory.type.Global : 2 -> 1)
+
+  (arr stdlib.gpu.memory.type.Ix : 1 -> 1)
+
+  (arr stdlib.gpu.memory.type.Shared : 9 -> 1)
+
+  (arr stdlib.gpu.memory.type.SharedLayout : 1 -> 1)
+
+  (arr stdlib.gpu.memory.type.SharedMemory : 4 -> 1)
+
+  (arr stdlib.gpu.memory.type.SlotName : 1 -> 1)
+})

@@ -1,0 +1,1337 @@
+(theory program type {
+  (arr meta.stdlib.runtime.global_reads_f32.helper.callback_metavars.blocks.threads.grid.0
+    : (
+      [blocks__s1206 grid__s1209 threads__s1207 . ]
+      {
+        (
+          {
+            [ . grid__s1209]
+            ({[ . blocks__s1206] [ . threads__s1207]} stdlib.gpu.geometry.type.Grid)
+          }
+          :
+        )
+      }
+    )
+    -> (
+      [blocks__s1206 grid__s1209 threads__s1207 . ]
+      {
+        (
+          {
+            [ . grid__s1209]
+            ({[ . blocks__s1206] [ . threads__s1207]} stdlib.gpu.geometry.type.Grid)
+          }
+          :
+        )
+        [ . blocks__s1206]
+        [ . threads__s1207]
+        [ . grid__s1209]
+      }
+    )
+  )
+
+  (arr meta.stdlib.runtime.global_reads_f32.helper.callback_metavars.count.global.0
+    : (
+      [count__s1208 global__s1210 . ]
+      {({[ . global__s1210] ({[ . count__s1208] f32} stdlib.gpu.memory.type.Global)} :)}
+    )
+    -> (
+      [count__s1208 global__s1210 . ]
+      {
+        ({[ . global__s1210] ({[ . count__s1208] f32} stdlib.gpu.memory.type.Global)} :)
+        [ . count__s1208]
+        [ . global__s1210]
+      }
+    )
+  )
+
+  (arr meta.stdlib.runtime.global_reads_f32.helper.instantiate.global_reads.0.arguments
+    : (
+      [blocks__s1206 callback_argument__s5090 callback_argument__s5091 count__s1208 global__s1210 grid__s1209 threads__s1207 . ]
+      {
+        (
+          {
+            [ . grid__s1209]
+            ({[ . blocks__s1206] [ . threads__s1207]} stdlib.gpu.geometry.type.Grid)
+          }
+          :
+        )
+        ({[ . global__s1210] ({[ . count__s1208] f32} stdlib.gpu.memory.type.Global)} :)
+        (({[ . count__s1208] f32 [ . global__s1210]} stdlib.runtime.prop.Readable) |-)
+        [ . callback_argument__s5090]
+        [ . callback_argument__s5091]
+      }
+    )
+    -> (
+      [blocks__s1206 callback_argument__s5090 callback_argument__s5091 count__s1208 global__s1210 grid__s1209 threads__s1207 . ]
+      {
+        (
+          {
+            [ . grid__s1209]
+            ({[ . blocks__s1206] [ . threads__s1207]} stdlib.gpu.geometry.type.Grid)
+          }
+          :
+        )
+        ({[ . global__s1210] ({[ . count__s1208] f32} stdlib.gpu.memory.type.Global)} :)
+        (({[ . count__s1208] f32 [ . global__s1210]} stdlib.runtime.prop.Readable) |-)
+        f32
+        [ . blocks__s1206]
+        [ . threads__s1207]
+        [ . count__s1208]
+        [ . grid__s1209]
+        [ . global__s1210]
+        [ . callback_argument__s5090]
+        [ . callback_argument__s5091]
+      }
+    )
+  )
+
+  (arr meta.stdlib.runtime.global_reads_u32.helper.callback_metavars.blocks.threads.grid.0
+    : (
+      [blocks__s1164 grid__s1167 threads__s1165 . ]
+      {
+        (
+          {
+            [ . grid__s1167]
+            ({[ . blocks__s1164] [ . threads__s1165]} stdlib.gpu.geometry.type.Grid)
+          }
+          :
+        )
+      }
+    )
+    -> (
+      [blocks__s1164 grid__s1167 threads__s1165 . ]
+      {
+        (
+          {
+            [ . grid__s1167]
+            ({[ . blocks__s1164] [ . threads__s1165]} stdlib.gpu.geometry.type.Grid)
+          }
+          :
+        )
+        [ . blocks__s1164]
+        [ . threads__s1165]
+        [ . grid__s1167]
+      }
+    )
+  )
+
+  (arr meta.stdlib.runtime.global_reads_u32.helper.callback_metavars.count.global.0
+    : (
+      [count__s1166 global__s1168 . ]
+      {({[ . global__s1168] ({[ . count__s1166] u32} stdlib.gpu.memory.type.Global)} :)}
+    )
+    -> (
+      [count__s1166 global__s1168 . ]
+      {
+        ({[ . global__s1168] ({[ . count__s1166] u32} stdlib.gpu.memory.type.Global)} :)
+        [ . count__s1166]
+        [ . global__s1168]
+      }
+    )
+  )
+
+  (arr meta.stdlib.runtime.global_reads_u32.helper.instantiate.global_reads.0.arguments
+    : (
+      [blocks__s1164 callback_argument__s5082 callback_argument__s5083 count__s1166 global__s1168 grid__s1167 threads__s1165 . ]
+      {
+        (
+          {
+            [ . grid__s1167]
+            ({[ . blocks__s1164] [ . threads__s1165]} stdlib.gpu.geometry.type.Grid)
+          }
+          :
+        )
+        ({[ . global__s1168] ({[ . count__s1166] u32} stdlib.gpu.memory.type.Global)} :)
+        (({[ . count__s1166] u32 [ . global__s1168]} stdlib.runtime.prop.Readable) |-)
+        [ . callback_argument__s5082]
+        [ . callback_argument__s5083]
+      }
+    )
+    -> (
+      [blocks__s1164 callback_argument__s5082 callback_argument__s5083 count__s1166 global__s1168 grid__s1167 threads__s1165 . ]
+      {
+        (
+          {
+            [ . grid__s1167]
+            ({[ . blocks__s1164] [ . threads__s1165]} stdlib.gpu.geometry.type.Grid)
+          }
+          :
+        )
+        ({[ . global__s1168] ({[ . count__s1166] u32} stdlib.gpu.memory.type.Global)} :)
+        (({[ . count__s1166] u32 [ . global__s1168]} stdlib.runtime.prop.Readable) |-)
+        u32
+        [ . blocks__s1164]
+        [ . threads__s1165]
+        [ . count__s1166]
+        [ . grid__s1167]
+        [ . global__s1168]
+        [ . callback_argument__s5082]
+        [ . callback_argument__s5083]
+      }
+    )
+  )
+
+  (arr meta.stdlib.runtime.global_reads_u64.helper.callback_metavars.blocks.threads.grid.0
+    : (
+      [blocks__s1185 grid__s1188 threads__s1186 . ]
+      {
+        (
+          {
+            [ . grid__s1188]
+            ({[ . blocks__s1185] [ . threads__s1186]} stdlib.gpu.geometry.type.Grid)
+          }
+          :
+        )
+      }
+    )
+    -> (
+      [blocks__s1185 grid__s1188 threads__s1186 . ]
+      {
+        (
+          {
+            [ . grid__s1188]
+            ({[ . blocks__s1185] [ . threads__s1186]} stdlib.gpu.geometry.type.Grid)
+          }
+          :
+        )
+        [ . blocks__s1185]
+        [ . threads__s1186]
+        [ . grid__s1188]
+      }
+    )
+  )
+
+  (arr meta.stdlib.runtime.global_reads_u64.helper.callback_metavars.count.global.0
+    : (
+      [count__s1187 global__s1189 . ]
+      {({[ . global__s1189] ({[ . count__s1187] u64} stdlib.gpu.memory.type.Global)} :)}
+    )
+    -> (
+      [count__s1187 global__s1189 . ]
+      {
+        ({[ . global__s1189] ({[ . count__s1187] u64} stdlib.gpu.memory.type.Global)} :)
+        [ . count__s1187]
+        [ . global__s1189]
+      }
+    )
+  )
+
+  (arr meta.stdlib.runtime.global_reads_u64.helper.instantiate.global_reads.0.arguments
+    : (
+      [blocks__s1185 callback_argument__s5086 callback_argument__s5087 count__s1187 global__s1189 grid__s1188 threads__s1186 . ]
+      {
+        (
+          {
+            [ . grid__s1188]
+            ({[ . blocks__s1185] [ . threads__s1186]} stdlib.gpu.geometry.type.Grid)
+          }
+          :
+        )
+        ({[ . global__s1189] ({[ . count__s1187] u64} stdlib.gpu.memory.type.Global)} :)
+        (({[ . count__s1187] u64 [ . global__s1189]} stdlib.runtime.prop.Readable) |-)
+        [ . callback_argument__s5086]
+        [ . callback_argument__s5087]
+      }
+    )
+    -> (
+      [blocks__s1185 callback_argument__s5086 callback_argument__s5087 count__s1187 global__s1189 grid__s1188 threads__s1186 . ]
+      {
+        (
+          {
+            [ . grid__s1188]
+            ({[ . blocks__s1185] [ . threads__s1186]} stdlib.gpu.geometry.type.Grid)
+          }
+          :
+        )
+        ({[ . global__s1189] ({[ . count__s1187] u64} stdlib.gpu.memory.type.Global)} :)
+        (({[ . count__s1187] u64 [ . global__s1189]} stdlib.runtime.prop.Readable) |-)
+        u64
+        [ . blocks__s1185]
+        [ . threads__s1186]
+        [ . count__s1187]
+        [ . grid__s1188]
+        [ . global__s1189]
+        [ . callback_argument__s5086]
+        [ . callback_argument__s5087]
+      }
+    )
+  )
+
+  (arr runtime.global_f32_to_mem
+    : (
+      [count__s1220 memory__s1221 . ]
+      {
+        ({[ . memory__s1221] ({[ . count__s1220] f32} stdlib.gpu.memory.type.Global)} :)
+        (({[ . count__s1220] f32 [ . memory__s1221]} stdlib.runtime.prop.Allocation) |-)
+      }
+    )
+    -> ([count__s1220 memory__s1221 . ] {(({cap.own} mem) val)})
+  )
+
+  (arr runtime.global_own_f32
+    : ([count__s1216 global__s1217 . ] {(({cap.own} mem) val) ({[ . count__s1216] u32} :)})
+    -> (
+      [count__s1216 global__s1217 . ]
+      {
+        ({[ . global__s1217] ({[ . count__s1216] f32} stdlib.gpu.memory.type.Global)} :)
+        (({[ . count__s1216] f32 [ . global__s1217]} stdlib.runtime.prop.Allocation) |-)
+        (
+          (
+            {({[ . count__s1216] f32} stdlib.gpu.memory.type.Global) [ . global__s1217]}
+            stdlib.gpu.memory.prop.Available
+          )
+          |-
+        )
+      }
+    )
+  )
+
+  (arr runtime.global_own_u32
+    : ([count__s1174 global__s1175 . ] {(({cap.own} mem) val) ({[ . count__s1174] u32} :)})
+    -> (
+      [count__s1174 global__s1175 . ]
+      {
+        ({[ . global__s1175] ({[ . count__s1174] u32} stdlib.gpu.memory.type.Global)} :)
+        (({[ . count__s1174] u32 [ . global__s1175]} stdlib.runtime.prop.Allocation) |-)
+        (
+          (
+            {({[ . count__s1174] u32} stdlib.gpu.memory.type.Global) [ . global__s1175]}
+            stdlib.gpu.memory.prop.Available
+          )
+          |-
+        )
+      }
+    )
+  )
+
+  (arr runtime.global_own_u64
+    : ([count__s1195 global__s1196 . ] {(({cap.own} mem) val) ({[ . count__s1195] u32} :)})
+    -> (
+      [count__s1195 global__s1196 . ]
+      {
+        ({[ . global__s1196] ({[ . count__s1195] u64} stdlib.gpu.memory.type.Global)} :)
+        (({[ . count__s1195] u64 [ . global__s1196]} stdlib.runtime.prop.Allocation) |-)
+        (
+          (
+            {({[ . count__s1195] u64} stdlib.gpu.memory.type.Global) [ . global__s1196]}
+            stdlib.gpu.memory.prop.Available
+          )
+          |-
+        )
+      }
+    )
+  )
+
+  (arr runtime.global_reads
+    : (
+      [element__s1150 blocks__s1151 threads__s1152 count__s1153 grid__s1154 global__s1155 block__s1157 thread__s1158 . ]
+      {
+        (
+          {
+            [ . grid__s1154]
+            ({[ . blocks__s1151] [ . threads__s1152]} stdlib.gpu.geometry.type.Grid)
+          }
+          :
+        )
+        (
+          {
+            [ . global__s1155]
+            ({[ . count__s1153] [ . element__s1150]} stdlib.gpu.memory.type.Global)
+          }
+          :
+        )
+        (
+          ({[ . count__s1153] [ . element__s1150] [ . global__s1155]} stdlib.runtime.prop.Readable)
+          |-
+        )
+      }
+    )
+    -> (
+      [element__s1150 blocks__s1151 threads__s1152 count__s1153 grid__s1154 global__s1155 block__s1157 thread__s1158 . ]
+      {
+        1
+        (
+          {
+            (
+              {
+                (
+                  {
+                    [ . block__s1157]
+                    (
+                      {[ . blocks__s1151] [ . threads__s1152] [ . grid__s1154]}
+                      stdlib.gpu.geometry.type.Block
+                    )
+                  }
+                  :
+                )
+                (
+                  {
+                    [ . thread__s1158]
+                    (
+                      {[ . blocks__s1151] [ . threads__s1152] [ . grid__s1154] [ . block__s1157]}
+                      stdlib.gpu.geometry.type.Thread
+                    )
+                  }
+                  :
+                )
+              }
+              *
+            )
+            (
+              (
+                {
+                  [ . blocks__s1151]
+                  [ . threads__s1152]
+                  [ . grid__s1154]
+                  [ . block__s1157]
+                  [ . count__s1153]
+                  [ . element__s1150]
+                  [ . thread__s1158]
+                  [ . global__s1155]
+                  stdlib.gpu.memory.sort.All
+                }
+                stdlib.gpu.memory.prop.GlobalRead
+              )
+              |-
+            )
+          }
+          =>
+        )
+      }
+    )
+  )
+
+  (arr runtime.global_ref_f32
+    : ([count__s1203 global__s1204 . ] {(({cap.ref} mem) val) ({[ . count__s1203] u32} :)})
+    -> (
+      [count__s1203 global__s1204 . ]
+      {
+        ({[ . global__s1204] ({[ . count__s1203] f32} stdlib.gpu.memory.type.Global)} :)
+        (({[ . count__s1203] f32 [ . global__s1204]} stdlib.runtime.prop.Readable) |-)
+      }
+    )
+  )
+
+  (arr runtime.global_ref_u32
+    : ([count__s1161 global__s1162 . ] {(({cap.ref} mem) val) ({[ . count__s1161] u32} :)})
+    -> (
+      [count__s1161 global__s1162 . ]
+      {
+        ({[ . global__s1162] ({[ . count__s1161] u32} stdlib.gpu.memory.type.Global)} :)
+        (({[ . count__s1161] u32 [ . global__s1162]} stdlib.runtime.prop.Readable) |-)
+      }
+    )
+  )
+
+  (arr runtime.global_ref_u64
+    : ([count__s1182 global__s1183 . ] {(({cap.ref} mem) val) ({[ . count__s1182] u32} :)})
+    -> (
+      [count__s1182 global__s1183 . ]
+      {
+        ({[ . global__s1183] ({[ . count__s1182] u64} stdlib.gpu.memory.type.Global)} :)
+        (({[ . count__s1182] u64 [ . global__s1183]} stdlib.runtime.prop.Readable) |-)
+      }
+    )
+  )
+
+  (arr runtime.global_u32_to_mem
+    : (
+      [count__s1178 memory__s1179 . ]
+      {
+        ({[ . memory__s1179] ({[ . count__s1178] u32} stdlib.gpu.memory.type.Global)} :)
+        (({[ . count__s1178] u32 [ . memory__s1179]} stdlib.runtime.prop.Allocation) |-)
+      }
+    )
+    -> ([count__s1178 memory__s1179 . ] {(({cap.own} mem) val)})
+  )
+
+  (arr runtime.global_u64_to_mem
+    : (
+      [count__s1199 memory__s1200 . ]
+      {
+        ({[ . memory__s1200] ({[ . count__s1199] u64} stdlib.gpu.memory.type.Global)} :)
+        (({[ . count__s1199] u64 [ . memory__s1200]} stdlib.runtime.prop.Allocation) |-)
+      }
+    )
+    -> ([count__s1199 memory__s1200 . ] {(({cap.own} mem) val)})
+  )
+
+  (def stdlib.runtime.global_f32_to_mem
+    : (
+      [count__s1220 memory__s1221 . ]
+      {
+        ({[ . memory__s1221] ({[ . count__s1220] f32} stdlib.gpu.memory.type.Global)} :)
+        (({[ . count__s1220] f32 [ . memory__s1221]} stdlib.runtime.prop.Allocation) |-)
+      }
+    )
+    -> ([count__s1220 memory__s1221 . ] {(({cap.own} mem) val)})
+    = {
+      [memory__input0__v5345 allocation__input1__v5346 . ]
+      (
+        [ . memory__input0__v5345 allocation__input1__v5346]
+        ({{_} {_}} runtime.global_f32_to_mem)
+        [output0__v5347 . ]
+      )
+      [ . output0__v5347]
+    }
+  )
+
+  (def stdlib.runtime.global_own_f32
+    : ([count__s1216 global__s1217 . ] {(({cap.own} mem) val) ({[ . count__s1216] u32} :)})
+    -> (
+      [count__s1216 global__s1217 . ]
+      {
+        ({[ . global__s1217] ({[ . count__s1216] f32} stdlib.gpu.memory.type.Global)} :)
+        (({[ . count__s1216] f32 [ . global__s1217]} stdlib.runtime.prop.Allocation) |-)
+        (
+          (
+            {({[ . count__s1216] f32} stdlib.gpu.memory.type.Global) [ . global__s1217]}
+            stdlib.gpu.memory.prop.Available
+          )
+          |-
+        )
+      }
+    )
+    = {
+      [source__input0__v5348 count__input1__v5349 . ]
+      (
+        [ . source__input0__v5348 count__input1__v5349]
+        ({{_} {_}} runtime.global_own_f32)
+        [global__output0__v5350 allocation__output1__v5351 available__output2__v5352 . ]
+      )
+      [ . global__output0__v5350 allocation__output1__v5351 available__output2__v5352]
+    }
+  )
+
+  (def stdlib.runtime.global_own_u32
+    : ([count__s1174 global__s1175 . ] {(({cap.own} mem) val) ({[ . count__s1174] u32} :)})
+    -> (
+      [count__s1174 global__s1175 . ]
+      {
+        ({[ . global__s1175] ({[ . count__s1174] u32} stdlib.gpu.memory.type.Global)} :)
+        (({[ . count__s1174] u32 [ . global__s1175]} stdlib.runtime.prop.Allocation) |-)
+        (
+          (
+            {({[ . count__s1174] u32} stdlib.gpu.memory.type.Global) [ . global__s1175]}
+            stdlib.gpu.memory.prop.Available
+          )
+          |-
+        )
+      }
+    )
+    = {
+      [source__input0__v5353 count__input1__v5354 . ]
+      (
+        [ . source__input0__v5353 count__input1__v5354]
+        ({{_} {_}} runtime.global_own_u32)
+        [global__output0__v5355 allocation__output1__v5356 available__output2__v5357 . ]
+      )
+      [ . global__output0__v5355 allocation__output1__v5356 available__output2__v5357]
+    }
+  )
+
+  (def stdlib.runtime.global_own_u64
+    : ([count__s1195 global__s1196 . ] {(({cap.own} mem) val) ({[ . count__s1195] u32} :)})
+    -> (
+      [count__s1195 global__s1196 . ]
+      {
+        ({[ . global__s1196] ({[ . count__s1195] u64} stdlib.gpu.memory.type.Global)} :)
+        (({[ . count__s1195] u64 [ . global__s1196]} stdlib.runtime.prop.Allocation) |-)
+        (
+          (
+            {({[ . count__s1195] u64} stdlib.gpu.memory.type.Global) [ . global__s1196]}
+            stdlib.gpu.memory.prop.Available
+          )
+          |-
+        )
+      }
+    )
+    = {
+      [source__input0__v5358 count__input1__v5359 . ]
+      (
+        [ . source__input0__v5358 count__input1__v5359]
+        ({{_} {_}} runtime.global_own_u64)
+        [global__output0__v5360 allocation__output1__v5361 available__output2__v5362 . ]
+      )
+      [ . global__output0__v5360 allocation__output1__v5361 available__output2__v5362]
+    }
+  )
+
+  (def stdlib.runtime.global_reads
+    : (
+      [element__s1150 blocks__s1151 threads__s1152 count__s1153 grid__s1154 global__s1155 block__s1157 thread__s1158 . ]
+      {
+        (
+          {
+            [ . grid__s1154]
+            ({[ . blocks__s1151] [ . threads__s1152]} stdlib.gpu.geometry.type.Grid)
+          }
+          :
+        )
+        (
+          {
+            [ . global__s1155]
+            ({[ . count__s1153] [ . element__s1150]} stdlib.gpu.memory.type.Global)
+          }
+          :
+        )
+        (
+          ({[ . count__s1153] [ . element__s1150] [ . global__s1155]} stdlib.runtime.prop.Readable)
+          |-
+        )
+      }
+    )
+    -> (
+      [element__s1150 blocks__s1151 threads__s1152 count__s1153 grid__s1154 global__s1155 block__s1157 thread__s1158 . ]
+      {
+        1
+        (
+          {
+            (
+              {
+                (
+                  {
+                    [ . block__s1157]
+                    (
+                      {[ . blocks__s1151] [ . threads__s1152] [ . grid__s1154]}
+                      stdlib.gpu.geometry.type.Block
+                    )
+                  }
+                  :
+                )
+                (
+                  {
+                    [ . thread__s1158]
+                    (
+                      {[ . blocks__s1151] [ . threads__s1152] [ . grid__s1154] [ . block__s1157]}
+                      stdlib.gpu.geometry.type.Thread
+                    )
+                  }
+                  :
+                )
+              }
+              *
+            )
+            (
+              (
+                {
+                  [ . blocks__s1151]
+                  [ . threads__s1152]
+                  [ . grid__s1154]
+                  [ . block__s1157]
+                  [ . count__s1153]
+                  [ . element__s1150]
+                  [ . thread__s1158]
+                  [ . global__s1155]
+                  stdlib.gpu.memory.sort.All
+                }
+                stdlib.gpu.memory.prop.GlobalRead
+              )
+              |-
+            )
+          }
+          =>
+        )
+      }
+    )
+    = {
+      [grid__input0__v5363 global__input1__v5364 readable__input2__v5365 . ]
+      (
+        [ . grid__input0__v5363 global__input1__v5364 readable__input2__v5365]
+        ({{_} {_} {_}} runtime.global_reads)
+        [output0__v5366 readable__output1__v5367 . ]
+      )
+      [ . output0__v5366 readable__output1__v5367]
+    }
+  )
+
+  (def stdlib.runtime.global_reads_f32
+    : (
+      [blocks__s1206 threads__s1207 count__s1208 grid__s1209 global__s1210 callback_argument__s5090 callback_argument__s5091 . ]
+      {
+        (
+          {
+            [ . grid__s1209]
+            ({[ . blocks__s1206] [ . threads__s1207]} stdlib.gpu.geometry.type.Grid)
+          }
+          :
+        )
+        ({[ . global__s1210] ({[ . count__s1208] f32} stdlib.gpu.memory.type.Global)} :)
+        (({[ . count__s1208] f32 [ . global__s1210]} stdlib.runtime.prop.Readable) |-)
+      }
+    )
+    -> (
+      [blocks__s1206 threads__s1207 count__s1208 grid__s1209 global__s1210 callback_argument__s5090 callback_argument__s5091 . ]
+      {
+        1
+        (
+          {
+            (
+              {
+                (
+                  {
+                    [ . callback_argument__s5090]
+                    (
+                      {[ . blocks__s1206] [ . threads__s1207] [ . grid__s1209]}
+                      stdlib.gpu.geometry.type.Block
+                    )
+                  }
+                  :
+                )
+                (
+                  {
+                    [ . callback_argument__s5091]
+                    (
+                      {
+                        [ . blocks__s1206]
+                        [ . threads__s1207]
+                        [ . grid__s1209]
+                        [ . callback_argument__s5090]
+                      }
+                      stdlib.gpu.geometry.type.Thread
+                    )
+                  }
+                  :
+                )
+              }
+              *
+            )
+            (
+              (
+                {
+                  [ . blocks__s1206]
+                  [ . threads__s1207]
+                  [ . grid__s1209]
+                  [ . callback_argument__s5090]
+                  [ . count__s1208]
+                  f32
+                  [ . callback_argument__s5091]
+                  [ . global__s1210]
+                  stdlib.gpu.memory.sort.All
+                }
+                stdlib.gpu.memory.prop.GlobalRead
+              )
+              |-
+            )
+          }
+          =>
+        )
+      }
+    )
+    = {
+      [grid__v4860__input global__v4862__input readable__v4864 . ]
+      (
+        [ . grid__v4860__input]
+        ({_} meta.stdlib.runtime.global_reads_f32.helper.callback_metavars.blocks.threads.grid.0)
+        [grid__v4860 __smolcat_blocks__v5368 __smolcat_threads__v5369 __smolcat_grid__v5370 . ]
+      )
+      (
+        [ . global__v4862__input]
+        ({_} meta.stdlib.runtime.global_reads_f32.helper.callback_metavars.count.global.0)
+        [global__v4862 __smolcat_count__v5371 __smolcat_global__v5372 . ]
+      )
+      (unit.intro smolcat.callback.symbol [__smolcat_callback_argument__v5373 . ])
+      (unit.intro smolcat.callback.symbol [__smolcat_callback_argument__v5374 . ])
+      (
+        [ . grid__v4860 global__v4862 readable__v4864]
+        (
+          {{_ _ _} [ . __smolcat_callback_argument__v5373 __smolcat_callback_argument__v5374]}
+          stdlib.runtime.global_reads_f32.helper.instantiate.global_reads.0
+        )
+        [unit__v4868 readable__v4869 . ]
+      )
+      ([ . unit__v4868] unit.elim [])
+      ([] unit.intro [unit__v4876 . ])
+      [ . unit__v4876 readable__v4869]
+    }
+  )
+
+  (def stdlib.runtime.global_reads_f32.helper.instantiate.global_reads.0
+    : (
+      [blocks__s1206 threads__s1207 count__s1208 grid__s1209 global__s1210 callback_argument__s5090 callback_argument__s5091 . ]
+      {
+        {
+          (
+            {
+              [ . grid__s1209]
+              ({[ . blocks__s1206] [ . threads__s1207]} stdlib.gpu.geometry.type.Grid)
+            }
+            :
+          )
+          ({[ . global__s1210] ({[ . count__s1208] f32} stdlib.gpu.memory.type.Global)} :)
+          (({[ . count__s1208] f32 [ . global__s1210]} stdlib.runtime.prop.Readable) |-)
+        }
+        [ . callback_argument__s5090]
+        [ . callback_argument__s5091]
+      }
+    )
+    -> (
+      [blocks__s1206 threads__s1207 count__s1208 grid__s1209 global__s1210 callback_argument__s5090 callback_argument__s5091 . ]
+      {
+        1
+        (
+          {
+            (
+              {
+                (
+                  {
+                    [ . callback_argument__s5090]
+                    (
+                      {[ . blocks__s1206] [ . threads__s1207] [ . grid__s1209]}
+                      stdlib.gpu.geometry.type.Block
+                    )
+                  }
+                  :
+                )
+                (
+                  {
+                    [ . callback_argument__s5091]
+                    (
+                      {
+                        [ . blocks__s1206]
+                        [ . threads__s1207]
+                        [ . grid__s1209]
+                        [ . callback_argument__s5090]
+                      }
+                      stdlib.gpu.geometry.type.Thread
+                    )
+                  }
+                  :
+                )
+              }
+              *
+            )
+            (
+              (
+                {
+                  [ . blocks__s1206]
+                  [ . threads__s1207]
+                  [ . grid__s1209]
+                  [ . callback_argument__s5090]
+                  [ . count__s1208]
+                  f32
+                  [ . callback_argument__s5091]
+                  [ . global__s1210]
+                  stdlib.gpu.memory.sort.All
+                }
+                stdlib.gpu.memory.prop.GlobalRead
+              )
+              |-
+            )
+          }
+          =>
+        )
+      }
+    )
+    = {
+      [grid__input0__v5375 global__input1__v5376 readable__input2__v5377 callback_argument__input3__v5378 callback_argument__input4__v5379 . ]
+      (
+        [ . grid__input0__v5375 global__input1__v5376 readable__input2__v5377 callback_argument__input3__v5378 callback_argument__input4__v5379]
+        (
+          meta.stdlib.runtime.global_reads_f32.helper.instantiate.global_reads.0.arguments
+          {({{_} ({{_} {_}} *.intro)} *.intro) (name.stdlib.runtime.global_reads lift)}
+          evaluate
+          (*.elim {{_} {_}})
+        )
+        [output0__v5380 readable__output1__v5381 . ]
+      )
+      [ . output0__v5380 readable__output1__v5381]
+    }
+  )
+
+  (def stdlib.runtime.global_reads_u32
+    : (
+      [blocks__s1164 threads__s1165 count__s1166 grid__s1167 global__s1168 callback_argument__s5082 callback_argument__s5083 . ]
+      {
+        (
+          {
+            [ . grid__s1167]
+            ({[ . blocks__s1164] [ . threads__s1165]} stdlib.gpu.geometry.type.Grid)
+          }
+          :
+        )
+        ({[ . global__s1168] ({[ . count__s1166] u32} stdlib.gpu.memory.type.Global)} :)
+        (({[ . count__s1166] u32 [ . global__s1168]} stdlib.runtime.prop.Readable) |-)
+      }
+    )
+    -> (
+      [blocks__s1164 threads__s1165 count__s1166 grid__s1167 global__s1168 callback_argument__s5082 callback_argument__s5083 . ]
+      {
+        1
+        (
+          {
+            (
+              {
+                (
+                  {
+                    [ . callback_argument__s5082]
+                    (
+                      {[ . blocks__s1164] [ . threads__s1165] [ . grid__s1167]}
+                      stdlib.gpu.geometry.type.Block
+                    )
+                  }
+                  :
+                )
+                (
+                  {
+                    [ . callback_argument__s5083]
+                    (
+                      {
+                        [ . blocks__s1164]
+                        [ . threads__s1165]
+                        [ . grid__s1167]
+                        [ . callback_argument__s5082]
+                      }
+                      stdlib.gpu.geometry.type.Thread
+                    )
+                  }
+                  :
+                )
+              }
+              *
+            )
+            (
+              (
+                {
+                  [ . blocks__s1164]
+                  [ . threads__s1165]
+                  [ . grid__s1167]
+                  [ . callback_argument__s5082]
+                  [ . count__s1166]
+                  u32
+                  [ . callback_argument__s5083]
+                  [ . global__s1168]
+                  stdlib.gpu.memory.sort.All
+                }
+                stdlib.gpu.memory.prop.GlobalRead
+              )
+              |-
+            )
+          }
+          =>
+        )
+      }
+    )
+    = {
+      [grid__v4826__input global__v4828__input readable__v4830 . ]
+      (
+        [ . grid__v4826__input]
+        ({_} meta.stdlib.runtime.global_reads_u32.helper.callback_metavars.blocks.threads.grid.0)
+        [grid__v4826 __smolcat_blocks__v5382 __smolcat_threads__v5383 __smolcat_grid__v5384 . ]
+      )
+      (
+        [ . global__v4828__input]
+        ({_} meta.stdlib.runtime.global_reads_u32.helper.callback_metavars.count.global.0)
+        [global__v4828 __smolcat_count__v5385 __smolcat_global__v5386 . ]
+      )
+      (unit.intro smolcat.callback.symbol [__smolcat_callback_argument__v5387 . ])
+      (unit.intro smolcat.callback.symbol [__smolcat_callback_argument__v5388 . ])
+      (
+        [ . grid__v4826 global__v4828 readable__v4830]
+        (
+          {{_ _ _} [ . __smolcat_callback_argument__v5387 __smolcat_callback_argument__v5388]}
+          stdlib.runtime.global_reads_u32.helper.instantiate.global_reads.0
+        )
+        [unit__v4834 readable__v4835 . ]
+      )
+      ([ . unit__v4834] unit.elim [])
+      ([] unit.intro [unit__v4842 . ])
+      [ . unit__v4842 readable__v4835]
+    }
+  )
+
+  (def stdlib.runtime.global_reads_u32.helper.instantiate.global_reads.0
+    : (
+      [blocks__s1164 threads__s1165 count__s1166 grid__s1167 global__s1168 callback_argument__s5082 callback_argument__s5083 . ]
+      {
+        {
+          (
+            {
+              [ . grid__s1167]
+              ({[ . blocks__s1164] [ . threads__s1165]} stdlib.gpu.geometry.type.Grid)
+            }
+            :
+          )
+          ({[ . global__s1168] ({[ . count__s1166] u32} stdlib.gpu.memory.type.Global)} :)
+          (({[ . count__s1166] u32 [ . global__s1168]} stdlib.runtime.prop.Readable) |-)
+        }
+        [ . callback_argument__s5082]
+        [ . callback_argument__s5083]
+      }
+    )
+    -> (
+      [blocks__s1164 threads__s1165 count__s1166 grid__s1167 global__s1168 callback_argument__s5082 callback_argument__s5083 . ]
+      {
+        1
+        (
+          {
+            (
+              {
+                (
+                  {
+                    [ . callback_argument__s5082]
+                    (
+                      {[ . blocks__s1164] [ . threads__s1165] [ . grid__s1167]}
+                      stdlib.gpu.geometry.type.Block
+                    )
+                  }
+                  :
+                )
+                (
+                  {
+                    [ . callback_argument__s5083]
+                    (
+                      {
+                        [ . blocks__s1164]
+                        [ . threads__s1165]
+                        [ . grid__s1167]
+                        [ . callback_argument__s5082]
+                      }
+                      stdlib.gpu.geometry.type.Thread
+                    )
+                  }
+                  :
+                )
+              }
+              *
+            )
+            (
+              (
+                {
+                  [ . blocks__s1164]
+                  [ . threads__s1165]
+                  [ . grid__s1167]
+                  [ . callback_argument__s5082]
+                  [ . count__s1166]
+                  u32
+                  [ . callback_argument__s5083]
+                  [ . global__s1168]
+                  stdlib.gpu.memory.sort.All
+                }
+                stdlib.gpu.memory.prop.GlobalRead
+              )
+              |-
+            )
+          }
+          =>
+        )
+      }
+    )
+    = {
+      [grid__input0__v5389 global__input1__v5390 readable__input2__v5391 callback_argument__input3__v5392 callback_argument__input4__v5393 . ]
+      (
+        [ . grid__input0__v5389 global__input1__v5390 readable__input2__v5391 callback_argument__input3__v5392 callback_argument__input4__v5393]
+        (
+          meta.stdlib.runtime.global_reads_u32.helper.instantiate.global_reads.0.arguments
+          {({{_} ({{_} {_}} *.intro)} *.intro) (name.stdlib.runtime.global_reads lift)}
+          evaluate
+          (*.elim {{_} {_}})
+        )
+        [output0__v5394 readable__output1__v5395 . ]
+      )
+      [ . output0__v5394 readable__output1__v5395]
+    }
+  )
+
+  (def stdlib.runtime.global_reads_u64
+    : (
+      [blocks__s1185 threads__s1186 count__s1187 grid__s1188 global__s1189 callback_argument__s5086 callback_argument__s5087 . ]
+      {
+        (
+          {
+            [ . grid__s1188]
+            ({[ . blocks__s1185] [ . threads__s1186]} stdlib.gpu.geometry.type.Grid)
+          }
+          :
+        )
+        ({[ . global__s1189] ({[ . count__s1187] u64} stdlib.gpu.memory.type.Global)} :)
+        (({[ . count__s1187] u64 [ . global__s1189]} stdlib.runtime.prop.Readable) |-)
+      }
+    )
+    -> (
+      [blocks__s1185 threads__s1186 count__s1187 grid__s1188 global__s1189 callback_argument__s5086 callback_argument__s5087 . ]
+      {
+        1
+        (
+          {
+            (
+              {
+                (
+                  {
+                    [ . callback_argument__s5086]
+                    (
+                      {[ . blocks__s1185] [ . threads__s1186] [ . grid__s1188]}
+                      stdlib.gpu.geometry.type.Block
+                    )
+                  }
+                  :
+                )
+                (
+                  {
+                    [ . callback_argument__s5087]
+                    (
+                      {
+                        [ . blocks__s1185]
+                        [ . threads__s1186]
+                        [ . grid__s1188]
+                        [ . callback_argument__s5086]
+                      }
+                      stdlib.gpu.geometry.type.Thread
+                    )
+                  }
+                  :
+                )
+              }
+              *
+            )
+            (
+              (
+                {
+                  [ . blocks__s1185]
+                  [ . threads__s1186]
+                  [ . grid__s1188]
+                  [ . callback_argument__s5086]
+                  [ . count__s1187]
+                  u64
+                  [ . callback_argument__s5087]
+                  [ . global__s1189]
+                  stdlib.gpu.memory.sort.All
+                }
+                stdlib.gpu.memory.prop.GlobalRead
+              )
+              |-
+            )
+          }
+          =>
+        )
+      }
+    )
+    = {
+      [grid__v4843__input global__v4845__input readable__v4847 . ]
+      (
+        [ . grid__v4843__input]
+        ({_} meta.stdlib.runtime.global_reads_u64.helper.callback_metavars.blocks.threads.grid.0)
+        [grid__v4843 __smolcat_blocks__v5396 __smolcat_threads__v5397 __smolcat_grid__v5398 . ]
+      )
+      (
+        [ . global__v4845__input]
+        ({_} meta.stdlib.runtime.global_reads_u64.helper.callback_metavars.count.global.0)
+        [global__v4845 __smolcat_count__v5399 __smolcat_global__v5400 . ]
+      )
+      (unit.intro smolcat.callback.symbol [__smolcat_callback_argument__v5401 . ])
+      (unit.intro smolcat.callback.symbol [__smolcat_callback_argument__v5402 . ])
+      (
+        [ . grid__v4843 global__v4845 readable__v4847]
+        (
+          {{_ _ _} [ . __smolcat_callback_argument__v5401 __smolcat_callback_argument__v5402]}
+          stdlib.runtime.global_reads_u64.helper.instantiate.global_reads.0
+        )
+        [unit__v4851 readable__v4852 . ]
+      )
+      ([ . unit__v4851] unit.elim [])
+      ([] unit.intro [unit__v4859 . ])
+      [ . unit__v4859 readable__v4852]
+    }
+  )
+
+  (def stdlib.runtime.global_reads_u64.helper.instantiate.global_reads.0
+    : (
+      [blocks__s1185 threads__s1186 count__s1187 grid__s1188 global__s1189 callback_argument__s5086 callback_argument__s5087 . ]
+      {
+        {
+          (
+            {
+              [ . grid__s1188]
+              ({[ . blocks__s1185] [ . threads__s1186]} stdlib.gpu.geometry.type.Grid)
+            }
+            :
+          )
+          ({[ . global__s1189] ({[ . count__s1187] u64} stdlib.gpu.memory.type.Global)} :)
+          (({[ . count__s1187] u64 [ . global__s1189]} stdlib.runtime.prop.Readable) |-)
+        }
+        [ . callback_argument__s5086]
+        [ . callback_argument__s5087]
+      }
+    )
+    -> (
+      [blocks__s1185 threads__s1186 count__s1187 grid__s1188 global__s1189 callback_argument__s5086 callback_argument__s5087 . ]
+      {
+        1
+        (
+          {
+            (
+              {
+                (
+                  {
+                    [ . callback_argument__s5086]
+                    (
+                      {[ . blocks__s1185] [ . threads__s1186] [ . grid__s1188]}
+                      stdlib.gpu.geometry.type.Block
+                    )
+                  }
+                  :
+                )
+                (
+                  {
+                    [ . callback_argument__s5087]
+                    (
+                      {
+                        [ . blocks__s1185]
+                        [ . threads__s1186]
+                        [ . grid__s1188]
+                        [ . callback_argument__s5086]
+                      }
+                      stdlib.gpu.geometry.type.Thread
+                    )
+                  }
+                  :
+                )
+              }
+              *
+            )
+            (
+              (
+                {
+                  [ . blocks__s1185]
+                  [ . threads__s1186]
+                  [ . grid__s1188]
+                  [ . callback_argument__s5086]
+                  [ . count__s1187]
+                  u64
+                  [ . callback_argument__s5087]
+                  [ . global__s1189]
+                  stdlib.gpu.memory.sort.All
+                }
+                stdlib.gpu.memory.prop.GlobalRead
+              )
+              |-
+            )
+          }
+          =>
+        )
+      }
+    )
+    = {
+      [grid__input0__v5403 global__input1__v5404 readable__input2__v5405 callback_argument__input3__v5406 callback_argument__input4__v5407 . ]
+      (
+        [ . grid__input0__v5403 global__input1__v5404 readable__input2__v5405 callback_argument__input3__v5406 callback_argument__input4__v5407]
+        (
+          meta.stdlib.runtime.global_reads_u64.helper.instantiate.global_reads.0.arguments
+          {({{_} ({{_} {_}} *.intro)} *.intro) (name.stdlib.runtime.global_reads lift)}
+          evaluate
+          (*.elim {{_} {_}})
+        )
+        [output0__v5408 readable__output1__v5409 . ]
+      )
+      [ . output0__v5408 readable__output1__v5409]
+    }
+  )
+
+  (def stdlib.runtime.global_ref_f32
+    : ([count__s1203 global__s1204 . ] {(({cap.ref} mem) val) ({[ . count__s1203] u32} :)})
+    -> (
+      [count__s1203 global__s1204 . ]
+      {
+        ({[ . global__s1204] ({[ . count__s1203] f32} stdlib.gpu.memory.type.Global)} :)
+        (({[ . count__s1203] f32 [ . global__s1204]} stdlib.runtime.prop.Readable) |-)
+      }
+    )
+    = {
+      [source__input0__v5410 count__input1__v5411 . ]
+      (
+        [ . source__input0__v5410 count__input1__v5411]
+        ({{_} {_}} runtime.global_ref_f32)
+        [global__output0__v5412 readable__output1__v5413 . ]
+      )
+      [ . global__output0__v5412 readable__output1__v5413]
+    }
+  )
+
+  (def stdlib.runtime.global_ref_u32
+    : ([count__s1161 global__s1162 . ] {(({cap.ref} mem) val) ({[ . count__s1161] u32} :)})
+    -> (
+      [count__s1161 global__s1162 . ]
+      {
+        ({[ . global__s1162] ({[ . count__s1161] u32} stdlib.gpu.memory.type.Global)} :)
+        (({[ . count__s1161] u32 [ . global__s1162]} stdlib.runtime.prop.Readable) |-)
+      }
+    )
+    = {
+      [source__input0__v5414 count__input1__v5415 . ]
+      (
+        [ . source__input0__v5414 count__input1__v5415]
+        ({{_} {_}} runtime.global_ref_u32)
+        [global__output0__v5416 readable__output1__v5417 . ]
+      )
+      [ . global__output0__v5416 readable__output1__v5417]
+    }
+  )
+
+  (def stdlib.runtime.global_ref_u64
+    : ([count__s1182 global__s1183 . ] {(({cap.ref} mem) val) ({[ . count__s1182] u32} :)})
+    -> (
+      [count__s1182 global__s1183 . ]
+      {
+        ({[ . global__s1183] ({[ . count__s1182] u64} stdlib.gpu.memory.type.Global)} :)
+        (({[ . count__s1182] u64 [ . global__s1183]} stdlib.runtime.prop.Readable) |-)
+      }
+    )
+    = {
+      [source__input0__v5418 count__input1__v5419 . ]
+      (
+        [ . source__input0__v5418 count__input1__v5419]
+        ({{_} {_}} runtime.global_ref_u64)
+        [global__output0__v5420 readable__output1__v5421 . ]
+      )
+      [ . global__output0__v5420 readable__output1__v5421]
+    }
+  )
+
+  (def stdlib.runtime.global_u32_to_mem
+    : (
+      [count__s1178 memory__s1179 . ]
+      {
+        ({[ . memory__s1179] ({[ . count__s1178] u32} stdlib.gpu.memory.type.Global)} :)
+        (({[ . count__s1178] u32 [ . memory__s1179]} stdlib.runtime.prop.Allocation) |-)
+      }
+    )
+    -> ([count__s1178 memory__s1179 . ] {(({cap.own} mem) val)})
+    = {
+      [memory__input0__v5422 allocation__input1__v5423 . ]
+      (
+        [ . memory__input0__v5422 allocation__input1__v5423]
+        ({{_} {_}} runtime.global_u32_to_mem)
+        [output0__v5424 . ]
+      )
+      [ . output0__v5424]
+    }
+  )
+
+  (def stdlib.runtime.global_u64_to_mem
+    : (
+      [count__s1199 memory__s1200 . ]
+      {
+        ({[ . memory__s1200] ({[ . count__s1199] u64} stdlib.gpu.memory.type.Global)} :)
+        (({[ . count__s1199] u64 [ . memory__s1200]} stdlib.runtime.prop.Allocation) |-)
+      }
+    )
+    -> ([count__s1199 memory__s1200 . ] {(({cap.own} mem) val)})
+    = {
+      [memory__input0__v5425 allocation__input1__v5426 . ]
+      (
+        [ . memory__input0__v5425 allocation__input1__v5426]
+        ({{_} {_}} runtime.global_u64_to_mem)
+        [output0__v5427 . ]
+      )
+      [ . output0__v5427]
+    }
+  )
+})
+
+(theory type nat {
+  (arr stdlib.runtime.prop.Allocation : 3 -> 1)
+
+  (arr stdlib.runtime.prop.Readable : 3 -> 1)
+
+  (arr stdlib.runtime.sort.Capability : 0 -> 1)
+})

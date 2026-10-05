@@ -1,0 +1,3 @@
+(theory type nat {
+  (arr prop.NotEqual : 2 -> 1)
+})

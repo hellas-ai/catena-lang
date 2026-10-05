@@ -1,0 +1,84 @@
+(theory program type {
+  (arr core.fold.bounded
+    : (
+      [state_type__s547 invariant_type__s548 end__s549 index__s552 . ]
+      {
+        ({[ . end__s549] u32} :)
+        [ . state_type__s547]
+        (
+          {
+            (
+              {
+                ({[ . index__s552] u32} :)
+                (
+                  {
+                    [ . state_type__s547]
+                    (
+                      {(({[ . index__s552] [ . end__s549]} prop.Less) |-) [ . invariant_type__s548]}
+                      *
+                    )
+                  }
+                  *
+                )
+              }
+              *
+            )
+            ({[ . state_type__s547] [ . invariant_type__s548]} *)
+          }
+          =>
+        )
+        [ . invariant_type__s548]
+      }
+    )
+    -> (
+      [state_type__s547 invariant_type__s548 end__s549 index__s552 . ]
+      {[ . state_type__s547] [ . invariant_type__s548]}
+    )
+  )
+
+  (def stdlib.fold.fold_bounded
+    : (
+      [state_type__s547 invariant_type__s548 end__s549 index__s552 . ]
+      {
+        ({[ . end__s549] u32} :)
+        [ . state_type__s547]
+        (
+          {
+            (
+              {
+                ({[ . index__s552] u32} :)
+                (
+                  {
+                    [ . state_type__s547]
+                    (
+                      {(({[ . index__s552] [ . end__s549]} prop.Less) |-) [ . invariant_type__s548]}
+                      *
+                    )
+                  }
+                  *
+                )
+              }
+              *
+            )
+            ({[ . state_type__s547] [ . invariant_type__s548]} *)
+          }
+          =>
+        )
+        [ . invariant_type__s548]
+      }
+    )
+    -> (
+      [state_type__s547 invariant_type__s548 end__s549 index__s552 . ]
+      {[ . state_type__s547] [ . invariant_type__s548]}
+    )
+    = {
+      [end__input0__v4879 initial__input1__v4880 body__input2__v4881 permission__input3__v4882 . ]
+      (
+        [ . end__input0__v4879 initial__input1__v4880 body__input2__v4881 permission__input3__v4882]
+        ({{_} {_} {_} {_}} core.fold.bounded)
+        [output0__v4883 permission__output1__v4884 . ]
+      )
+      [ . output0__v4883 permission__output1__v4884]
+    }
+  )
+})

@@ -6,9 +6,7 @@ use thiserror::Error;
 use crate::codegen::default::{
     GpuAssign, GpuDialect, GpuFunction, GpuModule, GpuModuleMap, GpuValue, GpuVar,
     components::{input_components, single_value, value_expr},
-    gpu_placement::{
-        GpuFunctionPlacement, direct_function_placement, function_placement, function_placements,
-    },
+    gpu_placement::{GpuFunctionPlacement, function_placement, function_placements},
     lower_types::{CType, LoweredType},
     ops::{ifc, materializec, reducec, row_major},
     prelude::render_gpu_prelude,
@@ -94,7 +92,8 @@ pub enum GpuRenderError {
 /// Codegen has already produced the semantic `GpuModule`; this renderer is responsible only for
 /// turning that artifact into text. It still contains primitive-specific lowering for the current
 /// small backend surface, but it should not inspect the original Catena graph or report state.
-pub fn render_module(module: &GpuModule, dialect: GpuDialect) -> Result<String, GpuRenderError> {
+#[cfg(test)]
+fn render_module(module: &GpuModule, dialect: GpuDialect) -> Result<String, GpuRenderError> {
     let mut out = String::new();
     out.push_str(&render_gpu_prelude(dialect));
     out.push('\n');
@@ -102,7 +101,7 @@ pub fn render_module(module: &GpuModule, dialect: GpuDialect) -> Result<String, 
         &mut out,
         module,
         dialect,
-        direct_function_placement(&module.entry),
+        super::gpu_placement::direct_function_placement(&module.entry),
     )?;
     Ok(out)
 }

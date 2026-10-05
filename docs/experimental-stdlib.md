@@ -43,6 +43,16 @@ declarations, elaborates partial applications and names, and type-checks the
 whole library, including the GPU launch and matmul definitions. It does not
 invoke the default codegen or establish experimental runtime support.
 
+## Closure conversion limitation
+
+Experimental primitives such as `runtime.global_reads`, `unsafe.launch`, and
+`stdlib.gpu.scheduling.permission_redistribution` return closures; some `meta.*`
+arrows forward closures too. The generic `forget_closures` adapter currently
+flattens returned closure domains into operation outputs, losing their role as
+future callback arguments. Unlike definitions, primitives have no body to inline.
+This remains unresolved. Do not bypass it by erasing schedulers: proof generation
+must still run and report failure when it cannot establish the required proof.
+
 ## Follow-up questions for Smolcat
 
 - [ ] Why does Smolcat generate the very long `smolcat.apply.2.*.pack` and

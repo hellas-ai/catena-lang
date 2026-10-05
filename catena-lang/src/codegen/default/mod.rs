@@ -1,8 +1,7 @@
 //! GPU codegen.
 //!
 //! This module lowers closure-converted, typed hypergraphs into a small dataflow
-//! GPU artifact. Report generation should render this artifact, not make codegen
-//! decisions itself.
+//! GPU artifact, then renders it into a runtime module.
 
 mod components;
 pub mod fn_ptrs;
@@ -99,7 +98,15 @@ struct CodegenState<'a> {
     next_specialization_id: usize,
 }
 
-pub(crate) fn generate_modules(terms: &CodegenTermMap) -> Result<GpuModuleMap, CodegenError> {
+pub(super) fn codegen(
+    terms: &super::CodegenTermMap,
+    dialect: GpuDialect,
+) -> Result<RuntimeModule, CodegenError> {
+    let modules = lower_to_ir(terms)?;
+    Ok(render_runtime_module(&modules, dialect)?)
+}
+
+fn lower_to_ir(terms: &CodegenTermMap) -> Result<GpuModuleMap, CodegenError> {
     let theory_id = TheoryId(
         PROGRAM_THEORY
             .parse()
@@ -154,7 +161,7 @@ pub(crate) fn generate_modules(terms: &CodegenTermMap) -> Result<GpuModuleMap, C
 }
 
 /// Render dialect-independent GPU modules into the runtime boundary format.
-pub fn runtime_module(
+fn render_runtime_module(
     modules: &GpuModuleMap,
     dialect: GpuDialect,
 ) -> Result<RuntimeModule, gpu::GpuRenderError> {

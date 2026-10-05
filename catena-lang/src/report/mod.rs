@@ -1,5 +1,4 @@
 mod elaboration;
-mod gpu;
 #[cfg(feature = "svg-reports")]
 mod svg;
 
@@ -14,7 +13,6 @@ use std::collections::BTreeMap;
 
 use crate::check::{AnnotatedTerm, PartialDefinitionTypes};
 use crate::closure::Conversion;
-use crate::codegen::GeneratedModules;
 use crate::pass::{
     forget_closures::ClosureForgotten, record_boundary_sizes::OperationWithBoundarySizes,
 };
@@ -48,7 +46,6 @@ pub struct CompileReport {
     pub closure_conversion: Option<Conversion>,
     pub boundary_sizes: Option<TheoryTermMap<OperationWithBoundarySizes<Operation>>>,
     pub unpacked_products: Option<TheoryTermMap<OperationWithBoundarySizes<Operation>>>,
-    pub gpu_modules: Option<GeneratedModules>,
 }
 
 impl CompileReport {
@@ -63,7 +60,6 @@ impl CompileReport {
             closure_conversion: None,
             boundary_sizes: None,
             unpacked_products: None,
-            gpu_modules: None,
         }
     }
 }
@@ -90,21 +86,6 @@ impl CompileReport {
         if options.generate_svgs {
             svg::dump_svgs(self, &dir.join("svgs"))?;
         }
-        Ok(())
-    }
-
-    pub fn dump_to_dir(&self, dir: impl AsRef<Path>) -> io::Result<()> {
-        self.dump_to_dir_with_options(dir, ReportOptions::default())
-    }
-
-    pub fn dump_to_dir_with_options(
-        &self,
-        dir: impl AsRef<Path>,
-        options: ReportOptions,
-    ) -> io::Result<()> {
-        let dir = dir.as_ref();
-        self.dump_graphs_to_dir_with_options(dir, options)?;
-        gpu::dump_gpu(self, &dir.join("gpu"))?;
         Ok(())
     }
 }

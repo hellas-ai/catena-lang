@@ -27,7 +27,8 @@ The separate `catena-cli` package currently provides only a `status` command.
 | `<PATHS>...` | One or more source files, loaded in the supplied order. |
 | `-o`, `--output-dir <PATH>` | Required directory for compilation reports. |
 | `--no-svg` | Skip SVG graph rendering. |
-| `--codegen <NAME>` | Select `default` (implicit) or `experimental` (registered, not implemented yet). |
+| `--dialect <NAME>` | Select `hip` (default) or `cuda`. |
+| `--codegen <NAME>` | Select `default` (implicit) or `experimental`. |
 | `--stdlib <NAME>` | Select a named bundle; repeat to select multiple bundles. |
 | `--stdlib-dir <PATH>` | Load and select a local bundle containing `stdlib.json`; repeat for multiple directories. |
 | `--no-stdlib` | Load only input files; conflicts with both stdlib selection options. |
@@ -47,10 +48,10 @@ The accepted names are `default` and `experimental`; `gpu` is not an alias.
 Codegen and stdlib selection are independent: selecting a codegen does not load
 a library, and selecting a library does not change the codegen.
 
-`default` implements the current GPU C++ lowering and emits HIP and CUDA report
-sources. `experimental` reserves the separate backend and currently exits with
-`experimental codegen is not implemented yet`, before compiler passes run. It
-does not fall back to `default`.
+Both backends share the compiler passes through closure conversion and product
+unpacking, then use separate lowering and rendering to emit one runtime module
+for the selected dialect. The CLI writes its source to `gpu/hip.cpp` or
+`gpu/cuda.cpp`. Unsupported arrows or runtime types are reported as errors.
 
 ## Standard library selection
 

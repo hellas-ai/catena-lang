@@ -2,7 +2,7 @@ use hexpr::Operation;
 use metacat::tree::Tree;
 use thiserror::Error;
 
-use crate::stdlib::constants::{FN_HOM_TYPE, FN_REF_TYPE, PRODUCT_TYPE, UNIT_TYPE, VALUE_TYPE};
+use crate::stdlib::constants::{FN_HOM_TYPE, FN_REF_TYPE, UNIT_TYPE, VALUE_TYPE};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LoweredType {
@@ -142,18 +142,20 @@ pub fn lower_runtime_type(ty: &Tree<(), Operation>) -> Result<CType, LowerTypeEr
     }
 }
 
-pub fn lower_interface(ty: &Tree<(), Operation>) -> Result<Vec<CType>, LowerTypeError> {
+#[cfg(test)]
+fn lower_interface(ty: &Tree<(), Operation>) -> Result<Vec<CType>, LowerTypeError> {
     let mut out = Vec::new();
     lower_interface_into(ty, &mut out)?;
     Ok(out)
 }
 
+#[cfg(test)]
 fn lower_interface_into(
     ty: &Tree<(), Operation>,
     out: &mut Vec<CType>,
 ) -> Result<(), LowerTypeError> {
     match ty {
-        Tree::Node(op, 0, children) if op.as_str() == PRODUCT_TYPE => {
+        Tree::Node(op, 0, children) if op.as_str() == crate::stdlib::constants::PRODUCT_TYPE => {
             for child in children {
                 lower_interface_into(child, out)?;
             }

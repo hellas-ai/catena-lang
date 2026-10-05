@@ -1,0 +1,70 @@
+//! Closure-free GPU instructions and generated function interfaces.
+use std::collections::BTreeMap;
+
+use super::lower_types::CType;
+use crate::runtime::GeneratedFunction;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Variable {
+    pub name: String,
+    pub ty: CType,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Instruction {
+    Let(Variable, String),
+    Assign(String, String),
+    /// Block-wide synchronization, including visibility of shared-memory writes.
+    Sync,
+    Assert {
+        condition: String,
+    },
+    /// Buffer types distinguish global and shared address spaces.
+    Load {
+        result: Variable,
+        buffer: Variable,
+        index: Variable,
+    },
+    Store {
+        buffer: Variable,
+        index: Variable,
+        value: Variable,
+    },
+    If {
+        condition: String,
+        yes: Vec<Instruction>,
+        no: Vec<Instruction>,
+    },
+    For {
+        index: String,
+        end: String,
+        body: Vec<Instruction>,
+    },
+    Launch {
+        kernel: String,
+        grid: String,
+        shared_bytes: String,
+        arguments: Vec<String>,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Function {
+    pub symbol: String,
+    pub inputs: Vec<Variable>,
+    pub outputs: Vec<Variable>,
+    pub body: Vec<Instruction>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct Modules {
+    pub functions: BTreeMap<String, Function>,
+    pub kernels: BTreeMap<String, Function>,
+    pub exports: Vec<GeneratedFunction>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Place {
+    Host,
+    Device,
+}

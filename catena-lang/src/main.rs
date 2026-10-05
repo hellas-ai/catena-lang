@@ -3,7 +3,8 @@ use std::{fs, path::PathBuf};
 use anyhow::Context;
 use catena_lang::{
     codegen::CodegenKind,
-    report::ReportOptions,
+    report::{CompileReport, ReportOptions},
+    runtime::GpuDialect,
     stdlib::{BundleRegistry, SourceFile},
 };
 use clap::{Parser, ValueEnum};
@@ -26,6 +27,10 @@ struct Cli {
     #[arg(long, value_enum, default_value_t)]
     codegen: CodegenArg,
 
+    /// GPU dialect to generate.
+    #[arg(long, value_enum, default_value_t)]
+    dialect: DialectArg,
+
     /// Select a named stdlib bundle (repeatable). Replaces the implicit default.
     #[arg(long = "stdlib", value_name = "NAME")]
     stdlibs: Vec<String>,
@@ -44,7 +49,7 @@ enum CodegenArg {
     /// The default GPU C++ code generator.
     #[default]
     Default,
-    /// The experimental code generator (not implemented yet).
+    /// The standalone experimental GPU C++ code generator.
     Experimental,
 }
 
@@ -57,6 +62,22 @@ impl From<CodegenArg> for CodegenKind {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, ValueEnum)]
+enum DialectArg {
+    #[default]
+    Hip,
+    Cuda,
+}
+
+impl From<DialectArg> for GpuDialect {
+    fn from(value: DialectArg) -> Self {
+        match value {
+            DialectArg::Hip => Self::Hip,
+            DialectArg::Cuda => Self::Cuda,
+        }
+    }
+}
+
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     let raw_theories = load_theories(&cli)?;
@@ -64,18 +85,18 @@ fn main() -> anyhow::Result<()> {
         #[cfg(feature = "svg-reports")]
         generate_svgs: !cli.no_svg,
     };
-    match catena_lang::compile::compile_with_codegen(raw_theories, cli.codegen.into()) {
-        Ok(report) => {
-            report.dump_to_dir_with_options(&cli.output_dir, report_options)?;
-            Ok(())
-        }
-        Err(failure) => {
-            failure
-                .report
-                .dump_to_dir_with_options(&cli.output_dir, report_options)?;
-            Err(failure.into())
-        }
-    }
+    let mut report = CompileReport::new(raw_theories);
+    let result = catena_lang::compile::compile(&mut report, cli.codegen.into(), cli.dialect.into());
+    report.dump_graphs_to_dir_with_options(&cli.output_dir, report_options)?;
+    let module = result?;
+    let dir = cli.output_dir.join("gpu");
+    fs::create_dir_all(&dir)?;
+    let filename = match module.dialect {
+        GpuDialect::Hip => "hip.cpp",
+        GpuDialect::Cuda => "cuda.cpp",
+    };
+    fs::write(dir.join(filename), module.source)?;
+    Ok(())
 }
 
 fn selected_stdlib(cli: &Cli) -> anyhow::Result<Vec<SourceFile>> {
@@ -207,13 +228,21 @@ mod tests {
         )?;
         let mut cli = cli_with(&["--stdlib-dir", directory.path().to_str().unwrap()]);
         cli.paths = vec![input.clone()];
-        catena_lang::compile::compile(load_theories(&cli)?)?;
+        catena_lang::compile::compile(
+            &mut CompileReport::new(load_theories(&cli)?),
+            cli.codegen.into(),
+            cli.dialect.into(),
+        )?;
 
         fs::write(&input, definition)?;
         let theories = load_theories(&cli)?;
-        let error = catena_lang::compile::compile(theories)
-            .unwrap_err()
-            .to_string();
+        let error = catena_lang::compile::compile(
+            &mut CompileReport::new(theories),
+            cli.codegen.into(),
+            cli.dialect.into(),
+        )
+        .unwrap_err()
+        .to_string();
         assert!(error.contains("custom.one multiple times"), "{error}");
         Ok(())
     }

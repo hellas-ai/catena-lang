@@ -14,6 +14,7 @@ impl GpuFunctionPlacement {
     }
 }
 
+#[cfg(test)]
 pub(super) fn direct_function_placement(function: &GpuFunction) -> GpuFunctionPlacement {
     if function_directly_requires_host(function) {
         GpuFunctionPlacement::HostOnly

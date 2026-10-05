@@ -27,6 +27,7 @@ pub(super) fn lower(
         || op.starts_with("const.")
         || op.starts_with("bool.")
         || op == "numeric.u32_subtype_u64"
+        || op == "u32.bitcast-f32"
     {
         return numeric::lower(l, op, &args, outputs);
     }
@@ -43,6 +44,18 @@ pub(super) fn lower(
         return runtime::lower(l, op, &args, outputs);
     }
     match op {
+        "stdlib.unsafe.discard" => {
+            let [proof] = args.as_slice() else {
+                return Err(invalid(op, "discard requires one proof"));
+            };
+            if !matches!(children(&proof.ty, "|-"), Some([_])) {
+                return Err(invalid(op, "discard requires a proof"));
+            }
+            if outputs.iter().any(|ty| children(ty, "1").is_none()) {
+                return Err(invalid(op, "discard can only return unit"));
+            }
+            outputs.iter().map(|ty| l.erased(ty)).collect()
+        }
         "stdlib.assert.assert_true" => {
             let [value] = args.as_slice() else {
                 return Err(invalid(op, "assert_true requires one condition"));

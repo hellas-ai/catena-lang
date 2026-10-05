@@ -6,30 +6,35 @@ use super::super::{
     values::*,
 };
 
-fn kernel_argument(l: &mut Lowerer<'_>, ty: &Obj, grid: &str) -> Result<Value, CodegenError> {
+fn kernel_argument(
+    l: &mut Lowerer<'_>,
+    op: &str,
+    ty: &Obj,
+    grid: &str,
+) -> Result<Value, CodegenError> {
     if let Some(fields) = children(ty, "*") {
         return Ok(super::super::product(
             ty.clone(),
             fields
                 .iter()
-                .map(|ty| kernel_argument(l, ty, grid))
+                .map(|ty| kernel_argument(l, op, ty, grid))
                 .collect::<Result<_, _>>()?,
         ));
     }
     match runtime(ty)? {
         Some(CType::Block) => l.emit(
             ty,
-            format!("exp_block{{{grid},{{blockIdx.x,blockIdx.y,blockIdx.z}}}}"),
+            format!("catena_block{{{grid},{{blockIdx.x,blockIdx.y,blockIdx.z}}}}"),
         ),
         Some(CType::Thread) => {
-            let block = format!("exp_block{{{grid},{{blockIdx.x,blockIdx.y,blockIdx.z}}}}");
+            let block = format!("catena_block{{{grid},{{blockIdx.x,blockIdx.y,blockIdx.z}}}}");
             l.emit(
                 ty,
-                format!("exp_thread{{{block},{{threadIdx.x,threadIdx.y,threadIdx.z}}}}"),
+                format!("catena_thread{{{block},{{threadIdx.x,threadIdx.y,threadIdx.z}}}}"),
             )
         }
         Some(_) => Err(invalid(
-            "unsafe.launch",
+            op,
             "kernel input must contain only block/thread data and proofs",
         )),
         None => l.erased(ty),
@@ -45,17 +50,29 @@ pub(crate) fn lower(
     if l.place != Place::Host {
         return Err(invalid(op, "nested device launch is unsupported"));
     }
-    let [grid, shared, environment, kernel, _, _] = args else {
-        return Err(invalid(op, "invalid launch operands"));
+    // Closure conversion expands the kernel into environment + function operands.
+    let (grid, shared, environment, kernel) = match (op, args) {
+        ("stdlib.gpu.launch.launch_unsafe", [grid, environment, kernel]) => {
+            (grid, None, environment, kernel)
+        }
+        ("stdlib.gpu.launch.launch_shared_unsafe", [grid, shared, environment, kernel]) => {
+            (grid, Some(shared), environment, kernel)
+        }
+        _ => return Err(invalid(op, "invalid launch operands")),
     };
-    if runtime(&grid.ty)? != Some(CType::Grid)
-        || !matches!(runtime(&shared.ty)?, Some(CType::Layout(_)))
-    {
-        return Err(invalid(op, "expected a grid and shared-memory layout"));
+    if runtime(&grid.ty)? != Some(CType::Grid) {
+        return Err(invalid(op, "expected a grid"));
     }
+    let shared_bytes = if let Some(shared) = shared {
+        if !matches!(runtime(&shared.ty)?, Some(CType::Layout(_))) {
+            return Err(invalid(op, "expected shared memory"));
+        }
+        format!("{}.bytes", expr(shared)?)
+    } else {
+        "0".into()
+    };
     let (domain, codomain) = super::super::function_parts(&kernel.ty)?;
     let grid_expression = expr(grid)?.to_owned();
-    let shared_bytes = format!("{}.bytes", expr(shared)?);
     let grid_parameter = l.fresh("grid");
     let mut inputs = vec![Variable {
         name: grid_parameter.clone(),
@@ -82,7 +99,7 @@ pub(crate) fn lower(
         .get(captured.len()..)
         .ok_or_else(|| invalid(op, "environment exceeds kernel domain"))?;
     for ty in remaining {
-        captured.push(kernel_argument(l, ty, &grid_parameter)?);
+        captured.push(kernel_argument(l, op, ty, &grid_parameter)?);
     }
     let results = l.call_function(
         kernel,
@@ -94,7 +111,7 @@ pub(crate) fn lower(
     }
     let body = std::mem::replace(&mut l.body, outer);
     l.place = Place::Host;
-    let symbol = l.fresh("exp_kernel");
+    let symbol = l.fresh("catena_kernel");
     l.modules.kernels.insert(
         symbol.clone(),
         Function {

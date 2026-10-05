@@ -298,20 +298,19 @@ impl<'a> Lowerer<'a> {
             }
             return self.call_function(function, flat, outputs);
         }
-        if op.starts_with("meta.") || op.starts_with("smolcat.") {
-            let mut flat = Vec::new();
-            for arg in &args {
-                arg.clone().flatten(&mut flat);
-            }
-            if let Some(result) = super::smolcat_compat::lower(self, op, &flat, outputs)? {
-                return Ok(result);
-            }
+        if op.starts_with("meta.") {
+            return super::meta::lower(self, op, &args, outputs);
+        }
+        if op.starts_with("smolcat.") {
+            return super::smolcat_compat::lower(self, op, &args, outputs);
         }
         match op {
             "core.if" | "core.if_guarded" | "core.fold.bounded" | "core.fold.trace" => {
                 ops::control::lower(self, op, args, outputs)
             }
-            "unsafe.launch" => ops::launch::lower(self, op, &args, outputs),
+            "stdlib.gpu.launch.launch_unsafe" | "stdlib.gpu.launch.launch_shared_unsafe" => {
+                ops::launch::lower(self, op, &args, outputs)
+            }
             ":.forget" | ":.ty" | ":.param" => ops::structure::lower(self, op, args, outputs),
             _ => ops::lower(self, op, args, outputs),
         }

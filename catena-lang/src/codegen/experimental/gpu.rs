@@ -30,7 +30,7 @@ pub(super) fn render(modules: &Modules, dialect: GpuDialect) -> String {
             )
             .unwrap();
             if kernel {
-                out.push_str("    extern __shared__ __align__(16) unsigned char exp_shared[];\n");
+                out.push_str("    extern __shared__ __align__(16) unsigned char catena_shared[];\n");
             }
             render_body(&mut out, &f.body, 1, dialect);
             out.push_str("}\n");
@@ -49,7 +49,7 @@ fn render_body(out: &mut String, body: &[Instruction], depth: usize, dialect: Gp
             Instruction::Assign(v, e) => writeln!(out, "{indent}{v} = {e};").unwrap(),
             Instruction::Sync => writeln!(out, "{indent}__syncthreads();").unwrap(),
             Instruction::Assert { condition } => {
-                writeln!(out, "{indent}exp_assert({condition});").unwrap();
+                writeln!(out, "{indent}catena_assert({condition});").unwrap();
             }
             Instruction::Load {
                 result,
@@ -110,10 +110,10 @@ fn render_body(out: &mut String, body: &[Instruction], depth: usize, dialect: Gp
                     GpuDialect::Hip => "hipGetLastError",
                     GpuDialect::Cuda => "cudaGetLastError",
                 };
-                writeln!(out, "{indent}exp_gpu_check({last_error}());").unwrap();
+                writeln!(out, "{indent}catena_gpu_check({last_error}());").unwrap();
                 writeln!(
                     out,
-                    "{indent}exp_gpu_check({}());",
+                    "{indent}catena_gpu_check({}());",
                     dialect.synchronize_fn()
                 )
                 .unwrap();

@@ -1,6 +1,5 @@
-//! Temporary exporter compatibility, deliberately separate from language primitives.
+//! Smolcat witness operations and legacy proof-family bridges.
 mod family_bridges;
-mod meta;
 mod symbols;
 
 use super::{
@@ -13,18 +12,19 @@ pub(crate) fn lower(
     op: &str,
     args: &[Value],
     outputs: &[Obj],
-) -> Result<Option<Vec<Value>>, CodegenError> {
-    if op.starts_with("meta.") {
-        return meta::lower(l, op, args, outputs).map(Some);
+) -> Result<Vec<Value>, CodegenError> {
+    let mut flat = Vec::new();
+    for arg in args {
+        arg.clone().flatten(&mut flat);
     }
+    let args = flat.as_slice();
     if op.starts_with("smolcat.apply.") {
-        return family_bridges::lower(l, op, args, outputs).map(Some);
+        return family_bridges::lower(l, op, args, outputs);
     }
     match op {
-        "smolcat.callback.symbol" | "smolcat.value.named" => {
-            symbols::lower(l, op, args, outputs).map(Some)
+        "smolcat.callback.symbol" | "smolcat.value.named" | "smolcat.value.named_at" => {
+            symbols::lower(l, op, args, outputs)
         }
-        _ if op.starts_with("smolcat.") => Err(CodegenError::Unsupported(op.into())),
-        _ => Ok(None),
+        _ => Err(CodegenError::Unsupported(op.into())),
     }
 }

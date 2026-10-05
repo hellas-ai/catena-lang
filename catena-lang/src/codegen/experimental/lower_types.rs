@@ -107,13 +107,13 @@ impl CType {
             Self::F32 => "float".into(),
             Self::MemOwn => "catena_mem_own_t".into(),
             Self::MemRef => "catena_mem_ref_t".into(),
-            Self::Grid => "exp_grid".into(),
-            Self::Block => "exp_block".into(),
-            Self::Thread => "exp_thread".into(),
-            Self::Index => "exp_index".into(),
-            Self::Global(t) => format!("exp_global<{}>", t.c_name()),
-            Self::Shared(t) => format!("exp_shared_view<{}>", t.c_name()),
-            Self::Layout(n) => format!("exp_layout<{n}>"),
+            Self::Grid => "catena_grid".into(),
+            Self::Block => "catena_block".into(),
+            Self::Thread => "catena_thread".into(),
+            Self::Index => "catena_index".into(),
+            Self::Global(t) => format!("catena_global<{}>", t.c_name()),
+            Self::Shared(t) => format!("catena_shared_view<{}>", t.c_name()),
+            Self::Layout(n) => format!("catena_layout<{n}>"),
         }
     }
     pub fn abi(&self) -> Option<ValueKind> {

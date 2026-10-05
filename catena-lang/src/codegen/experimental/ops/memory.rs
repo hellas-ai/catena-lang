@@ -75,7 +75,7 @@ pub(super) fn lower(
         ("size", [v]) => format!("{v}.count"),
         ("empty_shared_layout", []) => "{}".into(),
         ("add_shared_slot", [name, size, count, layout]) => {
-            format!("exp_add_slot({layout},{name},{size},{count})")
+            format!("catena_add_slot({layout},{name},{size},{count})")
         }
         ("reserve_shared", [_, layout]) => (*layout).into(),
         ("shared_slot", [name, layout, _, count]) => {
@@ -83,7 +83,7 @@ pub(super) fn lower(
                 return Err(invalid(op, "expected shared view"));
             };
             format!(
-                "exp_slot<{}>(exp_shared,{layout},{name},{count})",
+                "catena_slot<{}>(catena_shared,{layout},{name},{count})",
                 element.c_name()
             )
         }

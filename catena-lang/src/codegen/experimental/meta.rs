@@ -1,6 +1,6 @@
 //! Exporter meta projections forward their data input prefix, then expose
 //! symbolic context. Do not infer runtime meaning from their generated names.
-use super::super::{
+use super::{
     CodegenError, Lowerer, invalid,
     values::{Obj, Repr, Value},
 };
@@ -11,6 +11,11 @@ pub(super) fn lower(
     args: &[Value],
     outputs: &[Obj],
 ) -> Result<Vec<Value>, CodegenError> {
+    let mut flat = Vec::new();
+    for arg in args {
+        arg.clone().flatten(&mut flat);
+    }
+    let args = flat.as_slice();
     let prefix = args
         .iter()
         .zip(outputs)
@@ -23,17 +28,15 @@ pub(super) fn lower(
     {
         return Err(invalid(
             op,
-            "Smolcat meta projection must preserve its typed data prefix",
+            "meta projection must preserve its typed data prefix",
         ));
     }
     let mut result = args[..prefix].to_vec();
     for ty in &outputs[prefix..] {
-        result.push(l.erased(ty).map_err(|_| {
-            invalid(
-                op,
-                "Smolcat meta projection adds a runtime value or closure",
-            )
-        })?);
+        result.push(
+            l.erased(ty)
+                .map_err(|_| invalid(op, "meta projection adds a runtime value or closure"))?,
+        );
     }
     Ok(result)
 }

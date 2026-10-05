@@ -62,6 +62,11 @@ pub(super) fn lower(
         format!("UINT{}_C(0x{hex})", width * 4)
     } else {
         match (name, xs.as_slice()) {
+            ("u32.bitcast-f32", [x])
+                if runtime(&values[0].ty)? == Some(CType::U32) && out == CType::F32 =>
+            {
+                format!("catena_u32_bitcast_f32({x})")
+            }
             ("bool.t", []) => "1".into(),
             ("bool.f", []) => "0".into(),
             ("bool.not", [x]) => format!("!{x}"),

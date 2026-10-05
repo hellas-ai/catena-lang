@@ -183,14 +183,12 @@ fn launch_captures_values_and_emits_both_dialects() {
     };
     let result = l
         .lower_operation(
-            "unsafe.launch",
+            "stdlib.gpu.launch.launch_shared_unsafe",
             vec![
                 value(grid_type, "host_grid"),
                 value(shared_type, "host_layout"),
                 value(flag, "host_flag"),
                 callback,
-                Value::erased(proof()),
-                Value::erased(proof()),
             ],
             &[unit],
         )

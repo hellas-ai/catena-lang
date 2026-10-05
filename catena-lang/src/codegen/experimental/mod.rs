@@ -4,6 +4,7 @@ mod gpu;
 pub mod ir;
 mod lower;
 pub mod lower_types;
+mod meta;
 mod ops;
 mod prelude;
 mod smolcat_compat;
@@ -247,7 +248,7 @@ fn render_runtime_module(
 
 pub(crate) fn symbol(name: &str) -> String {
     // Keep public symbols separate from prelude helpers and generated kernels.
-    let mut result = "exp_fn_".to_string();
+    let mut result = "catena_fn_".to_string();
     for byte in name.bytes() {
         if byte.is_ascii_alphanumeric() {
             result.push(byte as char);

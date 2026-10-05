@@ -1,69 +1,69 @@
 (theory program type {
   (arr meta.stdlib.assert.assert.helper.callback_metavars.p.0
     : (
-      [p__s421 value__s408 . ]
-      {({({[ . value__s408] bool} :) (({({[ . value__s408] bool.t} =) [ . p__s421]} ==>) |-)} *)}
+      [p__s403 value__s390 . ]
+      {({({[ . value__s390] bool} :) (({({[ . value__s390] bool.t} =) [ . p__s403]} ==>) |-)} *)}
     )
     -> (
-      [p__s421 value__s408 . ]
+      [p__s403 value__s390 . ]
       {
-        ({({[ . value__s408] bool} :) (({({[ . value__s408] bool.t} =) [ . p__s421]} ==>) |-)} *)
-        [ . p__s421]
+        ({({[ . value__s390] bool} :) (({({[ . value__s390] bool.t} =) [ . p__s403]} ==>) |-)} *)
+        [ . p__s403]
       }
     )
   )
 
   (arr meta.stdlib.assert.assert.helper.callback_metavars.value.0
-    : ([value__s408 . ] {({[ . value__s408] bool} :)})
-    -> ([value__s408 . ] {({[ . value__s408] bool} :) [ . value__s408]})
+    : ([value__s390 . ] {({[ . value__s390] bool} :)})
+    -> ([value__s390 . ] {({[ . value__s390] bool} :) [ . value__s390]})
   )
 
   (def stdlib.assert.assert
     : (
-      [p__s421 . ]
-      {({({[ . value__s408] bool} :) (({({[ . value__s408] bool.t} =) [ . p__s421]} ==>) |-)} *)}
+      [p__s403 . ]
+      {({({[ . value__s390] bool} :) (({({[ . value__s390] bool.t} =) [ . p__s403]} ==>) |-)} *)}
     )
-    -> ([p__s421 . ] {1 ([ . p__s421] |-)})
+    -> ([p__s403 . ] {1 ([ . p__s403] |-)})
     = {
-      [condition__v1238__input . ]
+      [condition__v1072__input . ]
       (
-        [ . condition__v1238__input]
+        [ . condition__v1072__input]
         ({_} meta.stdlib.assert.assert.helper.callback_metavars.p.0)
-        [condition__v1238 __smolcat_p__v4877 . ]
+        [condition__v1072 __smolcat_p__v1089 . ]
       )
-      ([ . condition__v1238] (*.elim {{_} {_}}) [value__v1247__result meaning__v1248 . ])
+      ([ . condition__v1072] (*.elim {{_} {_}}) [value__v1081__result meaning__v1082 . ])
       (
-        [ . value__v1247__result]
+        [ . value__v1081__result]
         ({_} meta.stdlib.assert.assert.helper.callback_metavars.value.0)
-        [value__v1247 __smolcat_value__v4878 . ]
+        [value__v1081 __smolcat_value__v1090 . ]
       )
-      ([ . value__v1247 meaning__v1248] stdlib.assert.assert_then [unit__v1253 proven__v1254 . ])
-      [ . unit__v1253 proven__v1254]
+      ([ . value__v1081 meaning__v1082] stdlib.assert.assert_then [unit__v1087 proven__v1088 . ])
+      [ . unit__v1087 proven__v1088]
     }
   )
 
   (def stdlib.assert.assert_then
     : (
-      [p__s417 condition__s418 . ]
-      {({[ . condition__s418] bool} :) (({({[ . condition__s418] bool.t} =) [ . p__s417]} ==>) |-)}
+      [p__s399 condition__s400 . ]
+      {({[ . condition__s400] bool} :) (({({[ . condition__s400] bool.t} =) [ . p__s399]} ==>) |-)}
     )
-    -> ([p__s417 condition__s418 . ] {1 ([ . p__s417] |-)})
+    -> ([p__s399 condition__s400 . ] {1 ([ . p__s399] |-)})
     = {
-      [condition__v1223 meaning__v1225 . ]
-      ([ . condition__v1223] stdlib.assert.assert_true [unit__v1229 checked__v1230 . ])
-      ([ . unit__v1229] unit.elim [])
-      ([ . checked__v1230 meaning__v1225] stdlib.assert.ax_mp [unit__v1236 conclusion__v1237 . ])
-      [ . unit__v1236 conclusion__v1237]
+      [condition__v1057 meaning__v1059 . ]
+      ([ . condition__v1057] stdlib.assert.assert_true [unit__v1063 checked__v1064 . ])
+      ([ . unit__v1063] unit.elim [])
+      ([ . checked__v1064 meaning__v1059] stdlib.assert.ax_mp [unit__v1070 conclusion__v1071 . ])
+      [ . unit__v1070 conclusion__v1071]
     }
   )
 
   (arr stdlib.assert.assert_true
-    : ([condition__s410 . ] {({[ . condition__s410] bool} :)})
-    -> ([condition__s410 . ] {1 (({[ . condition__s410] bool.t} =) |-)})
+    : ([condition__s392 . ] {({[ . condition__s392] bool} :)})
+    -> ([condition__s392 . ] {1 (({[ . condition__s392] bool.t} =) |-)})
   )
 
   (arr stdlib.assert.ax_mp
-    : ([p__s412 q__s413 . ] {([ . p__s412] |-) (({[ . p__s412] [ . q__s413]} ==>) |-)})
-    -> ([p__s412 q__s413 . ] {1 ([ . q__s413] |-)})
+    : ([p__s394 q__s395 . ] {([ . p__s394] |-) (({[ . p__s394] [ . q__s395]} ==>) |-)})
+    -> ([p__s394 q__s395 . ] {1 ([ . q__s395] |-)})
   )
 })

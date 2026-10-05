@@ -1,0 +1,8 @@
+# From Catena 83d29a1ec697cd7a3cc6729a7391225c6372917b, stdlib/data.hex (literal and Boolean support only).
+(theory program type {
+  (arr bool.t : [] -> (bool val))
+  (arr bool.f : [] -> (bool val))
+  (arr bool.and : {(bool val) (bool val)} -> (bool val))
+  (arr bool.or  : {(bool val) (bool val)} -> (bool val))
+  (arr u32.bitcast-f32 : (u32 val) -> (f32 val))
+})

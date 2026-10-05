@@ -1,0 +1,3 @@
+(theory program type {
+  (arr stdlib.unsafe.discard : ([p__s1055 . ] {([ . p__s1055] |-)}) -> ([p__s1055 . ] {1}))
+})

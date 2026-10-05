@@ -1,0 +1,13 @@
+# From Catena 83d29a1ec697cd7a3cc6729a7391225c6372917b, stdlib/value.hex (structural declarations only).
+(theory type nat {
+  (arr val : 1 -> 1)
+  (arr : : 2 -> 1)
+  (arr |- : 1 -> 1)
+})
+
+(theory program type {
+  (arr :.forget : : -> ([x t.t] val))
+  (arr :.param : : -> [x t . x])
+  (arr :.ty : : -> {({[.x] [.t]} :) [x t . x]})
+  (arr ax-mp : {[ph ps.] ([.ph] |-) ([.ph ps] ==> |-)} -> ([ph ps . ps] |-))
+})

@@ -1,0 +1,13 @@
+# Smolcat's fixed symbolic-witness interfaces used by lowering.
+# These are trusted introspection operations, not runtime resource permissions.
+(theory program type {
+  (arr smolcat.value.named
+    : ([T x . ] ([. T] val))
+    -> ([T x . ] ([. x T] :)))
+  (arr smolcat.value.named_at
+    : ([T x . ] {([. T] val) [. x]})
+    -> ([T x . ] ([. x T] :)))
+  (arr smolcat.callback.symbol
+    : ([i . ] 1)
+    -> ([i . i]))
+})

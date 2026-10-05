@@ -3,6 +3,52 @@ use std::fs;
 use catena_lang::stdlib::{self, BundleRegistry, StdlibBundle, StdlibFile};
 
 #[test]
+fn default_manifest_loads_the_same_files_as_the_embedded_bundle() -> anyhow::Result<()> {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut registry = BundleRegistry::new(&[])?;
+    let name = registry.add_directory(root.join("stdlib/default"))?;
+    assert_eq!(name, "default");
+    let files = registry.resolve(&[&name])?;
+    assert_eq!(
+        files
+            .iter()
+            .map(|file| file.source.as_ref())
+            .collect::<Vec<_>>(),
+        stdlib::sources().collect::<Vec<_>>()
+    );
+    assert_eq!(
+        files
+            .iter()
+            .map(|file| file.filename.clone())
+            .collect::<Vec<_>>(),
+        stdlib::paths_from(root).collect::<Vec<_>>()
+    );
+    Ok(())
+}
+
+#[test]
+fn minimal_manifest_loads_all_hex_files_in_filename_order() -> anyhow::Result<()> {
+    let directory = tempfile::tempdir()?;
+    fs::write(directory.path().join("stdlib.json"), r#"{"name":"custom"}"#)?;
+    fs::write(directory.path().join("z.hex"), "# z")?;
+    fs::write(directory.path().join("a.hex"), "# a")?;
+    fs::write(directory.path().join("notes.txt"), "ignored")?;
+    fs::create_dir(directory.path().join("nested"))?;
+    fs::write(directory.path().join("nested/other.hex"), "ignored")?;
+    let mut registry = BundleRegistry::default();
+    registry.add_directory(directory.path())?;
+    let files = registry.resolve(&["custom"])?;
+    assert_eq!(
+        files
+            .iter()
+            .map(|file| file.source.as_ref())
+            .collect::<Vec<_>>(),
+        ["# a", "# z"]
+    );
+    Ok(())
+}
+
+#[test]
 fn default_bundle_preserves_existing_sources() -> anyhow::Result<()> {
     let registry = BundleRegistry::default();
     let files = registry.resolve(&["default", "default"])?;

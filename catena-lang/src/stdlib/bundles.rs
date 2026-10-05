@@ -35,11 +35,12 @@ struct Manifest {
     name: String,
     #[serde(default)]
     extends: Vec<String>,
-    files: Vec<PathBuf>,
+    #[serde(default)]
+    files: Option<Vec<PathBuf>>,
 }
 
-/// Embedded and explicitly registered local bundles. No filesystem discovery is
-/// performed: local dependencies must be registered with `add_directory` too.
+/// Embedded and explicitly registered local bundles. Local dependencies must
+/// be registered with `add_directory` too.
 pub struct BundleRegistry {
     bundles: BTreeMap<String, Bundle>,
 }
@@ -74,7 +75,8 @@ impl BundleRegistry {
         Ok(registry)
     }
 
-    /// Read `stdlib.json` and its ordered source files. Returns the bundle name
+    /// Read `stdlib.json` and its source files. Without a `files` list, loads all
+    /// `.hex` files directly in the directory, sorted by filename. Returns the bundle name
     /// to use as a selection root. Existing names cannot be overridden.
     pub fn add_directory(&mut self, directory: impl AsRef<Path>) -> anyhow::Result<String> {
         let directory = directory.as_ref();
@@ -87,7 +89,26 @@ impl BundleRegistry {
             .with_context(|| format!("invalid stdlib manifest {}", path.display()))?;
         let mut seen = BTreeSet::new();
         let mut files = Vec::new();
-        for file in manifest.files {
+        let filenames = match manifest.files {
+            Some(files) => files,
+            None => {
+                let mut files = Vec::new();
+                for entry in fs::read_dir(directory).with_context(|| {
+                    format!("failed to read stdlib directory {}", directory.display())
+                })? {
+                    let entry = entry?;
+                    let filename = PathBuf::from(entry.file_name());
+                    if entry.path().is_file()
+                        && filename.extension().is_some_and(|ext| ext == "hex")
+                    {
+                        files.push(filename);
+                    }
+                }
+                files.sort();
+                files
+            }
+        };
+        for file in filenames {
             if file.as_os_str().is_empty()
                 || !file
                     .components()
@@ -125,7 +146,7 @@ impl BundleRegistry {
     }
 
     /// Resolve roots in selection order, dependencies in declaration order,
-    /// and files in manifest order. Each bundle is included only once. Empty
+    /// and files in manifest order (or filename order when omitted). Each bundle is included only once. Empty
     /// roots select nothing; callers choose whether to request `default`.
     pub fn resolve(&self, names: &[&str]) -> anyhow::Result<Vec<SourceFile>> {
         let mut visited = BTreeSet::new();

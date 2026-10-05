@@ -43,6 +43,44 @@ declarations, elaborates partial applications and names, and type-checks the
 whole library, including the GPU launch and matmul definitions. It does not
 invoke the default codegen or establish experimental runtime support.
 
+The separate `experimental_runtime` integration target executes hex fixtures
+using only the experimental bundle and `CodegenKind::Experimental`:
+
+```sh
+CATENA_GPU_DIALECT=hip cargo test -p catena-lang --features runtime-tests --test experimental_runtime
+# Use CATENA_GPU_DIALECT=cuda for CUDA.
+```
+
+It requires the selected GPU toolchain and device. Like the existing `runtime`
+target, it is gated by `runtime-tests`. The existing structural stdlib test and
+default-library runtime cases remain separate.
+
+Runtime cases live under `catena-lang/tests/experimental_runtime/`: `support.rs`
+loads the bundle and reads fixtures from disk, `matmul.rs` checks device results
+against a CPU reference, and `fixtures/` contains the hex programs. The first
+fixtures are `matmul_naive_u64.hex` and `matmul_tiled_u64.hex`, exported from the
+Smolcat `matmul_simple_naive` and `matmul_simple_tiled` examples. Their
+`Stdlib_simple` references map to the experimental bundle's `stdlib` namespace.
+Six additional `program` arrow declarations were added to the hex fixtures:
+three in `matmul_naive_u64.hex` and three in `matmul_tiled_u64.hex`. Each set
+contains one `smolcat.apply.2.*.pack` arrow for input permissions, one
+`smolcat.apply.2.*.unpack` arrow for output permissions, and one
+`smolcat.apply.2.*.unpack` arrow for the barrier trace. Their exact proof-family
+bridge signatures come from Smolcat's checking dependencies; its per-module
+export omits these declarations. They are declared locally in the test fixtures
+and were not added to the experimental stdlib itself. The tiled fixture's
+generated `Barrier.id.280` name is mapped to the bundle's equivalent
+`Barrier.id.182` constructor. These are export compatibility adjustments; the
+matmul and launch bodies are preserved.
+
+Each algorithm has separate `perfect_tiling` and `predicated_tiling` tests.
+Perfect cases use rectangular matrices whose three dimensions are divisible by
+the tile width. Predicated cases leave partial row, column, and inner tiles,
+including a matrix smaller than one tile. Inputs are nonuniform, output memory
+starts with a sentinel, every result is checked exactly, and input buffers are
+checked for unintended writes. Compilation and runtime failures fail the tests;
+they are not treated as successful runtime coverage.
+
 ## Closure conversion limitation
 
 Experimental primitives such as `runtime.global_reads`, `unsafe.launch`, and

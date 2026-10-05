@@ -50,3 +50,8 @@ path = "examples/safe_runtime.rs"
 name = "runtime"
 path = "tests/runtime.rs"
 required-features = ["runtime-tests"]
+
+[[test]]
+name = "experimental_runtime"
+path = "tests/experimental_runtime.rs"
+required-features = ["runtime-tests"]

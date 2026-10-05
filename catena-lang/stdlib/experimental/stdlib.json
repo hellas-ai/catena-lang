@@ -1,7 +1,12 @@
 {
   "name": "experimental",
   "files": [
-    "foundation.hex",
+    "metacat/cmc.hex",
+    "metacat/fn.hex",
+    "metacat/literals.hex",
+    "metacat/product.hex",
+    "metacat/value.hex",
+    "metacat/witnesses.hex",
     "assert.hex",
     "equality.hex",
     "fold.hex",
@@ -10,13 +15,12 @@
     "numeric.hex",
     "prelude.hex",
     "runtime.hex",
+    "unsafe.hex",
     "gpu/barriers.hex",
-    "gpu/families.hex",
     "gpu/geometry.hex",
     "gpu/launch.hex",
     "gpu/matmul.hex",
     "gpu/memory.hex",
-    "gpu/protocol.hex",
-    "gpu/scheduling.hex"
+    "gpu/protocol.hex"
   ]
 }

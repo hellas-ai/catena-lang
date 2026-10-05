@@ -1,5 +1,12 @@
 # From Catena 83d29a1ec697cd7a3cc6729a7391225c6372917b, stdlib/data.hex (literal and Boolean support only).
+(theory type nat {
+  (arr type.const.u32.0x00000000 : 0 -> 1)
+  (arr type.const.u32.0x00000001 : 0 -> 1)
+})
+
 (theory program type {
+  (arr type.const.u32.0x00000000 : [] -> ({type.const.u32.0x00000000 u32} :))
+  (arr type.const.u32.0x00000001 : [] -> ({type.const.u32.0x00000001 u32} :))
   (arr bool.t : [] -> (bool val))
   (arr bool.f : [] -> (bool val))
   (arr bool.and : {(bool val) (bool val)} -> (bool val))

@@ -27,12 +27,30 @@ The separate `catena-cli` package currently provides only a `status` command.
 | `<PATHS>...` | One or more source files, loaded in the supplied order. |
 | `-o`, `--output-dir <PATH>` | Required directory for compilation reports. |
 | `--no-svg` | Skip SVG graph rendering. |
-| `--codegen gpu` | Select the GPU code generator, currently the only option and the default. |
+| `--codegen <NAME>` | Select `default` (implicit) or `experimental` (registered, not implemented yet). |
 | `--stdlib <NAME>` | Select a named bundle; repeat to select multiple bundles. |
 | `--stdlib-dir <PATH>` | Load and select a local bundle containing `stdlib.json`; repeat for multiple directories. |
 | `--no-stdlib` | Load only input files; conflicts with both stdlib selection options. |
 | `-h`, `--help` | Show usage and options. |
 | `-V`, `--version` | Show the version. |
+
+## Code generator selection
+
+```sh
+cargo run -p catena-lang -- program.hex -o report --codegen default
+
+cargo run -p catena-lang -- program.hex -o report \
+  --stdlib-dir catena-lang/stdlib/experimental --codegen experimental
+```
+
+The accepted names are `default` and `experimental`; `gpu` is not an alias.
+Codegen and stdlib selection are independent: selecting a codegen does not load
+a library, and selecting a library does not change the codegen.
+
+`default` implements the current GPU C++ lowering and emits HIP and CUDA report
+sources. `experimental` reserves the separate backend and currently exits with
+`experimental codegen is not implemented yet`, before compiler passes run. It
+does not fall back to `default`.
 
 ## Standard library selection
 

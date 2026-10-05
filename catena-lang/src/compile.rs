@@ -76,6 +76,7 @@ pub fn compile_with_codegen(
 // Helper for `compile` which exists so `compile` can return
 // `Result<CompileReport, CompileFailure>`
 fn compile_into(report: &mut CompileReport, codegen: CodegenKind) -> Result<(), CompileError> {
+    codegen.ensure_available()?;
     let elaborated = crate::elaborate::elaborate(report.raw_theories.clone())?;
     report.elaborated = Some(elaborated.clone());
 

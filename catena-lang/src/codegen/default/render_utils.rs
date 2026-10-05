@@ -1,4 +1,6 @@
-use crate::codegen::{GpuAssign, GpuVar, gpu::GpuRenderError, lower_types::CType, runtime_type};
+use crate::codegen::default::{
+    GpuAssign, GpuVar, gpu::GpuRenderError, lower_types::CType, runtime_type,
+};
 
 pub(in crate::codegen) fn param_decl(
     var: &GpuVar,

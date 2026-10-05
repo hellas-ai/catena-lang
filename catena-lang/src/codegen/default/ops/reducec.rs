@@ -19,7 +19,7 @@
 //! }
 //! ```
 
-use crate::codegen::{
+use crate::codegen::default::{
     GpuAssign, GpuValue, GpuVar,
     components::{
         Component, input_components, is_runtime_value, output_components, single_function,
@@ -200,7 +200,7 @@ fn invalid_component_count(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::codegen::{
+    use crate::codegen::default::{
         GpuAssign, GpuVar,
         fn_ptrs::FnPtrSymbol,
         lower_types::{CType, LoweredType},

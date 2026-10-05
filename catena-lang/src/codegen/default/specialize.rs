@@ -4,7 +4,7 @@ use hexpr::Operation;
 
 use crate::{
     check::AnnotatedTerm,
-    codegen::{
+    codegen::default::{
         GpuValue, GpuVar,
         fn_ptrs::FnPtrSymbol,
         lower_types::{CType, LowerTypeError, LoweredType, lower_type},

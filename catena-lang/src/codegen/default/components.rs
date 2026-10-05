@@ -1,4 +1,4 @@
-use crate::codegen::{
+use crate::codegen::default::{
     GpuAssign, GpuValue, GpuVar, gpu::GpuRenderError, render_utils::sanitize_ident, runtime_type,
 };
 
@@ -107,7 +107,7 @@ pub(in crate::codegen) fn value_expr(value: &GpuValue) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::codegen::{
+    use crate::codegen::default::{
         GpuAssign, GpuVar,
         fn_ptrs::FnPtrSymbol,
         lower_types::{CType, LoweredType},

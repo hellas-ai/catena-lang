@@ -22,7 +22,7 @@
 //! ```
 //!
 
-use crate::codegen::{
+use crate::codegen::default::{
     GpuAssign, GpuDialect, GpuFunction, GpuValue, GpuVar,
     components::{
         Component, input_components, runtime_values, single_function, single_value, value_expr,
@@ -206,7 +206,7 @@ fn invalid_component_count(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::codegen::fn_ptrs::FnPtrSymbol;
+    use crate::codegen::default::fn_ptrs::FnPtrSymbol;
     use hexpr::Operation;
     use open_hypergraphs::lax::NodeId;
 

@@ -14,7 +14,7 @@ use std::collections::BTreeMap;
 
 use crate::check::{AnnotatedTerm, PartialDefinitionTypes};
 use crate::closure::Conversion;
-use crate::codegen::GpuModuleMap;
+use crate::codegen::GeneratedModules;
 use crate::pass::{
     forget_closures::ClosureForgotten, record_boundary_sizes::OperationWithBoundarySizes,
 };
@@ -48,7 +48,7 @@ pub struct CompileReport {
     pub closure_conversion: Option<Conversion>,
     pub boundary_sizes: Option<TheoryTermMap<OperationWithBoundarySizes<Operation>>>,
     pub unpacked_products: Option<TheoryTermMap<OperationWithBoundarySizes<Operation>>>,
-    pub gpu_modules: Option<GpuModuleMap>,
+    pub gpu_modules: Option<GeneratedModules>,
 }
 
 impl CompileReport {

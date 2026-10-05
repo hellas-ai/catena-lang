@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, HashSet};
 
-use crate::codegen::{GpuFunction, GpuModuleMap};
+use crate::codegen::default::{GpuFunction, GpuModuleMap};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum GpuFunctionPlacement {

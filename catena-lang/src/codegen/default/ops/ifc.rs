@@ -1,6 +1,6 @@
 //! `bool.ifc` selects and calls one of two closure-converted functions.
 
-use crate::codegen::{
+use crate::codegen::default::{
     GpuAssign, GpuValue,
     components::{
         Component, input_components, output_components, single_function, single_value, value_expr,
@@ -85,7 +85,7 @@ fn invalid_component_count(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::codegen::{
+    use crate::codegen::default::{
         GpuVar,
         fn_ptrs::FnPtrSymbol,
         lower_types::{CType, LoweredType},

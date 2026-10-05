@@ -4,7 +4,7 @@ use hexpr::Operation;
 
 use crate::{
     check::AnnotatedTerm,
-    codegen::{CodegenError, GpuValue},
+    codegen::default::{CodegenError, GpuValue},
     pass::record_boundary_sizes::OperationWithBoundarySizes,
 };
 

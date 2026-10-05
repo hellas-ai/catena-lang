@@ -41,15 +41,18 @@ struct Cli {
 
 #[derive(Clone, Copy, Debug, Default, ValueEnum)]
 enum CodegenArg {
-    /// The existing GPU C++ code generator.
+    /// The default GPU C++ code generator.
     #[default]
-    Gpu,
+    Default,
+    /// The experimental code generator (not implemented yet).
+    Experimental,
 }
 
 impl From<CodegenArg> for CodegenKind {
     fn from(value: CodegenArg) -> Self {
         match value {
-            CodegenArg::Gpu => Self::Gpu,
+            CodegenArg::Default => Self::Default,
+            CodegenArg::Experimental => Self::Experimental,
         }
     }
 }
@@ -232,24 +235,40 @@ mod tests {
     }
 
     #[test]
-    fn gpu_codegen_is_the_default() {
+    fn default_codegen_is_the_default() {
         let cli = Cli::try_parse_from(["catena", "input.hex", "--output-dir", "report"]).unwrap();
 
-        assert!(matches!(cli.codegen, CodegenArg::Gpu));
+        assert!(matches!(cli.codegen, CodegenArg::Default));
     }
 
     #[test]
-    fn gpu_codegen_can_be_selected_explicitly() {
+    fn default_codegen_can_be_selected_explicitly() {
         let cli = Cli::try_parse_from([
             "catena",
             "input.hex",
             "--output-dir",
             "report",
             "--codegen",
-            "gpu",
+            "default",
         ])
         .unwrap();
 
-        assert!(matches!(cli.codegen, CodegenArg::Gpu));
+        assert!(matches!(cli.codegen, CodegenArg::Default));
+    }
+
+    #[test]
+    fn experimental_codegen_is_explicit_and_does_not_select_a_stdlib() {
+        let cli = cli_with(&["--codegen", "experimental"]);
+        assert_eq!(CodegenKind::from(cli.codegen), CodegenKind::Experimental);
+        assert!(cli.stdlibs.is_empty());
+        assert!(cli.stdlib_dirs.is_empty());
+    }
+
+    #[test]
+    fn gpu_is_not_a_codegen_alias() {
+        assert!(
+            Cli::try_parse_from(["catena", "input.hex", "-o", "report", "--codegen", "gpu"])
+                .is_err()
+        );
     }
 }

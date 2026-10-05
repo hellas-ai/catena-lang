@@ -1,4 +1,4 @@
-use crate::codegen::GpuDialect;
+use crate::codegen::default::GpuDialect;
 
 pub fn render_gpu_prelude(dialect: GpuDialect) -> String {
     let buffer_load = render_buffer_load(dialect);

@@ -11,8 +11,8 @@
 
 use catena_lang::{
     codegen,
-    compile::compile,
-    report::CompileReport,
+    compile::{CompileError, compile, compile_with_codegen},
+    report::{CompileReport, ReportOptions},
     runtime::{GpuDialect, ValueKind},
 };
 use metacat::theory::RawTheorySet;
@@ -52,22 +52,60 @@ fn codegen_produces_a_runtime_module() -> anyhow::Result<()> {
             .chain(["(def program identity : (u64 val) -> (u64 val) = [value])"]),
     )?;
     let report = compile(raw)?;
-    let module = codegen::runtime_module(
-        report
-            .gpu_modules
-            .as_ref()
-            .expect("successful compilation should contain generated modules"),
-        GpuDialect::Hip,
+    let modules = report
+        .gpu_modules
+        .as_ref()
+        .expect("successful compilation should contain generated modules");
+    assert_eq!(modules.kind(), codegen::CodegenKind::Default);
+    let directory = tempfile::tempdir()?;
+    report.dump_to_dir_with_options(
+        directory.path(),
+        ReportOptions {
+            #[cfg(feature = "svg-reports")]
+            generate_svgs: false,
+        },
     )?;
 
-    assert_eq!(module.dialect, GpuDialect::Hip);
-    assert!(!module.source.is_empty());
-    let identity = module
-        .functions
-        .iter()
-        .find(|function| function.source_name == "identity")
-        .expect("identity should be exported");
-    assert_eq!(identity.inputs, [ValueKind::U64]);
-    assert_eq!(identity.outputs, [ValueKind::U64]);
+    for (dialect, filename) in [(GpuDialect::Hip, "hip.cpp"), (GpuDialect::Cuda, "cuda.cpp")] {
+        let module = codegen::runtime_module(modules, dialect)?;
+        assert_eq!(module.dialect, dialect);
+        assert!(!module.source.is_empty());
+        assert_eq!(
+            std::fs::read_to_string(directory.path().join("gpu").join(filename))?,
+            module.source,
+        );
+        let identity = module
+            .functions
+            .iter()
+            .find(|function| function.source_name == "identity")
+            .expect("identity should be exported");
+        assert_eq!(identity.inputs, [ValueKind::U64]);
+        assert_eq!(identity.outputs, [ValueKind::U64]);
+    }
+    Ok(())
+}
+
+#[test]
+fn experimental_codegen_reports_unavailable_without_default_fallback() -> anyhow::Result<()> {
+    let failure = compile_with_codegen(
+        RawTheorySet::from_text("")?,
+        codegen::CodegenKind::Experimental,
+    )
+    .unwrap_err();
+    assert!(matches!(
+        failure.cause,
+        CompileError::Codegen(codegen::CodegenError::Experimental(
+            codegen::experimental::CodegenError::NotImplemented
+        ))
+    ));
+    assert!(failure.report.elaborated.is_none());
+    assert!(failure.report.gpu_modules.is_none());
+    let error = codegen::codegen(
+        codegen::CodegenKind::Experimental,
+        &Default::default(),
+        GpuDialect::Hip,
+    )
+    .unwrap_err();
+    assert!(matches!(error, codegen::CodegenError::Experimental(_)));
     Ok(())
 }

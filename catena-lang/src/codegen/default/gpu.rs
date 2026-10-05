@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, HashSet};
 use hexpr::Operation;
 use thiserror::Error;
 
-use crate::codegen::{
+use crate::codegen::default::{
     GpuAssign, GpuDialect, GpuFunction, GpuModule, GpuModuleMap, GpuValue, GpuVar,
     components::{input_components, single_value, value_expr},
     gpu_placement::{
@@ -1331,7 +1331,7 @@ mod tests {
 
     use std::collections::BTreeMap;
 
-    use crate::codegen::{
+    use crate::codegen::default::{
         fn_ptrs::FnPtrSymbol,
         lower_types::{CType, LoweredType},
     };

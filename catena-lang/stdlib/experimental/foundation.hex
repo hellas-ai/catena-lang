@@ -1,0 +1,77 @@
+# The experimental library owns its language foundation. No default bundle is
+# required. Type-level witnesses and propositions have no runtime representation.
+(theory type nat {
+  (arr val : 1 -> 1)
+  (arr : : 2 -> 1)
+  (arr |- : 1 -> 1)
+  (arr ==> : 2 -> 1)
+  (arr = : 2 -> 1)
+
+  (arr * : 2 -> 1)
+  (arr 1 : 0 -> 1)
+  (arr => : 2 -> 1)
+  (arr -> : 2 -> 1)
+  (arr eval : 2 -> 1)
+
+  # Apply a type family to two type-level arguments. This is symbolic syntax,
+  # not a runtime function call.
+  (arr smolcat.family.Apply.2 : 3 -> 1)
+
+  (arr bool : 0 -> 1)
+  (arr bool.t : 0 -> 1)
+  (arr bool.f : 0 -> 1)
+  (arr u16 : 0 -> 1)
+  (arr u32 : 0 -> 1)
+  (arr u64 : 0 -> 1)
+  (arr f32 : 0 -> 1)
+  (arr bf16 : 0 -> 1)
+  (arr type.const.u32.0x00000000 : 0 -> 1)
+  (arr type.const.u32.0x00000001 : 0 -> 1)
+
+  # The public memory ABI used by experimental runtime.global_* arrows.
+  (arr cap.own : 0 -> 1)
+  (arr cap.ref : 0 -> 1)
+  (arr mem : 1 -> 1)
+})
+
+(theory program type {
+  (arr unit.intro : [] -> 1)
+  (arr unit.elim : 1 -> [])
+  (arr *.intro : [a b] -> *)
+  (arr *.elim : * -> [a b])
+
+  (arr :.forget : : -> ([x t.t] val))
+  (arr :.param : : -> [x t.x])
+  (arr :.ty : : -> {({[.x] [.t]} :) [x t.x]})
+
+  (arr defer : [a] -> ({1 [a]} =>))
+  (arr run : ({1 [a]} =>) -> [a])
+  (arr compose : {[a b c.] ([.a b] =>) ([.b c] =>)} -> ([a b c.a c] =>))
+  (arr tensor : {[a0 b0 a1 b1.] ([.a0 b0] =>) ([.a1 b1] =>)}
+    -> {[a0 b0 a1 b1.]
+      ([.a0 a1] * [src.])
+      ([.b0 b1] * [tgt.])
+      ([.src tgt] =>)
+    })
+  (arr lift : (-> val) -> =>)
+
+  (def evaluate : {[a b.] [.a] ([.a b] =>)} -> [a b.b]
+    = ([x f.] ({([.x] defer) [.f]} compose run)))
+
+  # Exporter plumbing: introduce a symbolic callback identity or attach a
+  # symbolic name to a runtime value. Neither operation creates a proof.
+  (arr smolcat.callback.symbol : ([i.] 1) -> [i.i])
+  (arr smolcat.value.named : ([t x.t] val) -> ([t x.x t] :))
+
+  # Typed literals retain the same symbolic value in their result ascription.
+  (arr type.const.u32.0x00000000 : [] -> ({type.const.u32.0x00000000 u32} :))
+  (arr type.const.u32.0x00000001 : [] -> ({type.const.u32.0x00000001 u32} :))
+
+  (arr bool.t : [] -> (bool val))
+  (arr bool.f : [] -> (bool val))
+  (arr bool.not : (bool val) -> (bool val))
+  (arr bool.and : {(bool val) (bool val)} -> (bool val))
+  (arr bool.or : {(bool val) (bool val)} -> (bool val))
+
+  (arr ax-mp : {[p q.] ([.p] |-) ([.p q] ==> |-)} -> ([p q.q] |-))
+})

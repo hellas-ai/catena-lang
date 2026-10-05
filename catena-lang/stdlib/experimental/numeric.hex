@@ -470,6 +470,17 @@
 })
 
 (theory type nat {
+  # Symbolic result names used by dependent numeric signatures.
+  (arr type.stdlib.numeric.* : 2 -> 1)
+  (arr type.stdlib.numeric.+ : 2 -> 1)
+  (arr type.stdlib.numeric.- : 2 -> 1)
+  (arr type.stdlib.numeric./ : 2 -> 1)
+  (arr type.stdlib.numeric.ceil_div : 2 -> 1)
+  (arr type.stdlib.numeric.escaped.25 : 2 -> 1)
+  (arr type.stdlib.numeric.max : 2 -> 1)
+  (arr type.stdlib.numeric.min : 2 -> 1)
+  (arr type.stdlib.numeric.negate : 1 -> 1)
+
   (arr prop.Greater : 2 -> 1)
 
   (arr prop.GreaterEqual : 2 -> 1)

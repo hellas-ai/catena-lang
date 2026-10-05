@@ -1,3 +1,22 @@
 {
-  "name": "experimental"
+  "name": "experimental",
+  "files": [
+    "foundation.hex",
+    "assert.hex",
+    "equality.hex",
+    "fold.hex",
+    "gpu.hex",
+    "lists.hex",
+    "numeric.hex",
+    "prelude.hex",
+    "runtime.hex",
+    "gpu/barriers.hex",
+    "gpu/families.hex",
+    "gpu/geometry.hex",
+    "gpu/launch.hex",
+    "gpu/matmul.hex",
+    "gpu/memory.hex",
+    "gpu/protocol.hex",
+    "gpu/scheduling.hex"
+  ]
 }

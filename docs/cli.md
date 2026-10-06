@@ -18,6 +18,11 @@ generated code to the output directory. It does not execute the program. If
 compilation fails, it writes the available partial report and exits with an
 error. Input-loading errors occur before report generation.
 
+Stage starts, completions, elapsed times, and closure-conversion progress are
+printed to stderr. `timings.json` records each completed or failed stage with
+`stage`, `elapsed_ms`, and `status`, including partial runs. Report generation
+(including SVG rendering) is timed separately from compilation.
+
 The separate `catena-cli` package currently provides only a `status` command.
 
 ## Options

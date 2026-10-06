@@ -13,6 +13,7 @@ use std::collections::BTreeMap;
 
 use crate::check::{AnnotatedTerm, PartialDefinitionTypes};
 use crate::closure::Conversion;
+use crate::compile::{ProgressEvent, StageTiming, timed};
 use crate::pass::{
     forget_closures::ClosureForgotten, record_boundary_sizes::OperationWithBoundarySizes,
 };
@@ -37,6 +38,7 @@ impl Default for ReportOptions {
 
 #[derive(Debug)]
 pub struct CompileReport {
+    pub timings: Vec<StageTiming>,
     pub raw_theories: RawTheorySet,
     pub elaborated: Option<RawTheorySet>,
     pub theory_set: Option<TheorySet>,
@@ -51,6 +53,7 @@ pub struct CompileReport {
 impl CompileReport {
     pub fn new(raw_theories: RawTheorySet) -> Self {
         Self {
+            timings: Vec::new(),
             raw_theories,
             elaborated: None,
             theory_set: None,
@@ -69,23 +72,46 @@ impl CompileReport {
         self.dump_graphs_to_dir_with_options(dir, ReportOptions::default())
     }
 
-    #[cfg_attr(not(feature = "svg-reports"), allow(unused_variables))]
     pub fn dump_graphs_to_dir_with_options(
         &self,
         dir: impl AsRef<Path>,
         options: ReportOptions,
     ) -> io::Result<()> {
+        self.dump_graphs_to_dir_with_progress(dir, options, &mut |_| {})
+    }
+
+    /// Write compiler diagnostics, timing report generation separately from compilation.
+    #[cfg_attr(not(feature = "svg-reports"), allow(unused_variables))]
+    pub fn dump_graphs_to_dir_with_progress(
+        &self,
+        dir: impl AsRef<Path>,
+        options: ReportOptions,
+        progress: &mut dyn FnMut(ProgressEvent),
+    ) -> io::Result<()> {
         let dir = dir.as_ref();
         fs::create_dir_all(dir)?;
-        fs::write(
-            dir.join("raw_theories.hex"),
-            self.raw_theories.to_hexpr_text(),
-        )?;
-        elaboration::dump_elaboration(self, dir)?;
-        #[cfg(feature = "svg-reports")]
-        if options.generate_svgs {
-            svg::dump_svgs(self, &dir.join("svgs"))?;
-        }
-        Ok(())
+        let mut timings = self.timings.clone();
+        let write_timings = |timings: &[StageTiming]| -> io::Result<()> {
+            let json = serde_json::to_vec_pretty(timings).map_err(io::Error::other)?;
+            fs::write(dir.join("timings.json"), json)
+        };
+        // Preserve compilation timings even if writing graphs subsequently fails.
+        write_timings(&timings)?;
+        let result = timed(&mut timings, "Report generation", progress, |update| {
+            update("Writing raw theories and elaboration report");
+            fs::write(
+                dir.join("raw_theories.hex"),
+                self.raw_theories.to_hexpr_text(),
+            )?;
+            elaboration::dump_elaboration(self, dir)?;
+            #[cfg(feature = "svg-reports")]
+            if options.generate_svgs {
+                update("Rendering SVG graphs");
+                svg::dump_svgs(self, &dir.join("svgs"))?;
+            }
+            Ok(())
+        });
+        let timings_result = write_timings(&timings);
+        result.and(timings_result)
     }
 }

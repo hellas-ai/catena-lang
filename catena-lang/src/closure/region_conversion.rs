@@ -35,6 +35,7 @@ struct ScheduledRegion {
 pub(super) fn run(
     theory_set: &TheorySet,
     terms: TheoryTermMap<ClosureForgotten<Operation>>,
+    progress: &mut dyn FnMut(&str),
 ) -> Result<RegionConversion, ConversionError> {
     let mut state = ConversionState {
         terms,
@@ -42,21 +43,33 @@ pub(super) fn run(
         generated_functions: TheoryTermMap::new(),
         next_generated_id: 0,
     };
+    progress("Discovering closure regions");
     let mut discovered_regions = region::run(&state.terms)?;
     let initial_regions = discovered_regions.clone();
 
+    progress(&format!(
+        "Converted 0 closures; {} regions remaining",
+        region_count(&discovered_regions)
+    ));
     while region_count(&discovered_regions) != 0 {
+        progress("Scheduling next closure");
         // Step 1: build typed ordering dependencies and choose the first region with no unresolved prerequisites.
         let selected = schedule_next_region(&state.terms, &discovered_regions);
         let generated_id = state.next_generated_id;
         state.next_generated_id += 1;
 
         // Step 2: generate and validate the selected function.
+        progress(&format!(
+            "Generating closure {} for {}.{}",
+            generated_id, selected.theory, selected.definition
+        ));
         let original_context_leaves = add_closure_and_name(&mut state, &selected, generated_id)?;
+        progress("Validating generated theory");
         validate_generated_theory(&state.theory)?;
 
         // Step 3: replace its marker with explicit
         // environment/function-pointer values.
+        progress("Replacing closure region");
         replace_region_with_closure_representation(
             &mut state,
             &selected,
@@ -66,7 +79,13 @@ pub(super) fn run(
 
         // Step 4: rediscover regions and rebuild dependencies. Extraction
         // deletes and unifies nodes, so the previous snapshot is now stale.
+        progress("Rediscovering closure regions");
         discovered_regions = region::run(&state.terms)?;
+        progress(&format!(
+            "Converted {} closures; {} regions remaining",
+            state.next_generated_id,
+            region_count(&discovered_regions)
+        ));
     }
 
     Ok(RegionConversion {

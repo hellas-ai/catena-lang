@@ -3,6 +3,7 @@ use std::{fs, path::PathBuf};
 use anyhow::Context;
 use catena_lang::{
     codegen::CodegenKind,
+    compile::{ProgressEvent, StageStatus},
     report::{CompileReport, ReportOptions},
     runtime::GpuDialect,
     stdlib::{BundleRegistry, SourceFile},
@@ -86,8 +87,17 @@ fn main() -> anyhow::Result<()> {
         generate_svgs: !cli.no_svg,
     };
     let mut report = CompileReport::new(raw_theories);
-    let result = catena_lang::compile::compile(&mut report, cli.codegen.into(), cli.dialect.into());
-    report.dump_graphs_to_dir_with_options(&cli.output_dir, report_options)?;
+    let result = catena_lang::compile::compile_with_progress(
+        &mut report,
+        cli.codegen.into(),
+        cli.dialect.into(),
+        &mut print_progress,
+    );
+    report.dump_graphs_to_dir_with_progress(
+        &cli.output_dir,
+        report_options,
+        &mut print_progress,
+    )?;
     let module = result?;
     let dir = cli.output_dir.join("gpu");
     fs::create_dir_all(&dir)?;
@@ -97,6 +107,33 @@ fn main() -> anyhow::Result<()> {
     };
     fs::write(dir.join(filename), module.source)?;
     Ok(())
+}
+
+fn print_progress(event: ProgressEvent) {
+    match event {
+        ProgressEvent::Started { stage } => eprintln!("[compile] {stage} started"),
+        ProgressEvent::Update {
+            stage,
+            message,
+            elapsed_ms,
+        } => {
+            eprintln!(
+                "[compile] {stage}: {message} — elapsed {:.2}s",
+                elapsed_ms / 1000.0
+            );
+        }
+        ProgressEvent::Finished(timing) => {
+            let status = match timing.status {
+                StageStatus::Completed => "completed",
+                StageStatus::Failed => "failed",
+            };
+            eprintln!(
+                "[compile] {} {status} in {:.2}s",
+                timing.stage,
+                timing.elapsed_ms / 1000.0
+            );
+        }
+    }
 }
 
 fn selected_stdlib(cli: &Cli) -> anyhow::Result<Vec<SourceFile>> {

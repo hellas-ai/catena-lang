@@ -1,13 +1,69 @@
 (theory program type {
-  (arr stdlib.gpu.launch.launch_shared_unsafe
+  (arr unsafe.launch
     : (
-      [blocks__s859 width__s860 height__s861 layout__s862 steps__s863 inputs__s864 outputs__s865 grid__s866 block__s875 thread__s876 . ]
+      [blocks__s841 width__s842 height__s843 grid__s844 block__s846 . ]
       {
         (
           {
-            [ . grid__s866]
+            [ . grid__s844]
             (
-              {[ . blocks__s859] ({[ . width__s860] [ . height__s861]} stdlib.gpu.geometry.sort.D2)}
+              {[ . blocks__s841] ({[ . width__s842] [ . height__s843]} stdlib.gpu.geometry.sort.D2)}
+              stdlib.gpu.geometry.type.Grid
+            )
+          }
+          :
+        )
+        (
+          {
+            (
+              {
+                (
+                  {
+                    [ . block__s846]
+                    (
+                      {
+                        [ . blocks__s841]
+                        ({[ . width__s842] [ . height__s843]} stdlib.gpu.geometry.sort.D2)
+                        [ . grid__s844]
+                      }
+                      stdlib.gpu.geometry.type.Block
+                    )
+                  }
+                  :
+                )
+                (
+                  (
+                    {
+                      [ . blocks__s841]
+                      ({[ . width__s842] [ . height__s843]} stdlib.gpu.geometry.sort.D2)
+                      [ . grid__s844]
+                      [ . block__s846]
+                    }
+                    stdlib.gpu.geometry.type.Thread
+                  )
+                  val
+                )
+              }
+              *
+            )
+            1
+          }
+          =>
+        )
+      }
+    )
+    -> ([blocks__s841 width__s842 height__s843 grid__s844 block__s846 . ] {1})
+  )
+
+  (arr unsafe.launch_shared
+    : (
+      [blocks__s848 width__s849 height__s850 layout__s851 grid__s852 block__s855 . ]
+      {
+        (
+          {
+            [ . grid__s852]
+            (
+              {[ . blocks__s848] ({[ . width__s849] [ . height__s850]} stdlib.gpu.geometry.sort.D2)}
               stdlib.gpu.geometry.type.Grid
             )
           }
@@ -16,10 +72,10 @@
         (
           (
             {
-              [ . blocks__s859]
-              ({[ . width__s860] [ . height__s861]} stdlib.gpu.geometry.sort.D2)
-              [ . grid__s866]
-              [ . layout__s862]
+              [ . blocks__s848]
+              ({[ . width__s849] [ . height__s850]} stdlib.gpu.geometry.sort.D2)
+              [ . grid__s852]
+              [ . layout__s851]
             }
             stdlib.gpu.memory.type.SharedMemory
           )
@@ -31,12 +87,12 @@
               {
                 (
                   {
-                    [ . block__s875]
+                    [ . block__s855]
                     (
                       {
-                        [ . blocks__s859]
-                        ({[ . width__s860] [ . height__s861]} stdlib.gpu.geometry.sort.D2)
-                        [ . grid__s866]
+                        [ . blocks__s848]
+                        ({[ . width__s849] [ . height__s850]} stdlib.gpu.geometry.sort.D2)
+                        [ . grid__s852]
                       }
                       stdlib.gpu.geometry.type.Block
                     )
@@ -44,216 +100,26 @@
                   :
                 )
                 (
-                  {
-                    (
-                      {
-                        [ . thread__s876]
-                        (
-                          {
-                            [ . blocks__s859]
-                            ({[ . width__s860] [ . height__s861]} stdlib.gpu.geometry.sort.D2)
-                            [ . grid__s866]
-                            [ . block__s875]
-                          }
-                          stdlib.gpu.geometry.type.Thread
-                        )
-                      }
-                      :
-                    )
-                    (
-                      {
-                        (
-                          {
-                            (
-                              (
-                                {
-                                  [ . blocks__s859]
-                                  ({[ . width__s860] [ . height__s861]} stdlib.gpu.geometry.sort.D2)
-                                  [ . grid__s866]
-                                  [ . block__s875]
-                                  [ . steps__s863]
-                                }
-                                stdlib.gpu.barriers.prop.Trace
-                              )
-                              |-
-                            )
-                            [ . block__s875]
-                            [ . thread__s876]
-                          }
-                          smolcat.family.Apply.2
-                        )
-                        (
-                          {([ . inputs__s864] |-) [ . block__s875] [ . thread__s876]}
-                          smolcat.family.Apply.2
-                        )
-                      }
-                      *
-                    )
-                  }
-                  *
+                  (
+                    {
+                      [ . blocks__s848]
+                      ({[ . width__s849] [ . height__s850]} stdlib.gpu.geometry.sort.D2)
+                      [ . grid__s852]
+                      [ . block__s855]
+                    }
+                    stdlib.gpu.geometry.type.Thread
+                  )
+                  val
                 )
               }
               *
             )
-            (
-              {
-                1
-                (
-                  {
-                    (
-                      (
-                        {
-                          [ . blocks__s859]
-                          ({[ . width__s860] [ . height__s861]} stdlib.gpu.geometry.sort.D2)
-                          [ . grid__s866]
-                          [ . block__s875]
-                          list.Nil
-                        }
-                        stdlib.gpu.barriers.prop.Trace
-                      )
-                      |-
-                    )
-                    (
-                      {([ . outputs__s865] |-) [ . block__s875] [ . thread__s876]}
-                      smolcat.family.Apply.2
-                    )
-                  }
-                  *
-                )
-              }
-              *
-            )
+            1
           }
           =>
         )
       }
     )
-    -> (
-      [blocks__s859 width__s860 height__s861 layout__s862 steps__s863 inputs__s864 outputs__s865 grid__s866 block__s875 thread__s876 . ]
-      {1}
-    )
-  )
-
-  (arr stdlib.gpu.launch.launch_unsafe
-    : (
-      [blocks__s839 width__s840 height__s841 steps__s842 inputs__s843 outputs__s844 grid__s845 block__s853 thread__s854 . ]
-      {
-        (
-          {
-            [ . grid__s845]
-            (
-              {[ . blocks__s839] ({[ . width__s840] [ . height__s841]} stdlib.gpu.geometry.sort.D2)}
-              stdlib.gpu.geometry.type.Grid
-            )
-          }
-          :
-        )
-        (
-          {
-            (
-              {
-                (
-                  {
-                    [ . block__s853]
-                    (
-                      {
-                        [ . blocks__s839]
-                        ({[ . width__s840] [ . height__s841]} stdlib.gpu.geometry.sort.D2)
-                        [ . grid__s845]
-                      }
-                      stdlib.gpu.geometry.type.Block
-                    )
-                  }
-                  :
-                )
-                (
-                  {
-                    (
-                      {
-                        [ . thread__s854]
-                        (
-                          {
-                            [ . blocks__s839]
-                            ({[ . width__s840] [ . height__s841]} stdlib.gpu.geometry.sort.D2)
-                            [ . grid__s845]
-                            [ . block__s853]
-                          }
-                          stdlib.gpu.geometry.type.Thread
-                        )
-                      }
-                      :
-                    )
-                    (
-                      {
-                        (
-                          {
-                            (
-                              (
-                                {
-                                  [ . blocks__s839]
-                                  ({[ . width__s840] [ . height__s841]} stdlib.gpu.geometry.sort.D2)
-                                  [ . grid__s845]
-                                  [ . block__s853]
-                                  [ . steps__s842]
-                                }
-                                stdlib.gpu.barriers.prop.Trace
-                              )
-                              |-
-                            )
-                            [ . block__s853]
-                            [ . thread__s854]
-                          }
-                          smolcat.family.Apply.2
-                        )
-                        (
-                          {([ . inputs__s843] |-) [ . block__s853] [ . thread__s854]}
-                          smolcat.family.Apply.2
-                        )
-                      }
-                      *
-                    )
-                  }
-                  *
-                )
-              }
-              *
-            )
-            (
-              {
-                1
-                (
-                  {
-                    (
-                      (
-                        {
-                          [ . blocks__s839]
-                          ({[ . width__s840] [ . height__s841]} stdlib.gpu.geometry.sort.D2)
-                          [ . grid__s845]
-                          [ . block__s853]
-                          list.Nil
-                        }
-                        stdlib.gpu.barriers.prop.Trace
-                      )
-                      |-
-                    )
-                    (
-                      {([ . outputs__s844] |-) [ . block__s853] [ . thread__s854]}
-                      smolcat.family.Apply.2
-                    )
-                  }
-                  *
-                )
-              }
-              *
-            )
-          }
-          =>
-        )
-      }
-    )
-    -> (
-      [blocks__s839 width__s840 height__s841 steps__s842 inputs__s843 outputs__s844 grid__s845 block__s853 thread__s854 . ]
-      {1}
-    )
+    -> ([blocks__s848 width__s849 height__s850 layout__s851 grid__s852 block__s855 . ] {1})
   )
 })

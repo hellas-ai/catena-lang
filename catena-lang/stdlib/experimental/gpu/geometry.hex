@@ -1,27 +1,27 @@
 (theory program type {
   (arr stdlib.gpu.geometry.block_index
     : (
-      [blocks__s599 threads__s600 grid__s601 block__s602 . ]
+      [blocks__s601 threads__s602 grid__s603 block__s604 . ]
       {
         (
           {
-            [ . block__s602]
-            ({[ . blocks__s599] [ . threads__s600] [ . grid__s601]} stdlib.gpu.geometry.type.Block)
+            [ . block__s604]
+            ({[ . blocks__s601] [ . threads__s602] [ . grid__s603]} stdlib.gpu.geometry.type.Block)
           }
           :
         )
       }
     )
     -> (
-      [blocks__s599 threads__s600 grid__s601 block__s602 . ]
+      [blocks__s601 threads__s602 grid__s603 block__s604 . ]
       {
         (
           {
             (
-              {[ . blocks__s599] [ . threads__s600] [ . grid__s601] [ . block__s602]}
+              {[ . blocks__s601] [ . threads__s602] [ . grid__s603] [ . block__s604]}
               stdlib.gpu.geometry.sort.BlockIndex
             )
-            ({[ . blocks__s599]} stdlib.gpu.geometry.type.Index)
+            ({[ . blocks__s601]} stdlib.gpu.geometry.type.Index)
           }
           :
         )
@@ -31,17 +31,17 @@
 
   (arr stdlib.gpu.geometry.in_block_index
     : (
-      [blocks__s584 width__s585 height__s586 grid__s587 block__s588 thread__s589 . ]
+      [blocks__s586 width__s587 height__s588 grid__s589 block__s590 thread__s591 . ]
       {
         (
           {
-            [ . thread__s589]
+            [ . thread__s591]
             (
               {
-                [ . blocks__s584]
-                ({[ . width__s585] [ . height__s586]} stdlib.gpu.geometry.sort.D2)
-                [ . grid__s587]
-                [ . block__s588]
+                [ . blocks__s586]
+                ({[ . width__s587] [ . height__s588]} stdlib.gpu.geometry.sort.D2)
+                [ . grid__s589]
+                [ . block__s590]
               }
               stdlib.gpu.geometry.type.Thread
             )
@@ -51,22 +51,22 @@
       }
     )
     -> (
-      [blocks__s584 width__s585 height__s586 grid__s587 block__s588 thread__s589 . ]
+      [blocks__s586 width__s587 height__s588 grid__s589 block__s590 thread__s591 . ]
       {
         (
           {
             (
               {
-                [ . blocks__s584]
-                ({[ . width__s585] [ . height__s586]} stdlib.gpu.geometry.sort.D2)
-                [ . grid__s587]
-                [ . block__s588]
-                [ . thread__s589]
+                [ . blocks__s586]
+                ({[ . width__s587] [ . height__s588]} stdlib.gpu.geometry.sort.D2)
+                [ . grid__s589]
+                [ . block__s590]
+                [ . thread__s591]
               }
               stdlib.gpu.geometry.sort.InBlock
             )
             (
-              {({[ . width__s585] [ . height__s586]} stdlib.gpu.geometry.sort.D2)}
+              {({[ . width__s587] [ . height__s588]} stdlib.gpu.geometry.sort.D2)}
               stdlib.gpu.geometry.type.Index
             )
           }
@@ -77,21 +77,21 @@
             {
               (
                 {
-                  ({[ . width__s585] [ . height__s586]} stdlib.gpu.geometry.sort.D2)
+                  ({[ . width__s587] [ . height__s588]} stdlib.gpu.geometry.sort.D2)
                   (
                     {
-                      [ . blocks__s584]
-                      ({[ . width__s585] [ . height__s586]} stdlib.gpu.geometry.sort.D2)
-                      [ . grid__s587]
-                      [ . block__s588]
-                      [ . thread__s589]
+                      [ . blocks__s586]
+                      ({[ . width__s587] [ . height__s588]} stdlib.gpu.geometry.sort.D2)
+                      [ . grid__s589]
+                      [ . block__s590]
+                      [ . thread__s591]
                     }
                     stdlib.gpu.geometry.sort.InBlock
                   )
                 }
                 stdlib.gpu.geometry.sort.Y
               )
-              [ . height__s586]
+              [ . height__s588]
             }
             prop.Less
           )
@@ -102,21 +102,21 @@
             {
               (
                 {
-                  ({[ . width__s585] [ . height__s586]} stdlib.gpu.geometry.sort.D2)
+                  ({[ . width__s587] [ . height__s588]} stdlib.gpu.geometry.sort.D2)
                   (
                     {
-                      [ . blocks__s584]
-                      ({[ . width__s585] [ . height__s586]} stdlib.gpu.geometry.sort.D2)
-                      [ . grid__s587]
-                      [ . block__s588]
-                      [ . thread__s589]
+                      [ . blocks__s586]
+                      ({[ . width__s587] [ . height__s588]} stdlib.gpu.geometry.sort.D2)
+                      [ . grid__s589]
+                      [ . block__s590]
+                      [ . thread__s591]
                     }
                     stdlib.gpu.geometry.sort.InBlock
                   )
                 }
                 stdlib.gpu.geometry.sort.X
               )
-              [ . width__s585]
+              [ . width__s587]
             }
             prop.Less
           )
@@ -128,13 +128,13 @@
 
   (arr stdlib.gpu.geometry.in_grid_index
     : (
-      [blocks__s593 threads__s594 grid__s595 block__s596 thread__s597 . ]
+      [blocks__s595 threads__s596 grid__s597 block__s598 thread__s599 . ]
       {
         (
           {
-            [ . thread__s597]
+            [ . thread__s599]
             (
-              {[ . blocks__s593] [ . threads__s594] [ . grid__s595] [ . block__s596]}
+              {[ . blocks__s595] [ . threads__s596] [ . grid__s597] [ . block__s598]}
               stdlib.gpu.geometry.type.Thread
             )
           }
@@ -143,22 +143,22 @@
       }
     )
     -> (
-      [blocks__s593 threads__s594 grid__s595 block__s596 thread__s597 . ]
+      [blocks__s595 threads__s596 grid__s597 block__s598 thread__s599 . ]
       {
         (
           {
             (
               {
-                [ . blocks__s593]
-                [ . threads__s594]
-                [ . grid__s595]
-                [ . block__s596]
-                [ . thread__s597]
+                [ . blocks__s595]
+                [ . threads__s596]
+                [ . grid__s597]
+                [ . block__s598]
+                [ . thread__s599]
               }
               stdlib.gpu.geometry.sort.InGrid
             )
             (
-              {({[ . blocks__s593] [ . threads__s594]} stdlib.gpu.geometry.sort.GridExtent)}
+              {({[ . blocks__s595] [ . threads__s596]} stdlib.gpu.geometry.sort.GridExtent)}
               stdlib.gpu.geometry.type.Index
             )
           }
@@ -170,24 +170,24 @@
 
   (arr stdlib.gpu.geometry.make_grid
     : (
-      [blocks_x__s616 blocks_y__s617 threads_x__s618 threads_y__s619 grid__s620 . ]
+      [blocks_x__s618 blocks_y__s619 threads_x__s620 threads_y__s621 grid__s622 . ]
       {
-        ({[ . blocks_x__s616] u32} :)
-        ({[ . blocks_y__s617] u32} :)
-        ({[ . threads_x__s618] u32} :)
-        ({[ . threads_y__s619] u32} :)
+        ({[ . blocks_x__s618] u32} :)
+        ({[ . blocks_y__s619] u32} :)
+        ({[ . threads_x__s620] u32} :)
+        ({[ . threads_y__s621] u32} :)
       }
     )
     -> (
-      [blocks_x__s616 blocks_y__s617 threads_x__s618 threads_y__s619 grid__s620 . ]
+      [blocks_x__s618 blocks_y__s619 threads_x__s620 threads_y__s621 grid__s622 . ]
       {
         (
           {
-            [ . grid__s620]
+            [ . grid__s622]
             (
               {
-                ({[ . blocks_x__s616] [ . blocks_y__s617]} stdlib.gpu.geometry.sort.D2)
-                ({[ . threads_x__s618] [ . threads_y__s619]} stdlib.gpu.geometry.sort.D2)
+                ({[ . blocks_x__s618] [ . blocks_y__s619]} stdlib.gpu.geometry.sort.D2)
+                ({[ . threads_x__s620] [ . threads_y__s621]} stdlib.gpu.geometry.sort.D2)
               }
               stdlib.gpu.geometry.type.Grid
             )
@@ -197,9 +197,9 @@
         (
           (
             {
-              ({[ . blocks_x__s616] [ . blocks_y__s617]} stdlib.gpu.geometry.sort.D2)
-              ({[ . threads_x__s618] [ . threads_y__s619]} stdlib.gpu.geometry.sort.D2)
-              [ . grid__s620]
+              ({[ . blocks_x__s618] [ . blocks_y__s619]} stdlib.gpu.geometry.sort.D2)
+              ({[ . threads_x__s620] [ . threads_y__s621]} stdlib.gpu.geometry.sort.D2)
+              [ . grid__s622]
             }
             stdlib.gpu.geometry.prop.LaunchBounds
           )
@@ -211,39 +211,39 @@
 
   (arr stdlib.gpu.geometry.row_major
     : (
-      [row__s622 column__s623 rows__s624 columns__s625 . ]
+      [row__s624 column__s625 rows__s626 columns__s627 . ]
       {
-        ({[ . row__s622] u32} :)
-        ({[ . column__s623] u32} :)
-        ({[ . rows__s624] u32} :)
-        ({[ . columns__s625] u32} :)
-        (({[ . row__s622] [ . rows__s624]} prop.Less) |-)
-        (({[ . column__s623] [ . columns__s625]} prop.Less) |-)
+        ({[ . row__s624] u32} :)
+        ({[ . column__s625] u32} :)
+        ({[ . rows__s626] u32} :)
+        ({[ . columns__s627] u32} :)
+        (({[ . row__s624] [ . rows__s626]} prop.Less) |-)
+        (({[ . column__s625] [ . columns__s627]} prop.Less) |-)
       }
     )
     -> (
-      [row__s622 column__s623 rows__s624 columns__s625 . ]
+      [row__s624 column__s625 rows__s626 columns__s627 . ]
       {
         (
           {
             (
-              {({[ . row__s622] [ . columns__s625]} type.stdlib.numeric.*) [ . column__s623]}
+              {({[ . row__s624] [ . columns__s627]} type.stdlib.numeric.*) [ . column__s625]}
               type.stdlib.numeric.+
             )
             u32
           }
           :
         )
-        (({[ . row__s622] [ . rows__s624]} prop.Less) |-)
-        (({[ . column__s623] [ . columns__s625]} prop.Less) |-)
+        (({[ . row__s624] [ . rows__s626]} prop.Less) |-)
+        (({[ . column__s625] [ . columns__s627]} prop.Less) |-)
         (
           (
             {
               (
-                {({[ . row__s622] [ . columns__s625]} type.stdlib.numeric.*) [ . column__s623]}
+                {({[ . row__s624] [ . columns__s627]} type.stdlib.numeric.*) [ . column__s625]}
                 type.stdlib.numeric.+
               )
-              ({[ . rows__s624] [ . columns__s625]} type.stdlib.numeric.*)
+              ({[ . rows__s626] [ . columns__s627]} type.stdlib.numeric.*)
             }
             prop.Less
           )
@@ -255,34 +255,34 @@
 
   (arr stdlib.gpu.geometry.x
     : (
-      [shape__s604 index__s605 . ]
-      {({[ . index__s605] ({[ . shape__s604]} stdlib.gpu.geometry.type.Index)} :)}
+      [shape__s606 index__s607 . ]
+      {({[ . index__s607] ({[ . shape__s606]} stdlib.gpu.geometry.type.Index)} :)}
     )
     -> (
-      [shape__s604 index__s605 . ]
-      {({({[ . shape__s604] [ . index__s605]} stdlib.gpu.geometry.sort.X) u32} :)}
+      [shape__s606 index__s607 . ]
+      {({({[ . shape__s606] [ . index__s607]} stdlib.gpu.geometry.sort.X) u32} :)}
     )
   )
 
   (arr stdlib.gpu.geometry.y
     : (
-      [shape__s607 index__s608 . ]
-      {({[ . index__s608] ({[ . shape__s607]} stdlib.gpu.geometry.type.Index)} :)}
+      [shape__s609 index__s610 . ]
+      {({[ . index__s610] ({[ . shape__s609]} stdlib.gpu.geometry.type.Index)} :)}
     )
     -> (
-      [shape__s607 index__s608 . ]
-      {({({[ . shape__s607] [ . index__s608]} stdlib.gpu.geometry.sort.Y) u32} :)}
+      [shape__s609 index__s610 . ]
+      {({({[ . shape__s609] [ . index__s610]} stdlib.gpu.geometry.sort.Y) u32} :)}
     )
   )
 
   (arr stdlib.gpu.geometry.z
     : (
-      [shape__s610 index__s611 . ]
-      {({[ . index__s611] ({[ . shape__s610]} stdlib.gpu.geometry.type.Index)} :)}
+      [shape__s612 index__s613 . ]
+      {({[ . index__s613] ({[ . shape__s612]} stdlib.gpu.geometry.type.Index)} :)}
     )
     -> (
-      [shape__s610 index__s611 . ]
-      {({({[ . shape__s610] [ . index__s611]} stdlib.gpu.geometry.sort.Z) u32} :)}
+      [shape__s612 index__s613 . ]
+      {({({[ . shape__s612] [ . index__s613]} stdlib.gpu.geometry.sort.Z) u32} :)}
     )
   )
 })

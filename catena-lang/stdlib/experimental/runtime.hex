@@ -1,323 +1,122 @@
 (theory program type {
-  (arr runtime.global_f32_to_mem
-    : (
-      [count__s1052 memory__s1053 . ]
-      {
-        ({[ . memory__s1053] ({[ . count__s1052] f32} stdlib.gpu.memory.type.Global)} :)
-        (({[ . count__s1052] f32 [ . memory__s1053]} stdlib.runtime.prop.Allocation) |-)
-      }
-    )
-    -> ([count__s1052 memory__s1053 . ] {(({cap.own} mem) val)})
-  )
-
-  (arr runtime.global_own_f32
-    : ([count__s1048 global__s1049 . ] {(({cap.own} mem) val) ({[ . count__s1048] u32} :)})
-    -> (
-      [count__s1048 global__s1049 . ]
-      {
-        ({[ . global__s1049] ({[ . count__s1048] f32} stdlib.gpu.memory.type.Global)} :)
-        (({[ . count__s1048] f32 [ . global__s1049]} stdlib.runtime.prop.Allocation) |-)
-        (
-          (
-            {({[ . count__s1048] f32} stdlib.gpu.memory.type.Global) [ . global__s1049]}
-            stdlib.gpu.memory.prop.Available
-          )
-          |-
-        )
-      }
-    )
-  )
-
-  (arr runtime.global_own_u32
-    : ([count__s1024 global__s1025 . ] {(({cap.own} mem) val) ({[ . count__s1024] u32} :)})
-    -> (
-      [count__s1024 global__s1025 . ]
-      {
-        ({[ . global__s1025] ({[ . count__s1024] u32} stdlib.gpu.memory.type.Global)} :)
-        (({[ . count__s1024] u32 [ . global__s1025]} stdlib.runtime.prop.Allocation) |-)
-        (
-          (
-            {({[ . count__s1024] u32} stdlib.gpu.memory.type.Global) [ . global__s1025]}
-            stdlib.gpu.memory.prop.Available
-          )
-          |-
-        )
-      }
-    )
-  )
-
-  (arr runtime.global_own_u64
-    : ([count__s1036 global__s1037 . ] {(({cap.own} mem) val) ({[ . count__s1036] u32} :)})
-    -> (
-      [count__s1036 global__s1037 . ]
-      {
-        ({[ . global__s1037] ({[ . count__s1036] u64} stdlib.gpu.memory.type.Global)} :)
-        (({[ . count__s1036] u64 [ . global__s1037]} stdlib.runtime.prop.Allocation) |-)
-        (
-          (
-            {({[ . count__s1036] u64} stdlib.gpu.memory.type.Global) [ . global__s1037]}
-            stdlib.gpu.memory.prop.Available
-          )
-          |-
-        )
-      }
-    )
-  )
-
-  (arr runtime.global_ref_f32
-    : ([count__s1044 global__s1045 . ] {(({cap.ref} mem) val) ({[ . count__s1044] u32} :)})
-    -> (
-      [count__s1044 global__s1045 . ]
-      {
-        ({[ . global__s1045] ({[ . count__s1044] f32} stdlib.gpu.memory.type.Global)} :)
-        (({[ . count__s1044] f32 [ . global__s1045]} stdlib.runtime.prop.Readable) |-)
-      }
-    )
-  )
-
-  (arr runtime.global_ref_u32
-    : ([count__s1020 global__s1021 . ] {(({cap.ref} mem) val) ({[ . count__s1020] u32} :)})
-    -> (
-      [count__s1020 global__s1021 . ]
-      {
-        ({[ . global__s1021] ({[ . count__s1020] u32} stdlib.gpu.memory.type.Global)} :)
-        (({[ . count__s1020] u32 [ . global__s1021]} stdlib.runtime.prop.Readable) |-)
-      }
-    )
-  )
-
-  (arr runtime.global_ref_u64
-    : ([count__s1032 global__s1033 . ] {(({cap.ref} mem) val) ({[ . count__s1032] u32} :)})
-    -> (
-      [count__s1032 global__s1033 . ]
-      {
-        ({[ . global__s1033] ({[ . count__s1032] u64} stdlib.gpu.memory.type.Global)} :)
-        (({[ . count__s1032] u64 [ . global__s1033]} stdlib.runtime.prop.Readable) |-)
-      }
-    )
-  )
-
-  (arr runtime.global_u32_to_mem
+  (arr stdlib.runtime.global_f32_to_mem
     : (
       [count__s1028 memory__s1029 . ]
       {
-        ({[ . memory__s1029] ({[ . count__s1028] u32} stdlib.gpu.memory.type.Global)} :)
-        (({[ . count__s1028] u32 [ . memory__s1029]} stdlib.runtime.prop.Allocation) |-)
+        ({[ . memory__s1029] ({[ . count__s1028] f32} stdlib.gpu.memory.type.Global)} :)
+        (({[ . count__s1028] f32 [ . memory__s1029]} stdlib.runtime.prop.Allocation) |-)
       }
     )
     -> ([count__s1028 memory__s1029 . ] {(({cap.own} mem) val)})
   )
 
-  (arr runtime.global_u64_to_mem
-    : (
-      [count__s1040 memory__s1041 . ]
-      {
-        ({[ . memory__s1041] ({[ . count__s1040] u64} stdlib.gpu.memory.type.Global)} :)
-        (({[ . count__s1040] u64 [ . memory__s1041]} stdlib.runtime.prop.Allocation) |-)
-      }
-    )
-    -> ([count__s1040 memory__s1041 . ] {(({cap.own} mem) val)})
-  )
-
-  (def stdlib.runtime.global_f32_to_mem
-    : (
-      [count__s1052 memory__s1053 . ]
-      {
-        ({[ . memory__s1053] ({[ . count__s1052] f32} stdlib.gpu.memory.type.Global)} :)
-        (({[ . count__s1052] f32 [ . memory__s1053]} stdlib.runtime.prop.Allocation) |-)
-      }
-    )
-    -> ([count__s1052 memory__s1053 . ] {(({cap.own} mem) val)})
-    = {
-      [memory__input0__v0 allocation__input1__v1 . ]
-      (
-        [ . memory__input0__v0 allocation__input1__v1]
-        ({{_} {_}} runtime.global_f32_to_mem)
-        [output0__v2 . ]
-      )
-      [ . output0__v2]
-    }
-  )
-
-  (def stdlib.runtime.global_own_f32
-    : ([count__s1048 global__s1049 . ] {(({cap.own} mem) val) ({[ . count__s1048] u32} :)})
-    -> (
-      [count__s1048 global__s1049 . ]
-      {
-        ({[ . global__s1049] ({[ . count__s1048] f32} stdlib.gpu.memory.type.Global)} :)
-        (({[ . count__s1048] f32 [ . global__s1049]} stdlib.runtime.prop.Allocation) |-)
-        (
-          (
-            {({[ . count__s1048] f32} stdlib.gpu.memory.type.Global) [ . global__s1049]}
-            stdlib.gpu.memory.prop.Available
-          )
-          |-
-        )
-      }
-    )
-    = {
-      [source__input0__v0 count__input1__v1 . ]
-      (
-        [ . source__input0__v0 count__input1__v1]
-        ({{_} {_}} runtime.global_own_f32)
-        [global__output0__v2 allocation__output1__v3 available__output2__v4 . ]
-      )
-      [ . global__output0__v2 allocation__output1__v3 available__output2__v4]
-    }
-  )
-
-  (def stdlib.runtime.global_own_u32
+  (arr stdlib.runtime.global_own_f32
     : ([count__s1024 global__s1025 . ] {(({cap.own} mem) val) ({[ . count__s1024] u32} :)})
     -> (
       [count__s1024 global__s1025 . ]
       {
-        ({[ . global__s1025] ({[ . count__s1024] u32} stdlib.gpu.memory.type.Global)} :)
-        (({[ . count__s1024] u32 [ . global__s1025]} stdlib.runtime.prop.Allocation) |-)
+        ({[ . global__s1025] ({[ . count__s1024] f32} stdlib.gpu.memory.type.Global)} :)
+        (({[ . count__s1024] f32 [ . global__s1025]} stdlib.runtime.prop.Allocation) |-)
         (
           (
-            {({[ . count__s1024] u32} stdlib.gpu.memory.type.Global) [ . global__s1025]}
+            {({[ . count__s1024] f32} stdlib.gpu.memory.type.Global) [ . global__s1025]}
             stdlib.gpu.memory.prop.Available
           )
           |-
         )
       }
     )
-    = {
-      [source__input0__v0 count__input1__v1 . ]
-      (
-        [ . source__input0__v0 count__input1__v1]
-        ({{_} {_}} runtime.global_own_u32)
-        [global__output0__v2 allocation__output1__v3 available__output2__v4 . ]
-      )
-      [ . global__output0__v2 allocation__output1__v3 available__output2__v4]
-    }
   )
 
-  (def stdlib.runtime.global_own_u64
-    : ([count__s1036 global__s1037 . ] {(({cap.own} mem) val) ({[ . count__s1036] u32} :)})
+  (arr stdlib.runtime.global_own_u32
+    : ([count__s1000 global__s1001 . ] {(({cap.own} mem) val) ({[ . count__s1000] u32} :)})
     -> (
-      [count__s1036 global__s1037 . ]
+      [count__s1000 global__s1001 . ]
       {
-        ({[ . global__s1037] ({[ . count__s1036] u64} stdlib.gpu.memory.type.Global)} :)
-        (({[ . count__s1036] u64 [ . global__s1037]} stdlib.runtime.prop.Allocation) |-)
+        ({[ . global__s1001] ({[ . count__s1000] u32} stdlib.gpu.memory.type.Global)} :)
+        (({[ . count__s1000] u32 [ . global__s1001]} stdlib.runtime.prop.Allocation) |-)
         (
           (
-            {({[ . count__s1036] u64} stdlib.gpu.memory.type.Global) [ . global__s1037]}
+            {({[ . count__s1000] u32} stdlib.gpu.memory.type.Global) [ . global__s1001]}
             stdlib.gpu.memory.prop.Available
           )
           |-
         )
       }
     )
-    = {
-      [source__input0__v0 count__input1__v1 . ]
-      (
-        [ . source__input0__v0 count__input1__v1]
-        ({{_} {_}} runtime.global_own_u64)
-        [global__output0__v2 allocation__output1__v3 available__output2__v4 . ]
-      )
-      [ . global__output0__v2 allocation__output1__v3 available__output2__v4]
-    }
   )
 
-  (def stdlib.runtime.global_ref_f32
-    : ([count__s1044 global__s1045 . ] {(({cap.ref} mem) val) ({[ . count__s1044] u32} :)})
+  (arr stdlib.runtime.global_own_u64
+    : ([count__s1012 global__s1013 . ] {(({cap.own} mem) val) ({[ . count__s1012] u32} :)})
     -> (
-      [count__s1044 global__s1045 . ]
+      [count__s1012 global__s1013 . ]
       {
-        ({[ . global__s1045] ({[ . count__s1044] f32} stdlib.gpu.memory.type.Global)} :)
-        (({[ . count__s1044] f32 [ . global__s1045]} stdlib.runtime.prop.Readable) |-)
+        ({[ . global__s1013] ({[ . count__s1012] u64} stdlib.gpu.memory.type.Global)} :)
+        (({[ . count__s1012] u64 [ . global__s1013]} stdlib.runtime.prop.Allocation) |-)
+        (
+          (
+            {({[ . count__s1012] u64} stdlib.gpu.memory.type.Global) [ . global__s1013]}
+            stdlib.gpu.memory.prop.Available
+          )
+          |-
+        )
       }
     )
-    = {
-      [source__input0__v0 count__input1__v1 . ]
-      (
-        [ . source__input0__v0 count__input1__v1]
-        ({{_} {_}} runtime.global_ref_f32)
-        [global__output0__v2 readable__output1__v3 . ]
-      )
-      [ . global__output0__v2 readable__output1__v3]
-    }
   )
 
-  (def stdlib.runtime.global_ref_u32
+  (arr stdlib.runtime.global_ref_f32
     : ([count__s1020 global__s1021 . ] {(({cap.ref} mem) val) ({[ . count__s1020] u32} :)})
     -> (
       [count__s1020 global__s1021 . ]
       {
-        ({[ . global__s1021] ({[ . count__s1020] u32} stdlib.gpu.memory.type.Global)} :)
-        (({[ . count__s1020] u32 [ . global__s1021]} stdlib.runtime.prop.Readable) |-)
+        ({[ . global__s1021] ({[ . count__s1020] f32} stdlib.gpu.memory.type.Global)} :)
+        (({[ . count__s1020] f32 [ . global__s1021]} stdlib.runtime.prop.Readable) |-)
       }
     )
-    = {
-      [source__input0__v0 count__input1__v1 . ]
-      (
-        [ . source__input0__v0 count__input1__v1]
-        ({{_} {_}} runtime.global_ref_u32)
-        [global__output0__v2 readable__output1__v3 . ]
-      )
-      [ . global__output0__v2 readable__output1__v3]
-    }
   )
 
-  (def stdlib.runtime.global_ref_u64
-    : ([count__s1032 global__s1033 . ] {(({cap.ref} mem) val) ({[ . count__s1032] u32} :)})
+  (arr stdlib.runtime.global_ref_u32
+    : ([count__s996 global__s997 . ] {(({cap.ref} mem) val) ({[ . count__s996] u32} :)})
     -> (
-      [count__s1032 global__s1033 . ]
+      [count__s996 global__s997 . ]
       {
-        ({[ . global__s1033] ({[ . count__s1032] u64} stdlib.gpu.memory.type.Global)} :)
-        (({[ . count__s1032] u64 [ . global__s1033]} stdlib.runtime.prop.Readable) |-)
+        ({[ . global__s997] ({[ . count__s996] u32} stdlib.gpu.memory.type.Global)} :)
+        (({[ . count__s996] u32 [ . global__s997]} stdlib.runtime.prop.Readable) |-)
       }
     )
-    = {
-      [source__input0__v0 count__input1__v1 . ]
-      (
-        [ . source__input0__v0 count__input1__v1]
-        ({{_} {_}} runtime.global_ref_u64)
-        [global__output0__v2 readable__output1__v3 . ]
-      )
-      [ . global__output0__v2 readable__output1__v3]
-    }
   )
 
-  (def stdlib.runtime.global_u32_to_mem
-    : (
-      [count__s1028 memory__s1029 . ]
+  (arr stdlib.runtime.global_ref_u64
+    : ([count__s1008 global__s1009 . ] {(({cap.ref} mem) val) ({[ . count__s1008] u32} :)})
+    -> (
+      [count__s1008 global__s1009 . ]
       {
-        ({[ . memory__s1029] ({[ . count__s1028] u32} stdlib.gpu.memory.type.Global)} :)
-        (({[ . count__s1028] u32 [ . memory__s1029]} stdlib.runtime.prop.Allocation) |-)
+        ({[ . global__s1009] ({[ . count__s1008] u64} stdlib.gpu.memory.type.Global)} :)
+        (({[ . count__s1008] u64 [ . global__s1009]} stdlib.runtime.prop.Readable) |-)
       }
     )
-    -> ([count__s1028 memory__s1029 . ] {(({cap.own} mem) val)})
-    = {
-      [memory__input0__v0 allocation__input1__v1 . ]
-      (
-        [ . memory__input0__v0 allocation__input1__v1]
-        ({{_} {_}} runtime.global_u32_to_mem)
-        [output0__v2 . ]
-      )
-      [ . output0__v2]
-    }
   )
 
-  (def stdlib.runtime.global_u64_to_mem
+  (arr stdlib.runtime.global_u32_to_mem
     : (
-      [count__s1040 memory__s1041 . ]
+      [count__s1004 memory__s1005 . ]
       {
-        ({[ . memory__s1041] ({[ . count__s1040] u64} stdlib.gpu.memory.type.Global)} :)
-        (({[ . count__s1040] u64 [ . memory__s1041]} stdlib.runtime.prop.Allocation) |-)
+        ({[ . memory__s1005] ({[ . count__s1004] u32} stdlib.gpu.memory.type.Global)} :)
+        (({[ . count__s1004] u32 [ . memory__s1005]} stdlib.runtime.prop.Allocation) |-)
       }
     )
-    -> ([count__s1040 memory__s1041 . ] {(({cap.own} mem) val)})
-    = {
-      [memory__input0__v0 allocation__input1__v1 . ]
-      (
-        [ . memory__input0__v0 allocation__input1__v1]
-        ({{_} {_}} runtime.global_u64_to_mem)
-        [output0__v2 . ]
-      )
-      [ . output0__v2]
-    }
+    -> ([count__s1004 memory__s1005 . ] {(({cap.own} mem) val)})
+  )
+
+  (arr stdlib.runtime.global_u64_to_mem
+    : (
+      [count__s1016 memory__s1017 . ]
+      {
+        ({[ . memory__s1017] ({[ . count__s1016] u64} stdlib.gpu.memory.type.Global)} :)
+        (({[ . count__s1016] u64 [ . memory__s1017]} stdlib.runtime.prop.Allocation) |-)
+      }
+    )
+    -> ([count__s1016 memory__s1017 . ] {(({cap.own} mem) val)})
   )
 })
 

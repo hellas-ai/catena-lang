@@ -1,16 +1,16 @@
 (theory program type {
   (arr stdlib.gpu.memory.add_shared_slot
     : (
-      [index__s825 element__s826 rest__s827 count__s830 . ]
+      [index__s827 element__s828 rest__s829 count__s832 . ]
       {
-        (({[ . index__s825]} stdlib.gpu.memory.type.SlotName) val)
-        ({({[ . element__s826]} stdlib.numeric.sort.size_of) u32} :)
-        ({[ . count__s830] u32} :)
-        (({[ . rest__s827]} stdlib.gpu.memory.type.SharedLayout) val)
+        (({[ . index__s827]} stdlib.gpu.memory.type.SlotName) val)
+        ({({[ . element__s828]} stdlib.numeric.sort.size_of) u32} :)
+        ({[ . count__s832] u32} :)
+        (({[ . rest__s829]} stdlib.gpu.memory.type.SharedLayout) val)
       }
     )
     -> (
-      [index__s825 element__s826 rest__s827 count__s830 . ]
+      [index__s827 element__s828 rest__s829 count__s832 . ]
       {
         (
           (
@@ -19,13 +19,13 @@
                 {
                   (
                     {
-                      ({[ . index__s825]} stdlib.gpu.memory.type.SlotName)
-                      [ . count__s830]
-                      [ . element__s826]
+                      ({[ . index__s827]} stdlib.gpu.memory.type.SlotName)
+                      [ . count__s832]
+                      [ . element__s828]
                     }
                     stdlib.gpu.memory.sort.Slot
                   )
-                  [ . rest__s827]
+                  [ . rest__s829]
                 }
                 list.Cons
               )
@@ -45,34 +45,34 @@
 
   (arr stdlib.gpu.memory.global_read
     : (
-      [element__s768 blocks__s769 threads__s770 grid__s771 block__s772 count__s773 thread__s774 memory__s775 . ]
+      [element__s770 blocks__s771 threads__s772 grid__s773 block__s774 count__s775 thread__s776 memory__s777 . ]
       {
         (
           {
-            [ . thread__s774]
+            [ . thread__s776]
             (
-              {[ . blocks__s769] [ . threads__s770] [ . grid__s771] [ . block__s772]}
+              {[ . blocks__s771] [ . threads__s772] [ . grid__s773] [ . block__s774]}
               stdlib.gpu.geometry.type.Thread
             )
           }
           :
         )
         (
-          {[ . memory__s775] ({[ . count__s773] [ . element__s768]} stdlib.gpu.memory.type.Global)}
+          {[ . memory__s777] ({[ . count__s775] [ . element__s770]} stdlib.gpu.memory.type.Global)}
           :
         )
-        (({[ . count__s773]} stdlib.gpu.memory.type.Ix) val)
+        (({[ . count__s775]} stdlib.gpu.memory.type.Ix) val)
         (
           (
             {
-              [ . blocks__s769]
-              [ . threads__s770]
-              [ . grid__s771]
-              [ . block__s772]
-              [ . count__s773]
-              [ . element__s768]
-              [ . thread__s774]
-              [ . memory__s775]
+              [ . blocks__s771]
+              [ . threads__s772]
+              [ . grid__s773]
+              [ . block__s774]
+              [ . count__s775]
+              [ . element__s770]
+              [ . thread__s776]
+              [ . memory__s777]
               stdlib.gpu.memory.sort.All
             }
             stdlib.gpu.memory.prop.GlobalRead
@@ -82,20 +82,20 @@
       }
     )
     -> (
-      [element__s768 blocks__s769 threads__s770 grid__s771 block__s772 count__s773 thread__s774 memory__s775 . ]
+      [element__s770 blocks__s771 threads__s772 grid__s773 block__s774 count__s775 thread__s776 memory__s777 . ]
       {
-        ([ . element__s768] val)
+        ([ . element__s770] val)
         (
           (
             {
-              [ . blocks__s769]
-              [ . threads__s770]
-              [ . grid__s771]
-              [ . block__s772]
-              [ . count__s773]
-              [ . element__s768]
-              [ . thread__s774]
-              [ . memory__s775]
+              [ . blocks__s771]
+              [ . threads__s772]
+              [ . grid__s773]
+              [ . block__s774]
+              [ . count__s775]
+              [ . element__s770]
+              [ . thread__s776]
+              [ . memory__s777]
               stdlib.gpu.memory.sort.All
             }
             stdlib.gpu.memory.prop.GlobalRead
@@ -108,26 +108,26 @@
 
   (arr stdlib.gpu.memory.global_write
     : (
-      [element__s810 blocks__s811 threads__s812 grid__s813 block__s814 thread__s815 count__s816 memory__s817 index__s818 . ]
+      [element__s812 blocks__s813 threads__s814 grid__s815 block__s816 thread__s817 count__s818 memory__s819 index__s820 . ]
       {
         (
-          {[ . memory__s817] ({[ . count__s816] [ . element__s810]} stdlib.gpu.memory.type.Global)}
+          {[ . memory__s819] ({[ . count__s818] [ . element__s812]} stdlib.gpu.memory.type.Global)}
           :
         )
-        ({[ . index__s818] ({[ . count__s816]} stdlib.gpu.memory.type.Ix)} :)
-        ([ . element__s810] val)
+        ({[ . index__s820] ({[ . count__s818]} stdlib.gpu.memory.type.Ix)} :)
+        ([ . element__s812] val)
         (
           (
             {
-              [ . blocks__s811]
-              [ . threads__s812]
-              [ . grid__s813]
-              [ . block__s814]
-              [ . count__s816]
-              [ . element__s810]
-              [ . thread__s815]
-              [ . memory__s817]
-              [ . index__s818]
+              [ . blocks__s813]
+              [ . threads__s814]
+              [ . grid__s815]
+              [ . block__s816]
+              [ . count__s818]
+              [ . element__s812]
+              [ . thread__s817]
+              [ . memory__s819]
+              [ . index__s820]
             }
             stdlib.gpu.memory.prop.GlobalOwn
           )
@@ -136,23 +136,23 @@
       }
     )
     -> (
-      [element__s810 blocks__s811 threads__s812 grid__s813 block__s814 thread__s815 count__s816 memory__s817 index__s818 . ]
+      [element__s812 blocks__s813 threads__s814 grid__s815 block__s816 thread__s817 count__s818 memory__s819 index__s820 . ]
       {1}
     )
   )
 
   (arr stdlib.gpu.memory.ix
     : (
-      [count__s764 x__s765 . ]
-      {({[ . x__s765] u32} :) (({[ . x__s765] [ . count__s764]} prop.Less) |-)}
+      [count__s766 x__s767 . ]
+      {({[ . x__s767] u32} :) (({[ . x__s767] [ . count__s766]} prop.Less) |-)}
     )
     -> (
-      [count__s764 x__s765 . ]
+      [count__s766 x__s767 . ]
       {
         (
           {
-            ({[ . count__s764] [ . x__s765]} stdlib.gpu.memory.sort.At)
-            ({[ . count__s764]} stdlib.gpu.memory.type.Ix)
+            ({[ . count__s766] [ . x__s767]} stdlib.gpu.memory.sort.At)
+            ({[ . count__s766]} stdlib.gpu.memory.type.Ix)
           }
           :
         )
@@ -162,20 +162,20 @@
 
   (arr stdlib.gpu.memory.reserve_shared
     : (
-      [blocks__s832 threads__s833 layout__s834 grid__s835 shared_memory__s837 . ]
+      [blocks__s834 threads__s835 layout__s836 grid__s837 shared_memory__s839 . ]
       {
-        ({[ . grid__s835] ({[ . blocks__s832] [ . threads__s833]} stdlib.gpu.geometry.type.Grid)} :)
-        (({[ . layout__s834]} stdlib.gpu.memory.type.SharedLayout) val)
+        ({[ . grid__s837] ({[ . blocks__s834] [ . threads__s835]} stdlib.gpu.geometry.type.Grid)} :)
+        (({[ . layout__s836]} stdlib.gpu.memory.type.SharedLayout) val)
       }
     )
     -> (
-      [blocks__s832 threads__s833 layout__s834 grid__s835 shared_memory__s837 . ]
+      [blocks__s834 threads__s835 layout__s836 grid__s837 shared_memory__s839 . ]
       {
         (
           {
-            [ . shared_memory__s837]
+            [ . shared_memory__s839]
             (
-              {[ . blocks__s832] [ . threads__s833] [ . grid__s835] [ . layout__s834]}
+              {[ . blocks__s834] [ . threads__s835] [ . grid__s837] [ . layout__s836]}
               stdlib.gpu.memory.type.SharedMemory
             )
           }
@@ -185,10 +185,10 @@
           (
             {
               (
-                {[ . blocks__s832] [ . threads__s833] [ . grid__s835] [ . layout__s834]}
+                {[ . blocks__s834] [ . threads__s835] [ . grid__s837] [ . layout__s836]}
                 stdlib.gpu.memory.type.SharedMemory
               )
-              [ . shared_memory__s837]
+              [ . shared_memory__s839]
             }
             stdlib.gpu.memory.prop.Available
           )
@@ -200,37 +200,37 @@
 
   (arr stdlib.gpu.memory.shared_read
     : (
-      [phase__s795 element__s796 blocks__s797 threads__s798 grid__s799 layout__s800 count__s801 memory__s802 block__s803 slot__s804 thread__s805 . ]
+      [phase__s797 element__s798 blocks__s799 threads__s800 grid__s801 layout__s802 count__s803 memory__s804 block__s805 slot__s806 thread__s807 . ]
       {
         (
           (
             {
-              [ . blocks__s797]
-              [ . threads__s798]
-              [ . grid__s799]
-              [ . layout__s800]
-              [ . memory__s802]
-              [ . block__s803]
-              [ . slot__s804]
-              [ . count__s801]
-              [ . element__s796]
+              [ . blocks__s799]
+              [ . threads__s800]
+              [ . grid__s801]
+              [ . layout__s802]
+              [ . memory__s804]
+              [ . block__s805]
+              [ . slot__s806]
+              [ . count__s803]
+              [ . element__s798]
             }
             stdlib.gpu.memory.type.Shared
           )
           val
         )
-        (({[ . count__s801]} stdlib.gpu.memory.type.Ix) val)
+        (({[ . count__s803]} stdlib.gpu.memory.type.Ix) val)
         (
           (
             {
-              [ . blocks__s797]
-              [ . threads__s798]
-              [ . grid__s799]
-              [ . block__s803]
-              [ . layout__s800]
-              [ . phase__s795]
-              [ . thread__s805]
-              [ . memory__s802]
+              [ . blocks__s799]
+              [ . threads__s800]
+              [ . grid__s801]
+              [ . block__s805]
+              [ . layout__s802]
+              [ . phase__s797]
+              [ . thread__s807]
+              [ . memory__s804]
               stdlib.gpu.memory.sort.All
             }
             stdlib.gpu.memory.prop.SharedRead
@@ -240,13 +240,13 @@
         (
           (
             {
-              [ . blocks__s797]
-              [ . threads__s798]
-              [ . grid__s799]
-              [ . layout__s800]
-              [ . memory__s802]
-              [ . block__s803]
-              [ . slot__s804]
+              [ . blocks__s799]
+              [ . threads__s800]
+              [ . grid__s801]
+              [ . layout__s802]
+              [ . memory__s804]
+              [ . block__s805]
+              [ . slot__s806]
               stdlib.gpu.memory.sort.All
             }
             stdlib.gpu.memory.prop.Defined
@@ -256,20 +256,20 @@
       }
     )
     -> (
-      [phase__s795 element__s796 blocks__s797 threads__s798 grid__s799 layout__s800 count__s801 memory__s802 block__s803 slot__s804 thread__s805 . ]
+      [phase__s797 element__s798 blocks__s799 threads__s800 grid__s801 layout__s802 count__s803 memory__s804 block__s805 slot__s806 thread__s807 . ]
       {
-        ([ . element__s796] val)
+        ([ . element__s798] val)
         (
           (
             {
-              [ . blocks__s797]
-              [ . threads__s798]
-              [ . grid__s799]
-              [ . block__s803]
-              [ . layout__s800]
-              [ . phase__s795]
-              [ . thread__s805]
-              [ . memory__s802]
+              [ . blocks__s799]
+              [ . threads__s800]
+              [ . grid__s801]
+              [ . block__s805]
+              [ . layout__s802]
+              [ . phase__s797]
+              [ . thread__s807]
+              [ . memory__s804]
               stdlib.gpu.memory.sort.All
             }
             stdlib.gpu.memory.prop.SharedRead
@@ -279,13 +279,13 @@
         (
           (
             {
-              [ . blocks__s797]
-              [ . threads__s798]
-              [ . grid__s799]
-              [ . layout__s800]
-              [ . memory__s802]
-              [ . block__s803]
-              [ . slot__s804]
+              [ . blocks__s799]
+              [ . threads__s800]
+              [ . grid__s801]
+              [ . layout__s802]
+              [ . memory__s804]
+              [ . block__s805]
+              [ . slot__s806]
               stdlib.gpu.memory.sort.All
             }
             stdlib.gpu.memory.prop.Defined
@@ -298,14 +298,14 @@
 
   (arr stdlib.gpu.memory.shared_slot
     : (
-      [blocks__s747 threads__s748 grid__s749 layout__s750 index__s751 element__s752 memory__s754 block__s755 count__s756 . ]
+      [blocks__s749 threads__s750 grid__s751 layout__s752 index__s753 element__s754 memory__s756 block__s757 count__s758 . ]
       {
-        (({[ . index__s751]} stdlib.gpu.memory.type.SlotName) val)
+        (({[ . index__s753]} stdlib.gpu.memory.type.SlotName) val)
         (
           {
-            [ . memory__s754]
+            [ . memory__s756]
             (
-              {[ . blocks__s747] [ . threads__s748] [ . grid__s749] [ . layout__s750]}
+              {[ . blocks__s749] [ . threads__s750] [ . grid__s751] [ . layout__s752]}
               stdlib.gpu.memory.type.SharedMemory
             )
           }
@@ -313,29 +313,29 @@
         )
         (
           {
-            [ . block__s755]
-            ({[ . blocks__s747] [ . threads__s748] [ . grid__s749]} stdlib.gpu.geometry.type.Block)
+            [ . block__s757]
+            ({[ . blocks__s749] [ . threads__s750] [ . grid__s751]} stdlib.gpu.geometry.type.Block)
           }
           :
         )
-        ({[ . count__s756] u32} :)
+        ({[ . count__s758] u32} :)
       }
     )
     -> (
-      [blocks__s747 threads__s748 grid__s749 layout__s750 index__s751 element__s752 memory__s754 block__s755 count__s756 . ]
+      [blocks__s749 threads__s750 grid__s751 layout__s752 index__s753 element__s754 memory__s756 block__s757 count__s758 . ]
       {
         (
           (
             {
-              [ . blocks__s747]
-              [ . threads__s748]
-              [ . grid__s749]
-              [ . layout__s750]
-              [ . memory__s754]
-              [ . block__s755]
-              ({[ . index__s751]} stdlib.gpu.memory.type.SlotName)
-              [ . count__s756]
-              [ . element__s752]
+              [ . blocks__s749]
+              [ . threads__s750]
+              [ . grid__s751]
+              [ . layout__s752]
+              [ . memory__s756]
+              [ . block__s757]
+              ({[ . index__s753]} stdlib.gpu.memory.type.SlotName)
+              [ . count__s758]
+              [ . element__s754]
             }
             stdlib.gpu.memory.type.Shared
           )
@@ -347,40 +347,40 @@
 
   (arr stdlib.gpu.memory.shared_write
     : (
-      [phase__s778 element__s779 blocks__s780 threads__s781 grid__s782 layout__s783 count__s784 memory__s785 block__s786 slot__s787 thread__s788 index__s790 . ]
+      [phase__s780 element__s781 blocks__s782 threads__s783 grid__s784 layout__s785 count__s786 memory__s787 block__s788 slot__s789 thread__s790 index__s792 . ]
       {
         (
           (
             {
-              [ . blocks__s780]
-              [ . threads__s781]
-              [ . grid__s782]
-              [ . layout__s783]
-              [ . memory__s785]
-              [ . block__s786]
-              [ . slot__s787]
-              [ . count__s784]
-              [ . element__s779]
+              [ . blocks__s782]
+              [ . threads__s783]
+              [ . grid__s784]
+              [ . layout__s785]
+              [ . memory__s787]
+              [ . block__s788]
+              [ . slot__s789]
+              [ . count__s786]
+              [ . element__s781]
             }
             stdlib.gpu.memory.type.Shared
           )
           val
         )
-        ({[ . index__s790] ({[ . count__s784]} stdlib.gpu.memory.type.Ix)} :)
-        ([ . element__s779] val)
+        ({[ . index__s792] ({[ . count__s786]} stdlib.gpu.memory.type.Ix)} :)
+        ([ . element__s781] val)
         (
           (
             {
-              [ . blocks__s780]
-              [ . threads__s781]
-              [ . grid__s782]
-              [ . block__s786]
-              [ . count__s784]
-              [ . layout__s783]
-              [ . phase__s778]
-              [ . thread__s788]
-              [ . index__s790]
-              [ . memory__s785]
+              [ . blocks__s782]
+              [ . threads__s783]
+              [ . grid__s784]
+              [ . block__s788]
+              [ . count__s786]
+              [ . layout__s785]
+              [ . phase__s780]
+              [ . thread__s790]
+              [ . index__s792]
+              [ . memory__s787]
             }
             stdlib.gpu.memory.prop.SharedOwn
           )
@@ -389,22 +389,22 @@
       }
     )
     -> (
-      [phase__s778 element__s779 blocks__s780 threads__s781 grid__s782 layout__s783 count__s784 memory__s785 block__s786 slot__s787 thread__s788 index__s790 . ]
+      [phase__s780 element__s781 blocks__s782 threads__s783 grid__s784 layout__s785 count__s786 memory__s787 block__s788 slot__s789 thread__s790 index__s792 . ]
       {
         1
         (
           (
             {
-              [ . blocks__s780]
-              [ . threads__s781]
-              [ . grid__s782]
-              [ . block__s786]
-              [ . count__s784]
-              [ . layout__s783]
-              [ . phase__s778]
-              [ . thread__s788]
-              [ . index__s790]
-              [ . memory__s785]
+              [ . blocks__s782]
+              [ . threads__s783]
+              [ . grid__s784]
+              [ . block__s788]
+              [ . count__s786]
+              [ . layout__s785]
+              [ . phase__s780]
+              [ . thread__s790]
+              [ . index__s792]
+              [ . memory__s787]
             }
             stdlib.gpu.memory.prop.SharedOwn
           )
@@ -413,15 +413,15 @@
         (
           (
             {
-              [ . blocks__s780]
-              [ . threads__s781]
-              [ . grid__s782]
-              [ . layout__s783]
-              [ . count__s784]
-              [ . memory__s785]
-              [ . block__s786]
-              [ . slot__s787]
-              [ . index__s790]
+              [ . blocks__s782]
+              [ . threads__s783]
+              [ . grid__s784]
+              [ . layout__s785]
+              [ . count__s786]
+              [ . memory__s787]
+              [ . block__s788]
+              [ . slot__s789]
+              [ . index__s792]
             }
             stdlib.gpu.memory.prop.Written
           )
@@ -433,15 +433,15 @@
 
   (arr stdlib.gpu.memory.size
     : (
-      [count__s760 element__s761 . ]
-      {(({[ . count__s760] [ . element__s761]} stdlib.gpu.memory.type.Global) val)}
+      [count__s762 element__s763 . ]
+      {(({[ . count__s762] [ . element__s763]} stdlib.gpu.memory.type.Global) val)}
     )
-    -> ([count__s760 element__s761 . ] {({[ . count__s760] u32} :)})
+    -> ([count__s762 element__s763 . ] {({[ . count__s762] u32} :)})
   )
 
   (arr stdlib.gpu.memory.slot_name
-    : ([index__s676 . ] {({[ . index__s676] u32} :)})
-    -> ([index__s676 . ] {(({[ . index__s676]} stdlib.gpu.memory.type.SlotName) val)})
+    : ([index__s678 . ] {({[ . index__s678] u32} :)})
+    -> ([index__s678 . ] {(({[ . index__s678]} stdlib.gpu.memory.type.SlotName) val)})
   )
 })
 

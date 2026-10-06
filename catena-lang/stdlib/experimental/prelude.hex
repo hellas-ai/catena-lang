@@ -1,14 +1,24 @@
 (theory program type {
+  (arr core.and_elim
+    : ([p__s376 q__s377 . ] {(({[ . p__s376] [ . q__s377]} prop.And) |-)})
+    -> ([p__s376 q__s377 . ] {({([ . p__s376] |-) ([ . q__s377] |-)} *)})
+  )
+
+  (arr core.and_intro
+    : ([p__s371 q__s372 . ] {({([ . p__s371] |-) ([ . q__s372] |-)} *)})
+    -> ([p__s371 q__s372 . ] {(({[ . p__s371] [ . q__s372]} prop.And) |-)})
+  )
+
   (arr core.if
     : (
-      [p__s336 result_type__s337 context_type__s338 contracts_type__s339 . ]
+      [p__s338 result_type__s339 context_type__s340 contracts_type__s341 . ]
       {
         (bool val)
-        [ . context_type__s338]
+        [ . context_type__s340]
         (
           {
-            ({[ . context_type__s338] ({([ . p__s336] |-) [ . contracts_type__s339]} *)} *)
-            [ . result_type__s337]
+            ({[ . context_type__s340] ({([ . p__s338] |-) [ . contracts_type__s341]} *)} *)
+            [ . result_type__s339]
           }
           =>
         )
@@ -16,40 +26,40 @@
           {
             (
               {
-                [ . context_type__s338]
-                ({(({[ . p__s336]} stdlib.prelude.prop.Not) |-) [ . contracts_type__s339]} *)
+                [ . context_type__s340]
+                ({(({[ . p__s338]} stdlib.prelude.prop.Not) |-) [ . contracts_type__s341]} *)
               }
               *
             )
-            [ . result_type__s337]
+            [ . result_type__s339]
           }
           =>
         )
-        [ . contracts_type__s339]
+        [ . contracts_type__s341]
       }
     )
     -> (
-      [p__s336 result_type__s337 context_type__s338 contracts_type__s339 . ]
-      {[ . result_type__s337]}
+      [p__s338 result_type__s339 context_type__s340 contracts_type__s341 . ]
+      {[ . result_type__s339]}
     )
   )
 
   (arr core.if_guarded
     : (
-      [p__s351 permissions__s352 result_type__s353 context_type__s354 contracts_type__s355 . ]
+      [p__s353 permissions__s354 result_type__s355 context_type__s356 contracts_type__s357 . ]
       {
         (bool val)
-        [ . context_type__s354]
+        [ . context_type__s356]
         (
           {
             (
               {
-                [ . context_type__s354]
-                ({([ . p__s351] |-) ({[ . contracts_type__s355] ([ . permissions__s352] |-)} *)} *)
+                [ . context_type__s356]
+                ({([ . p__s353] |-) ({[ . contracts_type__s357] ([ . permissions__s354] |-)} *)} *)
               }
               *
             )
-            [ . result_type__s353]
+            [ . result_type__s355]
           }
           =>
         )
@@ -57,143 +67,28 @@
           {
             (
               {
-                [ . context_type__s354]
-                ({(({[ . p__s351]} stdlib.prelude.prop.Not) |-) [ . contracts_type__s355]} *)
+                [ . context_type__s356]
+                ({(({[ . p__s353]} stdlib.prelude.prop.Not) |-) [ . contracts_type__s357]} *)
               }
               *
             )
-            [ . result_type__s353]
+            [ . result_type__s355]
           }
           =>
         )
-        [ . contracts_type__s355]
-        (({[ . p__s351] [ . permissions__s352]} ==>) |-)
+        [ . contracts_type__s357]
+        (({[ . p__s353] [ . permissions__s354]} ==>) |-)
       }
     )
     -> (
-      [p__s351 permissions__s352 result_type__s353 context_type__s354 contracts_type__s355 . ]
-      {[ . result_type__s353]}
+      [p__s353 permissions__s354 result_type__s355 context_type__s356 contracts_type__s357 . ]
+      {[ . result_type__s355]}
     )
   )
 
-  (def stdlib.prelude.and_bool
-    : ([] {(bool val) (bool val)})
-    -> ([] {(bool val)})
-    = {
-      [arg0__input0__v0 arg1__input1__v1 . ]
-      ([ . arg0__input0__v0 arg1__input1__v1] ({{_} {_}} bool.and) [output0__v2 . ])
-      [ . output0__v2]
-    }
-  )
-
-  (arr stdlib.prelude.and_elim
-    : ([p__s374 q__s375 . ] {(({[ . p__s374] [ . q__s375]} prop.And) |-)})
-    -> ([p__s374 q__s375 . ] {({([ . p__s374] |-) ([ . q__s375] |-)} *)})
-  )
-
-  (arr stdlib.prelude.and_intro
-    : ([p__s369 q__s370 . ] {({([ . p__s369] |-) ([ . q__s370] |-)} *)})
-    -> ([p__s369 q__s370 . ] {(({[ . p__s369] [ . q__s370]} prop.And) |-)})
-  )
-
-  (def stdlib.prelude.if_guarded
-    : (
-      [p__s351 permissions__s352 result_type__s353 context_type__s354 contracts_type__s355 . ]
-      {
-        (bool val)
-        [ . context_type__s354]
-        (
-          {
-            (
-              {
-                [ . context_type__s354]
-                ({([ . p__s351] |-) ({[ . contracts_type__s355] ([ . permissions__s352] |-)} *)} *)
-              }
-              *
-            )
-            [ . result_type__s353]
-          }
-          =>
-        )
-        (
-          {
-            (
-              {
-                [ . context_type__s354]
-                ({(({[ . p__s351]} stdlib.prelude.prop.Not) |-) [ . contracts_type__s355]} *)
-              }
-              *
-            )
-            [ . result_type__s353]
-          }
-          =>
-        )
-        [ . contracts_type__s355]
-        (({[ . p__s351] [ . permissions__s352]} ==>) |-)
-      }
-    )
-    -> (
-      [p__s351 permissions__s352 result_type__s353 context_type__s354 contracts_type__s355 . ]
-      {[ . result_type__s353]}
-    )
-    = {
-      [condition__input0__v0 context__input1__v1 then_branch__input2__v2 else_branch__input3__v3 common__input4__v4 guarded__input5__v5 . ]
-      (
-        [ . condition__input0__v0 context__input1__v1 then_branch__input2__v2 else_branch__input3__v3 common__input4__v4 guarded__input5__v5]
-        ({{_} {_} {_} {_} {_} {_}} core.if_guarded)
-        [output0__v6 . ]
-      )
-      [ . output0__v6]
-    }
-  )
-
-  (def stdlib.prelude.if_then_else
-    : (
-      [p__s336 result_type__s337 context_type__s338 contracts_type__s339 . ]
-      {
-        (bool val)
-        [ . context_type__s338]
-        (
-          {
-            ({[ . context_type__s338] ({([ . p__s336] |-) [ . contracts_type__s339]} *)} *)
-            [ . result_type__s337]
-          }
-          =>
-        )
-        (
-          {
-            (
-              {
-                [ . context_type__s338]
-                ({(({[ . p__s336]} stdlib.prelude.prop.Not) |-) [ . contracts_type__s339]} *)
-              }
-              *
-            )
-            [ . result_type__s337]
-          }
-          =>
-        )
-        [ . contracts_type__s339]
-      }
-    )
-    -> (
-      [p__s336 result_type__s337 context_type__s338 contracts_type__s339 . ]
-      {[ . result_type__s337]}
-    )
-    = {
-      [condition__input0__v0 context__input1__v1 then_branch__input2__v2 else_branch__input3__v3 common__input4__v4 . ]
-      (
-        [ . condition__input0__v0 context__input1__v1 then_branch__input2__v2 else_branch__input3__v3 common__input4__v4]
-        ({{_} {_} {_} {_} {_}} core.if)
-        [output0__v5 . ]
-      )
-      [ . output0__v5]
-    }
-  )
-
-  (def stdlib.prelude.implication_apply
-    : ([p__s379 q__s380 . ] {(({[ . p__s379] [ . q__s380]} ==>) |-) ([ . p__s379] |-)})
-    -> ([p__s379 q__s380 . ] {([ . q__s380] |-)})
+  (def core.implication_apply
+    : ([p__s381 q__s382 . ] {(({[ . p__s381] [ . q__s382]} ==>) |-) ([ . p__s381] |-)})
+    -> ([p__s381 q__s382 . ] {([ . q__s382] |-)})
     = {
       [rule__input0__v0 premise__input1__v1 . ]
       (
@@ -205,7 +100,19 @@
     }
   )
 
-  (def stdlib.prelude.or_bool
+  (arr core.truth : ([] {}) -> ([] {(prop.Truth |-)}))
+
+  (def stdlib.boolean.and
+    : ([] {(bool val) (bool val)})
+    -> ([] {(bool val)})
+    = {
+      [arg0__input0__v0 arg1__input1__v1 . ]
+      ([ . arg0__input0__v0 arg1__input1__v1] ({{_} {_}} bool.and) [output0__v2 . ])
+      [ . output0__v2]
+    }
+  )
+
+  (def stdlib.boolean.or
     : ([] {(bool val) (bool val)})
     -> ([] {(bool val)})
     = {
@@ -215,9 +122,7 @@
     }
   )
 
-  (arr stdlib.prelude.truth : ([] {}) -> ([] {(prop.Truth |-)}))
-
-  (def stdlib.prelude.unit_value
+  (def stdlib.unit.unit
     : ([] {})
     -> ([] {1})
     = {

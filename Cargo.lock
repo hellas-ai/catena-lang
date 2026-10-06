@@ -117,6 +117,7 @@ dependencies = [
  "open-hypergraphs",
  "open-hypergraphs-dot",
  "serde",
+ "serde_json",
  "tempfile",
  "thiserror",
 ]

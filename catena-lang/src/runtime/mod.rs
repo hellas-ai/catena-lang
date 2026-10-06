@@ -5,8 +5,9 @@
 //!
 //! ```no_run
 //! use catena_lang::{
-//!     codegen,
+//!     codegen::CodegenKind,
 //!     compile::compile,
+//!     report::CompileReport,
 //!     runtime::{GpuDialect, Runtime, Value},
 //!     stdlib,
 //! };
@@ -14,16 +15,10 @@
 //!
 //! fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     let mut runtime = Runtime::new(GpuDialect::Hip)?;
-//!     let report = compile(RawTheorySet::from_texts(
+//!     let mut report = CompileReport::new(RawTheorySet::from_texts(
 //!         stdlib::sources().chain([PROGRAM]),
-//!     )?)?;
-//!     let module = codegen::runtime_module(
-//!         report
-//!             .gpu_modules
-//!             .as_ref()
-//!             .expect("successful compilation should contain generated modules"),
-//!         runtime.dialect(),
-//!     )?;
+//!     )?);
+//!     let module = compile(&mut report, CodegenKind::Default, runtime.dialect())?;
 //!     let artifact = runtime.load(module)?;
 //!     let [result] = artifact.exec("add-one", [41_u64.into()])?;
 //!     let Value::U64(sum) = result else {

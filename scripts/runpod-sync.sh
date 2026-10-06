@@ -67,6 +67,7 @@ rsync -rlptDz --delete --prune-empty-dirs --info=progress2 "${dry_run[@]}" \
   --include '/catena-core/src/lib.rs' \
   --include '/catena-lang/' \
   --include '/catena-lang/Cargo.toml' \
+  --include '/catena-lang/build.rs' \
   --include '/catena-lang/src/***' \
   --include '/catena-lang/tests/***' \
   --include '/catena-lang/examples/***' \

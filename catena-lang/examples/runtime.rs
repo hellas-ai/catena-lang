@@ -1,8 +1,9 @@
 use std::{env, path::PathBuf};
 
 use catena_lang::{
-    codegen,
+    codegen::CodegenKind,
     compile::compile,
+    report::CompileReport,
     runtime::{GpuDialect, Runtime, Value},
     stdlib,
 };
@@ -24,26 +25,14 @@ const ARRAY_HEAD_PLUS_ONE: &str = r#"
 fn main() -> anyhow::Result<()> {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let dialect = configured_gpu_dialect()?;
-    let artifact_report = compile(RawTheorySet::from_files(
+    let mut artifact_report = CompileReport::new(RawTheorySet::from_files(
         stdlib::paths_from(&root).chain([root.join("examples/example.hex")]),
-    )?)?;
-    let artifact_module = codegen::runtime_module(
-        artifact_report
-            .gpu_modules
-            .as_ref()
-            .expect("successful compilation should contain generated modules"),
-        dialect,
-    )?;
-    let plus_one_report = compile(RawTheorySet::from_texts(
+    )?);
+    let artifact_module = compile(&mut artifact_report, CodegenKind::Default, dialect)?;
+    let mut plus_one_report = CompileReport::new(RawTheorySet::from_texts(
         stdlib::sources().chain([ARRAY_HEAD_PLUS_ONE]),
-    )?)?;
-    let plus_one_module = codegen::runtime_module(
-        plus_one_report
-            .gpu_modules
-            .as_ref()
-            .expect("successful compilation should contain generated modules"),
-        dialect,
-    )?;
+    )?);
+    let plus_one_module = compile(&mut plus_one_report, CodegenKind::Default, dialect)?;
     let mut runtime = Runtime::new(dialect)?;
     let artifact = runtime.load(artifact_module)?;
     let plus_one = runtime.load(plus_one_module)?;

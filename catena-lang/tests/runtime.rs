@@ -1,6 +1,7 @@
 use catena_lang::{
-    codegen,
+    codegen::CodegenKind,
     compile::compile,
+    report::CompileReport,
     runtime::{
         Artifact, ExecError, GpuDialect, InitError, MemRef, Runtime, RuntimeModule, Value,
         ValueKind,
@@ -17,12 +18,8 @@ fn compile_sources(
     dialect: GpuDialect,
 ) -> anyhow::Result<RuntimeModule> {
     let raw = RawTheorySet::from_texts(sources)?;
-    let report = compile(raw)?;
-    let modules = report
-        .gpu_modules
-        .as_ref()
-        .expect("successful compilation should contain generated modules");
-    Ok(codegen::runtime_module(modules, dialect)?)
+    let mut report = CompileReport::new(raw);
+    Ok(compile(&mut report, CodegenKind::Default, dialect)?)
 }
 
 /// Create a runtime with a provided user source file

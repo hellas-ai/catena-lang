@@ -6,7 +6,7 @@
 //! closure conversion, and product lowering in scope.
 //!
 //! Most tests stop observing the report at `unpacked_products`; one focused boundary test
-//! also verifies that compiler output can be rendered as a runtime module. This suite does
+//! also verifies that compiler output is a runtime module. This suite does
 //! not create a runtime or execute a program; runtime behavior belongs in `runtime.rs`.
 
 use catena_lang::{
@@ -29,7 +29,9 @@ fn compile_with_sources(
     sources: impl IntoIterator<Item = &'static str>,
 ) -> anyhow::Result<CompileReport> {
     let raw = RawTheorySet::from_texts(catena_lang::stdlib::sources().chain(sources))?;
-    compile(raw).map_err(Into::into)
+    let mut report = CompileReport::new(raw);
+    compile(&mut report, codegen::CodegenKind::Default, GpuDialect::Hip)?;
+    Ok(report)
 }
 
 /// Require the public pipeline to complete closure conversion, while allowing
@@ -38,10 +40,11 @@ fn compile_through_closure_conversion_with_sources(
     sources: impl IntoIterator<Item = &'static str>,
 ) -> anyhow::Result<CompileReport> {
     let raw = RawTheorySet::from_texts(catena_lang::stdlib::sources().chain(sources))?;
-    match compile(raw) {
-        Ok(report) => Ok(report),
-        Err(failure) if failure.report.closure_conversion.is_some() => Ok(failure.report),
-        Err(failure) => Err(failure.into()),
+    let mut report = CompileReport::new(raw);
+    match compile(&mut report, codegen::CodegenKind::Default, GpuDialect::Hip) {
+        Ok(_) => Ok(report),
+        Err(_) if report.closure_conversion.is_some() => Ok(report),
+        Err(error) => Err(error.into()),
     }
 }
 
@@ -51,23 +54,33 @@ fn codegen_produces_a_runtime_module() -> anyhow::Result<()> {
         catena_lang::stdlib::sources()
             .chain(["(def program identity : (u64 val) -> (u64 val) = [value])"]),
     )?;
-    let report = compile(raw)?;
-    let module = codegen::runtime_module(
-        report
-            .gpu_modules
-            .as_ref()
-            .expect("successful compilation should contain generated modules"),
+    for dialect in [GpuDialect::Hip, GpuDialect::Cuda] {
+        let mut report = CompileReport::new(raw.clone());
+        let module = compile(&mut report, codegen::CodegenKind::Default, dialect)?;
+        assert_eq!(module.dialect, dialect);
+        assert!(!module.source.is_empty());
+        let identity = module
+            .functions
+            .iter()
+            .find(|function| function.source_name == "identity")
+            .expect("identity should be exported");
+        assert_eq!(identity.inputs, [ValueKind::U64]);
+        assert_eq!(identity.outputs, [ValueKind::U64]);
+    }
+    Ok(())
+}
+
+#[test]
+fn experimental_codegen_uses_shared_passes_and_dispatch() -> anyhow::Result<()> {
+    let mut report = CompileReport::new(RawTheorySet::from_text("")?);
+    let module = compile(
+        &mut report,
+        codegen::CodegenKind::Experimental,
         GpuDialect::Hip,
     )?;
-
     assert_eq!(module.dialect, GpuDialect::Hip);
-    assert!(!module.source.is_empty());
-    let identity = module
-        .functions
-        .iter()
-        .find(|function| function.source_name == "identity")
-        .expect("identity should be exported");
-    assert_eq!(identity.inputs, [ValueKind::U64]);
-    assert_eq!(identity.outputs, [ValueKind::U64]);
+    assert!(report.closure_conversion.is_some());
+    assert!(report.unpacked_products.is_some());
+    assert!(module.functions.is_empty());
     Ok(())
 }

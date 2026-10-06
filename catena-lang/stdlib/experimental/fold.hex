@@ -1,0 +1,38 @@
+(theory program type {
+  (arr core.fold.bounded
+    : (
+      [state_type__s531 invariant_type__s532 end__s533 index__s536 . ]
+      {
+        ({[ . end__s533] u32} :)
+        [ . state_type__s531]
+        (
+          {
+            (
+              {
+                ({[ . index__s536] u32} :)
+                (
+                  {
+                    [ . state_type__s531]
+                    (
+                      {(({[ . index__s536] [ . end__s533]} prop.Less) |-) [ . invariant_type__s532]}
+                      *
+                    )
+                  }
+                  *
+                )
+              }
+              *
+            )
+            ({[ . state_type__s531] [ . invariant_type__s532]} *)
+          }
+          =>
+        )
+        [ . invariant_type__s532]
+      }
+    )
+    -> (
+      [state_type__s531 invariant_type__s532 end__s533 index__s536 . ]
+      {[ . state_type__s531] [ . invariant_type__s532]}
+    )
+  )
+})

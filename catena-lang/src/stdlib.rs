@@ -1,5 +1,8 @@
 use std::path::{Path, PathBuf};
 
+mod bundles;
+pub use bundles::{BundleRegistry, SourceFile, StdlibBundle};
+
 /// Names of built in stdlib types and operations
 pub mod constants {
     // Type of the internal hom
@@ -28,48 +31,21 @@ pub struct StdlibFile {
     pub source: &'static str,
 }
 
-// Keep the stdlib order in one literal list. `include_str!` cannot consume a
-// runtime filename value, so the macro turns each filename literal into both the
-// public filename and the matching embedded source.
-macro_rules! stdlib_files {
-    ($($filename:literal),+ $(,)?) => {
-        &[
-            $(
-                StdlibFile {
-                    filename: $filename,
-                    source: include_str!(concat!("../stdlib/", $filename)),
-                },
-            )+
-        ]
-    };
-}
+/// All `.hex` files in `stdlib/default`, embedded in filename order at build time.
+pub const FILES: &[StdlibFile] = include!(concat!(env!("OUT_DIR"), "/stdlib_files.rs"));
 
-pub const FILES: &[StdlibFile] = stdlib_files![
-    "cmc.hex",
-    "value.hex",
-    "buf.hex",
-    "index.hex",
-    "data.hex",
-    "fn.hex",
-    "product.hex",
-    "combinators.hex",
-    "gpu.hex",
-    "identity-matrix.hex",
-    "matrix.hex",
-    "matrix-bf16.hex",
-    "tensor.hex",
-    "tensor-bf16.hex",
-    "math.hex",
-    "sum.hex",
-    "sum-bf16.hex",
-    "nn.hex",
-];
+/// Embedded bundles available by name. Dependencies are loaded before files.
+pub const BUNDLES: &[StdlibBundle] = &[StdlibBundle {
+    name: "default",
+    extends: &[],
+    files: FILES,
+}];
 
 pub fn sources() -> impl ExactSizeIterator<Item = &'static str> {
     FILES.iter().map(|file| file.source)
 }
 
 pub fn paths_from(root: impl AsRef<Path>) -> impl ExactSizeIterator<Item = PathBuf> {
-    let stdlib = root.as_ref().join("stdlib");
+    let stdlib = root.as_ref().join("stdlib/default");
     FILES.iter().map(move |file| stdlib.join(file.filename))
 }

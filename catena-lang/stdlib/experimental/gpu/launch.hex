@@ -1,0 +1,125 @@
+(theory program type {
+  (arr unsafe.launch
+    : (
+      [blocks__s841 width__s842 height__s843 grid__s844 block__s846 . ]
+      {
+        (
+          {
+            [ . grid__s844]
+            (
+              {[ . blocks__s841] ({[ . width__s842] [ . height__s843]} stdlib.gpu.geometry.sort.D2)}
+              stdlib.gpu.geometry.type.Grid
+            )
+          }
+          :
+        )
+        (
+          {
+            (
+              {
+                (
+                  {
+                    [ . block__s846]
+                    (
+                      {
+                        [ . blocks__s841]
+                        ({[ . width__s842] [ . height__s843]} stdlib.gpu.geometry.sort.D2)
+                        [ . grid__s844]
+                      }
+                      stdlib.gpu.geometry.type.Block
+                    )
+                  }
+                  :
+                )
+                (
+                  (
+                    {
+                      [ . blocks__s841]
+                      ({[ . width__s842] [ . height__s843]} stdlib.gpu.geometry.sort.D2)
+                      [ . grid__s844]
+                      [ . block__s846]
+                    }
+                    stdlib.gpu.geometry.type.Thread
+                  )
+                  val
+                )
+              }
+              *
+            )
+            1
+          }
+          =>
+        )
+      }
+    )
+    -> ([blocks__s841 width__s842 height__s843 grid__s844 block__s846 . ] {1})
+  )
+
+  (arr unsafe.launch_shared
+    : (
+      [blocks__s848 width__s849 height__s850 layout__s851 grid__s852 block__s855 . ]
+      {
+        (
+          {
+            [ . grid__s852]
+            (
+              {[ . blocks__s848] ({[ . width__s849] [ . height__s850]} stdlib.gpu.geometry.sort.D2)}
+              stdlib.gpu.geometry.type.Grid
+            )
+          }
+          :
+        )
+        (
+          (
+            {
+              [ . blocks__s848]
+              ({[ . width__s849] [ . height__s850]} stdlib.gpu.geometry.sort.D2)
+              [ . grid__s852]
+              [ . layout__s851]
+            }
+            stdlib.gpu.memory.type.SharedMemory
+          )
+          val
+        )
+        (
+          {
+            (
+              {
+                (
+                  {
+                    [ . block__s855]
+                    (
+                      {
+                        [ . blocks__s848]
+                        ({[ . width__s849] [ . height__s850]} stdlib.gpu.geometry.sort.D2)
+                        [ . grid__s852]
+                      }
+                      stdlib.gpu.geometry.type.Block
+                    )
+                  }
+                  :
+                )
+                (
+                  (
+                    {
+                      [ . blocks__s848]
+                      ({[ . width__s849] [ . height__s850]} stdlib.gpu.geometry.sort.D2)
+                      [ . grid__s852]
+                      [ . block__s855]
+                    }
+                    stdlib.gpu.geometry.type.Thread
+                  )
+                  val
+                )
+              }
+              *
+            )
+            1
+          }
+          =>
+        )
+      }
+    )
+    -> ([blocks__s848 width__s849 height__s850 layout__s851 grid__s852 block__s855 . ] {1})
+  )
+})

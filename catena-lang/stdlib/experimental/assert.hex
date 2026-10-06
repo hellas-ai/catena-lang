@@ -1,0 +1,69 @@
+(theory program type {
+  (arr meta.stdlib.assert.helper.callback_metavars.p.0
+    : (
+      [p__s405 value__s392 . ]
+      {({({[ . value__s392] bool} :) (({({[ . value__s392] bool.t} =) [ . p__s405]} ==>) |-)} *)}
+    )
+    -> (
+      [p__s405 value__s392 . ]
+      {
+        ({({[ . value__s392] bool} :) (({({[ . value__s392] bool.t} =) [ . p__s405]} ==>) |-)} *)
+        [ . p__s405]
+      }
+    )
+  )
+
+  (arr meta.stdlib.assert.helper.callback_metavars.value.0
+    : ([value__s392 . ] {({[ . value__s392] bool} :)})
+    -> ([value__s392 . ] {({[ . value__s392] bool} :) [ . value__s392]})
+  )
+
+  (def stdlib.assert
+    : (
+      [p__s405 . ]
+      {({({[ . value__s392] bool} :) (({({[ . value__s392] bool.t} =) [ . p__s405]} ==>) |-)} *)}
+    )
+    -> ([p__s405 . ] {1 ([ . p__s405] |-)})
+    = {
+      [condition__v1050__input . ]
+      (
+        [ . condition__v1050__input]
+        ({_} meta.stdlib.assert.helper.callback_metavars.p.0)
+        [condition__v1050 __smolcat_p__v1067 . ]
+      )
+      ([ . condition__v1050] (*.elim {{_} {_}}) [value__v1059__result meaning__v1060 . ])
+      (
+        [ . value__v1059__result]
+        ({_} meta.stdlib.assert.helper.callback_metavars.value.0)
+        [value__v1059 __smolcat_value__v1068 . ]
+      )
+      ([ . value__v1059 meaning__v1060] stdlib.assert.then [unit__v1065 proven__v1066 . ])
+      [ . unit__v1065 proven__v1066]
+    }
+  )
+
+  (arr stdlib.assert.assert_true
+    : ([condition__s394 . ] {({[ . condition__s394] bool} :)})
+    -> ([condition__s394 . ] {1 (({[ . condition__s394] bool.t} =) |-)})
+  )
+
+  (arr stdlib.assert.ax_mp
+    : ([p__s396 q__s397 . ] {([ . p__s396] |-) (({[ . p__s396] [ . q__s397]} ==>) |-)})
+    -> ([p__s396 q__s397 . ] {1 ([ . q__s397] |-)})
+  )
+
+  (def stdlib.assert.then
+    : (
+      [p__s401 condition__s402 . ]
+      {({[ . condition__s402] bool} :) (({({[ . condition__s402] bool.t} =) [ . p__s401]} ==>) |-)}
+    )
+    -> ([p__s401 condition__s402 . ] {1 ([ . p__s401] |-)})
+    = {
+      [condition__v1035 meaning__v1037 . ]
+      ([ . condition__v1035] stdlib.assert.assert_true [unit__v1041 checked__v1042 . ])
+      ([ . unit__v1041] unit.elim [])
+      ([ . checked__v1042 meaning__v1037] stdlib.assert.ax_mp [unit__v1048 conclusion__v1049 . ])
+      [ . unit__v1048 conclusion__v1049]
+    }
+  )
+})

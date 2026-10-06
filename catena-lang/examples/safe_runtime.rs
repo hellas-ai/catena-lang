@@ -1,8 +1,9 @@
 use std::env;
 
 use catena_lang::{
-    codegen,
+    codegen::CodegenKind,
     compile::compile,
+    report::CompileReport,
     runtime::{GpuDialect, MemOwn, Value},
     safe_runtime::{SafeExecError, SafeRuntime, run_safe_runtime_child_if_requested},
     stdlib,
@@ -23,28 +24,17 @@ fn main() -> anyhow::Result<()> {
     }
 
     let dialect = configured_gpu_dialect()?;
-    let artifact_report = compile(RawTheorySet::from_texts(stdlib::sources().chain([
-        include_str!("example.hex"),
-        include_str!("materializec.hex"),
-        OWNED_SOURCE,
-    ]))?)?;
-    let artifact_module = codegen::runtime_module(
-        artifact_report
-            .gpu_modules
-            .as_ref()
-            .expect("successful compilation should contain generated modules"),
-        dialect,
-    )?;
-    let add_one_report = compile(RawTheorySet::from_texts(
+    let mut artifact_report =
+        CompileReport::new(RawTheorySet::from_texts(stdlib::sources().chain([
+            include_str!("example.hex"),
+            include_str!("materializec.hex"),
+            OWNED_SOURCE,
+        ]))?);
+    let artifact_module = compile(&mut artifact_report, CodegenKind::Default, dialect)?;
+    let mut add_one_report = CompileReport::new(RawTheorySet::from_texts(
         stdlib::sources().chain([ADD_ONE_SOURCE]),
-    )?)?;
-    let add_one_module = codegen::runtime_module(
-        add_one_report
-            .gpu_modules
-            .as_ref()
-            .expect("successful compilation should contain generated modules"),
-        dialect,
-    )?;
+    )?);
+    let add_one_module = compile(&mut add_one_report, CodegenKind::Default, dialect)?;
     let mut runtime = SafeRuntime::new(dialect)?;
     let artifact = runtime.load(artifact_module)?;
     let add_one = runtime.load(add_one_module)?;

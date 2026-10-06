@@ -1,0 +1,5 @@
+(theory type nat {
+  (arr list.Cons : 2 -> 1)
+
+  (arr list.Nil : 0 -> 1)
+})

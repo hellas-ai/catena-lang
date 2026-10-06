@@ -77,6 +77,15 @@ pub fn run(
     theory_set: &TheorySet,
     forgotten: &TheoryTermMap<ClosureForgotten<Operation>>,
 ) -> Result<Conversion, ConversionError> {
+    run_with_progress(theory_set, forgotten, &mut |_| {})
+}
+
+pub(crate) fn run_with_progress(
+    theory_set: &TheorySet,
+    forgotten: &TheoryTermMap<ClosureForgotten<Operation>>,
+    progress: &mut dyn FnMut(&str),
+) -> Result<Conversion, ConversionError> {
+    progress("Inlining named calls");
     // Forgetting exposes `name.f -> eval`. Inline the complete call adapter
     // when `f` has closures on its interface, before discovering regions.
     let inlined_definitions = inline_named_calls::run(theory_set, forgotten)?;
@@ -88,16 +97,18 @@ pub fn run(
         initial_regions: regions,
         theory: generated_theory,
         generated_functions,
-    } = region_conversion::run(theory_set, inlined_definitions)?;
+    } = region_conversion::run(theory_set, inlined_definitions, progress)?;
 
     // Validate the completed generated theory, finish primitive rewriting, and
     // erase compile-time context projections.
+    progress("Validating completed generated theory");
     let generated_types = crate::check::check(&generated_theory).map_err(|error| {
         ConversionError::CheckDefinitions {
             partial_definition_types: partial_definition_types(&error),
             error,
         }
     })?;
+    progress("Rewriting definitions and erasing contexts");
     let rewritten_definitions =
         replace::build_rewritten_definitions(&working, &generated_functions)?;
     let runtime_functions = context::erase(&rewritten_definitions)?;

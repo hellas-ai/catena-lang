@@ -1,0 +1,10 @@
+# From Catena 83d29a1ec697cd7a3cc6729a7391225c6372917b, stdlib/fn.hex
+# Function pointers
+(theory type nat {
+  # (A ~> B) is a function *pointer* - has no captured vars
+  (arr -> : 2 -> 1)
+
+  # traditional "eval" for function types; *fully* applies a function
+  # A ● (A ~> B) -> B
+  (arr eval : 2 -> 1)
+})

@@ -1,0 +1,13 @@
+# From Catena 83d29a1ec697cd7a3cc6729a7391225c6372917b, stdlib/product.hex
+(theory type nat {
+  # products
+  (arr * : 2 -> 1)
+  (arr 1 : 0 -> 1)
+})
+
+(theory program type {
+  (arr unit.intro : [] -> 1)
+  (arr unit.elim : 1 -> [])
+  (arr *.intro : [a b] -> *)
+  (arr *.elim : * -> [a b])
+})

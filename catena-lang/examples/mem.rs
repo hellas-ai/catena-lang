@@ -10,8 +10,9 @@
 use std::env;
 
 use catena_lang::{
-    codegen,
+    codegen::CodegenKind,
     compile::compile,
+    report::CompileReport,
     runtime::{GpuDialect, Runtime, Value},
     stdlib,
 };
@@ -43,14 +44,9 @@ const SOURCE: &str = r#"
 
 fn main() -> anyhow::Result<()> {
     let dialect = configured_gpu_dialect()?;
-    let report = compile(RawTheorySet::from_texts(stdlib::sources().chain([SOURCE]))?)?;
-    let module = codegen::runtime_module(
-        report
-            .gpu_modules
-            .as_ref()
-            .expect("successful compilation should contain generated modules"),
-        dialect,
-    )?;
+    let mut report =
+        CompileReport::new(RawTheorySet::from_texts(stdlib::sources().chain([SOURCE]))?);
+    let module = compile(&mut report, CodegenKind::Default, dialect)?;
     let mut runtime = Runtime::new(dialect)?;
     let artifact = runtime.load(module)?;
 

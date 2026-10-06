@@ -9,28 +9,36 @@ const PREDICATED: &[(u32, u32, u32, u32)] = &[(3, 5, 7, 2), (5, 7, 3, 4), (1, 1,
 
 #[test]
 fn matmul_naive_u64_perfect_tiling() -> anyhow::Result<()> {
-    check_matmul("matmul_naive_u64.hex", "matmul_naive_u64.matmul", PERFECT)
+    check_matmul(
+        "matmul_naive_u64.hex",
+        "matmul_simple_naive.main.matmul",
+        PERFECT,
+    )
 }
 
 #[test]
 fn matmul_naive_u64_predicated_tiling() -> anyhow::Result<()> {
     check_matmul(
         "matmul_naive_u64.hex",
-        "matmul_naive_u64.matmul",
+        "matmul_simple_naive.main.matmul",
         PREDICATED,
     )
 }
 
 #[test]
 fn matmul_tiled_u64_perfect_tiling() -> anyhow::Result<()> {
-    check_matmul("matmul_tiled_u64.hex", "matmul_tiled_u64.matmul", PERFECT)
+    check_matmul(
+        "matmul_tiled_u64.hex",
+        "matmul_simple_tiled.main.matmul",
+        PERFECT,
+    )
 }
 
 #[test]
 fn matmul_tiled_u64_predicated_tiling() -> anyhow::Result<()> {
     check_matmul(
         "matmul_tiled_u64.hex",
-        "matmul_tiled_u64.matmul",
+        "matmul_simple_tiled.main.matmul",
         PREDICATED,
     )
 }

@@ -6,7 +6,7 @@ use super::{
     values::{Obj, Value},
 };
 
-pub(crate) fn lower(
+pub(super) fn lower(
     l: &mut Lowerer<'_>,
     op: &str,
     args: &[Value],

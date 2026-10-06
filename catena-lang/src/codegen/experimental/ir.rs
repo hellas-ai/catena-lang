@@ -5,13 +5,13 @@ use super::lower_types::CType;
 use crate::runtime::GeneratedFunction;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Variable {
-    pub name: String,
-    pub ty: CType,
+pub(super) struct Variable {
+    pub(super) name: String,
+    pub(super) ty: CType,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Instruction {
+pub(super) enum Instruction {
     Let(Variable, String),
     Assign(String, String),
     /// Block-wide synchronization, including visibility of shared-memory writes.
@@ -49,22 +49,22 @@ pub enum Instruction {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Function {
-    pub symbol: String,
-    pub inputs: Vec<Variable>,
-    pub outputs: Vec<Variable>,
-    pub body: Vec<Instruction>,
+pub(super) struct Function {
+    pub(super) symbol: String,
+    pub(super) inputs: Vec<Variable>,
+    pub(super) outputs: Vec<Variable>,
+    pub(super) body: Vec<Instruction>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
-pub struct Modules {
-    pub functions: BTreeMap<String, Function>,
-    pub kernels: BTreeMap<String, Function>,
-    pub exports: Vec<GeneratedFunction>,
+pub(super) struct Modules {
+    pub(super) functions: BTreeMap<String, Function>,
+    pub(super) kernels: BTreeMap<String, Function>,
+    pub(super) exports: Vec<GeneratedFunction>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Place {
+pub(super) enum Place {
     Host,
     Device,
 }

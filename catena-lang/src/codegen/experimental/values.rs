@@ -1,14 +1,14 @@
 //! Values carried while lowering closure-converted graphs.
 use hexpr::Operation;
 use metacat::tree::Tree;
-pub type Obj = Tree<(), Operation>;
+pub(super) type Obj = Tree<(), Operation>;
 #[derive(Clone, Debug)]
-pub struct Value {
-    pub ty: Obj,
-    pub repr: Repr,
+pub(super) struct Value {
+    pub(super) ty: Obj,
+    pub(super) repr: Repr,
 }
 #[derive(Clone, Debug)]
-pub enum Repr {
+pub(super) enum Repr {
     Erased,
     Runtime(String),
     Product(Vec<Value>),
@@ -16,13 +16,13 @@ pub enum Repr {
     Function(Operation),
 }
 impl Value {
-    pub fn erased(ty: Obj) -> Self {
+    pub(super) fn erased(ty: Obj) -> Self {
         Self {
             ty,
             repr: Repr::Erased,
         }
     }
-    pub fn runtime_values(&self, out: &mut Vec<Value>) {
+    pub(super) fn runtime_values(&self, out: &mut Vec<Value>) {
         match &self.repr {
             Repr::Runtime(_) => out.push(self.clone()),
             Repr::Product(values) => {
@@ -33,7 +33,7 @@ impl Value {
             _ => {}
         }
     }
-    pub fn flatten(self, out: &mut Vec<Value>) {
+    pub(super) fn flatten(self, out: &mut Vec<Value>) {
         match self.repr {
             Repr::Product(fields) => {
                 for field in fields {

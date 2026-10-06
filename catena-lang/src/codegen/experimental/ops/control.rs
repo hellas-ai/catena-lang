@@ -6,7 +6,7 @@ use super::super::{
     ops::{results, runtime_args},
     values::*,
 };
-pub(crate) fn lower(
+pub(in crate::codegen::experimental) fn lower(
     l: &mut Lowerer<'_>,
     op: &str,
     args: Vec<Value>,

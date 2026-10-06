@@ -4,7 +4,7 @@ use crate::runtime::ValueKind;
 use metacat::tree::Tree;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum CType {
+pub(super) enum CType {
     Bool,
     U16,
     U32,
@@ -21,18 +21,18 @@ pub enum CType {
     Layout(usize),
 }
 
-pub fn node(name: &str, children: Vec<Obj>) -> Obj {
+pub(super) fn node(name: &str, children: Vec<Obj>) -> Obj {
     Tree::Node(name.parse().expect("internal type name"), 0, children)
 }
 
-pub fn children<'a>(ty: &'a Obj, name: &str) -> Option<&'a [Obj]> {
+pub(super) fn children<'a>(ty: &'a Obj, name: &str) -> Option<&'a [Obj]> {
     match ty {
         Tree::Node(op, 0, args) if op.as_str() == name => Some(args),
         _ => None,
     }
 }
 
-pub fn runtime(ty: &Obj) -> Result<Option<CType>, CodegenError> {
+pub(super) fn runtime(ty: &Obj) -> Result<Option<CType>, CodegenError> {
     if let Some([inner]) = children(ty, "val") {
         return concrete(inner).map(Some);
     }
@@ -47,7 +47,7 @@ pub fn runtime(ty: &Obj) -> Result<Option<CType>, CodegenError> {
     Ok(None)
 }
 
-pub fn concrete(ty: &Obj) -> Result<CType, CodegenError> {
+pub(super) fn concrete(ty: &Obj) -> Result<CType, CodegenError> {
     let Tree::Node(op, 0, args) = ty else {
         return Err(CodegenError::Type(format!(
             "unresolved runtime type {ty:?}"
@@ -98,7 +98,7 @@ fn layout_len(ty: &Obj) -> Result<usize, CodegenError> {
 }
 
 impl CType {
-    pub fn c_name(&self) -> String {
+    pub(super) fn c_name(&self) -> String {
         match self {
             Self::Bool => "uint8_t".into(),
             Self::U16 => "uint16_t".into(),
@@ -116,7 +116,7 @@ impl CType {
             Self::Layout(n) => format!("catena_layout<{n}>"),
         }
     }
-    pub fn abi(&self) -> Option<ValueKind> {
+    pub(super) fn abi(&self) -> Option<ValueKind> {
         Some(match self {
             Self::Bool => ValueKind::Bool,
             Self::U16 => ValueKind::U16,
@@ -128,10 +128,10 @@ impl CType {
             _ => return None,
         })
     }
-    pub fn numeric(&self) -> bool {
+    pub(super) fn numeric(&self) -> bool {
         matches!(self, Self::U16 | Self::U32 | Self::U64 | Self::F32)
     }
-    pub fn integral(&self) -> bool {
+    pub(super) fn integral(&self) -> bool {
         matches!(self, Self::U16 | Self::U32 | Self::U64)
     }
 }

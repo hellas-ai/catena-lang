@@ -1,9 +1,12 @@
 //! Experimental GPU lowering of typed, closure-converted graphs.
+//!
+//! Only `codegen` and its error type cross the backend boundary. Lowering, IR,
+//! and rendering are private to this module and its descendants.
 
 mod gpu;
-pub mod ir;
+mod ir;
 mod lower;
-pub mod lower_types;
+mod lower_types;
 mod meta;
 mod ops;
 mod prelude;
@@ -41,7 +44,7 @@ pub enum CodegenError {
     Ssa(#[from] metacat::ssa::SSAError),
 }
 
-pub(crate) fn invalid(op: &str, reason: impl Into<String>) -> CodegenError {
+fn invalid(op: &str, reason: impl Into<String>) -> CodegenError {
     CodegenError::Invalid {
         op: op.into(),
         reason: reason.into(),
@@ -52,11 +55,11 @@ struct Template {
     term: AnnotatedTerm<crate::pass::record_boundary_sizes::OperationWithBoundarySizes<Operation>>,
 }
 
-pub(crate) struct Lowerer<'a> {
+struct Lowerer<'a> {
     templates: &'a BTreeMap<Operation, Template>,
-    pub modules: Modules,
-    pub body: Vec<Instruction>,
-    pub place: Place,
+    modules: Modules,
+    body: Vec<Instruction>,
+    place: Place,
     next: usize,
     next_type: usize,
     stack: Vec<Operation>,
@@ -247,7 +250,7 @@ fn render_runtime_module(
     ))
 }
 
-pub(crate) fn symbol(name: &str) -> String {
+fn symbol(name: &str) -> String {
     // Keep public symbols separate from prelude helpers and generated kernels.
     let mut result = "catena_fn_".to_string();
     for byte in name.bytes() {
@@ -260,7 +263,7 @@ pub(crate) fn symbol(name: &str) -> String {
     result
 }
 
-pub(crate) fn expr(value: &Value) -> Result<&str, CodegenError> {
+fn expr(value: &Value) -> Result<&str, CodegenError> {
     match &value.repr {
         Repr::Runtime(s) => Ok(s),
         _ => Err(CodegenError::Type(format!(
@@ -270,14 +273,14 @@ pub(crate) fn expr(value: &Value) -> Result<&str, CodegenError> {
     }
 }
 
-pub(crate) fn product(ty: Obj, fields: Vec<Value>) -> Value {
+fn product(ty: Obj, fields: Vec<Value>) -> Value {
     Value {
         ty,
         repr: Repr::Product(fields),
     }
 }
 
-pub(crate) fn pack(mut values: Vec<Value>) -> Value {
+fn pack(mut values: Vec<Value>) -> Value {
     if values.is_empty() {
         return Value::erased(node("1", vec![]));
     }
@@ -291,7 +294,7 @@ pub(crate) fn pack(mut values: Vec<Value>) -> Value {
     value
 }
 
-pub(crate) fn function_parts(ty: &Obj) -> Result<(&Obj, &Obj), CodegenError> {
+fn function_parts(ty: &Obj) -> Result<(&Obj, &Obj), CodegenError> {
     let inner = children(ty, "val").and_then(|a| a.first()).unwrap_or(ty);
     let Some([domain, codomain]) = children(inner, "->") else {
         return Err(invalid(

@@ -11,7 +11,7 @@ use metacat::ssa::ssa;
 use metacat::tree::Tree;
 use std::collections::{BTreeMap, BTreeSet};
 
-pub fn bind(
+fn bind(
     pattern: &Obj,
     actual: &Obj,
     bindings: &mut BTreeMap<usize, Obj>,
@@ -45,7 +45,7 @@ pub fn bind(
     Ok(())
 }
 
-pub fn substitute(ty: &Obj, bindings: &BTreeMap<usize, Obj>) -> Obj {
+fn substitute(ty: &Obj, bindings: &BTreeMap<usize, Obj>) -> Obj {
     match ty {
         Tree::Leaf(i, ()) => bindings.get(i).cloned().unwrap_or_else(|| ty.clone()),
         Tree::Node(op, port, children) => Tree::Node(
@@ -82,12 +82,16 @@ impl<'a> Lowerer<'a> {
             stack: vec![],
         }
     }
-    pub fn fresh(&mut self, prefix: &str) -> String {
+    pub(super) fn fresh(&mut self, prefix: &str) -> String {
         let n = self.next;
         self.next += 1;
         format!("{prefix}{n}")
     }
-    pub fn emit(&mut self, ty: &Obj, expression: impl Into<String>) -> Result<Value, CodegenError> {
+    pub(super) fn emit(
+        &mut self,
+        ty: &Obj,
+        expression: impl Into<String>,
+    ) -> Result<Value, CodegenError> {
         let ctype = runtime(ty)?.ok_or_else(|| {
             CodegenError::Type(format!("runtime expression has erased type {ty:?}"))
         })?;
@@ -132,7 +136,7 @@ impl<'a> Lowerer<'a> {
             self.erased(ty)
         }
     }
-    pub fn erased(&self, ty: &Obj) -> Result<Value, CodegenError> {
+    pub(super) fn erased(&self, ty: &Obj) -> Result<Value, CodegenError> {
         if let Some(fields) = children(ty, "*") {
             return Ok(product(
                 ty.clone(),
@@ -149,7 +153,7 @@ impl<'a> Lowerer<'a> {
         }
         Ok(Value::erased(ty.clone()))
     }
-    pub fn call(
+    pub(super) fn call(
         &mut self,
         op: &Operation,
         args: Vec<Value>,
@@ -312,7 +316,7 @@ impl<'a> Lowerer<'a> {
             _ => ops::lower(self, op, args, outputs),
         }
     }
-    pub fn call_function(
+    pub(super) fn call_function(
         &mut self,
         function: &Value,
         args: Vec<Value>,
@@ -327,7 +331,7 @@ impl<'a> Lowerer<'a> {
         self.call(target, args, outputs)
     }
     /// Inline a converted callback with its explicit environment and runtime operands.
-    pub fn callback(
+    pub(super) fn callback(
         &mut self,
         function: &Value,
         environment: &Value,
@@ -351,7 +355,7 @@ impl<'a> Lowerer<'a> {
         self.call_function(function, args, &outputs)
     }
     /// Rebuild a callback argument, filling only its erased fields implicitly.
-    pub fn argument(
+    pub(super) fn argument(
         &self,
         ty: &Obj,
         values: &mut impl Iterator<Item = Value>,

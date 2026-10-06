@@ -115,6 +115,15 @@ fn lower_to_ir(terms: &super::CodegenTermMap) -> Result<Modules, CodegenError> {
         {
             return Err(CodegenError::NoRuntimeRepresentation(ty.clone()));
         }
+        // Bare symbolic witnesses are erased, not unresolved runtime values.
+        // Keep definitions with these generic interfaces available for call-site lowering.
+        if input_types
+            .iter()
+            .chain(&output_types)
+            .any(has_symbolic_witness)
+        {
+            continue;
+        }
         if !input_types
             .iter()
             .chain(&output_types)
@@ -198,9 +207,6 @@ fn public_type(ty: &Obj) -> Result<bool, CodegenError> {
 }
 
 fn has_abstract_runtime(ty: &Obj) -> bool {
-    if matches!(ty, Tree::Leaf(..)) {
-        return true;
-    }
     if children(ty, "=>").is_some() || children(ty, "->").is_some() {
         return true;
     }
@@ -238,6 +244,11 @@ fn has_abstract_runtime(ty: &Obj) -> bool {
         }
     }
     false
+}
+
+fn has_symbolic_witness(ty: &Obj) -> bool {
+    matches!(ty, Tree::Leaf(..))
+        || children(ty, "*").is_some_and(|fields| fields.iter().any(has_symbolic_witness))
 }
 
 fn render_runtime_module(

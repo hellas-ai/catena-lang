@@ -25,9 +25,9 @@ fn generic_entrypoint_interfaces_fail_during_codegen() {
     for ty in [generic.clone(), node("*", vec![scalar("u32"), generic])] {
         for is_input in [true, false] {
             let (sources, targets) = if is_input {
-                (vec![ty.clone()], vec![])
+                (vec![Tree::Leaf(1, ()), ty.clone()], vec![])
             } else {
-                (vec![], vec![ty.clone()])
+                (vec![Tree::Leaf(1, ())], vec![ty.clone()])
             };
             let term = OpenHypergraph::singleton(
                 OperationWithBoundarySizes {
@@ -48,6 +48,28 @@ fn generic_entrypoint_interfaces_fail_during_codegen() {
             ));
         }
     }
+}
+
+#[test]
+fn generic_witness_helpers_remain_available_without_runtime_exports() {
+    use crate::pass::record_boundary_sizes::OperationWithBoundarySizes;
+    use open_hypergraphs::lax::OpenHypergraph;
+
+    let term = OpenHypergraph::singleton(
+        OperationWithBoundarySizes {
+            operation: "meta.test".parse().unwrap(),
+            source_sizes: vec![1],
+            target_sizes: vec![1],
+        },
+        vec![Tree::Leaf(0, ())],
+        vec![proof()],
+    );
+    let terms = BTreeMap::from([(
+        TheoryId("program".parse().unwrap()),
+        BTreeMap::from([("test.helper".parse().unwrap(), term)]),
+    )]);
+    let modules = lower_to_ir(&terms).unwrap();
+    assert!(modules.exports.is_empty());
 }
 
 #[test]

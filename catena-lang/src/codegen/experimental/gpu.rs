@@ -30,7 +30,9 @@ pub(super) fn render(modules: &Modules, dialect: GpuDialect) -> String {
             )
             .unwrap();
             if kernel {
-                out.push_str("    extern __shared__ __align__(16) unsigned char catena_shared[];\n");
+                out.push_str(
+                    "    extern __shared__ __align__(16) unsigned char catena_shared[];\n",
+                );
             }
             render_body(&mut out, &f.body, 1, dialect);
             out.push_str("}\n");

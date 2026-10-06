@@ -147,7 +147,10 @@ fn add_closure_and_name(
     Ok(defined.original_context_leaves)
 }
 
-#[allow(dead_code, reason = "per-iteration validation is temporarily disabled above")]
+#[allow(
+    dead_code,
+    reason = "per-iteration validation is temporarily disabled above"
+)]
 fn validate_generated_theory(theory: &TheorySet) -> Result<(), ConversionError> {
     // Validate generated declarations before replacement starts depending on
     // their types and context projections.

@@ -17,6 +17,49 @@ fn lowerer<'a>(templates: &'a BTreeMap<Operation, Template>) -> Lowerer<'a> {
 }
 
 #[test]
+fn generic_entrypoint_interfaces_fail_during_codegen() {
+    use crate::pass::record_boundary_sizes::OperationWithBoundarySizes;
+    use open_hypergraphs::lax::OpenHypergraph;
+
+    let generic = node("val", vec![Tree::Leaf(0, ())]);
+    for ty in [generic.clone(), node("*", vec![scalar("u32"), generic])] {
+        for is_input in [true, false] {
+            let (sources, targets) = if is_input {
+                (vec![ty.clone()], vec![])
+            } else {
+                (vec![], vec![ty.clone()])
+            };
+            let term = OpenHypergraph::singleton(
+                OperationWithBoundarySizes {
+                    operation: "meta.test".parse().unwrap(),
+                    source_sizes: vec![1; sources.len()],
+                    target_sizes: vec![1; targets.len()],
+                },
+                sources,
+                targets,
+            );
+            let terms = BTreeMap::from([(
+                TheoryId("program".parse().unwrap()),
+                BTreeMap::from([("test".parse().unwrap(), term)]),
+            )]);
+            assert!(matches!(
+                codegen(&terms, GpuDialect::Cuda),
+                Err(CodegenError::NoRuntimeRepresentation(actual)) if actual == ty
+            ));
+        }
+    }
+}
+
+#[test]
+fn unresolved_runtime_type_has_no_runtime_representation() {
+    let ty = Tree::Leaf(0, ());
+    assert!(matches!(
+        runtime(&node("val", vec![ty.clone()])),
+        Err(CodegenError::NoRuntimeRepresentation(actual)) if actual == ty
+    ));
+}
+
+#[test]
 fn meta_forwards_data_and_rejects_runtime_invention() {
     let templates = BTreeMap::new();
     let mut l = lowerer(&templates);

@@ -34,6 +34,8 @@ pub enum CodegenError {
     InvalidIr { function: String, reason: String },
     #[error("experimental codegen: {0}")]
     Type(String),
+    #[error("experimental codegen: type `{0:?}` has no runtime representation")]
+    NoRuntimeRepresentation(Obj),
     #[error("experimental codegen does not support arrow `{0}`")]
     Unsupported(String),
     #[error("experimental codegen: invalid `{op}`: {reason}")]
@@ -106,12 +108,12 @@ fn lower_to_ir(terms: &super::CodegenTermMap) -> Result<Modules, CodegenError> {
             .iter()
             .map(|n| template.term.hypergraph.nodes[n.0].clone())
             .collect::<Vec<_>>();
-        if input_types
+        if let Some(ty) = input_types
             .iter()
             .chain(&output_types)
-            .any(has_abstract_runtime)
+            .find(|ty| has_abstract_runtime(ty))
         {
-            continue;
+            return Err(CodegenError::NoRuntimeRepresentation(ty.clone()));
         }
         if !input_types
             .iter()

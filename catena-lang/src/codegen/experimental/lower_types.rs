@@ -49,9 +49,7 @@ pub(super) fn runtime(ty: &Obj) -> Result<Option<CType>, CodegenError> {
 
 pub(super) fn concrete(ty: &Obj) -> Result<CType, CodegenError> {
     let Tree::Node(op, 0, args) = ty else {
-        return Err(CodegenError::Type(format!(
-            "unresolved runtime type {ty:?}"
-        )));
+        return Err(CodegenError::NoRuntimeRepresentation(ty.clone()));
     };
     let result = match (op.as_str(), args.as_slice()) {
         ("bool", []) => CType::Bool,

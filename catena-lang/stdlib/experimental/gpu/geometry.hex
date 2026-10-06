@@ -304,8 +304,6 @@
 
   (arr stdlib.gpu.geometry.sort.InGrid : 5 -> 1)
 
-  (arr stdlib.gpu.geometry.sort.Shape : 0 -> 1)
-
   (arr stdlib.gpu.geometry.sort.X : 2 -> 1)
 
   (arr stdlib.gpu.geometry.sort.Y : 2 -> 1)

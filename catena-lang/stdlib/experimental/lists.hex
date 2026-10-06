@@ -2,6 +2,4 @@
   (arr list.Cons : 2 -> 1)
 
   (arr list.Nil : 0 -> 1)
-
-  (arr stdlib.lists.sort.List : 1 -> 1)
 })

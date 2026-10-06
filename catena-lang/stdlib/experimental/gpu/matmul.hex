@@ -5042,7 +5042,7 @@
                             prop.And
                           )
                         }
-                        stdlib.gpu.barriers.sort.Barrier.id.182
+                        stdlib.gpu.barriers.sort.Barrier
                       )
                       (
                         {
@@ -5434,7 +5434,7 @@
                                 stdlib.gpu.memory.prop.SharedOwn
                               )
                             }
-                            stdlib.gpu.barriers.sort.Barrier.id.182
+                            stdlib.gpu.barriers.sort.Barrier
                           )
                           list.Nil
                         }
@@ -7949,7 +7949,7 @@
                         prop.And
                       )
                     }
-                    stdlib.gpu.barriers.sort.Barrier.id.182
+                    stdlib.gpu.barriers.sort.Barrier
                   )
                   (
                     {
@@ -8323,7 +8323,7 @@
                             stdlib.gpu.memory.prop.SharedOwn
                           )
                         }
-                        stdlib.gpu.barriers.sort.Barrier.id.182
+                        stdlib.gpu.barriers.sort.Barrier
                       )
                       list.Nil
                     }
@@ -12246,6 +12246,8 @@
       [ . output0__v4]
     }
   )
+
+  (arr type.const.u32.0x00000000 : ([] {}) -> ([] {({type.const.u32.0x00000000 u32} :)}))
 
   (arr type.const.u32.0x00000001 : ([] {}) -> ([] {({type.const.u32.0x00000001 u32} :)}))
 })

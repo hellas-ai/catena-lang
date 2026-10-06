@@ -464,13 +464,7 @@
 
   (arr stdlib.gpu.memory.sort.At : 2 -> 1)
 
-  (arr stdlib.gpu.memory.sort.Phase : 0 -> 1)
-
   (arr stdlib.gpu.memory.sort.ReadPhase : 0 -> 1)
-
-  (arr stdlib.gpu.memory.sort.Region : 0 -> 1)
-
-  (arr stdlib.gpu.memory.sort.SharedSlot : 0 -> 1)
 
   (arr stdlib.gpu.memory.sort.Slot : 3 -> 1)
 

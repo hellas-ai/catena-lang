@@ -1435,7 +1435,7 @@
                           prop.And
                         )
                       }
-                      stdlib.gpu.barriers.sort.Barrier.id.282
+                      stdlib.gpu.barriers.sort.Barrier
                     )
                     (
                       {
@@ -1827,7 +1827,7 @@
                               stdlib.gpu.memory.prop.SharedOwn
                             )
                           }
-                          stdlib.gpu.barriers.sort.Barrier.id.282
+                          stdlib.gpu.barriers.sort.Barrier
                         )
                         list.Nil
                       }
@@ -3481,7 +3481,7 @@
                           prop.And
                         )
                       }
-                      stdlib.gpu.barriers.sort.Barrier.id.282
+                      stdlib.gpu.barriers.sort.Barrier
                     )
                     (
                       {
@@ -3873,7 +3873,7 @@
                               stdlib.gpu.memory.prop.SharedOwn
                             )
                           }
-                          stdlib.gpu.barriers.sort.Barrier.id.282
+                          stdlib.gpu.barriers.sort.Barrier
                         )
                         list.Nil
                       }

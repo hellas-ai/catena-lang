@@ -130,6 +130,4 @@
   (arr stdlib.runtime.prop.Allocation : 3 -> 1)
 
   (arr stdlib.runtime.prop.Readable : 3 -> 1)
-
-  (arr stdlib.runtime.sort.Capability : 0 -> 1)
 })

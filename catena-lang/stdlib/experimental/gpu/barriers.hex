@@ -118,7 +118,7 @@
               [ . block__s645]
               (
                 {
-                  ({[ . pre__s646] [ . post__s647]} stdlib.gpu.barriers.sort.Barrier.id.182)
+                  ({[ . pre__s646] [ . post__s647]} stdlib.gpu.barriers.sort.Barrier)
                   [ . rest__s648]
                 }
                 list.Cons
@@ -151,9 +151,7 @@
 (theory type nat {
   (arr stdlib.gpu.barriers.prop.Trace : 5 -> 1)
 
-  (arr stdlib.gpu.barriers.sort.Barrier : 0 -> 1)
-
-  (arr stdlib.gpu.barriers.sort.Barrier.id.182 : 2 -> 1)
+  (arr stdlib.gpu.barriers.sort.Barrier : 2 -> 1)
 
   (arr stdlib.gpu.barriers.sort.Repeat : 3 -> 1)
 })

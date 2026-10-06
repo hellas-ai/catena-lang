@@ -286,8 +286,6 @@
     : ([a__s449 . ] {(({[ . a__s449]} stdlib.numeric.prop.Numeric) |-)})
     -> ([a__s449 . ] {([ . a__s449] val)})
   )
-
-  (arr type.const.u32.0x00000000 : ([] {}) -> ([] {({type.const.u32.0x00000000 u32} :)}))
 })
 
 (theory type nat {

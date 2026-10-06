@@ -1,5 +1,4 @@
-//! Smolcat witness operations and legacy proof-family bridges.
-mod family_bridges;
+//! Smolcat symbolic-witness operations, separate from meta projections.
 mod symbols;
 
 use super::{
@@ -18,9 +17,6 @@ pub(crate) fn lower(
         arg.clone().flatten(&mut flat);
     }
     let args = flat.as_slice();
-    if op.starts_with("smolcat.apply.") {
-        return family_bridges::lower(l, op, args, outputs);
-    }
     match op {
         "smolcat.callback.symbol" | "smolcat.value.named" | "smolcat.value.named_at" => {
             symbols::lower(l, op, args, outputs)

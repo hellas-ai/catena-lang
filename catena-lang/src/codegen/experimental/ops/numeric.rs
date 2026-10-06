@@ -69,7 +69,6 @@ pub(super) fn lower(
             }
             ("bool.t", []) => "1".into(),
             ("bool.f", []) => "0".into(),
-            ("bool.not", [x]) => format!("!{x}"),
             ("bool.and", [x, y]) => format!("{x} && {y}"),
             ("bool.or", [x, y]) => format!("{x} || {y}"),
             ("zero", []) if out.numeric() => "0".into(),
@@ -92,9 +91,8 @@ pub(super) fn lower(
                 format!("-{x}")
             }
             (
-                "add" | "subtract" | "multiply" | "divide" | "remainder" | "ceil_div"
-                | "ceil_div_u32" | "equal" | "notequal" | "less" | "lessequal" | "greater"
-                | "greaterequal" | "min" | "max",
+                "+" | "-" | "*" | "/" | "escaped.25" | "ceil_div" | "ceil_div_u32" | "equal"
+                | "not_equal" | "less" | "less_equal" | "greater" | "greater_equal" | "min" | "max",
                 [x, y],
             ) => {
                 let input = runtime(&values[0].ty)?.unwrap();
@@ -103,7 +101,7 @@ pub(super) fn lower(
                 }
                 let comparison = matches!(
                     name,
-                    "equal" | "notequal" | "less" | "lessequal" | "greater" | "greaterequal"
+                    "equal" | "not_equal" | "less" | "less_equal" | "greater" | "greater_equal"
                 );
                 if out
                     != if comparison {
@@ -114,10 +112,10 @@ pub(super) fn lower(
                 {
                     return Err(invalid(op, "numeric result type mismatch"));
                 }
-                if matches!(name, "remainder" | "ceil_div" | "ceil_div_u32") && !input.integral() {
+                if matches!(name, "escaped.25" | "ceil_div" | "ceil_div_u32") && !input.integral() {
                     return Err(invalid(op, "requires integral operands"));
                 }
-                if matches!(name, "divide" | "remainder" | "ceil_div" | "ceil_div_u32")
+                if matches!(name, "/" | "escaped.25" | "ceil_div" | "ceil_div_u32")
                     && input.integral()
                 {
                     l.body.push(Instruction::Assert {
@@ -130,17 +128,15 @@ pub(super) fn lower(
                     "ceil_div" | "ceil_div_u32" => format!("({x} / {y} + ({x} % {y} != 0))"),
                     _ => {
                         let operator = match name {
-                            "add" => "+",
-                            "subtract" => "-",
-                            "multiply" => "*",
-                            "divide" => "/",
-                            "remainder" => "%",
+                            "+" | "-" | "*" | "/" => name,
+                            // Smolcat exports `%` using its hexadecimal escape.
+                            "escaped.25" => "%",
                             "equal" => "==",
-                            "notequal" => "!=",
+                            "not_equal" => "!=",
                             "less" => "<",
-                            "lessequal" => "<=",
+                            "less_equal" => "<=",
                             "greater" => ">",
-                            "greaterequal" => ">=",
+                            "greater_equal" => ">=",
                             _ => unreachable!(),
                         };
                         // Avoid signed C++ integer promotion for u16 multiplication.

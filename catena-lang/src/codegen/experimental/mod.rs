@@ -83,6 +83,7 @@ fn lower_to_ir(terms: &super::CodegenTermMap) -> Result<Modules, CodegenError> {
     for (name, template) in &templates {
         // Library definitions and generic helpers are lowered at their call sites.
         if name.as_str().starts_with("stdlib.")
+            || name.as_str().starts_with("core.")
             || name.as_str().starts_with("partial.")
             || name.as_str().starts_with("catena.")
             || name.as_str().starts_with("closure.")

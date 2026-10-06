@@ -142,9 +142,6 @@ impl<'a> Lowerer<'a> {
                     .collect::<Result<_, _>>()?,
             ));
         }
-        if let Some([payload, _, _]) = children(ty, "smolcat.family.Apply.2") {
-            self.erased(payload)?;
-        }
         if runtime(ty)?.is_some() {
             return Err(CodegenError::Type(format!(
                 "cannot erase runtime output {ty:?}"
@@ -308,7 +305,7 @@ impl<'a> Lowerer<'a> {
             "core.if" | "core.if_guarded" | "core.fold.bounded" | "core.fold.trace" => {
                 ops::control::lower(self, op, args, outputs)
             }
-            "stdlib.gpu.launch.launch_unsafe" | "stdlib.gpu.launch.launch_shared_unsafe" => {
+            "unsafe.launch" | "unsafe.launch_shared" => {
                 ops::launch::lower(self, op, &args, outputs)
             }
             ":.forget" | ":.ty" | ":.param" => ops::structure::lower(self, op, args, outputs),

@@ -49,35 +49,6 @@ fn unknown_erased_arrows_are_errors() {
 }
 
 #[test]
-fn shipped_family_bridges_validate_proposition_preservation() {
-    let templates = BTreeMap::new();
-    let mut l = lowerer(&templates);
-    let plain = proof();
-    let applied = node(
-        "smolcat.family.Apply.2",
-        vec![plain.clone(), Tree::Leaf(1, ()), Tree::Leaf(2, ())],
-    );
-    for op in include_str!("../../../stdlib/experimental/gpu/families.hex")
-        .lines()
-        .filter_map(|s| s.trim().strip_prefix("(arr "))
-    {
-        let (input, output) = if op.ends_with(".pack") {
-            (plain.clone(), applied.clone())
-        } else {
-            (applied.clone(), plain.clone())
-        };
-        assert!(
-            l.lower_operation(op, vec![Value::erased(input)], &[output])
-                .is_ok()
-        );
-        assert!(
-            l.lower_operation(op, vec![value(scalar("u32"), "x")], &[scalar("u32")])
-                .is_err()
-        );
-    }
-}
-
-#[test]
 fn writes_assertions_and_barriers_survive_proof_erasure() {
     let templates = BTreeMap::new();
     let mut l = lowerer(&templates);
@@ -131,7 +102,7 @@ fn fold_emits_loop_and_preserves_carried_state() {
     let domain = node("*", vec![ty.clone(), ty.clone()]);
     let callback = Value {
         ty: node("val", vec![node("->", vec![domain, ty.clone()])]),
-        repr: Repr::Function("stdlib.numeric.add".parse().unwrap()),
+        repr: Repr::Function("stdlib.numeric.+".parse().unwrap()),
     };
     let result = l
         .lower_operation(
@@ -183,7 +154,7 @@ fn launch_captures_values_and_emits_both_dialects() {
     };
     let result = l
         .lower_operation(
-            "stdlib.gpu.launch.launch_shared_unsafe",
+            "unsafe.launch_shared",
             vec![
                 value(grid_type, "host_grid"),
                 value(shared_type, "host_layout"),

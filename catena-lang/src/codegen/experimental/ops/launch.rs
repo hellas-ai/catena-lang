@@ -52,10 +52,8 @@ pub(crate) fn lower(
     }
     // Closure conversion expands the kernel into environment + function operands.
     let (grid, shared, environment, kernel) = match (op, args) {
-        ("stdlib.gpu.launch.launch_unsafe", [grid, environment, kernel]) => {
-            (grid, None, environment, kernel)
-        }
-        ("stdlib.gpu.launch.launch_shared_unsafe", [grid, shared, environment, kernel]) => {
+        ("unsafe.launch", [grid, environment, kernel]) => (grid, None, environment, kernel),
+        ("unsafe.launch_shared", [grid, shared, environment, kernel]) => {
             (grid, Some(shared), environment, kernel)
         }
         _ => return Err(invalid(op, "invalid launch operands")),

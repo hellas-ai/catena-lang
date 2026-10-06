@@ -40,11 +40,23 @@ pub(super) fn lower(
     if op == "stdlib.gpu.barriers.sync" {
         return barriers::lower(l, op, &args, outputs);
     }
-    if op.starts_with("runtime.global_") {
+    if op.starts_with("stdlib.runtime.global_") {
         return runtime::lower(l, op, &args, outputs);
     }
     match op {
-        "stdlib.unsafe.discard" => {
+        "unsafe.assume" => {
+            if args
+                .iter()
+                .any(|value| children(&value.ty, "1") != Some(&[]))
+            {
+                return Err(invalid(op, "assume requires unit"));
+            }
+            if !matches!(outputs, [ty] if matches!(children(ty, "|-"), Some([_]))) {
+                return Err(invalid(op, "assume must return one proof"));
+            }
+            outputs.iter().map(|ty| l.erased(ty)).collect()
+        }
+        "unsafe.discard" => {
             let [proof] = args.as_slice() else {
                 return Err(invalid(op, "discard requires one proof"));
             };
@@ -65,13 +77,7 @@ pub(super) fn lower(
             });
             outputs.iter().map(|ty| l.erased(ty)).collect()
         }
-        "ax-mp"
-        | "stdlib.assert.ax_mp"
-        | "stdlib.prelude.and_intro"
-        | "stdlib.prelude.and_elim"
-        | "stdlib.prelude.and_intro.applied.2"
-        | "stdlib.prelude.and_elim.applied.2"
-        | "stdlib.prelude.truth" => {
+        "ax-mp" | "stdlib.assert.ax_mp" | "core.and_intro" | "core.and_elim" | "core.truth" => {
             for arg in &args {
                 l.erased(&arg.ty)?;
             }

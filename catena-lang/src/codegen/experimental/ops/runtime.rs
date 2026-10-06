@@ -16,21 +16,26 @@ pub(super) fn lower(
     let ty = single_output(outputs)?;
     let expression = match (op, xs.as_slice()) {
         (
-            "runtime.global_own_u32"
-            | "runtime.global_own_u64"
-            | "runtime.global_own_f32"
-            | "runtime.global_ref_u32"
-            | "runtime.global_ref_u64"
-            | "runtime.global_ref_f32",
+            "stdlib.runtime.global_own_u32"
+            | "stdlib.runtime.global_own_u64"
+            | "stdlib.runtime.global_own_f32"
+            | "stdlib.runtime.global_ref_u32"
+            | "stdlib.runtime.global_ref_u64"
+            | "stdlib.runtime.global_ref_f32",
             [mem, count],
         ) => {
             let Some(CType::Global(element)) = runtime(&ty)? else {
                 return Err(invalid(op, "expected Global result"));
             };
-            format!("catena_global_from_mem<{}>({mem},{count})", element.c_name())
+            format!(
+                "catena_global_from_mem<{}>({mem},{count})",
+                element.c_name()
+            )
         }
         (
-            "runtime.global_u32_to_mem" | "runtime.global_u64_to_mem" | "runtime.global_f32_to_mem",
+            "stdlib.runtime.global_u32_to_mem"
+            | "stdlib.runtime.global_u64_to_mem"
+            | "stdlib.runtime.global_f32_to_mem",
             [mem],
         ) => format!("catena_mem_own_t{{{mem}.data,{mem}.bytes}}"),
         _ => return Err(CodegenError::Unsupported(op.into())),

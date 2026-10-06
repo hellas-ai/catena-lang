@@ -58,14 +58,19 @@ pub(super) fn run(
         let generated_id = state.next_generated_id;
         state.next_generated_id += 1;
 
-        // Step 2: generate and validate the selected function.
+        // Step 2: generate the selected function.
         progress(&format!(
             "Generating closure {} for {}.{}",
             generated_id, selected.theory, selected.definition
         ));
         let original_context_leaves = add_closure_and_name(&mut state, &selected, generated_id)?;
-        progress("Validating generated theory");
-        validate_generated_theory(&state.theory)?;
+        // Temporarily skip checking the entire growing theory after every closure:
+        // it repeatedly checks unchanged definitions and is a likely major cost.
+        // closure::run_with_progress still validates the completed theory once.
+        // TODO: validate only new/affected declarations here. Until then, malformed
+        // generated declarations may fail during replacement before final validation.
+        // progress("Validating generated theory");
+        // validate_generated_theory(&state.theory)?;
 
         // Step 3: replace its marker with explicit
         // environment/function-pointer values.
@@ -142,6 +147,7 @@ fn add_closure_and_name(
     Ok(defined.original_context_leaves)
 }
 
+#[allow(dead_code, reason = "per-iteration validation is temporarily disabled above")]
 fn validate_generated_theory(theory: &TheorySet) -> Result<(), ConversionError> {
     // Validate generated declarations before replacement starts depending on
     // their types and context projections.

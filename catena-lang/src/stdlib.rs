@@ -51,32 +51,109 @@ pub fn sources() -> impl ExactSizeIterator<Item = &'static str> {
 /// callers combine these sources with their program and select
 /// [`crate::codegen::CodegenKind::Experimental`] explicitly.
 pub fn experimental_sources() -> impl ExactSizeIterator<Item = &'static str> {
-    EXPERIMENTAL_SOURCES.iter().copied()
+    EXPERIMENTAL_FILES.iter().map(|file| file.source)
 }
 
-const EXPERIMENTAL_SOURCES: &[&str] = &[
-    include_str!("../stdlib/experimental/metacat/cmc.hex"),
-    include_str!("../stdlib/experimental/metacat/fn.hex"),
-    include_str!("../stdlib/experimental/metacat/literals.hex"),
-    include_str!("../stdlib/experimental/metacat/product.hex"),
-    include_str!("../stdlib/experimental/metacat/value.hex"),
-    include_str!("../stdlib/experimental/metacat/witnesses.hex"),
-    include_str!("../stdlib/experimental/assert.hex"),
-    include_str!("../stdlib/experimental/equality.hex"),
-    include_str!("../stdlib/experimental/fold.hex"),
-    include_str!("../stdlib/experimental/gpu.hex"),
-    include_str!("../stdlib/experimental/lists.hex"),
-    include_str!("../stdlib/experimental/numeric.hex"),
-    include_str!("../stdlib/experimental/prelude.hex"),
-    include_str!("../stdlib/experimental/runtime.hex"),
-    include_str!("../stdlib/experimental/unsafe.hex"),
-    include_str!("../stdlib/experimental/gpu/barriers.hex"),
-    include_str!("../stdlib/experimental/gpu/geometry.hex"),
-    include_str!("../stdlib/experimental/gpu/launch.hex"),
-    include_str!("../stdlib/experimental/gpu/matmul.hex"),
-    include_str!("../stdlib/experimental/gpu/memory.hex"),
-    include_str!("../stdlib/experimental/gpu/protocol.hex"),
-    include_str!("../stdlib/experimental/execution.hex"),
+/// Experimental primitives and core helpers, without the optional matmul helpers.
+///
+/// Use this for programs implementing their own tensor kernels. The full
+/// [`experimental_sources`] library additionally includes `gpu/matmul.hex`.
+pub fn experimental_core_sources() -> impl Iterator<Item = &'static str> {
+    EXPERIMENTAL_FILES
+        .iter()
+        .filter(|file| file.filename != "gpu/matmul.hex")
+        .map(|file| file.source)
+}
+
+const EXPERIMENTAL_FILES: &[StdlibFile] = &[
+    StdlibFile {
+        filename: "metacat/cmc.hex",
+        source: include_str!("../stdlib/experimental/metacat/cmc.hex"),
+    },
+    StdlibFile {
+        filename: "metacat/fn.hex",
+        source: include_str!("../stdlib/experimental/metacat/fn.hex"),
+    },
+    StdlibFile {
+        filename: "metacat/literals.hex",
+        source: include_str!("../stdlib/experimental/metacat/literals.hex"),
+    },
+    StdlibFile {
+        filename: "metacat/product.hex",
+        source: include_str!("../stdlib/experimental/metacat/product.hex"),
+    },
+    StdlibFile {
+        filename: "metacat/value.hex",
+        source: include_str!("../stdlib/experimental/metacat/value.hex"),
+    },
+    StdlibFile {
+        filename: "metacat/witnesses.hex",
+        source: include_str!("../stdlib/experimental/metacat/witnesses.hex"),
+    },
+    StdlibFile {
+        filename: "assert.hex",
+        source: include_str!("../stdlib/experimental/assert.hex"),
+    },
+    StdlibFile {
+        filename: "equality.hex",
+        source: include_str!("../stdlib/experimental/equality.hex"),
+    },
+    StdlibFile {
+        filename: "fold.hex",
+        source: include_str!("../stdlib/experimental/fold.hex"),
+    },
+    StdlibFile {
+        filename: "gpu.hex",
+        source: include_str!("../stdlib/experimental/gpu.hex"),
+    },
+    StdlibFile {
+        filename: "lists.hex",
+        source: include_str!("../stdlib/experimental/lists.hex"),
+    },
+    StdlibFile {
+        filename: "numeric.hex",
+        source: include_str!("../stdlib/experimental/numeric.hex"),
+    },
+    StdlibFile {
+        filename: "prelude.hex",
+        source: include_str!("../stdlib/experimental/prelude.hex"),
+    },
+    StdlibFile {
+        filename: "runtime.hex",
+        source: include_str!("../stdlib/experimental/runtime.hex"),
+    },
+    StdlibFile {
+        filename: "unsafe.hex",
+        source: include_str!("../stdlib/experimental/unsafe.hex"),
+    },
+    StdlibFile {
+        filename: "gpu/barriers.hex",
+        source: include_str!("../stdlib/experimental/gpu/barriers.hex"),
+    },
+    StdlibFile {
+        filename: "gpu/geometry.hex",
+        source: include_str!("../stdlib/experimental/gpu/geometry.hex"),
+    },
+    StdlibFile {
+        filename: "gpu/launch.hex",
+        source: include_str!("../stdlib/experimental/gpu/launch.hex"),
+    },
+    StdlibFile {
+        filename: "gpu/matmul.hex",
+        source: include_str!("../stdlib/experimental/gpu/matmul.hex"),
+    },
+    StdlibFile {
+        filename: "gpu/memory.hex",
+        source: include_str!("../stdlib/experimental/gpu/memory.hex"),
+    },
+    StdlibFile {
+        filename: "gpu/protocol.hex",
+        source: include_str!("../stdlib/experimental/gpu/protocol.hex"),
+    },
+    StdlibFile {
+        filename: "execution.hex",
+        source: include_str!("../stdlib/experimental/execution.hex"),
+    },
 ];
 
 pub fn paths_from(root: impl AsRef<Path>) -> impl ExactSizeIterator<Item = PathBuf> {

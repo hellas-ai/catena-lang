@@ -131,7 +131,10 @@ Rust callers can use `catena_lang::stdlib::experimental_sources()` to get the
 checked-in experimental library as static source strings in manifest order.
 Chain this iterator with your program's `include_str!` sources, parse them with
 `RawTheorySet::from_texts`, and select `CodegenKind::Experimental` when compiling.
-No application build script or bundle registry is needed for this path.
+No application build script or bundle registry is needed for this path. Programs
+that supply their own tensor kernels can use `stdlib::experimental_core_sources()`
+to omit the large predefined `gpu/matmul.hex` helpers. This smaller API does not
+change the CLI's full-library manifests.
 
 This additive API leaves `stdlib::sources()` and the CLI's named bundles
 unchanged. Selecting a backend still does not select a library automatically.

@@ -2,7 +2,7 @@ use crate::runtime::GpuDialect;
 
 pub(super) fn render(dialect: GpuDialect) -> String {
     let mut result = format!(
-        "#include <{}>\n#include <stdint.h>\n#include <stddef.h>\n#include <math.h>\n#include <stdio.h>\n#include <stdlib.h>\n",
+        "#include <{}>\n#include <stdint.h>\n#include <stddef.h>\n#include <math.h>\n#include <stdio.h>\n#include <stdlib.h>\n#include <vector>\n",
         dialect.runtime_header()
     );
     result.push_str(&format!(
@@ -33,6 +33,10 @@ __host__ __device__ inline float catena_u32_bitcast_f32(uint32_t bits) {
 }
 struct catena_mem_own_t { void* data; uint64_t len; };
 struct catena_mem_ref_t { void* data; uint64_t len; };
+using catena_mem_refs = std::vector<catena_mem_ref_t>;
+inline catena_mem_refs catena_mem_refs_push(catena_mem_refs table, catena_mem_ref_t reference) {
+    table.push_back(reference); return table;
+}
 __host__ __device__ inline uint32_t catena_f32_bitcast_u32(float x) {
     union { uint32_t u; float f; } value; value.f=x; return value.u;
 }

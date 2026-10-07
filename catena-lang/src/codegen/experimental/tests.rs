@@ -472,3 +472,83 @@ fn reused_kernels_keep_per_launch_arguments_and_shared_memory() {
     l.place = Place::Device;
     assert!(l.lower_operation("unsafe.launch", vec![], &[unit]).is_err());
 }
+
+#[test]
+fn memory_reference_tables_are_checked_and_host_only() {
+    let templates = BTreeMap::new();
+    let mut l = lowerer(&templates);
+    let table_ty = node("val", vec![node("stdlib.runtime.type.MemRefs", vec![])]);
+    let ref_ty = node("val", vec![node("mem", vec![node("cap.ref", vec![])])]);
+    let own_ty = node("val", vec![node("mem", vec![node("cap.own", vec![])])]);
+    assert!(runtime(&table_ty).unwrap().unwrap().abi().is_none());
+    let empty = l
+        .lower_operation(
+            "stdlib.runtime.raw.mem_refs_empty",
+            vec![],
+            &[table_ty.clone()],
+        )
+        .unwrap()
+        .remove(0);
+    let table = l
+        .lower_operation(
+            "stdlib.runtime.raw.mem_refs_push",
+            vec![empty, value(ref_ty.clone(), "buffer")],
+            &[table_ty.clone()],
+        )
+        .unwrap()
+        .remove(0);
+    l.lower_operation(
+        "stdlib.runtime.raw.mem_ref_at",
+        vec![table.clone(), value(scalar("u32"), "index")],
+        &[ref_ty.clone()],
+    )
+    .unwrap();
+    assert!(l.body.iter().any(|i| matches!(i, Instruction::Assert {condition} if condition.contains("index <") && condition.contains(".size()"))));
+    assert!(
+        l.lower_operation(
+            "stdlib.runtime.raw.mem_refs_push",
+            vec![table.clone(), value(own_ty, "owned")],
+            &[table_ty.clone()]
+        )
+        .is_err()
+    );
+    assert!(
+        l.lower_operation(
+            "stdlib.runtime.raw.mem_ref_at",
+            vec![table.clone(), value(scalar("u64"), "index")],
+            &[ref_ty.clone()]
+        )
+        .is_err()
+    );
+    assert!(
+        l.lower_operation(
+            "unsafe.launch_linear",
+            vec![
+                value(scalar("u32"), "count"),
+                table.clone(),
+                Value {
+                    ty: node(
+                        "val",
+                        vec![node("->", vec![scalar("u32"), node("1", vec![])])]
+                    ),
+                    repr: Repr::Function("test".parse().unwrap())
+                }
+            ],
+            &[node("1", vec![])]
+        )
+        .is_err()
+    );
+    l.place = Place::Device;
+    assert!(
+        l.lower_operation(
+            "stdlib.runtime.raw.mem_ref_at",
+            vec![table, value(scalar("u32"), "index")],
+            &[ref_ty]
+        )
+        .is_err()
+    );
+    assert!(
+        l.lower_operation("stdlib.runtime.raw.mem_refs_empty", vec![], &[table_ty])
+            .is_err()
+    );
+}

@@ -26,4 +26,13 @@
 (arr stdlib.runtime.raw.write_f32 : {((cap.own mem) val) (u32 val) (f32 val)} -> 1)
 (arr unsafe.launch_linear : {(u32 val) ({(u32 val) 1} =>)} -> 1)
 (arr core.fold.values : ([s.] {(u32 val) [.s] ({({(u32 val) [.s]} *) [.s]} =>)}) -> ([s.] [.s]))
+
+# Host-only indexed collections of borrowed buffers. No buffer ownership transfer.
+(arr stdlib.runtime.raw.mem_refs_empty : 1 -> (stdlib.runtime.type.MemRefs val))
+(arr stdlib.runtime.raw.mem_refs_push : {(stdlib.runtime.type.MemRefs val) ((cap.ref mem) val)} -> (stdlib.runtime.type.MemRefs val))
+(arr stdlib.runtime.raw.mem_ref_at : {(stdlib.runtime.type.MemRefs val) (u32 val)} -> ((cap.ref mem) val))
+})
+
+(theory type nat {
+(arr stdlib.runtime.type.MemRefs : 0 -> 1)
 })

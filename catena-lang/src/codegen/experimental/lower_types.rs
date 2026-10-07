@@ -12,6 +12,8 @@ pub(super) enum CType {
     F32,
     MemOwn,
     MemRef,
+    /// Host-owned table of borrowed ABI memory references.
+    MemRefs,
     Grid,
     Block,
     Thread,
@@ -52,6 +54,7 @@ pub(super) fn concrete(ty: &Obj) -> Result<CType, CodegenError> {
         return Err(CodegenError::NoRuntimeRepresentation(ty.clone()));
     };
     let result = match (op.as_str(), args.as_slice()) {
+        ("stdlib.runtime.type.MemRefs", []) => CType::MemRefs,
         ("bool", []) => CType::Bool,
         ("u16", []) => CType::U16,
         ("u32", []) => CType::U32,
@@ -105,6 +108,7 @@ impl CType {
             Self::F32 => "float".into(),
             Self::MemOwn => "catena_mem_own_t".into(),
             Self::MemRef => "catena_mem_ref_t".into(),
+            Self::MemRefs => "catena_mem_refs".into(),
             Self::Grid => "catena_grid".into(),
             Self::Block => "catena_block".into(),
             Self::Thread => "catena_thread".into(),

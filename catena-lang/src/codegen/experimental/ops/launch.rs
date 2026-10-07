@@ -129,6 +129,14 @@ pub(in crate::codegen::experimental) fn lower(
     let mut arguments = vec![grid_expression.clone()];
     let mut captured = Vec::new();
     environment.clone().flatten(&mut captured);
+    for value in &captured {
+        if matches!(value.repr, Repr::Runtime(_)) && runtime(&value.ty)? == Some(CType::MemRefs) {
+            return Err(invalid(
+                op,
+                "host memory-reference tables cannot be captured by a GPU kernel",
+            ));
+        }
+    }
     let specialization = key(false, kernel, &captured);
     if let Some(symbol) = cached(l, &specialization) {
         for value in &captured {
@@ -241,6 +249,14 @@ pub(in crate::codegen::experimental) fn linear(
     let mut arguments = vec![expr(&grid)?.into(), count_expr];
     let mut captured = vec![];
     environment.clone().flatten(&mut captured);
+    for value in &captured {
+        if matches!(value.repr, Repr::Runtime(_)) && runtime(&value.ty)? == Some(CType::MemRefs) {
+            return Err(invalid(
+                op,
+                "host memory-reference tables cannot be captured by a GPU kernel",
+            ));
+        }
+    }
     let specialization = key(true, kernel, &captured);
     if let Some(symbol) = cached(l, &specialization) {
         for value in &captured {

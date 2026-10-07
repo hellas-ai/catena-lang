@@ -130,9 +130,41 @@ or model Hex changes.
 
 For the f32 SmolLM2 model, this reduced emitted kernels from 403 to 10 and HIP
 source from 1.95 MB to 380 KB. On the measured machine, native HIP compilation
-for `gfx1151` fell from about 9 seconds to 2 seconds. The roughly 9-second shared
-front-end cost remains, chiefly closure conversion and type checking. The host
-launch sequence remains expanded across all 30 layers.
+for `gfx1151` fell from about 9 seconds to 2 seconds. With the full experimental
+library, the shared front end still costs roughly
+9 seconds, chiefly closure conversion and type checking. Kernel reuse alone
+leaves the host launch sequence expanded across all 30 layers.
+
+## Looped decoder and host weight tables
+
+The experimental model now uses `core.fold.values` to carry the owned hidden
+buffer through 30 ascending decoder iterations. The callback selects nine
+borrowed weight buffers at `layer * 9 + offset`, executes the unchanged decoder
+helper, and returns the next hidden buffer. The 274-buffer public ABI and f32
+arithmetic are unchanged; the default Hex model remains the reference.
+
+New compiler-backed operations make the weight collection one runtime value:
+
+| Addition | Generated host code | Rationale |
+| --- | --- | --- |
+| `stdlib.runtime.type.MemRefs` | A `std::vector<catena_mem_ref_t>` value. | Capture one indexable collection instead of 270 individual weight references. It owns descriptors, not the referenced buffers. |
+| `stdlib.runtime.raw.mem_refs_empty` | Construct an empty table. | Start table construction using the existing separate ABI arguments. |
+| `stdlib.runtime.raw.mem_refs_push` | Copy the input table, append a borrowed reference, and return it. | Preserve value semantics when a Hex value has multiple uses. Existing tables remain valid. Owned-buffer inputs are rejected. |
+| `stdlib.runtime.raw.mem_ref_at` | Check the u32 index against `.size()` and read the descriptor. | Select weights using the loop index without expanding 30 decoder bodies. |
+
+These operations require host execution. Tables cannot cross the public runtime
+ABI or be captured by a GPU kernel. C++ destructors release descriptor storage;
+buffer owners must remain alive while their references are used. This is a
+convenience representation for the loop; the prior explicit decoder composition
+did not require it.
+
+`stdlib::experimental_core_sources()` supplies the experimental primitives and
+core helpers without `gpu/matmul.hex`, a 516 KB library of predefined matmul
+helpers unused by this model. The existing full-library API and CLI manifests
+retain those helpers. With the loop and core library, measured Catena compilation
+fell to 0.66 seconds, emitted HIP source to 96 KB, and native HIP compilation took
+2.5 seconds on the same `gfx1151` setup. The library selection accounts for most
+of the frontend improvement; the loop reduces the generated host code.
 
 ## Integration and validation
 

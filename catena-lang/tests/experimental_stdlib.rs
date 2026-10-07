@@ -114,5 +114,16 @@ fn embedded_experimental_sources_match_the_manifest() -> anyhow::Result<()> {
             .map(|file| file.source.as_ref())
             .collect::<Vec<_>>()
     );
+    assert_eq!(
+        catena_lang::stdlib::experimental_core_sources().collect::<Vec<_>>(),
+        files
+            .iter()
+            .filter(|file| file
+                .filename
+                .file_name()
+                .is_none_or(|name| name != "matmul.hex"))
+            .map(|file| file.source.as_ref())
+            .collect::<Vec<_>>()
+    );
     Ok(())
 }

@@ -14,6 +14,62 @@ pub(super) fn lower(
     args: &[Value],
     outputs: &[Obj],
 ) -> Result<Vec<Value>, CodegenError> {
+    if matches!(
+        op,
+        "stdlib.runtime.raw.mem_refs_empty"
+            | "stdlib.runtime.raw.mem_refs_push"
+            | "stdlib.runtime.raw.mem_ref_at"
+    ) {
+        if l.place != Place::Host {
+            return Err(invalid(
+                op,
+                "memory-reference tables require host execution",
+            ));
+        }
+        let ty = single_output(outputs)?;
+        let expression = if op == "stdlib.runtime.raw.mem_refs_empty" {
+            if !runtime_args(args).is_empty() || runtime(&ty)? != Some(CType::MemRefs) {
+                return Err(invalid(op, "expected no runtime inputs and a table result"));
+            }
+            "catena_mem_refs{}".into()
+        } else if op == "stdlib.runtime.raw.mem_refs_push" {
+            let [table, reference] = args else {
+                return Err(invalid(op, "expected a table and borrowed buffer"));
+            };
+            if runtime(&table.ty)? != Some(CType::MemRefs)
+                || runtime(&reference.ty)? != Some(CType::MemRef)
+                || runtime(&ty)? != Some(CType::MemRefs)
+            {
+                return Err(invalid(
+                    op,
+                    "only borrowed buffers can be appended to a table",
+                ));
+            }
+            format!(
+                "catena_mem_refs_push({},{})",
+                expr(table)?,
+                expr(reference)?
+            )
+        } else {
+            let [table, index] = args else {
+                return Err(invalid(op, "expected a table and u32 index"));
+            };
+            if runtime(&table.ty)? != Some(CType::MemRefs)
+                || runtime(&index.ty)? != Some(CType::U32)
+                || runtime(&ty)? != Some(CType::MemRef)
+            {
+                return Err(invalid(op, "invalid table, index, or result type"));
+            }
+            let table = expr(table)?;
+            let index = expr(index)?;
+            l.body.push(Instruction::Assert {
+                condition: format!("{index} < {table}.size()"),
+            });
+            format!("{table}[{index}]")
+        };
+        let result = l.emit(&ty, expression)?;
+        return results(l, outputs, vec![result]);
+    }
     let values = runtime_args(args);
     let xs = values.iter().map(expr).collect::<Result<Vec<_>, _>>()?;
     let types = values

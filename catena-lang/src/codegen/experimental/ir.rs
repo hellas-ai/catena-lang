@@ -35,8 +35,12 @@ pub(super) enum Instruction {
         yes: Vec<Instruction>,
         no: Vec<Instruction>,
     },
+    Free {
+        buffer: Variable,
+    },
     For {
         index: String,
+        index_type: CType,
         end: String,
         body: Vec<Instruction>,
     },

@@ -306,9 +306,12 @@ impl<'a> Lowerer<'a> {
             return super::smolcat_compat::lower(self, op, &args, outputs);
         }
         match op {
-            "core.if" | "core.if_guarded" | "core.fold.bounded" | "core.fold.trace" => {
-                ops::control::lower(self, op, args, outputs)
-            }
+            "core.if"
+            | "core.if_guarded"
+            | "core.fold.bounded"
+            | "core.fold.trace"
+            | "core.fold.bounded_u64"
+            | "core.fold.trace_u64" => ops::control::lower(self, op, args, outputs),
             "unsafe.launch" | "unsafe.launch_shared" => {
                 ops::launch::lower(self, op, &args, outputs)
             }

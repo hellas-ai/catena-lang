@@ -6,7 +6,6 @@ use metacat::tree::Tree;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum CType {
     Bool,
-    U16,
     U32,
     U64,
     F32,
@@ -53,7 +52,6 @@ pub(super) fn concrete(ty: &Obj) -> Result<CType, CodegenError> {
     };
     let result = match (op.as_str(), args.as_slice()) {
         ("bool", []) => CType::Bool,
-        ("u16", []) => CType::U16,
         ("u32", []) => CType::U32,
         ("u64", []) => CType::U64,
         ("f32", []) => CType::F32,
@@ -63,7 +61,7 @@ pub(super) fn concrete(ty: &Obj) -> Result<CType, CodegenError> {
         ("stdlib.gpu.geometry.type.Block", [_, _, _]) => CType::Block,
         ("stdlib.gpu.geometry.type.Thread", [_, _, _, _]) => CType::Thread,
         ("stdlib.gpu.geometry.type.Index", [_]) => CType::Index,
-        ("stdlib.gpu.memory.type.Ix" | "stdlib.gpu.memory.type.SlotName", [_]) => CType::U32,
+        ("stdlib.gpu.memory.type.Ix" | "stdlib.gpu.memory.type.SlotName", [_]) => CType::U64,
         ("stdlib.gpu.memory.type.Global", [_, element]) => {
             CType::Global(Box::new(concrete(element)?))
         }
@@ -99,7 +97,6 @@ impl CType {
     pub(super) fn c_name(&self) -> String {
         match self {
             Self::Bool => "uint8_t".into(),
-            Self::U16 => "uint16_t".into(),
             Self::U32 => "uint32_t".into(),
             Self::U64 => "uint64_t".into(),
             Self::F32 => "float".into(),
@@ -117,7 +114,6 @@ impl CType {
     pub(super) fn abi(&self) -> Option<ValueKind> {
         Some(match self {
             Self::Bool => ValueKind::Bool,
-            Self::U16 => ValueKind::U16,
             Self::U32 => ValueKind::U32,
             Self::U64 => ValueKind::U64,
             Self::F32 => ValueKind::F32,
@@ -127,9 +123,9 @@ impl CType {
         })
     }
     pub(super) fn numeric(&self) -> bool {
-        matches!(self, Self::U16 | Self::U32 | Self::U64 | Self::F32)
+        matches!(self, Self::U32 | Self::U64 | Self::F32)
     }
     pub(super) fn integral(&self) -> bool {
-        matches!(self, Self::U16 | Self::U32 | Self::U64)
+        matches!(self, Self::U32 | Self::U64)
     }
 }

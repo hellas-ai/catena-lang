@@ -24,6 +24,7 @@ pub(super) fn lower(
             | "stdlib.numeric.numeric.f32"
             | "stdlib.numeric.signed.int"
             | "stdlib.numeric.signed.f32"
+            | "stdlib.numeric.floating.f32"
     ) {
         return outputs.iter().map(|t| l.erased(t)).collect();
     }
@@ -87,12 +88,27 @@ pub(super) fn lower(
             ("coerce", [x]) if runtime(&values[0].ty)? == Some(CType::U32) && out == CType::U64 => {
                 format!("uint64_t({x})")
             }
+            ("u32_to_f32", [x])
+                if runtime(&values[0].ty)? == Some(CType::U32) && out == CType::F32 =>
+            {
+                format!("float({x})")
+            }
+            ("exp" | "sqrt" | "rsqrt", [x])
+                if runtime(&values[0].ty)? == Some(CType::F32) && out == CType::F32 =>
+            {
+                match name {
+                    "exp" => format!("expf({x})"),
+                    "sqrt" => format!("sqrtf({x})"),
+                    _ => format!("(1.0f / sqrtf({x}))"),
+                }
+            }
             ("negate", [x]) if out == CType::F32 && runtime(&values[0].ty)? == Some(CType::F32) => {
                 format!("-{x}")
             }
             (
-                "+" | "-" | "*" | "/" | "escaped.25" | "ceil_div" | "ceil_div_u32" | "equal"
-                | "not_equal" | "less" | "less_equal" | "greater" | "greater_equal" | "min" | "max",
+                "+" | "-" | "*" | "/" | "escaped.25" | "ceil_div" | "ceil_div_u32" | "ceil_div_u64"
+                | "equal" | "not_equal" | "less" | "less_equal" | "greater" | "greater_equal"
+                | "min" | "max",
                 [x, y],
             ) => {
                 let input = runtime(&values[0].ty)?.unwrap();
@@ -112,11 +128,17 @@ pub(super) fn lower(
                 {
                     return Err(invalid(op, "numeric result type mismatch"));
                 }
-                if matches!(name, "escaped.25" | "ceil_div" | "ceil_div_u32") && !input.integral() {
+                if matches!(
+                    name,
+                    "escaped.25" | "ceil_div" | "ceil_div_u32" | "ceil_div_u64"
+                ) && !input.integral()
+                {
                     return Err(invalid(op, "requires integral operands"));
                 }
-                if matches!(name, "/" | "escaped.25" | "ceil_div" | "ceil_div_u32")
-                    && input.integral()
+                if matches!(
+                    name,
+                    "/" | "escaped.25" | "ceil_div" | "ceil_div_u32" | "ceil_div_u64"
+                ) && input.integral()
                 {
                     l.body.push(Instruction::Assert {
                         condition: format!("{y} != 0"),
@@ -125,7 +147,9 @@ pub(super) fn lower(
                 match name {
                     "min" => format!("({x} < {y} ? {x} : {y})"),
                     "max" => format!("({x} > {y} ? {x} : {y})"),
-                    "ceil_div" | "ceil_div_u32" => format!("({x} / {y} + ({x} % {y} != 0))"),
+                    "ceil_div" | "ceil_div_u32" | "ceil_div_u64" => {
+                        format!("({x} / {y} + ({x} % {y} != 0))")
+                    }
                     _ => {
                         let operator = match name {
                             "+" | "-" | "*" | "/" => name,
@@ -139,12 +163,7 @@ pub(super) fn lower(
                             "greater_equal" => ">=",
                             _ => unreachable!(),
                         };
-                        // Avoid signed C++ integer promotion for u16 multiplication.
-                        if input == CType::U16 {
-                            format!("(uint32_t({x}) {operator} uint32_t({y}))")
-                        } else {
-                            format!("({x} {operator} {y})")
-                        }
+                        format!("({x} {operator} {y})")
                     }
                 }
             }

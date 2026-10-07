@@ -6,7 +6,6 @@ mod geometry;
 pub(super) mod launch;
 mod memory;
 mod numeric;
-mod runtime;
 pub(super) mod structure;
 
 use super::{
@@ -39,9 +38,6 @@ pub(super) fn lower(
     }
     if op == "stdlib.gpu.barriers.sync" {
         return barriers::lower(l, op, &args, outputs);
-    }
-    if op.starts_with("stdlib.runtime.global_") {
-        return runtime::lower(l, op, &args, outputs);
     }
     match op {
         "unsafe.assume" => {

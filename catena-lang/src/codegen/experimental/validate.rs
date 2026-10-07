@@ -35,6 +35,11 @@ fn validate_body(
 ) -> Result<(), CodegenError> {
     for instruction in body {
         match instruction {
+            Instruction::Free { buffer } => {
+                if place != Place::Host || !matches!(buffer.ty, CType::Global(_)) {
+                    return Err(error(function, "free requires a global buffer on the host"));
+                }
+            }
             Instruction::Sync => {
                 if place != Place::Device {
                     return Err(error(
@@ -104,8 +109,8 @@ fn validate_memory(
             "memory access requires a global or shared buffer",
         ));
     };
-    if index.ty != CType::U32 {
-        return Err(error(function, "memory index must be u32"));
+    if index.ty != CType::U64 {
+        return Err(error(function, "memory index must be u64"));
     }
     if element.as_ref() != &value.ty {
         return Err(error(
@@ -149,6 +154,7 @@ mod tests {
     fn nested(body: Vec<Instruction>) -> Vec<Instruction> {
         vec![Instruction::For {
             index: "i".into(),
+            index_type: CType::U32,
             end: "n".into(),
             body: vec![Instruction::If {
                 condition: "condition".into(),
@@ -179,7 +185,7 @@ mod tests {
             CType::Shared(Box::new(CType::U32)),
         ] {
             let buffer = variable("buffer", ty);
-            let index = variable("index", CType::U32);
+            let index = variable("index", CType::U64);
             let value = variable("value", CType::U32);
             let load = Instruction::Load {
                 result: value.clone(),

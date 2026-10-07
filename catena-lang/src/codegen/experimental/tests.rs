@@ -107,6 +107,7 @@ fn unknown_erased_arrows_are_errors() {
         "unknown.effect",
         "smolcat.apply.2.unknown.pack",
         "stdlib.numeric.unknown",
+        "stdlib.runtime.global_own_u64",
         "stdlib.gpu.scheduling.unknown",
     ] {
         assert!(l.lower_operation(op, vec![], &[proof()]).is_err(), "{op}");
@@ -139,7 +140,7 @@ fn writes_assertions_and_barriers_survive_proof_erasure() {
         "stdlib.gpu.memory.global_write",
         vec![
             value(memory, "buffer"),
-            value(scalar("u32"), "index"),
+            value(scalar("u64"), "index"),
             value(scalar("u32"), "item"),
             Value::erased(proof()),
         ],
@@ -161,36 +162,47 @@ fn writes_assertions_and_barriers_survive_proof_erasure() {
 
 #[test]
 fn fold_emits_loop_and_preserves_carried_state() {
-    let templates = BTreeMap::new();
-    let mut l = lowerer(&templates);
-    let ty = scalar("u32");
-    let domain = node("*", vec![ty.clone(), ty.clone()]);
-    let callback = Value {
-        ty: node("val", vec![node("->", vec![domain, ty.clone()])]),
-        repr: Repr::Function("stdlib.numeric.+".parse().unwrap()),
-    };
-    let result = l
-        .lower_operation(
-            "core.fold.bounded",
-            vec![
-                value(ty.clone(), "end"),
-                value(ty.clone(), "initial"),
-                Value::erased(node("1", vec![])),
-                callback,
-                Value::erased(proof()),
-            ],
-            &[ty, proof()],
-        )
-        .unwrap();
-    assert_eq!(result.len(), 2);
-    let Instruction::For { body, .. } = l.body.last().unwrap() else {
-        panic!("expected loop")
-    };
-    assert!(
-        body.iter()
-            .any(|i| matches!(i,Instruction::Let(_,s) if s.contains(" + ")))
-    );
-    assert!(matches!(body.last(), Some(Instruction::Assign(..))));
+    for (op, kind) in [
+        ("core.fold.bounded", "u32"),
+        ("core.fold.trace", "u32"),
+        ("core.fold.bounded_u64", "u64"),
+        ("core.fold.trace_u64", "u64"),
+    ] {
+        let templates = BTreeMap::new();
+        let mut l = lowerer(&templates);
+        let ty = scalar(kind);
+        let domain = node("*", vec![ty.clone(), ty.clone()]);
+        let callback = Value {
+            ty: node("val", vec![node("->", vec![domain, ty.clone()])]),
+            repr: Repr::Function("stdlib.numeric.+".parse().unwrap()),
+        };
+        let result = l
+            .lower_operation(
+                op,
+                vec![
+                    value(ty.clone(), "end"),
+                    value(ty.clone(), "initial"),
+                    Value::erased(node("1", vec![])),
+                    callback,
+                    Value::erased(proof()),
+                ],
+                &[ty, proof()],
+            )
+            .unwrap();
+        assert_eq!(result.len(), 2);
+        let Instruction::For {
+            body, index_type, ..
+        } = l.body.last().unwrap()
+        else {
+            panic!("expected loop")
+        };
+        assert!(
+            body.iter()
+                .any(|i| matches!(i,Instruction::Let(_,s) if s.contains(" + ")))
+        );
+        assert!(matches!(body.last(), Some(Instruction::Assign(..))));
+        assert_eq!(*index_type, runtime(&scalar(kind)).unwrap().unwrap());
+    }
 }
 
 #[test]
@@ -261,5 +273,150 @@ fn launch_captures_values_and_emits_both_dialects() {
             "<<<host_grid.blocks,host_grid.threads,host_layout.bytes>>>(host_grid, host_flag)"
         ));
         assert!(source.contains(dialect.synchronize_fn()));
+    }
+}
+
+#[test]
+fn new_numeric_primitives_lower_with_erased_evidence() {
+    let templates = BTreeMap::new();
+    let mut l = lowerer(&templates);
+    for op in ["exp", "sqrt", "rsqrt"] {
+        let result = l
+            .lower_operation(
+                &format!("stdlib.numeric.{op}"),
+                vec![value(scalar("f32"), "x"), Value::erased(proof())],
+                &[scalar("f32")],
+            )
+            .unwrap();
+        assert_eq!(result.len(), 1);
+    }
+    l.lower_operation("stdlib.numeric.floating.f32", vec![], &[proof()])
+        .unwrap();
+    l.lower_operation(
+        "stdlib.numeric.u32_to_f32",
+        vec![value(scalar("u32"), "x")],
+        &[scalar("f32")],
+    )
+    .unwrap();
+    l.lower_operation(
+        "stdlib.numeric.ceil_div_u64",
+        vec![
+            value(scalar("u64"), "n"),
+            value(scalar("u64"), "d"),
+            Value::erased(proof()),
+        ],
+        &[scalar("u64"), proof()],
+    )
+    .unwrap();
+    assert!(
+        l.body
+            .iter()
+            .any(|i| matches!(i, Instruction::Assert { condition } if condition == "d != 0"))
+    );
+}
+
+#[test]
+fn kernel_allocation_is_rejected() {
+    let templates = BTreeMap::new();
+    let mut l = lowerer(&templates);
+    let bytes = scalar("u64");
+    let mem = node("val", vec![node("mem", vec![node("cap.own", vec![])])]);
+    let kernel = Value {
+        ty: node("val", vec![node("->", vec![bytes.clone(), mem])]),
+        repr: Repr::Function("stdlib.gpu.memory.allocate".parse().unwrap()),
+    };
+    let grid = node(
+        "val",
+        vec![node(
+            "stdlib.gpu.geometry.type.Grid",
+            vec![Tree::Leaf(0, ()), Tree::Leaf(1, ())],
+        )],
+    );
+    let error = l
+        .lower_operation(
+            "unsafe.launch",
+            vec![value(grid, "grid"), value(bytes, "bytes"), kernel],
+            &[node("1", vec![])],
+        )
+        .unwrap_err();
+    assert!(matches!(error, CodegenError::Invalid { op, reason }
+        if op == "stdlib.gpu.memory.allocate" && reason == "allocation requires host execution"));
+    assert!(l.modules.kernels.is_empty());
+    assert!(!l.body.iter().any(|instruction| matches!(instruction,
+        Instruction::Let(_, expression) if expression.contains("catena_allocate"))));
+}
+
+#[test]
+fn memory_conversions_allocation_and_free_use_current_namespace() {
+    let templates = BTreeMap::new();
+    let mut l = lowerer(&templates);
+    let mem = node("val", vec![node("mem", vec![node("cap.own", vec![])])]);
+    let global = node(
+        "val",
+        vec![node(
+            "stdlib.gpu.memory.type.Global",
+            vec![Tree::Leaf(0, ()), node("u64", vec![])],
+        )],
+    );
+    l.lower_operation(
+        "stdlib.gpu.memory.allocate",
+        vec![value(scalar("u64"), "bytes"), Value::erased(proof())],
+        &[mem.clone()],
+    )
+    .unwrap();
+    l.lower_operation(
+        "stdlib.gpu.memory.global_own_u64",
+        vec![value(mem.clone(), "memory"), value(scalar("u64"), "count")],
+        &[global.clone(), proof()],
+    )
+    .unwrap();
+    let outputs = [node(
+        "*",
+        vec![scalar("u64"), node("*", vec![global.clone(), proof()])],
+    )];
+    let cast = l
+        .lower_operation(
+            "stdlib.gpu.memory.mem_cast_own_u64",
+            vec![value(mem.clone(), "memory")],
+            &outputs,
+        )
+        .unwrap();
+    assert_eq!(ops::runtime_args(&cast).len(), 2);
+    l.lower_operation(
+        "stdlib.gpu.memory.global_cast_equal_own",
+        vec![
+            value(global.clone(), "buffer"),
+            value(scalar("u64"), "count"),
+        ],
+        &[global.clone(), proof()],
+    )
+    .unwrap();
+    l.lower_operation(
+        "stdlib.gpu.memory.global_u64_to_mem",
+        vec![value(global.clone(), "buffer")],
+        &[mem],
+    )
+    .unwrap();
+    l.lower_operation(
+        "stdlib.gpu.memory.free",
+        vec![value(global, "buffer"), Value::erased(proof())],
+        &[node("1", vec![])],
+    )
+    .unwrap();
+    assert!(matches!(l.body.last(), Some(Instruction::Free { .. })));
+    l.modules.functions.insert(
+        "entry".into(),
+        Function {
+            symbol: "entry".into(),
+            inputs: vec![],
+            outputs: vec![],
+            body: l.body,
+        },
+    );
+    for dialect in [GpuDialect::Hip, GpuDialect::Cuda] {
+        let source = render_runtime_module(&l.modules, dialect).unwrap().source;
+        assert!(source.contains(dialect.device_alloc_fn()));
+        assert!(source.contains(&format!("{}(buffer.data)", dialect.device_free_fn())));
+        assert!(source.contains("uint64_t count"));
     }
 }

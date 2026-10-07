@@ -14,7 +14,10 @@ pub(in crate::codegen::experimental) fn lower(
 ) -> Result<Vec<Value>, CodegenError> {
     match op {
         "core.if" | "core.if_guarded" => conditional(l, op, &args, outputs),
-        "core.fold.bounded" | "core.fold.trace" => fold(l, op, &args, outputs),
+        "core.fold.bounded"
+        | "core.fold.trace"
+        | "core.fold.bounded_u64"
+        | "core.fold.trace_u64" => fold(l, op, &args, outputs),
         _ => unreachable!("unexpected callback operation: {op}"),
     }
 }
@@ -67,6 +70,11 @@ fn fold(
     if args.len() < 5 {
         return Err(invalid(op, "missing fold operands"));
     }
+    let index_type = if op.ends_with("_u64") { "u64" } else { "u32" };
+    let index_ty = node("val", vec![node(index_type, vec![])]);
+    if representation(&args[0].ty)? != representation(&index_ty)? {
+        return Err(invalid(op, "fold bound type mismatch"));
+    }
     let end = expr(&args[0])?.to_owned();
     let initial = runtime_args(&[args[1].clone(), args[4].clone()]);
     let mut state = vec![];
@@ -76,7 +84,7 @@ fn fold(
     let outer = std::mem::take(&mut l.body);
     let index = l.fresh("index");
     let mut fields = vec![Value {
-        ty: node("val", vec![node("u32", vec![])]),
+        ty: index_ty.clone(),
         repr: Repr::Runtime(index.clone()),
     }];
     fields.extend(state.clone());
@@ -98,6 +106,11 @@ fn fold(
             .push(Instruction::Assign(expr(old)?.into(), expr(new)?.into()));
     }
     let body = std::mem::replace(&mut l.body, outer);
-    l.body.push(Instruction::For { index, end, body });
+    l.body.push(Instruction::For {
+        index,
+        index_type: representation(&index_ty)?.unwrap(),
+        end,
+        body,
+    });
     results(l, outputs, state)
 }

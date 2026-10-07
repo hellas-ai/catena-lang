@@ -2,6 +2,22 @@ use catena_lang::elaborate::{ElaborateError, elaborate};
 use metacat::theory::RawTheorySet;
 
 #[test]
+fn missing_type_literals_are_available_before_name_generation() -> anyhow::Result<()> {
+    let source = "(theory program type {
+        (arr test.literal : ([] {}) -> ([] {({type.const.u64.0x0000000000000080 u64} :)}))
+    })";
+    let raw = RawTheorySet::from_texts(catena_lang::stdlib::sources().chain([source]))?;
+    let elaborated = elaborate(raw)?;
+    assert!(
+        elaborated.theories[&"type".parse()?]
+            .arrows
+            .contains_key(&"type.const.u64.0x0000000000000080".parse()?)
+    );
+    metacat::theory::TheorySet::from_raw(elaborated)?;
+    Ok(())
+}
+
+#[test]
 fn rejects_arrow_type_maps_with_different_context_domains_before_name_generation() {
     let raw = RawTheorySet::from_text(
         r#"

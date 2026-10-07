@@ -6,6 +6,7 @@ mod geometry;
 pub(super) mod launch;
 mod memory;
 mod numeric;
+mod raw;
 mod runtime;
 pub(super) mod structure;
 
@@ -22,6 +23,9 @@ pub(super) fn lower(
     args: Vec<Value>,
     outputs: &[Obj],
 ) -> Result<Vec<Value>, CodegenError> {
+    if op.starts_with("stdlib.numeric.raw.") || op.starts_with("stdlib.runtime.raw.") {
+        return raw::lower(l, op, &args, outputs);
+    }
     if op.starts_with("stdlib.numeric.")
         || op.starts_with("type.const.")
         || op.starts_with("const.")

@@ -21,6 +21,7 @@
     "gpu/launch.hex",
     "gpu/matmul.hex",
     "gpu/memory.hex",
-    "gpu/protocol.hex"
+    "gpu/protocol.hex",
+    "execution.hex"
   ]
 }

@@ -1,3 +1,4 @@
+use super::lower_types::CType;
 use super::*;
 
 fn scalar(name: &str) -> Obj {
@@ -261,5 +262,120 @@ fn launch_captures_values_and_emits_both_dialects() {
             "<<<host_grid.blocks,host_grid.threads,host_layout.bytes>>>(host_grid, host_flag)"
         ));
         assert!(source.contains(dialect.synchronize_fn()));
+    }
+}
+
+#[test]
+fn plain_memory_adapters_preserve_effects_and_check_placement() {
+    let templates = BTreeMap::new();
+    let mut l = lowerer(&templates);
+    let own = node("val", vec![node("mem", vec![node("cap.own", vec![])])]);
+    let reference = node("val", vec![node("mem", vec![node("cap.ref", vec![])])]);
+    let memory = value(own.clone(), "memory");
+    let index = value(scalar("u32"), "index");
+    let f = value(scalar("f32"), "element");
+    assert!(
+        l.lower_operation(
+            "stdlib.runtime.raw.read_f32",
+            vec![memory.clone(), index.clone()],
+            &[scalar("f32")]
+        )
+        .is_err()
+    );
+    let borrowed = l
+        .lower_operation(
+            "stdlib.runtime.raw.borrow",
+            vec![memory.clone()],
+            &[own.clone(), reference.clone()],
+        )
+        .unwrap();
+    assert_eq!(expr(&borrowed[0]).unwrap(), "memory");
+    assert_eq!(runtime(&borrowed[1].ty).unwrap(), Some(CType::MemRef));
+    l.place = Place::Device;
+    assert!(
+        l.lower_operation(
+            "stdlib.runtime.raw.alloc_f32",
+            vec![index.clone()],
+            &[own.clone()]
+        )
+        .is_err()
+    );
+    assert!(
+        l.lower_operation("stdlib.runtime.raw.free", vec![memory.clone()], &[])
+            .is_err()
+    );
+    assert!(
+        l.lower_operation(
+            "stdlib.runtime.raw.write_f32",
+            vec![value(reference, "borrowed"), index.clone(), f.clone()],
+            &[]
+        )
+        .is_err()
+    );
+    l.lower_operation(
+        "stdlib.runtime.raw.write_f32",
+        vec![memory.clone(), index, f],
+        &[],
+    )
+    .unwrap();
+    assert!(
+        l.body
+            .iter()
+            .any(|i| matches!(i, Instruction::Store { .. }))
+    );
+    assert!(
+        l.body
+            .iter()
+            .any(|i| matches!(i, Instruction::Assert { .. }))
+    );
+    l.place = Place::Host;
+    l.lower_operation("stdlib.runtime.raw.free", vec![memory], &[])
+        .unwrap();
+    assert!(l.body.iter().any(
+        |i| matches!(i,Instruction::Let(_,expression) if expression.starts_with("catena_free("))
+    ));
+}
+
+#[test]
+fn plain_numeric_adapters_reject_invalid_types_and_emit_checked_narrowing() {
+    let templates = BTreeMap::new();
+    let mut l = lowerer(&templates);
+    assert!(
+        l.lower_operation(
+            "stdlib.numeric.raw.add",
+            vec![value(scalar("u32"), "a"), value(scalar("f32"), "b")],
+            &[scalar("f32")]
+        )
+        .is_err()
+    );
+    assert!(
+        l.lower_operation(
+            "stdlib.numeric.raw.select",
+            vec![
+                value(scalar("u32"), "c"),
+                value(scalar("f32"), "a"),
+                value(scalar("f32"), "b")
+            ],
+            &[scalar("f32")]
+        )
+        .is_err()
+    );
+    l.lower_operation(
+        "stdlib.numeric.raw.to_u32",
+        vec![value(scalar("u64"), "wide")],
+        &[scalar("u32")],
+    )
+    .unwrap();
+    assert!(
+        l.body.iter().any(
+            |i| matches!(i,Instruction::Assert{condition} if condition == "wide <= UINT32_MAX")
+        )
+    );
+    for dialect in [GpuDialect::Hip, GpuDialect::Cuda] {
+        let source = prelude::render(dialect);
+        assert!(source.contains("nearbyintf(x)"));
+        assert!(source.contains("mem.len % sizeof(T) == 0"));
+        assert!(source.contains(dialect.device_alloc_fn()));
+        assert!(source.contains(dialect.device_free_fn()));
     }
 }

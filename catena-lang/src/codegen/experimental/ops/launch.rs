@@ -127,3 +127,104 @@ pub(in crate::codegen::experimental) fn lower(
     });
     outputs.iter().map(|ty| l.erased(ty)).collect()
 }
+
+/// A guarded 1-D launch for a plain u32 index callback. Captures are still
+/// explicit closure-converted environment operands, as for `unsafe.launch`.
+pub(in crate::codegen::experimental) fn linear(
+    l: &mut Lowerer<'_>,
+    op: &str,
+    args: &[Value],
+    outputs: &[Obj],
+) -> Result<Vec<Value>, CodegenError> {
+    use super::super::lower_types::node;
+    if l.place != Place::Host {
+        return Err(invalid(op, "launch requires host execution"));
+    }
+    let [count, environment, kernel] = args else {
+        return Err(invalid(op, "invalid launch operands"));
+    };
+    if runtime(&count.ty)? != Some(CType::U32) {
+        return Err(invalid(op, "count must be u32"));
+    }
+    let grid_ty = node(
+        "val",
+        vec![node(
+            "stdlib.gpu.geometry.type.Grid",
+            vec![node("1", vec![]), node("1", vec![])],
+        )],
+    );
+    let count_expr = expr(count)?.to_owned();
+    let grid = l.emit(
+        &grid_ty,
+        format!("catena_make_grid({count_expr}/256+({count_expr}%256 != 0),1,256,1)"),
+    )?;
+    let grid_param = l.fresh("grid");
+    let count_param = l.fresh("count");
+    let mut inputs = vec![
+        Variable {
+            name: grid_param,
+            ty: CType::Grid,
+        },
+        Variable {
+            name: count_param.clone(),
+            ty: CType::U32,
+        },
+    ];
+    let mut arguments = vec![expr(&grid)?.into(), count_expr];
+    let mut captured = vec![];
+    environment.clone().flatten(&mut captured);
+    for value in &mut captured {
+        if let Repr::Runtime(expression) = &mut value.repr {
+            let name = l.fresh("capture");
+            arguments.push(expression.clone());
+            *expression = name.clone();
+            inputs.push(Variable {
+                name,
+                ty: runtime(&value.ty)?.ok_or_else(|| invalid(op, "invalid capture"))?,
+            });
+        }
+    }
+    let outer = std::mem::take(&mut l.body);
+    l.place = Place::Device;
+    let index_ty = node("val", vec![node("u32", vec![])]);
+    let index = l.emit(&index_ty, "uint32_t(blockIdx.x)*256+uint32_t(threadIdx.x)")?;
+    captured.push(index.clone());
+    let (_, codomain) = super::super::function_parts(&kernel.ty)?;
+    let results = l.call_function(
+        kernel,
+        captured,
+        &crate::pass::unpack_products::flatten_object(codomain),
+    )?;
+    for result in results {
+        l.erased(&result.ty)?;
+    }
+    let body = std::mem::replace(&mut l.body, outer);
+    l.place = Place::Host;
+    // The index declaration precedes the guard; all callback work is predicated.
+    let mut body = body.into_iter();
+    let index_decl = body.next().ok_or_else(|| invalid(op, "missing index"))?;
+    let symbol = l.fresh("catena_kernel");
+    l.modules.kernels.insert(
+        symbol.clone(),
+        Function {
+            symbol: symbol.clone(),
+            inputs,
+            outputs: vec![],
+            body: vec![
+                index_decl,
+                Instruction::If {
+                    condition: format!("{} < {count_param}", expr(&index)?),
+                    yes: body.collect(),
+                    no: vec![],
+                },
+            ],
+        },
+    );
+    l.body.push(Instruction::Launch {
+        kernel: symbol,
+        grid: expr(&grid)?.into(),
+        shared_bytes: "0".into(),
+        arguments,
+    });
+    outputs.iter().map(|ty| l.erased(ty)).collect()
+}

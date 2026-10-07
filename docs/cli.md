@@ -124,3 +124,28 @@ An optional `files` array replaces automatic discovery with an explicit ordered
 list, for example `"files": ["operations.hex", "arrays.hex"]`. Paths are relative
 to the bundle directory and cannot contain `..`. An empty list loads no source
 files from that bundle. Unknown manifest fields are rejected.
+
+## Plain-value experimental execution
+
+The experimental library also provides `execution.hex` for programs that use
+plain `val` types instead of symbolic named values. These adapters share the
+experimental IR and HIP/CUDA renderer:
+
+- `core.fold.values` carries a state through an ascending u32-indexed fold.
+- `unsafe.launch_linear` accepts a positive u32 element count and an index
+  callback; it launches 256-thread blocks and guards the callback against
+  padded threads. Launches synchronize before returning.
+- `stdlib.runtime.raw.alloc_f32`, `free`, and `bytes` manage length-tagged
+  buffers. Allocation and deallocation require host execution; borrowing
+  returns both the owner and its reference.
+- `stdlib.runtime.raw.read_f32`, `read_u64`, and `write_f32` require device
+  execution. They check alignment, element counts, and bounds. Writes require
+  owned memory; callers must preserve owners until all borrowed uses finish.
+- `stdlib.numeric.raw.*` supplies plain-value arithmetic and conversions.
+  Narrowing and shift counts are checked; rounded f32-to-u32 conversion uses
+  `nearbyintf`, with a finite representable-result check.
+
+These operations do not replace the proof-carrying geometry and memory API.
+They provide an explicit runtime-checked path for programs such as the f32
+SmolLM2 port. Temporary allocations must be freed after their final consumer;
+returned owned buffers transfer responsibility to the runtime caller.

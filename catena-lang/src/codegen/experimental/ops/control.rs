@@ -15,6 +15,11 @@ pub(in crate::codegen::experimental) fn lower(
     match op {
         "core.if" | "core.if_guarded" => conditional(l, op, &args, outputs),
         "core.fold.bounded" | "core.fold.trace" => fold(l, op, &args, outputs),
+        "core.fold.values" => {
+            let mut args = args;
+            args.push(Value::erased(node("1", vec![])));
+            fold(l, op, &args, outputs)
+        }
         _ => unreachable!("unexpected callback operation: {op}"),
     }
 }

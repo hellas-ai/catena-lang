@@ -2,7 +2,7 @@ use crate::runtime::GpuDialect;
 
 pub(super) fn render(dialect: GpuDialect) -> String {
     let mut result = format!(
-        "#include <{}>\n#include <stdint.h>\n#include <stddef.h>\n#include <stdio.h>\n#include <stdlib.h>\n",
+        "#include <{}>\n#include <stdint.h>\n#include <stddef.h>\n#include <math.h>\n#include <stdio.h>\n#include <stdlib.h>\n",
         dialect.runtime_header()
     );
     result.push_str(&format!(
@@ -33,6 +33,14 @@ __host__ __device__ inline float catena_u32_bitcast_f32(uint32_t bits) {
 }
 struct catena_mem_own_t { void* data; uint64_t len; };
 struct catena_mem_ref_t { void* data; uint64_t len; };
+__host__ __device__ inline uint32_t catena_f32_bitcast_u32(float x) {
+    union { uint32_t u; float f; } value; value.f=x; return value.u;
+}
+__host__ __device__ inline uint32_t catena_round_u32(float x) {
+    float r=nearbyintf(x);
+    catena_assert(isfinite(r) && r >= 0 && double(r) <= double(UINT32_MAX));
+    return uint32_t(r);
+}
 struct catena_index { uint32_t x,y,z; };
 struct catena_grid { dim3 blocks,threads; };
 struct catena_block { catena_grid grid; catena_index index; };
@@ -56,6 +64,12 @@ __host__ __device__ inline catena_index catena_grid_index(catena_thread t) {
 __host__ __device__ inline uint32_t catena_row_major(uint32_t r,uint32_t c,uint32_t rows,uint32_t cols) {
     catena_assert(r < rows && c < cols && uint64_t(rows)*cols <= UINT32_MAX);
     return r*cols+c;
+}
+template<class T,class M> __host__ __device__ catena_global<T> catena_global_bytes(M mem) {
+    catena_assert(mem.len % sizeof(T) == 0 && mem.len / sizeof(T) <= UINT32_MAX);
+    catena_assert(!mem.len || mem.data);
+    catena_assert(reinterpret_cast<uintptr_t>(mem.data) % alignof(T) == 0);
+    return {static_cast<T*>(mem.data), uint32_t(mem.len/sizeof(T)), mem.len};
 }
 template<class T,class M> __host__ __device__ catena_global<T> catena_global_from_mem(M mem,uint32_t count) {
     catena_assert(uint64_t(count)*sizeof(T) <= mem.len);
@@ -85,5 +99,22 @@ template<class T,size_t N> __device__ catena_shared_view<T> catena_slot(unsigned
     catena_assert(false); return {nullptr,0};
 }
 "#);
+    result.push_str(&format!(
+        r#"
+inline catena_mem_own_t catena_alloc_f32(uint32_t count) {{
+    uint64_t bytes=uint64_t(count)*sizeof(float);
+    catena_assert(bytes <= SIZE_MAX);
+    void* data=nullptr;
+    if (bytes) catena_gpu_check({}(&data,size_t(bytes)));
+    return {{data,bytes}};
+}}
+inline uint32_t catena_free(catena_mem_own_t mem) {{
+    if (mem.data) catena_gpu_check({}(mem.data));
+    return 0;
+}}
+"#,
+        dialect.device_alloc_fn(),
+        dialect.device_free_fn()
+    ));
     result
 }

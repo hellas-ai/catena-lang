@@ -4,8 +4,8 @@ use super::support::runtime_with_fixture;
 
 // Rectangular matrices and multiple blocks/inner tiles distinguish all three
 // dimensions. Predicated cases leave partial tiles in rows, columns and inner.
-const PERFECT: &[(u32, u32, u32, u32)] = &[(4, 6, 8, 2), (8, 12, 4, 4)];
-const PREDICATED: &[(u32, u32, u32, u32)] = &[(3, 5, 7, 2), (5, 7, 3, 4), (1, 1, 1, 4)];
+const PERFECT: &[(u64, u64, u64, u64)] = &[(4, 6, 8, 2), (8, 12, 4, 4)];
+const PREDICATED: &[(u64, u64, u64, u64)] = &[(3, 5, 7, 2), (5, 7, 3, 4), (1, 1, 1, 4)];
 
 #[test]
 fn matmul_naive_u64_perfect_tiling() -> anyhow::Result<()> {
@@ -43,7 +43,7 @@ fn matmul_tiled_u64_predicated_tiling() -> anyhow::Result<()> {
     )
 }
 
-fn check_matmul(fixture: &str, entry: &str, cases: &[(u32, u32, u32, u32)]) -> anyhow::Result<()> {
+fn check_matmul(fixture: &str, entry: &str, cases: &[(u64, u64, u64, u64)]) -> anyhow::Result<()> {
     let (runtime, artifact) = runtime_with_fixture(fixture)?;
     for &(rows, inner, columns, width) in cases {
         let (m, k, n) = (rows as usize, inner as usize, columns as usize);

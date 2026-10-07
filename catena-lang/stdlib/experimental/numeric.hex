@@ -3,124 +3,142 @@
 
   (arr stdlib.numeric.*
     : (
-      [a__s473 left__s474 right__s475 . ]
+      [a__s550 left__s551 right__s552 . ]
       {
-        ({[ . left__s474] [ . a__s473]} :)
-        ({[ . right__s475] [ . a__s473]} :)
-        (({[ . a__s473]} stdlib.numeric.prop.Numeric) |-)
+        ({[ . left__s551] [ . a__s550]} :)
+        ({[ . right__s552] [ . a__s550]} :)
+        (({[ . a__s550]} stdlib.numeric.prop.Numeric) |-)
       }
     )
     -> (
-      [a__s473 left__s474 right__s475 . ]
-      {({({[ . left__s474] [ . right__s475]} type.stdlib.numeric.*) [ . a__s473]} :)}
+      [a__s550 left__s551 right__s552 . ]
+      {({({[ . left__s551] [ . right__s552]} type.stdlib.numeric.*) [ . a__s550]} :)}
     )
   )
 
   (arr stdlib.numeric.+
     : (
-      [a__s463 left__s464 right__s465 . ]
+      [a__s540 left__s541 right__s542 . ]
       {
-        ({[ . left__s464] [ . a__s463]} :)
-        ({[ . right__s465] [ . a__s463]} :)
-        (({[ . a__s463]} stdlib.numeric.prop.Numeric) |-)
+        ({[ . left__s541] [ . a__s540]} :)
+        ({[ . right__s542] [ . a__s540]} :)
+        (({[ . a__s540]} stdlib.numeric.prop.Numeric) |-)
       }
     )
     -> (
-      [a__s463 left__s464 right__s465 . ]
-      {({({[ . left__s464] [ . right__s465]} type.stdlib.numeric.+) [ . a__s463]} :)}
+      [a__s540 left__s541 right__s542 . ]
+      {({({[ . left__s541] [ . right__s542]} type.stdlib.numeric.+) [ . a__s540]} :)}
     )
   )
 
   (arr stdlib.numeric.-
     : (
-      [a__s468 left__s469 right__s470 . ]
+      [a__s545 left__s546 right__s547 . ]
       {
-        ({[ . left__s469] [ . a__s468]} :)
-        ({[ . right__s470] [ . a__s468]} :)
-        (({[ . a__s468]} stdlib.numeric.prop.Numeric) |-)
+        ({[ . left__s546] [ . a__s545]} :)
+        ({[ . right__s547] [ . a__s545]} :)
+        (({[ . a__s545]} stdlib.numeric.prop.Numeric) |-)
       }
     )
     -> (
-      [a__s468 left__s469 right__s470 . ]
-      {({({[ . left__s469] [ . right__s470]} type.stdlib.numeric.-) [ . a__s468]} :)}
+      [a__s545 left__s546 right__s547 . ]
+      {({({[ . left__s546] [ . right__s547]} type.stdlib.numeric.-) [ . a__s545]} :)}
     )
   )
 
   (arr stdlib.numeric./
     : (
-      [a__s478 left__s479 right__s480 . ]
+      [a__s555 left__s556 right__s557 . ]
       {
-        ({[ . left__s479] [ . a__s478]} :)
-        ({[ . right__s480] [ . a__s478]} :)
-        (({[ . a__s478]} stdlib.numeric.prop.Numeric) |-)
+        ({[ . left__s556] [ . a__s555]} :)
+        ({[ . right__s557] [ . a__s555]} :)
+        (({[ . a__s555]} stdlib.numeric.prop.Numeric) |-)
       }
     )
     -> (
-      [a__s478 left__s479 right__s480 . ]
-      {({({[ . left__s479] [ . right__s480]} type.stdlib.numeric./) [ . a__s478]} :)}
+      [a__s555 left__s556 right__s557 . ]
+      {({({[ . left__s556] [ . right__s557]} type.stdlib.numeric./) [ . a__s555]} :)}
     )
   )
 
   (arr stdlib.numeric.ceil_div
     : (
-      [a__s516 left__s517 right__s518 . ]
+      [a__s593 left__s594 right__s595 . ]
       {
-        ({[ . left__s517] [ . a__s516]} :)
-        ({[ . right__s518] [ . a__s516]} :)
-        (({[ . a__s516]} stdlib.numeric.prop.Integral) |-)
+        ({[ . left__s594] [ . a__s593]} :)
+        ({[ . right__s595] [ . a__s593]} :)
+        (({[ . a__s593]} stdlib.numeric.prop.Integral) |-)
       }
     )
     -> (
-      [a__s516 left__s517 right__s518 . ]
-      {({({[ . left__s517] [ . right__s518]} type.stdlib.numeric.ceil_div) [ . a__s516]} :)}
+      [a__s593 left__s594 right__s595 . ]
+      {({({[ . left__s594] [ . right__s595]} type.stdlib.numeric.ceil_div) [ . a__s593]} :)}
     )
   )
 
   (arr stdlib.numeric.ceil_div_u32
     : (
-      [n__s419 d__s420 . ]
+      [n__s489 d__s490 . ]
       {
-        ({[ . n__s419] u32} :)
-        ({[ . d__s420] u32} :)
-        (({[ . d__s420] ({} type.const.u32.0x00000000)} prop.Greater) |-)
+        ({[ . n__s489] u32} :)
+        ({[ . d__s490] u32} :)
+        (({[ . d__s490] ({} type.const.u32.0x00000000)} prop.Greater) |-)
       }
     )
     -> (
-      [n__s419 d__s420 . ]
+      [n__s489 d__s490 . ]
       {
-        ({({[ . n__s419] [ . d__s420]} type.stdlib.numeric.ceil_div) u32} :)
-        (({[ . d__s420] ({} type.const.u32.0x00000000)} prop.Greater) |-)
+        ({({[ . n__s489] [ . d__s490]} type.stdlib.numeric.ceil_div) u32} :)
+        (({[ . d__s490] ({} type.const.u32.0x00000000)} prop.Greater) |-)
+      }
+    )
+  )
+
+  (arr stdlib.numeric.ceil_div_u64
+    : (
+      [n__s493 d__s494 . ]
+      {
+        ({[ . n__s493] u64} :)
+        ({[ . d__s494] u64} :)
+        (({[ . d__s494] ({} type.const.u64.0x0000000000000000)} prop.Greater) |-)
+      }
+    )
+    -> (
+      [n__s493 d__s494 . ]
+      {
+        ({({[ . n__s493] [ . d__s494]} type.stdlib.numeric.ceil_div) u64} :)
+        (({[ . d__s494] ({} type.const.u64.0x0000000000000000)} prop.Greater) |-)
       }
     )
   )
 
   (arr stdlib.numeric.coerce
     : (
-      [source__s410 target__s411 value__s412 . ]
+      [source__s477 target__s478 value__s479 . ]
       {
-        ({[ . value__s412] [ . source__s410]} :)
-        (({[ . source__s410] [ . target__s411]} prop.Subtype) |-)
+        ({[ . value__s479] [ . source__s477]} :)
+        (({[ . source__s477] [ . target__s478]} prop.Subtype) |-)
       }
     )
-    -> ([source__s410 target__s411 value__s412 . ] {({[ . value__s412] [ . target__s411]} :)})
+    -> ([source__s477 target__s478 value__s479 . ] {({[ . value__s479] [ . target__s478]} :)})
   )
 
   (arr stdlib.numeric.equal
     : (
-      [a__s488 left__s489 right__s490 . ]
+      [a__s565 left__s566 right__s567 . ]
       {
-        ({[ . left__s489] [ . a__s488]} :)
-        ({[ . right__s490] [ . a__s488]} :)
-        (({[ . a__s488]} stdlib.numeric.prop.Numeric) |-)
+        ({[ . left__s566] [ . a__s565]} :)
+        ({[ . right__s567] [ . a__s565]} :)
+        (({[ . a__s565]} stdlib.numeric.prop.Numeric) |-)
       }
     )
     -> (
-      [a__s488 left__s489 right__s490 . ]
+      [a__s565 left__s566 right__s567 . ]
       {
         (
           {
-            ({[ . value__s392] bool} :)
-            (({({[ . value__s392] bool.t} =) ({[ . left__s489] [ . right__s490]} =)} ==>) |-)
+            ({[ . value__s1249] bool} :)
+            (({({[ . value__s1249] bool.t} =) ({[ . left__s566] [ . right__s567]} =)} ==>) |-)
           }
           *
         )
@@ -130,37 +148,47 @@
 
   (arr stdlib.numeric.escaped.25
     : (
-      [a__s483 left__s484 right__s485 . ]
+      [a__s560 left__s561 right__s562 . ]
       {
-        ({[ . left__s484] [ . a__s483]} :)
-        ({[ . right__s485] [ . a__s483]} :)
-        (({[ . a__s483]} stdlib.numeric.prop.Numeric) |-)
+        ({[ . left__s561] [ . a__s560]} :)
+        ({[ . right__s562] [ . a__s560]} :)
+        (({[ . a__s560]} stdlib.numeric.prop.Numeric) |-)
       }
     )
     -> (
-      [a__s483 left__s484 right__s485 . ]
-      {({({[ . left__s484] [ . right__s485]} type.stdlib.numeric.escaped.25) [ . a__s483]} :)}
+      [a__s560 left__s561 right__s562 . ]
+      {({({[ . left__s561] [ . right__s562]} type.stdlib.numeric.escaped.25) [ . a__s560]} :)}
     )
   )
 
+  (arr stdlib.numeric.exp
+    : (
+      [a__s608 value__s609 . ]
+      {({[ . value__s609] [ . a__s608]} :) (({[ . a__s608]} stdlib.numeric.prop.Floating) |-)}
+    )
+    -> ([a__s608 value__s609 . ] {({({[ . value__s609]} type.stdlib.numeric.exp) [ . a__s608]} :)})
+  )
+
+  (arr stdlib.numeric.floating.f32 : ([] {}) -> ([] {(({f32} stdlib.numeric.prop.Floating) |-)}))
+
   (arr stdlib.numeric.greater
     : (
-      [a__s504 left__s505 right__s506 . ]
+      [a__s581 left__s582 right__s583 . ]
       {
-        ({[ . left__s505] [ . a__s504]} :)
-        ({[ . right__s506] [ . a__s504]} :)
-        (({[ . a__s504]} stdlib.numeric.prop.Numeric) |-)
+        ({[ . left__s582] [ . a__s581]} :)
+        ({[ . right__s583] [ . a__s581]} :)
+        (({[ . a__s581]} stdlib.numeric.prop.Numeric) |-)
       }
     )
     -> (
-      [a__s504 left__s505 right__s506 . ]
+      [a__s581 left__s582 right__s583 . ]
       {
         (
           {
-            ({[ . value__s392] bool} :)
+            ({[ . value__s1251] bool} :)
             (
               (
-                {({[ . value__s392] bool.t} =) ({[ . left__s505] [ . right__s506]} prop.Greater)}
+                {({[ . value__s1251] bool.t} =) ({[ . left__s582] [ . right__s583]} prop.Greater)}
                 ==>
               )
               |-
@@ -174,10 +202,10 @@
 
   (arr stdlib.numeric.greater_equal
     : (
-      [a__s508 . ]
-      {([ . a__s508] val) ([ . a__s508] val) (({[ . a__s508]} stdlib.numeric.prop.Numeric) |-)}
+      [a__s585 . ]
+      {([ . a__s585] val) ([ . a__s585] val) (({[ . a__s585]} stdlib.numeric.prop.Numeric) |-)}
     )
-    -> ([a__s508 . ] {(bool val)})
+    -> ([a__s585 . ] {(bool val)})
   )
 
   (arr stdlib.numeric.integral.int
@@ -191,67 +219,67 @@
 
   (arr stdlib.numeric.less
     : (
-      [a__s496 . ]
-      {([ . a__s496] val) ([ . a__s496] val) (({[ . a__s496]} stdlib.numeric.prop.Numeric) |-)}
+      [a__s573 . ]
+      {([ . a__s573] val) ([ . a__s573] val) (({[ . a__s573]} stdlib.numeric.prop.Numeric) |-)}
     )
-    -> ([a__s496 . ] {(bool val)})
+    -> ([a__s573 . ] {(bool val)})
   )
 
   (arr stdlib.numeric.less_equal
     : (
-      [a__s500 . ]
-      {([ . a__s500] val) ([ . a__s500] val) (({[ . a__s500]} stdlib.numeric.prop.Numeric) |-)}
+      [a__s577 . ]
+      {([ . a__s577] val) ([ . a__s577] val) (({[ . a__s577]} stdlib.numeric.prop.Numeric) |-)}
     )
-    -> ([a__s500 . ] {(bool val)})
+    -> ([a__s577 . ] {(bool val)})
   )
 
   (arr stdlib.numeric.max
     : (
-      [a__s526 left__s527 right__s528 . ]
+      [a__s603 left__s604 right__s605 . ]
       {
-        ({[ . left__s527] [ . a__s526]} :)
-        ({[ . right__s528] [ . a__s526]} :)
-        (({[ . a__s526]} stdlib.numeric.prop.Numeric) |-)
+        ({[ . left__s604] [ . a__s603]} :)
+        ({[ . right__s605] [ . a__s603]} :)
+        (({[ . a__s603]} stdlib.numeric.prop.Numeric) |-)
       }
     )
     -> (
-      [a__s526 left__s527 right__s528 . ]
-      {({({[ . left__s527] [ . right__s528]} type.stdlib.numeric.max) [ . a__s526]} :)}
+      [a__s603 left__s604 right__s605 . ]
+      {({({[ . left__s604] [ . right__s605]} type.stdlib.numeric.max) [ . a__s603]} :)}
     )
   )
 
   (arr stdlib.numeric.min
     : (
-      [a__s521 left__s522 right__s523 . ]
+      [a__s598 left__s599 right__s600 . ]
       {
-        ({[ . left__s522] [ . a__s521]} :)
-        ({[ . right__s523] [ . a__s521]} :)
-        (({[ . a__s521]} stdlib.numeric.prop.Numeric) |-)
+        ({[ . left__s599] [ . a__s598]} :)
+        ({[ . right__s600] [ . a__s598]} :)
+        (({[ . a__s598]} stdlib.numeric.prop.Numeric) |-)
       }
     )
     -> (
-      [a__s521 left__s522 right__s523 . ]
-      {({({[ . left__s522] [ . right__s523]} type.stdlib.numeric.min) [ . a__s521]} :)}
+      [a__s598 left__s599 right__s600 . ]
+      {({({[ . left__s599] [ . right__s600]} type.stdlib.numeric.min) [ . a__s598]} :)}
     )
   )
 
   (arr stdlib.numeric.negate
     : (
-      [a__s512 value__s513 . ]
-      {({[ . value__s513] [ . a__s512]} :) (({[ . a__s512]} stdlib.numeric.prop.Signed) |-)}
+      [a__s589 value__s590 . ]
+      {({[ . value__s590] [ . a__s589]} :) (({[ . a__s589]} stdlib.numeric.prop.Signed) |-)}
     )
     -> (
-      [a__s512 value__s513 . ]
-      {({({[ . value__s513]} type.stdlib.numeric.negate) [ . a__s512]} :)}
+      [a__s589 value__s590 . ]
+      {({({[ . value__s590]} type.stdlib.numeric.negate) [ . a__s589]} :)}
     )
   )
 
   (arr stdlib.numeric.not_equal
     : (
-      [a__s492 . ]
-      {([ . a__s492] val) ([ . a__s492] val) (({[ . a__s492]} stdlib.numeric.prop.Numeric) |-)}
+      [a__s569 . ]
+      {([ . a__s569] val) ([ . a__s569] val) (({[ . a__s569]} stdlib.numeric.prop.Numeric) |-)}
     )
-    -> ([a__s492 . ] {(bool val)})
+    -> ([a__s569 . ] {(bool val)})
   )
 
   (arr stdlib.numeric.numeric.f32 : ([] {}) -> ([] {(({f32} stdlib.numeric.prop.Numeric) |-)}))
@@ -263,28 +291,60 @@
   (arr stdlib.numeric.numeric.u64 : ([] {}) -> ([] {(({u64} stdlib.numeric.prop.Numeric) |-)}))
 
   (arr stdlib.numeric.numeric_size
-    : ([a__s445 . ] {1 (({[ . a__s445]} stdlib.numeric.prop.Numeric) |-)})
-    -> ([a__s445 . ] {({({[ . a__s445]} stdlib.numeric.sort.size_of) u32} :)})
+    : ([a__s522 . ] {1 (({[ . a__s522]} stdlib.numeric.prop.Numeric) |-)})
+    -> ([a__s522 . ] {({({[ . a__s522]} stdlib.numeric.sort.size_of) u32} :)})
+  )
+
+  (arr stdlib.numeric.rsqrt
+    : (
+      [a__s621 value__s622 . ]
+      {
+        ({[ . value__s622] [ . a__s621]} :)
+        (({[ . a__s621] [ . value__s622]} stdlib.numeric.prop.Positive) |-)
+        (({[ . a__s621]} stdlib.numeric.prop.Floating) |-)
+      }
+    )
+    -> (
+      [a__s621 value__s622 . ]
+      {({({[ . value__s622]} type.stdlib.numeric.rsqrt) [ . a__s621]} :)}
+    )
   )
 
   (arr stdlib.numeric.signed.f32 : ([] {}) -> ([] {(({f32} stdlib.numeric.prop.Signed) |-)}))
 
   (arr stdlib.numeric.signed.int : ([] {}) -> ([] {(({type.Int} stdlib.numeric.prop.Signed) |-)}))
 
+  (arr stdlib.numeric.sqrt
+    : (
+      [a__s616 value__s617 . ]
+      {
+        ({[ . value__s617] [ . a__s616]} :)
+        (({[ . a__s616] [ . value__s617]} stdlib.numeric.prop.Nonnegative) |-)
+        (({[ . a__s616]} stdlib.numeric.prop.Floating) |-)
+      }
+    )
+    -> ([a__s616 value__s617 . ] {({({[ . value__s617]} type.stdlib.numeric.sqrt) [ . a__s616]} :)})
+  )
+
   (def stdlib.numeric.to_u64
-    : ([n__s415 . ] {({[ . n__s415] u32} :)})
-    -> ([n__s415 . ] {({[ . n__s415] u64} :)})
+    : ([n__s482 . ] {({[ . n__s482] u32} :)})
+    -> ([n__s482 . ] {({[ . n__s482] u64} :)})
     = {
-      [n__v1067 . ]
-      ([] numeric.u32_subtype_u64 [subtype__v1070 . ])
-      ([ . n__v1067 subtype__v1070] stdlib.numeric.coerce [value__v1073 . ])
-      [ . value__v1073]
+      [n__v1314 . ]
+      ([] numeric.u32_subtype_u64 [subtype__v1317 . ])
+      ([ . n__v1314 subtype__v1317] stdlib.numeric.coerce [value__v1320 . ])
+      [ . value__v1320]
     }
   )
 
+  (arr stdlib.numeric.u32_to_f32
+    : ([value__s485 . ] {({[ . value__s485] u32} :)})
+    -> ([value__s485 . ] {({({[ . value__s485]} stdlib.numeric.sort.round_u32_to_f32_rne) f32} :)})
+  )
+
   (arr stdlib.numeric.zero
-    : ([a__s449 . ] {(({[ . a__s449]} stdlib.numeric.prop.Numeric) |-)})
-    -> ([a__s449 . ] {([ . a__s449] val)})
+    : ([a__s526 . ] {(({[ . a__s526]} stdlib.numeric.prop.Numeric) |-)})
+    -> ([a__s526 . ] {([ . a__s526] val)})
   )
 })
 
@@ -301,17 +361,27 @@
 
   (arr prop.Subtype : 2 -> 1)
 
+  (arr stdlib.numeric.prop.Floating : 1 -> 1)
+
   (arr stdlib.numeric.prop.Integral : 1 -> 1)
+
+  (arr stdlib.numeric.prop.Nonnegative : 2 -> 1)
 
   (arr stdlib.numeric.prop.Numeric : 1 -> 1)
 
+  (arr stdlib.numeric.prop.Positive : 2 -> 1)
+
   (arr stdlib.numeric.prop.Signed : 1 -> 1)
+
+  (arr stdlib.numeric.sort.round_u32_to_f32_rne : 1 -> 1)
 
   (arr stdlib.numeric.sort.size_of : 1 -> 1)
 
   (arr type.Int : 0 -> 1)
 
   (arr type.const.u32.0x00000000 : 0 -> 1)
+
+  (arr type.const.u64.0x0000000000000000 : 0 -> 1)
 
   (arr type.stdlib.numeric.* : 2 -> 1)
 
@@ -325,11 +395,17 @@
 
   (arr type.stdlib.numeric.escaped.25 : 2 -> 1)
 
+  (arr type.stdlib.numeric.exp : 1 -> 1)
+
   (arr type.stdlib.numeric.max : 2 -> 1)
 
   (arr type.stdlib.numeric.min : 2 -> 1)
 
   (arr type.stdlib.numeric.negate : 1 -> 1)
+
+  (arr type.stdlib.numeric.rsqrt : 1 -> 1)
+
+  (arr type.stdlib.numeric.sqrt : 1 -> 1)
 
   (arr u32 : 0 -> 1)
 

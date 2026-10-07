@@ -1,22 +1,983 @@
 (theory program type {
-  (arr meta.matmul_simple_naive.main.matmul.helper.callback_metavars.block.0
+  (def matmul_simple_naive.main.matmul
     : (
-      [block__s4515 block_width__s1023 columns__s1019 grid__s4468 rows__s1017 . ]
+      []
+      {
+        (u64 val)
+        (u64 val)
+        (u64 val)
+        (({cap.ref} mem) val)
+        (({cap.ref} mem) val)
+        (({cap.own} mem) val)
+        (u64 val)
+      }
+    )
+    -> ([] {(({cap.own} mem) val)})
+    = {
+      [rows__v4284__input inner__v4286__input columns__v4288__input a_mem__v4290 b_mem__v4292 c_mem__v4294 block_width__v4296__input . ]
+      (
+        [ . rows__v4284__input]
+        (smolcat.value.named meta.matmul_simple_naive.main.matmul.helper.callback_metavars.rows.0)
+        [rows__v4284 __smolcat_rows__v4592 . ]
+      )
+      (
+        [ . inner__v4286__input]
+        (smolcat.value.named meta.matmul_simple_naive.main.matmul.helper.callback_metavars.inner.0)
+        [inner__v4286 __smolcat_inner__v4593 . ]
+      )
+      (
+        [ . columns__v4288__input]
+        (
+          smolcat.value.named
+          meta.matmul_simple_naive.main.matmul.helper.callback_metavars.columns.0
+        )
+        [columns__v4288 __smolcat_columns__v4594 . ]
+      )
+      (
+        [ . block_width__v4296__input]
+        (
+          smolcat.value.named
+          meta.matmul_simple_naive.main.matmul.helper.callback_metavars.block_width.0
+        )
+        [block_width__v4296 __smolcat_block_width__v4595 . ]
+      )
+      (unit.intro smolcat.callback.symbol [__smolcat_block__v4596 . ])
+      (
+        [ . rows__v4284]
+        [op0_value__v4597 . op0_value__v4597 op0_value__v4597]
+        [rows__v4504 rows__v4505 . ]
+      )
+      (
+        [ . rows__v4505]
+        [op1_value__v4598 . op1_value__v4598 op1_value__v4598]
+        [rows__v4506 rows__v4507 . ]
+      )
+      (
+        [ . rows__v4507]
+        [op2_value__v4599 . op2_value__v4599 op2_value__v4599]
+        [rows__v4508 rows__v4509 . ]
+      )
+      (
+        [ . rows__v4509]
+        [op3_value__v4600 . op3_value__v4600 op3_value__v4600]
+        [rows__v4510 rows__v4511 . ]
+      )
+      (
+        [ . inner__v4286]
+        [op4_value__v4601 . op4_value__v4601 op4_value__v4601]
+        [inner__v4516 inner__v4517 . ]
+      )
+      (
+        [ . inner__v4517]
+        [op5_value__v4602 . op5_value__v4602 op5_value__v4602]
+        [inner__v4518 inner__v4519 . ]
+      )
+      (
+        [ . inner__v4519]
+        [op6_value__v4603 . op6_value__v4603 op6_value__v4603]
+        [inner__v4520 inner__v4521 . ]
+      )
+      (
+        [ . columns__v4288]
+        [op7_value__v4604 . op7_value__v4604 op7_value__v4604]
+        [columns__v4526 columns__v4527 . ]
+      )
+      (
+        [ . columns__v4527]
+        [op8_value__v4605 . op8_value__v4605 op8_value__v4605]
+        [columns__v4528 columns__v4529 . ]
+      )
+      (
+        [ . columns__v4529]
+        [op9_value__v4606 . op9_value__v4606 op9_value__v4606]
+        [columns__v4530 columns__v4531 . ]
+      )
+      (
+        [ . columns__v4531]
+        [op10_value__v4607 . op10_value__v4607 op10_value__v4607]
+        [columns__v4532 columns__v4533 . ]
+      )
+      (
+        [ . block_width__v4296]
+        [op11_value__v4608 . op11_value__v4608 op11_value__v4608]
+        [block_width__v4538 block_width__v4539 . ]
+      )
+      (
+        [ . block_width__v4539]
+        [op12_value__v4609 . op12_value__v4609 op12_value__v4609]
+        [block_width__v4540 block_width__v4541 . ]
+      )
+      (
+        [ . block_width__v4541]
+        [op13_value__v4610 . op13_value__v4610 op13_value__v4610]
+        [block_width__v4542 block_width__v4543 . ]
+      )
+      (
+        [ . block_width__v4543]
+        [op14_value__v4611 . op14_value__v4611 op14_value__v4611]
+        [block_width__v4544 block_width__v4545 . ]
+      )
+      (
+        [ . block_width__v4545]
+        [op15_value__v4612 . op15_value__v4612 op15_value__v4612]
+        [block_width__v4546 block_width__v4547 . ]
+      )
+      ([] type.const.u64.0x0000000000000000 [literal__v4302 . ])
+      ([] stdlib.numeric.numeric.u64 [numeric_u64__v4304 . ])
+      (
+        [ . rows__v4511 literal__v4302 numeric_u64__v4304]
+        stdlib.numeric.greater
+        [greater__v4308 . ]
+      )
+      (
+        [ . greater__v4308]
+        ({((*.elim {{_} {_}}) {{_} {_}} ({{_} {_}} *.intro))} stdlib.assert)
+        [unit__v4311 proven__v4312 . ]
+      )
+      ([ . proven__v4312] [op20_value__v4613 . ] [])
+      ([ . unit__v4311] unit.elim [])
+      ([] type.const.u64.0x0000000000000000 [literal__v4319 . ])
+      ([] stdlib.numeric.numeric.u64 [numeric_u64__v4321 . ])
+      (
+        [ . inner__v4521 literal__v4319 numeric_u64__v4321]
+        stdlib.numeric.greater
+        [greater__v4325 . ]
+      )
+      (
+        [ . greater__v4325]
+        ({((*.elim {{_} {_}}) {{_} {_}} ({{_} {_}} *.intro))} stdlib.assert)
+        [unit__v4328 proven__v4329 . ]
+      )
+      ([ . proven__v4329] [op26_value__v4614 . ] [])
+      ([ . unit__v4328] unit.elim [])
+      ([] type.const.u64.0x0000000000000000 [literal__v4336 . ])
+      ([] stdlib.numeric.numeric.u64 [numeric_u64__v4338 . ])
+      (
+        [ . columns__v4533 literal__v4336 numeric_u64__v4338]
+        stdlib.numeric.greater
+        [greater__v4342 . ]
+      )
+      (
+        [ . greater__v4342]
+        ({((*.elim {{_} {_}}) {{_} {_}} ({{_} {_}} *.intro))} stdlib.assert)
+        [unit__v4345 proven__v4346 . ]
+      )
+      ([ . proven__v4346] [op32_value__v4615 . ] [])
+      ([ . unit__v4345] unit.elim [])
+      ([] type.const.u64.0x0000000000000000 [literal__v4353 . ])
+      ([] stdlib.numeric.numeric.u64 [numeric_u64__v4355 . ])
+      (
+        [ . block_width__v4547 literal__v4353 numeric_u64__v4355]
+        stdlib.numeric.greater
+        [greater__v4359 . ]
+      )
+      (
+        [ . greater__v4359]
+        ({((*.elim {{_} {_}}) {{_} {_}} ({{_} {_}} *.intro))} stdlib.assert)
+        [unit__v4362 width_positive__v4363 . ]
+      )
+      ([ . unit__v4362] unit.elim [])
+      (
+        [ . columns__v4532 block_width__v4546 width_positive__v4363]
+        stdlib.numeric.ceil_div_u64
+        [blocks_x__v4369 width_positive__v4370 . ]
+      )
+      (
+        [ . rows__v4510 block_width__v4544 width_positive__v4370]
+        stdlib.numeric.ceil_div_u64
+        [blocks_y__v4375 width_positive__v4376 . ]
+      )
+      ([ . width_positive__v4376] [op41_value__v4616 . ] [])
+      (
+        [ . blocks_x__v4369 blocks_y__v4375 block_width__v4542 block_width__v4540]
+        stdlib.gpu.geometry.make_grid
+        [grid__v4381__result bounds__v4382 . ]
+      )
+      (
+        [ . grid__v4381__result]
+        ({_} meta.matmul_simple_naive.main.matmul.helper.callback_metavars.grid.0)
+        [grid__v4381 __smolcat_grid__v4617 . ]
+      )
+      (
+        [ . grid__v4381]
+        [op43_value__v4618 . op43_value__v4618 op43_value__v4618]
+        [grid__v4578 grid__v4579 . ]
+      )
+      ([] stdlib.numeric.numeric.u64 [numeric_u64__v4386 . ])
+      ([ . rows__v4508 inner__v4520 numeric_u64__v4386] stdlib.numeric.* [result__v4388 . ])
+      (
+        [ . a_mem__v4290 result__v4388]
+        stdlib.gpu.memory.global_ref_u64
+        [a__v4391__result readable_a__v4392 . ]
+      )
+      (
+        [ . a__v4391__result]
+        ({_} meta.matmul_simple_naive.main.matmul.helper.callback_metavars.global.0)
+        [a__v4391 __smolcat_global__v4619 . ]
+      )
+      ([] stdlib.numeric.numeric.u64 [numeric_u64__v4396 . ])
+      ([ . inner__v4518 columns__v4530 numeric_u64__v4396] stdlib.numeric.* [result__v4398 . ])
+      (
+        [ . b_mem__v4292 result__v4398]
+        stdlib.gpu.memory.global_ref_u64
+        [b__v4401__result readable_b__v4402 . ]
+      )
+      (
+        [ . b__v4401__result]
+        ({_} meta.matmul_simple_naive.main.matmul.helper.callback_metavars.global.1)
+        [b__v4401 __smolcat_global__v4620 . ]
+      )
+      ([] stdlib.numeric.numeric.u64 [numeric_u64__v4406 . ])
+      ([ . rows__v4506 columns__v4528 numeric_u64__v4406] stdlib.numeric.* [result__v4408 . ])
+      (
+        [ . c_mem__v4294 result__v4408]
+        stdlib.gpu.memory.global_own_u64
+        [c__v4412__result allocation__v4413 available_c__v4414 . ]
+      )
+      (
+        [ . c__v4412__result]
+        ({_} meta.matmul_simple_naive.main.matmul.helper.callback_metavars.global.2)
+        [c__v4412 __smolcat_global__v4621 . ]
+      )
+      (
+        [ . c__v4412]
+        [op53_value__v4622 . op53_value__v4622 op53_value__v4622]
+        [c__v4590 c__v4591 . ]
+      )
+      ([ . bounds__v4382] unsafe.discard [unit__v4419 . ])
+      ([ . unit__v4419] [op55_value__v4623 . ] [])
+      ([ . readable_a__v4392] unsafe.discard [unit__v4421 . ])
+      ([ . unit__v4421] [op57_value__v4624 . ] [])
+      ([ . readable_b__v4402] unsafe.discard [unit__v4423 . ])
+      ([ . unit__v4423] [op59_value__v4625 . ] [])
+      ([ . available_c__v4414] unsafe.discard [unit__v4425 . ])
+      ([ . unit__v4425] [op61_value__v4626 . ] [])
+      (
+        [ . a__v4391 b__v4401 block_width__v4538 c__v4591 columns__v4526 grid__v4579 inner__v4516 rows__v4504]
+        {
+          [op62_global__capture0__v4627 op62_global__capture1__v4628 op62_block_width__capture2__v4629 op62_global__capture3__v4630 op62_columns__capture4__v4631 op62_grid__capture5__v4632 op62_inner__capture6__v4633 op62_rows__capture7__v4634 . ]
+          (
+            [ . op62_global__capture0__v4627]
+            :.ty
+            [op62_global__value0__v4635 op62_global__context__v4636 . ]
+          )
+          (
+            [ . op62_global__capture1__v4628]
+            :.ty
+            [op62_global__value1__v4637 op62_global__context__v4638 . ]
+          )
+          (
+            [ . op62_block_width__capture2__v4629]
+            :.ty
+            [op62_block_width__value2__v4639 op62_block_width__context__v4640 . ]
+          )
+          (
+            [ . op62_global__capture3__v4630]
+            :.ty
+            [op62_global__value3__v4641 op62_global__context__v4642 . ]
+          )
+          (
+            [ . op62_columns__capture4__v4631]
+            :.ty
+            [op62_columns__value4__v4643 op62_columns__context__v4644 . ]
+          )
+          (
+            [ . op62_grid__capture5__v4632]
+            :.ty
+            [op62_grid__value5__v4645 op62_grid__context__v4646 . ]
+          )
+          (
+            [ . op62_inner__capture6__v4633]
+            :.ty
+            [op62_inner__value6__v4647 op62_inner__context__v4648 . ]
+          )
+          (
+            [ . op62_rows__capture7__v4634]
+            :.ty
+            [op62_rows__value7__v4649 op62_rows__context__v4650 . ]
+          )
+          (
+            [ . op62_rows__context__v4650 op62_inner__context__v4648 op62_columns__context__v4644 op62_block_width__context__v4640 op62_grid__context__v4646 op62_global__context__v4636 op62_global__context__v4638 op62_global__context__v4642 __smolcat_block__v4596 op62_global__value0__v4635 op62_global__value1__v4637 op62_block_width__value2__v4639 op62_global__value3__v4641 op62_columns__value4__v4643 op62_grid__value5__v4645 op62_inner__value6__v4647 op62_rows__value7__v4649]
+            partial.matmul_simple_naive.main.matmul.helper.launch_unsafe.kernel.0.8
+          )
+        }
+        [callback__v4494 . ]
+      )
+      ([ . grid__v4578 callback__v4494] unsafe.launch [unit__v4497 . ])
+      ([ . unit__v4497] [op64_value__v4651 . ] [])
+      (
+        [ . c__v4590 allocation__v4413]
+        stdlib.gpu.memory.global_u64_to_mem
+        [global_u64_to_mem__v4499 . ]
+      )
+      [ . global_u64_to_mem__v4499]
+    }
+  )
+
+  (def matmul_simple_naive.main.matmul.helper.instantiate.unsafe_assume.0
+    : (
+      [rows__s1204 columns__s1206 block_width__s1210 grid__s4379 block__s4426 . ]
+      {
+        {1}
+        [ . rows__s1204]
+        [ . columns__s1206]
+        [ . block_width__s1210]
+        [ . grid__s4379]
+        [ . block__s4426]
+      }
+    )
+    -> (
+      [rows__s1204 columns__s1206 block_width__s1210 grid__s4379 block__s4426 . ]
+      {
+        (
+          (
+            {
+              (
+                {
+                  ({[ . columns__s1206] [ . block_width__s1210]} type.stdlib.numeric.ceil_div)
+                  ({[ . rows__s1204] [ . block_width__s1210]} type.stdlib.numeric.ceil_div)
+                }
+                stdlib.gpu.geometry.sort.D2
+              )
+              ({[ . block_width__s1210] [ . block_width__s1210]} stdlib.gpu.geometry.sort.D2)
+              [ . grid__s4379]
+              [ . block__s4426]
+              list.Nil
+            }
+            stdlib.gpu.barriers.prop.Trace
+          )
+          |-
+        )
+      }
+    )
+    = {
+      [arg0__input0__v0 rows__input1__v1 columns__input2__v2 block_width__input3__v3 grid__input4__v4 block__input5__v5 . ]
+      (
+        [ . arg0__input0__v0 rows__input1__v1 columns__input2__v2 block_width__input3__v3 grid__input4__v4 block__input5__v5]
+        (
+          meta.matmul_simple_naive.main.matmul.helper.instantiate.unsafe_assume.0.arguments
+          {{_} (name.unsafe.assume lift)}
+          evaluate
+          {_}
+        )
+        [output0__v6 . ]
+      )
+      [ . output0__v6]
+    }
+  )
+
+  (def matmul_simple_naive.main.matmul.helper.instantiate.unsafe_assume.1
+    : (
+      [rows__s1204 inner__s1205 columns__s1206 block_width__s1210 grid__s4379 global__s4389 global__s4399 global__s4409 block__s4426 thread__s4427 . ]
+      {
+        {1}
+        [ . rows__s1204]
+        [ . inner__s1205]
+        [ . columns__s1206]
+        [ . block_width__s1210]
+        [ . grid__s4379]
+        [ . global__s4389]
+        [ . global__s4399]
+        [ . global__s4409]
+        [ . block__s4426]
+        [ . thread__s4427]
+      }
+    )
+    -> (
+      [rows__s1204 inner__s1205 columns__s1206 block_width__s1210 grid__s4379 global__s4389 global__s4399 global__s4409 block__s4426 thread__s4427 . ]
+      {
+        (
+          (
+            {
+              (
+                {
+                  (
+                    {
+                      (
+                        {
+                          (
+                            {
+                              (
+                                {
+                                  (
+                                    {[ . rows__s1204] ({} type.const.u64.0x0000000000000000)}
+                                    prop.Greater
+                                  )
+                                  (
+                                    {[ . inner__s1205] ({} type.const.u64.0x0000000000000000)}
+                                    prop.Greater
+                                  )
+                                }
+                                prop.And
+                              )
+                              (
+                                {[ . columns__s1206] ({} type.const.u64.0x0000000000000000)}
+                                prop.Greater
+                              )
+                            }
+                            prop.And
+                          )
+                          (
+                            {[ . block_width__s1210] ({} type.const.u64.0x0000000000000000)}
+                            prop.Greater
+                          )
+                        }
+                        prop.And
+                      )
+                      (
+                        {
+                          (
+                            {
+                              (
+                                {[ . columns__s1206] [ . block_width__s1210]}
+                                type.stdlib.numeric.ceil_div
+                              )
+                              (
+                                {[ . rows__s1204] [ . block_width__s1210]}
+                                type.stdlib.numeric.ceil_div
+                              )
+                            }
+                            stdlib.gpu.geometry.sort.D2
+                          )
+                          (
+                            {[ . block_width__s1210] [ . block_width__s1210]}
+                            stdlib.gpu.geometry.sort.D2
+                          )
+                          [ . grid__s4379]
+                          [ . block__s4426]
+                          ({[ . rows__s1204] [ . inner__s1205]} type.stdlib.numeric.*)
+                          u64
+                          [ . thread__s4427]
+                          [ . global__s4389]
+                          stdlib.gpu.memory.sort.All
+                        }
+                        stdlib.gpu.memory.prop.GlobalRead
+                      )
+                    }
+                    prop.And
+                  )
+                  (
+                    {
+                      (
+                        {
+                          (
+                            {[ . columns__s1206] [ . block_width__s1210]}
+                            type.stdlib.numeric.ceil_div
+                          )
+                          ({[ . rows__s1204] [ . block_width__s1210]} type.stdlib.numeric.ceil_div)
+                        }
+                        stdlib.gpu.geometry.sort.D2
+                      )
+                      (
+                        {[ . block_width__s1210] [ . block_width__s1210]}
+                        stdlib.gpu.geometry.sort.D2
+                      )
+                      [ . grid__s4379]
+                      [ . block__s4426]
+                      ({[ . inner__s1205] [ . columns__s1206]} type.stdlib.numeric.*)
+                      u64
+                      [ . thread__s4427]
+                      [ . global__s4399]
+                      stdlib.gpu.memory.sort.All
+                    }
+                    stdlib.gpu.memory.prop.GlobalRead
+                  )
+                }
+                prop.And
+              )
+              (
+                {
+                  (
+                    {
+                      (
+                        {
+                          (
+                            {
+                              (
+                                {
+                                  (
+                                    {
+                                      (
+                                        {[ . columns__s1206] [ . block_width__s1210]}
+                                        type.stdlib.numeric.ceil_div
+                                      )
+                                      (
+                                        {[ . rows__s1204] [ . block_width__s1210]}
+                                        type.stdlib.numeric.ceil_div
+                                      )
+                                    }
+                                    stdlib.gpu.geometry.sort.D2
+                                  )
+                                  (
+                                    {[ . block_width__s1210] [ . block_width__s1210]}
+                                    stdlib.gpu.geometry.sort.D2
+                                  )
+                                }
+                                stdlib.gpu.geometry.sort.GridExtent
+                              )
+                              (
+                                {
+                                  (
+                                    {
+                                      (
+                                        {[ . columns__s1206] [ . block_width__s1210]}
+                                        type.stdlib.numeric.ceil_div
+                                      )
+                                      (
+                                        {[ . rows__s1204] [ . block_width__s1210]}
+                                        type.stdlib.numeric.ceil_div
+                                      )
+                                    }
+                                    stdlib.gpu.geometry.sort.D2
+                                  )
+                                  (
+                                    {[ . block_width__s1210] [ . block_width__s1210]}
+                                    stdlib.gpu.geometry.sort.D2
+                                  )
+                                  [ . grid__s4379]
+                                  [ . block__s4426]
+                                  [ . thread__s4427]
+                                }
+                                stdlib.gpu.geometry.sort.InGrid
+                              )
+                            }
+                            stdlib.gpu.geometry.sort.Y
+                          )
+                          [ . rows__s1204]
+                        }
+                        prop.Less
+                      )
+                      (
+                        {
+                          (
+                            {
+                              (
+                                {
+                                  (
+                                    {
+                                      (
+                                        {[ . columns__s1206] [ . block_width__s1210]}
+                                        type.stdlib.numeric.ceil_div
+                                      )
+                                      (
+                                        {[ . rows__s1204] [ . block_width__s1210]}
+                                        type.stdlib.numeric.ceil_div
+                                      )
+                                    }
+                                    stdlib.gpu.geometry.sort.D2
+                                  )
+                                  (
+                                    {[ . block_width__s1210] [ . block_width__s1210]}
+                                    stdlib.gpu.geometry.sort.D2
+                                  )
+                                }
+                                stdlib.gpu.geometry.sort.GridExtent
+                              )
+                              (
+                                {
+                                  (
+                                    {
+                                      (
+                                        {[ . columns__s1206] [ . block_width__s1210]}
+                                        type.stdlib.numeric.ceil_div
+                                      )
+                                      (
+                                        {[ . rows__s1204] [ . block_width__s1210]}
+                                        type.stdlib.numeric.ceil_div
+                                      )
+                                    }
+                                    stdlib.gpu.geometry.sort.D2
+                                  )
+                                  (
+                                    {[ . block_width__s1210] [ . block_width__s1210]}
+                                    stdlib.gpu.geometry.sort.D2
+                                  )
+                                  [ . grid__s4379]
+                                  [ . block__s4426]
+                                  [ . thread__s4427]
+                                }
+                                stdlib.gpu.geometry.sort.InGrid
+                              )
+                            }
+                            stdlib.gpu.geometry.sort.X
+                          )
+                          [ . columns__s1206]
+                        }
+                        prop.Less
+                      )
+                    }
+                    prop.And
+                  )
+                  (
+                    {
+                      (
+                        {
+                          (
+                            {[ . columns__s1206] [ . block_width__s1210]}
+                            type.stdlib.numeric.ceil_div
+                          )
+                          ({[ . rows__s1204] [ . block_width__s1210]} type.stdlib.numeric.ceil_div)
+                        }
+                        stdlib.gpu.geometry.sort.D2
+                      )
+                      (
+                        {[ . block_width__s1210] [ . block_width__s1210]}
+                        stdlib.gpu.geometry.sort.D2
+                      )
+                      [ . grid__s4379]
+                      [ . block__s4426]
+                      ({[ . rows__s1204] [ . columns__s1206]} type.stdlib.numeric.*)
+                      u64
+                      [ . thread__s4427]
+                      [ . global__s4409]
+                      (
+                        {
+                          ({[ . rows__s1204] [ . columns__s1206]} type.stdlib.numeric.*)
+                          (
+                            {
+                              (
+                                {
+                                  (
+                                    {
+                                      (
+                                        {
+                                          (
+                                            {
+                                              (
+                                                {[ . columns__s1206] [ . block_width__s1210]}
+                                                type.stdlib.numeric.ceil_div
+                                              )
+                                              (
+                                                {[ . rows__s1204] [ . block_width__s1210]}
+                                                type.stdlib.numeric.ceil_div
+                                              )
+                                            }
+                                            stdlib.gpu.geometry.sort.D2
+                                          )
+                                          (
+                                            {[ . block_width__s1210] [ . block_width__s1210]}
+                                            stdlib.gpu.geometry.sort.D2
+                                          )
+                                        }
+                                        stdlib.gpu.geometry.sort.GridExtent
+                                      )
+                                      (
+                                        {
+                                          (
+                                            {
+                                              (
+                                                {[ . columns__s1206] [ . block_width__s1210]}
+                                                type.stdlib.numeric.ceil_div
+                                              )
+                                              (
+                                                {[ . rows__s1204] [ . block_width__s1210]}
+                                                type.stdlib.numeric.ceil_div
+                                              )
+                                            }
+                                            stdlib.gpu.geometry.sort.D2
+                                          )
+                                          (
+                                            {[ . block_width__s1210] [ . block_width__s1210]}
+                                            stdlib.gpu.geometry.sort.D2
+                                          )
+                                          [ . grid__s4379]
+                                          [ . block__s4426]
+                                          [ . thread__s4427]
+                                        }
+                                        stdlib.gpu.geometry.sort.InGrid
+                                      )
+                                    }
+                                    stdlib.gpu.geometry.sort.Y
+                                  )
+                                  [ . columns__s1206]
+                                }
+                                type.stdlib.numeric.*
+                              )
+                              (
+                                {
+                                  (
+                                    {
+                                      (
+                                        {
+                                          (
+                                            {[ . columns__s1206] [ . block_width__s1210]}
+                                            type.stdlib.numeric.ceil_div
+                                          )
+                                          (
+                                            {[ . rows__s1204] [ . block_width__s1210]}
+                                            type.stdlib.numeric.ceil_div
+                                          )
+                                        }
+                                        stdlib.gpu.geometry.sort.D2
+                                      )
+                                      (
+                                        {[ . block_width__s1210] [ . block_width__s1210]}
+                                        stdlib.gpu.geometry.sort.D2
+                                      )
+                                    }
+                                    stdlib.gpu.geometry.sort.GridExtent
+                                  )
+                                  (
+                                    {
+                                      (
+                                        {
+                                          (
+                                            {[ . columns__s1206] [ . block_width__s1210]}
+                                            type.stdlib.numeric.ceil_div
+                                          )
+                                          (
+                                            {[ . rows__s1204] [ . block_width__s1210]}
+                                            type.stdlib.numeric.ceil_div
+                                          )
+                                        }
+                                        stdlib.gpu.geometry.sort.D2
+                                      )
+                                      (
+                                        {[ . block_width__s1210] [ . block_width__s1210]}
+                                        stdlib.gpu.geometry.sort.D2
+                                      )
+                                      [ . grid__s4379]
+                                      [ . block__s4426]
+                                      [ . thread__s4427]
+                                    }
+                                    stdlib.gpu.geometry.sort.InGrid
+                                  )
+                                }
+                                stdlib.gpu.geometry.sort.X
+                              )
+                            }
+                            type.stdlib.numeric.+
+                          )
+                        }
+                        stdlib.gpu.memory.sort.At
+                      )
+                    }
+                    stdlib.gpu.memory.prop.GlobalOwn
+                  )
+                }
+                ==>
+              )
+            }
+            prop.And
+          )
+          |-
+        )
+      }
+    )
+    = {
+      [arg0__input0__v0 rows__input1__v1 inner__input2__v2 columns__input3__v3 block_width__input4__v4 grid__input5__v5 global__input6__v6 global__input7__v7 global__input8__v8 block__input9__v9 thread__input10__v10 . ]
+      (
+        [ . arg0__input0__v0 rows__input1__v1 inner__input2__v2 columns__input3__v3 block_width__input4__v4 grid__input5__v5 global__input6__v6 global__input7__v7 global__input8__v8 block__input9__v9 thread__input10__v10]
+        (
+          meta.matmul_simple_naive.main.matmul.helper.instantiate.unsafe_assume.1.arguments
+          {{_} (name.unsafe.assume lift)}
+          evaluate
+          {_}
+        )
+        [output0__v11 . ]
+      )
+      [ . output0__v11]
+    }
+  )
+
+  (def matmul_simple_naive.main.matmul.helper.launch_unsafe.kernel.0
+    : (
+      [rows__s1204 inner__s1205 columns__s1206 block_width__s1210 grid__s4379 global__s4389 global__s4399 global__s4409 block__s4426 . ]
       {
         (
           {
-            [ . block__s4515]
+            [ . global__s4389]
+            (
+              {({[ . rows__s1204] [ . inner__s1205]} type.stdlib.numeric.*) u64}
+              stdlib.gpu.memory.type.Global
+            )
+          }
+          :
+        )
+        (
+          {
+            [ . global__s4399]
+            (
+              {({[ . inner__s1205] [ . columns__s1206]} type.stdlib.numeric.*) u64}
+              stdlib.gpu.memory.type.Global
+            )
+          }
+          :
+        )
+        ({[ . block_width__s1210] u64} :)
+        (
+          {
+            [ . global__s4409]
+            (
+              {({[ . rows__s1204] [ . columns__s1206]} type.stdlib.numeric.*) u64}
+              stdlib.gpu.memory.type.Global
+            )
+          }
+          :
+        )
+        ({[ . columns__s1206] u64} :)
+        (
+          {
+            [ . grid__s4379]
             (
               {
                 (
                   {
-                    ({[ . columns__s1019] [ . block_width__s1023]} type.stdlib.numeric.ceil_div)
-                    ({[ . rows__s1017] [ . block_width__s1023]} type.stdlib.numeric.ceil_div)
+                    ({[ . columns__s1206] [ . block_width__s1210]} type.stdlib.numeric.ceil_div)
+                    ({[ . rows__s1204] [ . block_width__s1210]} type.stdlib.numeric.ceil_div)
                   }
                   stdlib.gpu.geometry.sort.D2
                 )
-                ({[ . block_width__s1023] [ . block_width__s1023]} stdlib.gpu.geometry.sort.D2)
-                [ . grid__s4468]
+                ({[ . block_width__s1210] [ . block_width__s1210]} stdlib.gpu.geometry.sort.D2)
+              }
+              stdlib.gpu.geometry.type.Grid
+            )
+          }
+          :
+        )
+        ({[ . inner__s1205] u64} :)
+        ({[ . rows__s1204] u64} :)
+        (
+          {
+            [ . block__s4426]
+            (
+              {
+                (
+                  {
+                    ({[ . columns__s1206] [ . block_width__s1210]} type.stdlib.numeric.ceil_div)
+                    ({[ . rows__s1204] [ . block_width__s1210]} type.stdlib.numeric.ceil_div)
+                  }
+                  stdlib.gpu.geometry.sort.D2
+                )
+                ({[ . block_width__s1210] [ . block_width__s1210]} stdlib.gpu.geometry.sort.D2)
+                [ . grid__s4379]
+              }
+              stdlib.gpu.geometry.type.Block
+            )
+          }
+          :
+        )
+        (
+          (
+            {
+              (
+                {
+                  ({[ . columns__s1206] [ . block_width__s1210]} type.stdlib.numeric.ceil_div)
+                  ({[ . rows__s1204] [ . block_width__s1210]} type.stdlib.numeric.ceil_div)
+                }
+                stdlib.gpu.geometry.sort.D2
+              )
+              ({[ . block_width__s1210] [ . block_width__s1210]} stdlib.gpu.geometry.sort.D2)
+              [ . grid__s4379]
+              [ . block__s4426]
+            }
+            stdlib.gpu.geometry.type.Thread
+          )
+          val
+        )
+      }
+    )
+    -> (
+      [rows__s1204 inner__s1205 columns__s1206 block_width__s1210 grid__s4379 global__s4389 global__s4399 global__s4409 block__s4426 . ]
+      {1}
+    )
+    = {
+      [a__v4428__input b__v4430__input block_width__v4432__input c__v4434__input columns__v4436 grid__v4438__input inner__v4440 rows__v4442 block__v4444__input thread__v4445__input . ]
+      (
+        [ . a__v4428__input]
+        ({_} meta.matmul_simple_naive.main.matmul.helper.callback_metavars.rows.inner.global.0)
+        [a__v4428 __smolcat_rows__v4486 __smolcat_inner__v4487 __smolcat_global__v4488 . ]
+      )
+      (
+        [ . b__v4430__input]
+        ({_} meta.matmul_simple_naive.main.matmul.helper.callback_metavars.columns.global.0)
+        [b__v4430 __smolcat_columns__v4489 __smolcat_global__v4490 . ]
+      )
+      (
+        [ . block_width__v4432__input]
+        ({_} meta.matmul_simple_naive.main.matmul.helper.callback_metavars.block_width.1)
+        [block_width__v4432 __smolcat_block_width__v4491 . ]
+      )
+      (
+        [ . c__v4434__input]
+        ({_} meta.matmul_simple_naive.main.matmul.helper.callback_metavars.global.3)
+        [c__v4434 __smolcat_global__v4492 . ]
+      )
+      (
+        [ . grid__v4438__input]
+        ({_} meta.matmul_simple_naive.main.matmul.helper.callback_metavars.grid.1)
+        [grid__v4438 __smolcat_grid__v4493 . ]
+      )
+      (
+        [ . block__v4444__input]
+        ({_} meta.matmul_simple_naive.main.matmul.helper.callback_metavars.block.0)
+        [block__v4444 __smolcat_block__v4494 . ]
+      )
+      (
+        [ . thread__v4445__input]
+        (smolcat.value.named meta.matmul_simple_naive.main.matmul.helper.callback_metavars.thread.0)
+        [thread__v4445 __smolcat_thread__v4495 . ]
+      )
+      ([ . block_width__v4432] [op0_value__v4496 . ] [])
+      ([ . grid__v4438] [op1_value__v4497 . ] [])
+      ([] unit.intro [unit__v4449 . ])
+      (
+        [ . unit__v4449]
+        (
+          {
+            {_}
+            [ . __smolcat_rows__v4486 __smolcat_columns__v4489 __smolcat_block_width__v4491 __smolcat_grid__v4493 __smolcat_block__v4494]
+          }
+          matmul_simple_naive.main.matmul.helper.instantiate.unsafe_assume.0
+        )
+        [trace__v4451 . ]
+      )
+      ([] unit.intro [unit__v4456 . ])
+      (
+        [ . unit__v4456]
+        (
+          {
+            {_}
+            [ . __smolcat_rows__v4486 __smolcat_inner__v4487 __smolcat_columns__v4489 __smolcat_block_width__v4491 __smolcat_grid__v4493 __smolcat_global__v4488 __smolcat_global__v4490 __smolcat_global__v4492 __smolcat_block__v4494 __smolcat_thread__v4495]
+          }
+          matmul_simple_naive.main.matmul.helper.instantiate.unsafe_assume.1
+        )
+        [permissions__v4458 . ]
+      )
+      ([] stdlib.numeric.numeric.u64 [numeric_u64__v4463 . ])
+      (
+        [ . rows__v4442 inner__v4440 columns__v4436 a__v4428 b__v4430 c__v4434 block__v4444 thread__v4445 trace__v4451 permissions__v4458 numeric_u64__v4463]
+        stdlib.gpu.matmul.naive
+        [unit__v4467 trace__v4468 returned__v4469 . ]
+      )
+      ([ . unit__v4467] unit.elim [])
+      ([ . trace__v4468] unsafe.discard [unit__v4475 . ])
+      ([ . unit__v4475] unit.elim [])
+      ([ . returned__v4469] unsafe.discard [unit__v4479 . ])
+      ([ . unit__v4479] unit.elim [])
+      ([] unit.intro [unit__v4485 . ])
+      [ . unit__v4485]
+    }
+  )
+
+  (arr meta.matmul_simple_naive.main.matmul.helper.callback_metavars.block.0
+    : (
+      [block__s4426 block_width__s1210 columns__s1206 grid__s4379 rows__s1204 . ]
+      {
+        (
+          {
+            [ . block__s4426]
+            (
+              {
+                (
+                  {
+                    ({[ . columns__s1206] [ . block_width__s1210]} type.stdlib.numeric.ceil_div)
+                    ({[ . rows__s1204] [ . block_width__s1210]} type.stdlib.numeric.ceil_div)
+                  }
+                  stdlib.gpu.geometry.sort.D2
+                )
+                ({[ . block_width__s1210] [ . block_width__s1210]} stdlib.gpu.geometry.sort.D2)
+                [ . grid__s4379]
               }
               stdlib.gpu.geometry.type.Block
             )
@@ -26,57 +987,57 @@
       }
     )
     -> (
-      [block__s4515 block_width__s1023 columns__s1019 grid__s4468 rows__s1017 . ]
+      [block__s4426 block_width__s1210 columns__s1206 grid__s4379 rows__s1204 . ]
       {
         (
           {
-            [ . block__s4515]
+            [ . block__s4426]
             (
               {
                 (
                   {
-                    ({[ . columns__s1019] [ . block_width__s1023]} type.stdlib.numeric.ceil_div)
-                    ({[ . rows__s1017] [ . block_width__s1023]} type.stdlib.numeric.ceil_div)
+                    ({[ . columns__s1206] [ . block_width__s1210]} type.stdlib.numeric.ceil_div)
+                    ({[ . rows__s1204] [ . block_width__s1210]} type.stdlib.numeric.ceil_div)
                   }
                   stdlib.gpu.geometry.sort.D2
                 )
-                ({[ . block_width__s1023] [ . block_width__s1023]} stdlib.gpu.geometry.sort.D2)
-                [ . grid__s4468]
+                ({[ . block_width__s1210] [ . block_width__s1210]} stdlib.gpu.geometry.sort.D2)
+                [ . grid__s4379]
               }
               stdlib.gpu.geometry.type.Block
             )
           }
           :
         )
-        [ . block__s4515]
+        [ . block__s4426]
       }
     )
   )
 
   (arr meta.matmul_simple_naive.main.matmul.helper.callback_metavars.block_width.0
-    : ([block_width__s1023 . ] {({[ . block_width__s1023] u32} :)})
-    -> ([block_width__s1023 . ] {({[ . block_width__s1023] u32} :) [ . block_width__s1023]})
+    : ([block_width__s1210 . ] {({[ . block_width__s1210] u64} :)})
+    -> ([block_width__s1210 . ] {({[ . block_width__s1210] u64} :) [ . block_width__s1210]})
   )
 
   (arr meta.matmul_simple_naive.main.matmul.helper.callback_metavars.block_width.1
-    : ([block_width__s1023 . ] {({[ . block_width__s1023] u32} :)})
-    -> ([block_width__s1023 . ] {({[ . block_width__s1023] u32} :) [ . block_width__s1023]})
+    : ([block_width__s1210 . ] {({[ . block_width__s1210] u64} :)})
+    -> ([block_width__s1210 . ] {({[ . block_width__s1210] u64} :) [ . block_width__s1210]})
   )
 
   (arr meta.matmul_simple_naive.main.matmul.helper.callback_metavars.columns.0
-    : ([columns__s1019 . ] {({[ . columns__s1019] u32} :)})
-    -> ([columns__s1019 . ] {({[ . columns__s1019] u32} :) [ . columns__s1019]})
+    : ([columns__s1206 . ] {({[ . columns__s1206] u64} :)})
+    -> ([columns__s1206 . ] {({[ . columns__s1206] u64} :) [ . columns__s1206]})
   )
 
   (arr meta.matmul_simple_naive.main.matmul.helper.callback_metavars.columns.global.0
     : (
-      [columns__s1019 global__s4488 inner__s1018 . ]
+      [columns__s1206 global__s4399 inner__s1205 . ]
       {
         (
           {
-            [ . global__s4488]
+            [ . global__s4399]
             (
-              {({[ . inner__s1018] [ . columns__s1019]} type.stdlib.numeric.*) u64}
+              {({[ . inner__s1205] [ . columns__s1206]} type.stdlib.numeric.*) u64}
               stdlib.gpu.memory.type.Global
             )
           }
@@ -85,33 +1046,33 @@
       }
     )
     -> (
-      [columns__s1019 global__s4488 inner__s1018 . ]
+      [columns__s1206 global__s4399 inner__s1205 . ]
       {
         (
           {
-            [ . global__s4488]
+            [ . global__s4399]
             (
-              {({[ . inner__s1018] [ . columns__s1019]} type.stdlib.numeric.*) u64}
+              {({[ . inner__s1205] [ . columns__s1206]} type.stdlib.numeric.*) u64}
               stdlib.gpu.memory.type.Global
             )
           }
           :
         )
-        [ . columns__s1019]
-        [ . global__s4488]
+        [ . columns__s1206]
+        [ . global__s4399]
       }
     )
   )
 
   (arr meta.matmul_simple_naive.main.matmul.helper.callback_metavars.global.0
     : (
-      [global__s4478 inner__s1018 rows__s1017 . ]
+      [global__s4389 inner__s1205 rows__s1204 . ]
       {
         (
           {
-            [ . global__s4478]
+            [ . global__s4389]
             (
-              {({[ . rows__s1017] [ . inner__s1018]} type.stdlib.numeric.*) u64}
+              {({[ . rows__s1204] [ . inner__s1205]} type.stdlib.numeric.*) u64}
               stdlib.gpu.memory.type.Global
             )
           }
@@ -120,32 +1081,32 @@
       }
     )
     -> (
-      [global__s4478 inner__s1018 rows__s1017 . ]
+      [global__s4389 inner__s1205 rows__s1204 . ]
       {
         (
           {
-            [ . global__s4478]
+            [ . global__s4389]
             (
-              {({[ . rows__s1017] [ . inner__s1018]} type.stdlib.numeric.*) u64}
+              {({[ . rows__s1204] [ . inner__s1205]} type.stdlib.numeric.*) u64}
               stdlib.gpu.memory.type.Global
             )
           }
           :
         )
-        [ . global__s4478]
+        [ . global__s4389]
       }
     )
   )
 
   (arr meta.matmul_simple_naive.main.matmul.helper.callback_metavars.global.1
     : (
-      [columns__s1019 global__s4488 inner__s1018 . ]
+      [columns__s1206 global__s4399 inner__s1205 . ]
       {
         (
           {
-            [ . global__s4488]
+            [ . global__s4399]
             (
-              {({[ . inner__s1018] [ . columns__s1019]} type.stdlib.numeric.*) u64}
+              {({[ . inner__s1205] [ . columns__s1206]} type.stdlib.numeric.*) u64}
               stdlib.gpu.memory.type.Global
             )
           }
@@ -154,32 +1115,32 @@
       }
     )
     -> (
-      [columns__s1019 global__s4488 inner__s1018 . ]
+      [columns__s1206 global__s4399 inner__s1205 . ]
       {
         (
           {
-            [ . global__s4488]
+            [ . global__s4399]
             (
-              {({[ . inner__s1018] [ . columns__s1019]} type.stdlib.numeric.*) u64}
+              {({[ . inner__s1205] [ . columns__s1206]} type.stdlib.numeric.*) u64}
               stdlib.gpu.memory.type.Global
             )
           }
           :
         )
-        [ . global__s4488]
+        [ . global__s4399]
       }
     )
   )
 
   (arr meta.matmul_simple_naive.main.matmul.helper.callback_metavars.global.2
     : (
-      [columns__s1019 global__s4498 rows__s1017 . ]
+      [columns__s1206 global__s4409 rows__s1204 . ]
       {
         (
           {
-            [ . global__s4498]
+            [ . global__s4409]
             (
-              {({[ . rows__s1017] [ . columns__s1019]} type.stdlib.numeric.*) u64}
+              {({[ . rows__s1204] [ . columns__s1206]} type.stdlib.numeric.*) u64}
               stdlib.gpu.memory.type.Global
             )
           }
@@ -188,32 +1149,32 @@
       }
     )
     -> (
-      [columns__s1019 global__s4498 rows__s1017 . ]
+      [columns__s1206 global__s4409 rows__s1204 . ]
       {
         (
           {
-            [ . global__s4498]
+            [ . global__s4409]
             (
-              {({[ . rows__s1017] [ . columns__s1019]} type.stdlib.numeric.*) u64}
+              {({[ . rows__s1204] [ . columns__s1206]} type.stdlib.numeric.*) u64}
               stdlib.gpu.memory.type.Global
             )
           }
           :
         )
-        [ . global__s4498]
+        [ . global__s4409]
       }
     )
   )
 
   (arr meta.matmul_simple_naive.main.matmul.helper.callback_metavars.global.3
     : (
-      [columns__s1019 global__s4498 rows__s1017 . ]
+      [columns__s1206 global__s4409 rows__s1204 . ]
       {
         (
           {
-            [ . global__s4498]
+            [ . global__s4409]
             (
-              {({[ . rows__s1017] [ . columns__s1019]} type.stdlib.numeric.*) u64}
+              {({[ . rows__s1204] [ . columns__s1206]} type.stdlib.numeric.*) u64}
               stdlib.gpu.memory.type.Global
             )
           }
@@ -222,40 +1183,40 @@
       }
     )
     -> (
-      [columns__s1019 global__s4498 rows__s1017 . ]
+      [columns__s1206 global__s4409 rows__s1204 . ]
       {
         (
           {
-            [ . global__s4498]
+            [ . global__s4409]
             (
-              {({[ . rows__s1017] [ . columns__s1019]} type.stdlib.numeric.*) u64}
+              {({[ . rows__s1204] [ . columns__s1206]} type.stdlib.numeric.*) u64}
               stdlib.gpu.memory.type.Global
             )
           }
           :
         )
-        [ . global__s4498]
+        [ . global__s4409]
       }
     )
   )
 
   (arr meta.matmul_simple_naive.main.matmul.helper.callback_metavars.grid.0
     : (
-      [block_width__s1023 columns__s1019 grid__s4468 rows__s1017 . ]
+      [block_width__s1210 columns__s1206 grid__s4379 rows__s1204 . ]
       {
         (
           {
-            [ . grid__s4468]
+            [ . grid__s4379]
             (
               {
                 (
                   {
-                    ({[ . columns__s1019] [ . block_width__s1023]} type.stdlib.numeric.ceil_div)
-                    ({[ . rows__s1017] [ . block_width__s1023]} type.stdlib.numeric.ceil_div)
+                    ({[ . columns__s1206] [ . block_width__s1210]} type.stdlib.numeric.ceil_div)
+                    ({[ . rows__s1204] [ . block_width__s1210]} type.stdlib.numeric.ceil_div)
                   }
                   stdlib.gpu.geometry.sort.D2
                 )
-                ({[ . block_width__s1023] [ . block_width__s1023]} stdlib.gpu.geometry.sort.D2)
+                ({[ . block_width__s1210] [ . block_width__s1210]} stdlib.gpu.geometry.sort.D2)
               }
               stdlib.gpu.geometry.type.Grid
             )
@@ -265,49 +1226,49 @@
       }
     )
     -> (
-      [block_width__s1023 columns__s1019 grid__s4468 rows__s1017 . ]
+      [block_width__s1210 columns__s1206 grid__s4379 rows__s1204 . ]
       {
         (
           {
-            [ . grid__s4468]
+            [ . grid__s4379]
             (
               {
                 (
                   {
-                    ({[ . columns__s1019] [ . block_width__s1023]} type.stdlib.numeric.ceil_div)
-                    ({[ . rows__s1017] [ . block_width__s1023]} type.stdlib.numeric.ceil_div)
+                    ({[ . columns__s1206] [ . block_width__s1210]} type.stdlib.numeric.ceil_div)
+                    ({[ . rows__s1204] [ . block_width__s1210]} type.stdlib.numeric.ceil_div)
                   }
                   stdlib.gpu.geometry.sort.D2
                 )
-                ({[ . block_width__s1023] [ . block_width__s1023]} stdlib.gpu.geometry.sort.D2)
+                ({[ . block_width__s1210] [ . block_width__s1210]} stdlib.gpu.geometry.sort.D2)
               }
               stdlib.gpu.geometry.type.Grid
             )
           }
           :
         )
-        [ . grid__s4468]
+        [ . grid__s4379]
       }
     )
   )
 
   (arr meta.matmul_simple_naive.main.matmul.helper.callback_metavars.grid.1
     : (
-      [block_width__s1023 columns__s1019 grid__s4468 rows__s1017 . ]
+      [block_width__s1210 columns__s1206 grid__s4379 rows__s1204 . ]
       {
         (
           {
-            [ . grid__s4468]
+            [ . grid__s4379]
             (
               {
                 (
                   {
-                    ({[ . columns__s1019] [ . block_width__s1023]} type.stdlib.numeric.ceil_div)
-                    ({[ . rows__s1017] [ . block_width__s1023]} type.stdlib.numeric.ceil_div)
+                    ({[ . columns__s1206] [ . block_width__s1210]} type.stdlib.numeric.ceil_div)
+                    ({[ . rows__s1204] [ . block_width__s1210]} type.stdlib.numeric.ceil_div)
                   }
                   stdlib.gpu.geometry.sort.D2
                 )
-                ({[ . block_width__s1023] [ . block_width__s1023]} stdlib.gpu.geometry.sort.D2)
+                ({[ . block_width__s1210] [ . block_width__s1210]} stdlib.gpu.geometry.sort.D2)
               }
               stdlib.gpu.geometry.type.Grid
             )
@@ -317,51 +1278,51 @@
       }
     )
     -> (
-      [block_width__s1023 columns__s1019 grid__s4468 rows__s1017 . ]
+      [block_width__s1210 columns__s1206 grid__s4379 rows__s1204 . ]
       {
         (
           {
-            [ . grid__s4468]
+            [ . grid__s4379]
             (
               {
                 (
                   {
-                    ({[ . columns__s1019] [ . block_width__s1023]} type.stdlib.numeric.ceil_div)
-                    ({[ . rows__s1017] [ . block_width__s1023]} type.stdlib.numeric.ceil_div)
+                    ({[ . columns__s1206] [ . block_width__s1210]} type.stdlib.numeric.ceil_div)
+                    ({[ . rows__s1204] [ . block_width__s1210]} type.stdlib.numeric.ceil_div)
                   }
                   stdlib.gpu.geometry.sort.D2
                 )
-                ({[ . block_width__s1023] [ . block_width__s1023]} stdlib.gpu.geometry.sort.D2)
+                ({[ . block_width__s1210] [ . block_width__s1210]} stdlib.gpu.geometry.sort.D2)
               }
               stdlib.gpu.geometry.type.Grid
             )
           }
           :
         )
-        [ . grid__s4468]
+        [ . grid__s4379]
       }
     )
   )
 
   (arr meta.matmul_simple_naive.main.matmul.helper.callback_metavars.inner.0
-    : ([inner__s1018 . ] {({[ . inner__s1018] u32} :)})
-    -> ([inner__s1018 . ] {({[ . inner__s1018] u32} :) [ . inner__s1018]})
+    : ([inner__s1205 . ] {({[ . inner__s1205] u64} :)})
+    -> ([inner__s1205 . ] {({[ . inner__s1205] u64} :) [ . inner__s1205]})
   )
 
   (arr meta.matmul_simple_naive.main.matmul.helper.callback_metavars.rows.0
-    : ([rows__s1017 . ] {({[ . rows__s1017] u32} :)})
-    -> ([rows__s1017 . ] {({[ . rows__s1017] u32} :) [ . rows__s1017]})
+    : ([rows__s1204 . ] {({[ . rows__s1204] u64} :)})
+    -> ([rows__s1204 . ] {({[ . rows__s1204] u64} :) [ . rows__s1204]})
   )
 
   (arr meta.matmul_simple_naive.main.matmul.helper.callback_metavars.rows.inner.global.0
     : (
-      [global__s4478 inner__s1018 rows__s1017 . ]
+      [global__s4389 inner__s1205 rows__s1204 . ]
       {
         (
           {
-            [ . global__s4478]
+            [ . global__s4389]
             (
-              {({[ . rows__s1017] [ . inner__s1018]} type.stdlib.numeric.*) u64}
+              {({[ . rows__s1204] [ . inner__s1205]} type.stdlib.numeric.*) u64}
               stdlib.gpu.memory.type.Global
             )
           }
@@ -370,44 +1331,44 @@
       }
     )
     -> (
-      [global__s4478 inner__s1018 rows__s1017 . ]
+      [global__s4389 inner__s1205 rows__s1204 . ]
       {
         (
           {
-            [ . global__s4478]
+            [ . global__s4389]
             (
-              {({[ . rows__s1017] [ . inner__s1018]} type.stdlib.numeric.*) u64}
+              {({[ . rows__s1204] [ . inner__s1205]} type.stdlib.numeric.*) u64}
               stdlib.gpu.memory.type.Global
             )
           }
           :
         )
-        [ . rows__s1017]
-        [ . inner__s1018]
-        [ . global__s4478]
+        [ . rows__s1204]
+        [ . inner__s1205]
+        [ . global__s4389]
       }
     )
   )
 
   (arr meta.matmul_simple_naive.main.matmul.helper.callback_metavars.thread.0
     : (
-      [block__s4515 block_width__s1023 columns__s1019 grid__s4468 rows__s1017 thread__s4516 . ]
+      [block__s4426 block_width__s1210 columns__s1206 grid__s4379 rows__s1204 thread__s4427 . ]
       {
         (
           {
-            [ . thread__s4516]
+            [ . thread__s4427]
             (
               {
                 (
                   {
-                    ({[ . columns__s1019] [ . block_width__s1023]} type.stdlib.numeric.ceil_div)
-                    ({[ . rows__s1017] [ . block_width__s1023]} type.stdlib.numeric.ceil_div)
+                    ({[ . columns__s1206] [ . block_width__s1210]} type.stdlib.numeric.ceil_div)
+                    ({[ . rows__s1204] [ . block_width__s1210]} type.stdlib.numeric.ceil_div)
                   }
                   stdlib.gpu.geometry.sort.D2
                 )
-                ({[ . block_width__s1023] [ . block_width__s1023]} stdlib.gpu.geometry.sort.D2)
-                [ . grid__s4468]
-                [ . block__s4515]
+                ({[ . block_width__s1210] [ . block_width__s1210]} stdlib.gpu.geometry.sort.D2)
+                [ . grid__s4379]
+                [ . block__s4426]
               }
               stdlib.gpu.geometry.type.Thread
             )
@@ -417,62 +1378,62 @@
       }
     )
     -> (
-      [block__s4515 block_width__s1023 columns__s1019 grid__s4468 rows__s1017 thread__s4516 . ]
+      [block__s4426 block_width__s1210 columns__s1206 grid__s4379 rows__s1204 thread__s4427 . ]
       {
         (
           {
-            [ . thread__s4516]
+            [ . thread__s4427]
             (
               {
                 (
                   {
-                    ({[ . columns__s1019] [ . block_width__s1023]} type.stdlib.numeric.ceil_div)
-                    ({[ . rows__s1017] [ . block_width__s1023]} type.stdlib.numeric.ceil_div)
+                    ({[ . columns__s1206] [ . block_width__s1210]} type.stdlib.numeric.ceil_div)
+                    ({[ . rows__s1204] [ . block_width__s1210]} type.stdlib.numeric.ceil_div)
                   }
                   stdlib.gpu.geometry.sort.D2
                 )
-                ({[ . block_width__s1023] [ . block_width__s1023]} stdlib.gpu.geometry.sort.D2)
-                [ . grid__s4468]
-                [ . block__s4515]
+                ({[ . block_width__s1210] [ . block_width__s1210]} stdlib.gpu.geometry.sort.D2)
+                [ . grid__s4379]
+                [ . block__s4426]
               }
               stdlib.gpu.geometry.type.Thread
             )
           }
           :
         )
-        [ . thread__s4516]
+        [ . thread__s4427]
       }
     )
   )
 
   (arr meta.matmul_simple_naive.main.matmul.helper.instantiate.unsafe_assume.0.arguments
     : (
-      [block__s4515 block_width__s1023 columns__s1019 grid__s4468 rows__s1017 . ]
+      [block__s4426 block_width__s1210 columns__s1206 grid__s4379 rows__s1204 . ]
       {
         1
-        [ . rows__s1017]
-        [ . columns__s1019]
-        [ . block_width__s1023]
-        [ . grid__s4468]
-        [ . block__s4515]
+        [ . rows__s1204]
+        [ . columns__s1206]
+        [ . block_width__s1210]
+        [ . grid__s4379]
+        [ . block__s4426]
       }
     )
     -> (
-      [block__s4515 block_width__s1023 columns__s1019 grid__s4468 rows__s1017 . ]
+      [block__s4426 block_width__s1210 columns__s1206 grid__s4379 rows__s1204 . ]
       {
         1
         (
           {
             (
               {
-                ({[ . columns__s1019] [ . block_width__s1023]} type.stdlib.numeric.ceil_div)
-                ({[ . rows__s1017] [ . block_width__s1023]} type.stdlib.numeric.ceil_div)
+                ({[ . columns__s1206] [ . block_width__s1210]} type.stdlib.numeric.ceil_div)
+                ({[ . rows__s1204] [ . block_width__s1210]} type.stdlib.numeric.ceil_div)
               }
               stdlib.gpu.geometry.sort.D2
             )
-            ({[ . block_width__s1023] [ . block_width__s1023]} stdlib.gpu.geometry.sort.D2)
-            [ . grid__s4468]
-            [ . block__s4515]
+            ({[ . block_width__s1210] [ . block_width__s1210]} stdlib.gpu.geometry.sort.D2)
+            [ . grid__s4379]
+            [ . block__s4426]
             list.Nil
           }
           stdlib.gpu.barriers.prop.Trace
@@ -483,23 +1444,23 @@
 
   (arr meta.matmul_simple_naive.main.matmul.helper.instantiate.unsafe_assume.1.arguments
     : (
-      [block__s4515 block_width__s1023 columns__s1019 global__s4478 global__s4488 global__s4498 grid__s4468 inner__s1018 rows__s1017 thread__s4516 . ]
+      [block__s4426 block_width__s1210 columns__s1206 global__s4389 global__s4399 global__s4409 grid__s4379 inner__s1205 rows__s1204 thread__s4427 . ]
       {
         1
-        [ . rows__s1017]
-        [ . inner__s1018]
-        [ . columns__s1019]
-        [ . block_width__s1023]
-        [ . grid__s4468]
-        [ . global__s4478]
-        [ . global__s4488]
-        [ . global__s4498]
-        [ . block__s4515]
-        [ . thread__s4516]
+        [ . rows__s1204]
+        [ . inner__s1205]
+        [ . columns__s1206]
+        [ . block_width__s1210]
+        [ . grid__s4379]
+        [ . global__s4389]
+        [ . global__s4399]
+        [ . global__s4409]
+        [ . block__s4426]
+        [ . thread__s4427]
       }
     )
     -> (
-      [block__s4515 block_width__s1023 columns__s1019 global__s4478 global__s4488 global__s4498 grid__s4468 inner__s1018 rows__s1017 thread__s4516 . ]
+      [block__s4426 block_width__s1210 columns__s1206 global__s4389 global__s4399 global__s4409 grid__s4379 inner__s1205 rows__s1204 thread__s4427 . ]
       {
         1
         (
@@ -514,16 +1475,28 @@
                           {
                             (
                               {
-                                ({[ . rows__s1017] ({} type.const.u32.0x00000000)} prop.Greater)
-                                ({[ . inner__s1018] ({} type.const.u32.0x00000000)} prop.Greater)
+                                (
+                                  {[ . rows__s1204] ({} type.const.u64.0x0000000000000000)}
+                                  prop.Greater
+                                )
+                                (
+                                  {[ . inner__s1205] ({} type.const.u64.0x0000000000000000)}
+                                  prop.Greater
+                                )
                               }
                               prop.And
                             )
-                            ({[ . columns__s1019] ({} type.const.u32.0x00000000)} prop.Greater)
+                            (
+                              {[ . columns__s1206] ({} type.const.u64.0x0000000000000000)}
+                              prop.Greater
+                            )
                           }
                           prop.And
                         )
-                        ({[ . block_width__s1023] ({} type.const.u32.0x00000000)} prop.Greater)
+                        (
+                          {[ . block_width__s1210] ({} type.const.u64.0x0000000000000000)}
+                          prop.Greater
+                        )
                       }
                       prop.And
                     )
@@ -532,26 +1505,26 @@
                         (
                           {
                             (
-                              {[ . columns__s1019] [ . block_width__s1023]}
+                              {[ . columns__s1206] [ . block_width__s1210]}
                               type.stdlib.numeric.ceil_div
                             )
                             (
-                              {[ . rows__s1017] [ . block_width__s1023]}
+                              {[ . rows__s1204] [ . block_width__s1210]}
                               type.stdlib.numeric.ceil_div
                             )
                           }
                           stdlib.gpu.geometry.sort.D2
                         )
                         (
-                          {[ . block_width__s1023] [ . block_width__s1023]}
+                          {[ . block_width__s1210] [ . block_width__s1210]}
                           stdlib.gpu.geometry.sort.D2
                         )
-                        [ . grid__s4468]
-                        [ . block__s4515]
-                        ({[ . rows__s1017] [ . inner__s1018]} type.stdlib.numeric.*)
+                        [ . grid__s4379]
+                        [ . block__s4426]
+                        ({[ . rows__s1204] [ . inner__s1205]} type.stdlib.numeric.*)
                         u64
-                        [ . thread__s4516]
-                        [ . global__s4478]
+                        [ . thread__s4427]
+                        [ . global__s4389]
                         stdlib.gpu.memory.sort.All
                       }
                       stdlib.gpu.memory.prop.GlobalRead
@@ -563,18 +1536,18 @@
                   {
                     (
                       {
-                        ({[ . columns__s1019] [ . block_width__s1023]} type.stdlib.numeric.ceil_div)
-                        ({[ . rows__s1017] [ . block_width__s1023]} type.stdlib.numeric.ceil_div)
+                        ({[ . columns__s1206] [ . block_width__s1210]} type.stdlib.numeric.ceil_div)
+                        ({[ . rows__s1204] [ . block_width__s1210]} type.stdlib.numeric.ceil_div)
                       }
                       stdlib.gpu.geometry.sort.D2
                     )
-                    ({[ . block_width__s1023] [ . block_width__s1023]} stdlib.gpu.geometry.sort.D2)
-                    [ . grid__s4468]
-                    [ . block__s4515]
-                    ({[ . inner__s1018] [ . columns__s1019]} type.stdlib.numeric.*)
+                    ({[ . block_width__s1210] [ . block_width__s1210]} stdlib.gpu.geometry.sort.D2)
+                    [ . grid__s4379]
+                    [ . block__s4426]
+                    ({[ . inner__s1205] [ . columns__s1206]} type.stdlib.numeric.*)
                     u64
-                    [ . thread__s4516]
-                    [ . global__s4488]
+                    [ . thread__s4427]
+                    [ . global__s4399]
                     stdlib.gpu.memory.sort.All
                   }
                   stdlib.gpu.memory.prop.GlobalRead
@@ -595,18 +1568,18 @@
                                 (
                                   {
                                     (
-                                      {[ . columns__s1019] [ . block_width__s1023]}
+                                      {[ . columns__s1206] [ . block_width__s1210]}
                                       type.stdlib.numeric.ceil_div
                                     )
                                     (
-                                      {[ . rows__s1017] [ . block_width__s1023]}
+                                      {[ . rows__s1204] [ . block_width__s1210]}
                                       type.stdlib.numeric.ceil_div
                                     )
                                   }
                                   stdlib.gpu.geometry.sort.D2
                                 )
                                 (
-                                  {[ . block_width__s1023] [ . block_width__s1023]}
+                                  {[ . block_width__s1210] [ . block_width__s1210]}
                                   stdlib.gpu.geometry.sort.D2
                                 )
                               }
@@ -617,30 +1590,30 @@
                                 (
                                   {
                                     (
-                                      {[ . columns__s1019] [ . block_width__s1023]}
+                                      {[ . columns__s1206] [ . block_width__s1210]}
                                       type.stdlib.numeric.ceil_div
                                     )
                                     (
-                                      {[ . rows__s1017] [ . block_width__s1023]}
+                                      {[ . rows__s1204] [ . block_width__s1210]}
                                       type.stdlib.numeric.ceil_div
                                     )
                                   }
                                   stdlib.gpu.geometry.sort.D2
                                 )
                                 (
-                                  {[ . block_width__s1023] [ . block_width__s1023]}
+                                  {[ . block_width__s1210] [ . block_width__s1210]}
                                   stdlib.gpu.geometry.sort.D2
                                 )
-                                [ . grid__s4468]
-                                [ . block__s4515]
-                                [ . thread__s4516]
+                                [ . grid__s4379]
+                                [ . block__s4426]
+                                [ . thread__s4427]
                               }
                               stdlib.gpu.geometry.sort.InGrid
                             )
                           }
                           stdlib.gpu.geometry.sort.Y
                         )
-                        [ . rows__s1017]
+                        [ . rows__s1204]
                       }
                       prop.Less
                     )
@@ -653,18 +1626,18 @@
                                 (
                                   {
                                     (
-                                      {[ . columns__s1019] [ . block_width__s1023]}
+                                      {[ . columns__s1206] [ . block_width__s1210]}
                                       type.stdlib.numeric.ceil_div
                                     )
                                     (
-                                      {[ . rows__s1017] [ . block_width__s1023]}
+                                      {[ . rows__s1204] [ . block_width__s1210]}
                                       type.stdlib.numeric.ceil_div
                                     )
                                   }
                                   stdlib.gpu.geometry.sort.D2
                                 )
                                 (
-                                  {[ . block_width__s1023] [ . block_width__s1023]}
+                                  {[ . block_width__s1210] [ . block_width__s1210]}
                                   stdlib.gpu.geometry.sort.D2
                                 )
                               }
@@ -675,30 +1648,30 @@
                                 (
                                   {
                                     (
-                                      {[ . columns__s1019] [ . block_width__s1023]}
+                                      {[ . columns__s1206] [ . block_width__s1210]}
                                       type.stdlib.numeric.ceil_div
                                     )
                                     (
-                                      {[ . rows__s1017] [ . block_width__s1023]}
+                                      {[ . rows__s1204] [ . block_width__s1210]}
                                       type.stdlib.numeric.ceil_div
                                     )
                                   }
                                   stdlib.gpu.geometry.sort.D2
                                 )
                                 (
-                                  {[ . block_width__s1023] [ . block_width__s1023]}
+                                  {[ . block_width__s1210] [ . block_width__s1210]}
                                   stdlib.gpu.geometry.sort.D2
                                 )
-                                [ . grid__s4468]
-                                [ . block__s4515]
-                                [ . thread__s4516]
+                                [ . grid__s4379]
+                                [ . block__s4426]
+                                [ . thread__s4427]
                               }
                               stdlib.gpu.geometry.sort.InGrid
                             )
                           }
                           stdlib.gpu.geometry.sort.X
                         )
-                        [ . columns__s1019]
+                        [ . columns__s1206]
                       }
                       prop.Less
                     )
@@ -709,21 +1682,21 @@
                   {
                     (
                       {
-                        ({[ . columns__s1019] [ . block_width__s1023]} type.stdlib.numeric.ceil_div)
-                        ({[ . rows__s1017] [ . block_width__s1023]} type.stdlib.numeric.ceil_div)
+                        ({[ . columns__s1206] [ . block_width__s1210]} type.stdlib.numeric.ceil_div)
+                        ({[ . rows__s1204] [ . block_width__s1210]} type.stdlib.numeric.ceil_div)
                       }
                       stdlib.gpu.geometry.sort.D2
                     )
-                    ({[ . block_width__s1023] [ . block_width__s1023]} stdlib.gpu.geometry.sort.D2)
-                    [ . grid__s4468]
-                    [ . block__s4515]
-                    ({[ . rows__s1017] [ . columns__s1019]} type.stdlib.numeric.*)
+                    ({[ . block_width__s1210] [ . block_width__s1210]} stdlib.gpu.geometry.sort.D2)
+                    [ . grid__s4379]
+                    [ . block__s4426]
+                    ({[ . rows__s1204] [ . columns__s1206]} type.stdlib.numeric.*)
                     u64
-                    [ . thread__s4516]
-                    [ . global__s4498]
+                    [ . thread__s4427]
+                    [ . global__s4409]
                     (
                       {
-                        ({[ . rows__s1017] [ . columns__s1019]} type.stdlib.numeric.*)
+                        ({[ . rows__s1204] [ . columns__s1206]} type.stdlib.numeric.*)
                         (
                           {
                             (
@@ -735,18 +1708,18 @@
                                         (
                                           {
                                             (
-                                              {[ . columns__s1019] [ . block_width__s1023]}
+                                              {[ . columns__s1206] [ . block_width__s1210]}
                                               type.stdlib.numeric.ceil_div
                                             )
                                             (
-                                              {[ . rows__s1017] [ . block_width__s1023]}
+                                              {[ . rows__s1204] [ . block_width__s1210]}
                                               type.stdlib.numeric.ceil_div
                                             )
                                           }
                                           stdlib.gpu.geometry.sort.D2
                                         )
                                         (
-                                          {[ . block_width__s1023] [ . block_width__s1023]}
+                                          {[ . block_width__s1210] [ . block_width__s1210]}
                                           stdlib.gpu.geometry.sort.D2
                                         )
                                       }
@@ -757,30 +1730,30 @@
                                         (
                                           {
                                             (
-                                              {[ . columns__s1019] [ . block_width__s1023]}
+                                              {[ . columns__s1206] [ . block_width__s1210]}
                                               type.stdlib.numeric.ceil_div
                                             )
                                             (
-                                              {[ . rows__s1017] [ . block_width__s1023]}
+                                              {[ . rows__s1204] [ . block_width__s1210]}
                                               type.stdlib.numeric.ceil_div
                                             )
                                           }
                                           stdlib.gpu.geometry.sort.D2
                                         )
                                         (
-                                          {[ . block_width__s1023] [ . block_width__s1023]}
+                                          {[ . block_width__s1210] [ . block_width__s1210]}
                                           stdlib.gpu.geometry.sort.D2
                                         )
-                                        [ . grid__s4468]
-                                        [ . block__s4515]
-                                        [ . thread__s4516]
+                                        [ . grid__s4379]
+                                        [ . block__s4426]
+                                        [ . thread__s4427]
                                       }
                                       stdlib.gpu.geometry.sort.InGrid
                                     )
                                   }
                                   stdlib.gpu.geometry.sort.Y
                                 )
-                                [ . columns__s1019]
+                                [ . columns__s1206]
                               }
                               type.stdlib.numeric.*
                             )
@@ -791,18 +1764,18 @@
                                     (
                                       {
                                         (
-                                          {[ . columns__s1019] [ . block_width__s1023]}
+                                          {[ . columns__s1206] [ . block_width__s1210]}
                                           type.stdlib.numeric.ceil_div
                                         )
                                         (
-                                          {[ . rows__s1017] [ . block_width__s1023]}
+                                          {[ . rows__s1204] [ . block_width__s1210]}
                                           type.stdlib.numeric.ceil_div
                                         )
                                       }
                                       stdlib.gpu.geometry.sort.D2
                                     )
                                     (
-                                      {[ . block_width__s1023] [ . block_width__s1023]}
+                                      {[ . block_width__s1210] [ . block_width__s1210]}
                                       stdlib.gpu.geometry.sort.D2
                                     )
                                   }
@@ -813,23 +1786,23 @@
                                     (
                                       {
                                         (
-                                          {[ . columns__s1019] [ . block_width__s1023]}
+                                          {[ . columns__s1206] [ . block_width__s1210]}
                                           type.stdlib.numeric.ceil_div
                                         )
                                         (
-                                          {[ . rows__s1017] [ . block_width__s1023]}
+                                          {[ . rows__s1204] [ . block_width__s1210]}
                                           type.stdlib.numeric.ceil_div
                                         )
                                       }
                                       stdlib.gpu.geometry.sort.D2
                                     )
                                     (
-                                      {[ . block_width__s1023] [ . block_width__s1023]}
+                                      {[ . block_width__s1210] [ . block_width__s1210]}
                                       stdlib.gpu.geometry.sort.D2
                                     )
-                                    [ . grid__s4468]
-                                    [ . block__s4515]
-                                    [ . thread__s4516]
+                                    [ . grid__s4379]
+                                    [ . block__s4426]
+                                    [ . thread__s4427]
                                   }
                                   stdlib.gpu.geometry.sort.InGrid
                                 )
@@ -855,905 +1828,3 @@
     )
   )
 })
-
-(def program matmul_simple_naive.main.matmul
-  : (
-    []
-    {
-      (u32 val)
-      (u32 val)
-      (u32 val)
-      (({cap.ref} mem) val)
-      (({cap.ref} mem) val)
-      (({cap.own} mem) val)
-      (u32 val)
-    }
-  )
-  -> ([] {(({cap.own} mem) val)})
-  = {
-    [rows__v4381__input inner__v4383__input columns__v4385__input a_mem__v4387 b_mem__v4389 c_mem__v4391 block_width__v4393__input . ]
-    (
-      [ . rows__v4381__input]
-      (smolcat.value.named meta.matmul_simple_naive.main.matmul.helper.callback_metavars.rows.0)
-      [rows__v4381 __smolcat_rows__v4681 . ]
-    )
-    (
-      [ . inner__v4383__input]
-      (smolcat.value.named meta.matmul_simple_naive.main.matmul.helper.callback_metavars.inner.0)
-      [inner__v4383 __smolcat_inner__v4682 . ]
-    )
-    (
-      [ . columns__v4385__input]
-      (smolcat.value.named meta.matmul_simple_naive.main.matmul.helper.callback_metavars.columns.0)
-      [columns__v4385 __smolcat_columns__v4683 . ]
-    )
-    (
-      [ . block_width__v4393__input]
-      (
-        smolcat.value.named
-        meta.matmul_simple_naive.main.matmul.helper.callback_metavars.block_width.0
-      )
-      [block_width__v4393 __smolcat_block_width__v4684 . ]
-    )
-    (unit.intro smolcat.callback.symbol [__smolcat_block__v4685 . ])
-    (
-      [ . rows__v4381]
-      [op0_value__v4686 . op0_value__v4686 op0_value__v4686]
-      [rows__v4593 rows__v4594 . ]
-    )
-    (
-      [ . rows__v4594]
-      [op1_value__v4687 . op1_value__v4687 op1_value__v4687]
-      [rows__v4595 rows__v4596 . ]
-    )
-    (
-      [ . rows__v4596]
-      [op2_value__v4688 . op2_value__v4688 op2_value__v4688]
-      [rows__v4597 rows__v4598 . ]
-    )
-    (
-      [ . rows__v4598]
-      [op3_value__v4689 . op3_value__v4689 op3_value__v4689]
-      [rows__v4599 rows__v4600 . ]
-    )
-    (
-      [ . inner__v4383]
-      [op4_value__v4690 . op4_value__v4690 op4_value__v4690]
-      [inner__v4605 inner__v4606 . ]
-    )
-    (
-      [ . inner__v4606]
-      [op5_value__v4691 . op5_value__v4691 op5_value__v4691]
-      [inner__v4607 inner__v4608 . ]
-    )
-    (
-      [ . inner__v4608]
-      [op6_value__v4692 . op6_value__v4692 op6_value__v4692]
-      [inner__v4609 inner__v4610 . ]
-    )
-    (
-      [ . columns__v4385]
-      [op7_value__v4693 . op7_value__v4693 op7_value__v4693]
-      [columns__v4615 columns__v4616 . ]
-    )
-    (
-      [ . columns__v4616]
-      [op8_value__v4694 . op8_value__v4694 op8_value__v4694]
-      [columns__v4617 columns__v4618 . ]
-    )
-    (
-      [ . columns__v4618]
-      [op9_value__v4695 . op9_value__v4695 op9_value__v4695]
-      [columns__v4619 columns__v4620 . ]
-    )
-    (
-      [ . columns__v4620]
-      [op10_value__v4696 . op10_value__v4696 op10_value__v4696]
-      [columns__v4621 columns__v4622 . ]
-    )
-    (
-      [ . block_width__v4393]
-      [op11_value__v4697 . op11_value__v4697 op11_value__v4697]
-      [block_width__v4627 block_width__v4628 . ]
-    )
-    (
-      [ . block_width__v4628]
-      [op12_value__v4698 . op12_value__v4698 op12_value__v4698]
-      [block_width__v4629 block_width__v4630 . ]
-    )
-    (
-      [ . block_width__v4630]
-      [op13_value__v4699 . op13_value__v4699 op13_value__v4699]
-      [block_width__v4631 block_width__v4632 . ]
-    )
-    (
-      [ . block_width__v4632]
-      [op14_value__v4700 . op14_value__v4700 op14_value__v4700]
-      [block_width__v4633 block_width__v4634 . ]
-    )
-    (
-      [ . block_width__v4634]
-      [op15_value__v4701 . op15_value__v4701 op15_value__v4701]
-      [block_width__v4635 block_width__v4636 . ]
-    )
-    ([] type.const.u32.0x00000000 [literal__v4399 . ])
-    ([] stdlib.numeric.numeric.u32 [numeric_u32__v4401 . ])
-    ([ . rows__v4600 literal__v4399 numeric_u32__v4401] stdlib.numeric.greater [greater__v4403 . ])
-    ([ . greater__v4403] stdlib.assert [unit__v4406 proven__v4407 . ])
-    ([ . proven__v4407] [op20_value__v4702 . ] [])
-    ([ . unit__v4406] unit.elim [])
-    ([] type.const.u32.0x00000000 [literal__v4414 . ])
-    ([] stdlib.numeric.numeric.u32 [numeric_u32__v4416 . ])
-    ([ . inner__v4610 literal__v4414 numeric_u32__v4416] stdlib.numeric.greater [greater__v4418 . ])
-    ([ . greater__v4418] stdlib.assert [unit__v4421 proven__v4422 . ])
-    ([ . proven__v4422] [op26_value__v4703 . ] [])
-    ([ . unit__v4421] unit.elim [])
-    ([] type.const.u32.0x00000000 [literal__v4429 . ])
-    ([] stdlib.numeric.numeric.u32 [numeric_u32__v4431 . ])
-    (
-      [ . columns__v4622 literal__v4429 numeric_u32__v4431]
-      stdlib.numeric.greater
-      [greater__v4433 . ]
-    )
-    ([ . greater__v4433] stdlib.assert [unit__v4436 proven__v4437 . ])
-    ([ . proven__v4437] [op32_value__v4704 . ] [])
-    ([ . unit__v4436] unit.elim [])
-    ([] type.const.u32.0x00000000 [literal__v4444 . ])
-    ([] stdlib.numeric.numeric.u32 [numeric_u32__v4446 . ])
-    (
-      [ . block_width__v4636 literal__v4444 numeric_u32__v4446]
-      stdlib.numeric.greater
-      [greater__v4448 . ]
-    )
-    ([ . greater__v4448] stdlib.assert [unit__v4451 width_positive__v4452 . ])
-    ([ . unit__v4451] unit.elim [])
-    (
-      [ . columns__v4621 block_width__v4635 width_positive__v4452]
-      stdlib.numeric.ceil_div_u32
-      [blocks_x__v4458 width_positive__v4459 . ]
-    )
-    (
-      [ . rows__v4599 block_width__v4633 width_positive__v4459]
-      stdlib.numeric.ceil_div_u32
-      [blocks_y__v4464 width_positive__v4465 . ]
-    )
-    ([ . width_positive__v4465] [op41_value__v4705 . ] [])
-    (
-      [ . blocks_x__v4458 blocks_y__v4464 block_width__v4631 block_width__v4629]
-      stdlib.gpu.geometry.make_grid
-      [grid__v4470__result bounds__v4471 . ]
-    )
-    (
-      [ . grid__v4470__result]
-      ({_} meta.matmul_simple_naive.main.matmul.helper.callback_metavars.grid.0)
-      [grid__v4470 __smolcat_grid__v4706 . ]
-    )
-    (
-      [ . grid__v4470]
-      [op43_value__v4707 . op43_value__v4707 op43_value__v4707]
-      [grid__v4667 grid__v4668 . ]
-    )
-    ([] stdlib.numeric.numeric.u32 [numeric_u32__v4475 . ])
-    ([ . rows__v4597 inner__v4609 numeric_u32__v4475] stdlib.numeric.* [result__v4477 . ])
-    (
-      [ . a_mem__v4387 result__v4477]
-      stdlib.runtime.global_ref_u64
-      [a__v4480__result readable_a__v4481 . ]
-    )
-    (
-      [ . a__v4480__result]
-      ({_} meta.matmul_simple_naive.main.matmul.helper.callback_metavars.global.0)
-      [a__v4480 __smolcat_global__v4708 . ]
-    )
-    ([] stdlib.numeric.numeric.u32 [numeric_u32__v4485 . ])
-    ([ . inner__v4607 columns__v4619 numeric_u32__v4485] stdlib.numeric.* [result__v4487 . ])
-    (
-      [ . b_mem__v4389 result__v4487]
-      stdlib.runtime.global_ref_u64
-      [b__v4490__result readable_b__v4491 . ]
-    )
-    (
-      [ . b__v4490__result]
-      ({_} meta.matmul_simple_naive.main.matmul.helper.callback_metavars.global.1)
-      [b__v4490 __smolcat_global__v4709 . ]
-    )
-    ([] stdlib.numeric.numeric.u32 [numeric_u32__v4495 . ])
-    ([ . rows__v4595 columns__v4617 numeric_u32__v4495] stdlib.numeric.* [result__v4497 . ])
-    (
-      [ . c_mem__v4391 result__v4497]
-      stdlib.runtime.global_own_u64
-      [c__v4501__result allocation__v4502 available_c__v4503 . ]
-    )
-    (
-      [ . c__v4501__result]
-      ({_} meta.matmul_simple_naive.main.matmul.helper.callback_metavars.global.2)
-      [c__v4501 __smolcat_global__v4710 . ]
-    )
-    ([ . c__v4501] [op53_value__v4711 . op53_value__v4711 op53_value__v4711] [c__v4679 c__v4680 . ])
-    ([ . bounds__v4471] unsafe.discard [unit__v4508 . ])
-    ([ . unit__v4508] [op55_value__v4712 . ] [])
-    ([ . readable_a__v4481] unsafe.discard [unit__v4510 . ])
-    ([ . unit__v4510] [op57_value__v4713 . ] [])
-    ([ . readable_b__v4491] unsafe.discard [unit__v4512 . ])
-    ([ . unit__v4512] [op59_value__v4714 . ] [])
-    ([ . available_c__v4503] unsafe.discard [unit__v4514 . ])
-    ([ . unit__v4514] [op61_value__v4715 . ] [])
-    (
-      [ . a__v4480 b__v4490 block_width__v4627 c__v4680 columns__v4615 grid__v4668 inner__v4605 rows__v4593]
-      {
-        [op62_global__capture0__v4716 op62_global__capture1__v4717 op62_block_width__capture2__v4718 op62_global__capture3__v4719 op62_columns__capture4__v4720 op62_grid__capture5__v4721 op62_inner__capture6__v4722 op62_rows__capture7__v4723 . ]
-        (
-          [ . op62_global__capture0__v4716]
-          :.ty
-          [op62_global__value0__v4724 op62_global__context__v4725 . ]
-        )
-        (
-          [ . op62_global__capture1__v4717]
-          :.ty
-          [op62_global__value1__v4726 op62_global__context__v4727 . ]
-        )
-        (
-          [ . op62_block_width__capture2__v4718]
-          :.ty
-          [op62_block_width__value2__v4728 op62_block_width__context__v4729 . ]
-        )
-        (
-          [ . op62_global__capture3__v4719]
-          :.ty
-          [op62_global__value3__v4730 op62_global__context__v4731 . ]
-        )
-        (
-          [ . op62_columns__capture4__v4720]
-          :.ty
-          [op62_columns__value4__v4732 op62_columns__context__v4733 . ]
-        )
-        (
-          [ . op62_grid__capture5__v4721]
-          :.ty
-          [op62_grid__value5__v4734 op62_grid__context__v4735 . ]
-        )
-        (
-          [ . op62_inner__capture6__v4722]
-          :.ty
-          [op62_inner__value6__v4736 op62_inner__context__v4737 . ]
-        )
-        (
-          [ . op62_rows__capture7__v4723]
-          :.ty
-          [op62_rows__value7__v4738 op62_rows__context__v4739 . ]
-        )
-        (
-          [ . op62_rows__context__v4739 op62_inner__context__v4737 op62_columns__context__v4733 op62_block_width__context__v4729 op62_grid__context__v4735 op62_global__context__v4725 op62_global__context__v4727 op62_global__context__v4731 __smolcat_block__v4685 op62_global__value0__v4724 op62_global__value1__v4726 op62_block_width__value2__v4728 op62_global__value3__v4730 op62_columns__value4__v4732 op62_grid__value5__v4734 op62_inner__value6__v4736 op62_rows__value7__v4738]
-          partial.matmul_simple_naive.main.matmul.helper.launch_unsafe.kernel.0.8
-        )
-      }
-      [callback__v4583 . ]
-    )
-    ([ . grid__v4667 callback__v4583] unsafe.launch [unit__v4586 . ])
-    ([ . unit__v4586] [op64_value__v4740 . ] [])
-    ([ . c__v4679 allocation__v4502] stdlib.runtime.global_u64_to_mem [global_u64_to_mem__v4588 . ])
-    [ . global_u64_to_mem__v4588]
-  }
-)
-
-(def program matmul_simple_naive.main.matmul.helper.instantiate.unsafe_assume.0
-  : (
-    [rows__s1017 columns__s1019 block_width__s1023 grid__s4468 block__s4515 . ]
-    {
-      {1}
-      [ . rows__s1017]
-      [ . columns__s1019]
-      [ . block_width__s1023]
-      [ . grid__s4468]
-      [ . block__s4515]
-    }
-  )
-  -> (
-    [rows__s1017 columns__s1019 block_width__s1023 grid__s4468 block__s4515 . ]
-    {
-      (
-        (
-          {
-            (
-              {
-                ({[ . columns__s1019] [ . block_width__s1023]} type.stdlib.numeric.ceil_div)
-                ({[ . rows__s1017] [ . block_width__s1023]} type.stdlib.numeric.ceil_div)
-              }
-              stdlib.gpu.geometry.sort.D2
-            )
-            ({[ . block_width__s1023] [ . block_width__s1023]} stdlib.gpu.geometry.sort.D2)
-            [ . grid__s4468]
-            [ . block__s4515]
-            list.Nil
-          }
-          stdlib.gpu.barriers.prop.Trace
-        )
-        |-
-      )
-    }
-  )
-  = {
-    [arg0__input0__v0 rows__input1__v1 columns__input2__v2 block_width__input3__v3 grid__input4__v4 block__input5__v5 . ]
-    (
-      [ . arg0__input0__v0 rows__input1__v1 columns__input2__v2 block_width__input3__v3 grid__input4__v4 block__input5__v5]
-      (
-        meta.matmul_simple_naive.main.matmul.helper.instantiate.unsafe_assume.0.arguments
-        {{_} (name.unsafe.assume lift)}
-        evaluate
-        {_}
-      )
-      [output0__v6 . ]
-    )
-    [ . output0__v6]
-  }
-)
-
-(def program matmul_simple_naive.main.matmul.helper.instantiate.unsafe_assume.1
-  : (
-    [rows__s1017 inner__s1018 columns__s1019 block_width__s1023 grid__s4468 global__s4478 global__s4488 global__s4498 block__s4515 thread__s4516 . ]
-    {
-      {1}
-      [ . rows__s1017]
-      [ . inner__s1018]
-      [ . columns__s1019]
-      [ . block_width__s1023]
-      [ . grid__s4468]
-      [ . global__s4478]
-      [ . global__s4488]
-      [ . global__s4498]
-      [ . block__s4515]
-      [ . thread__s4516]
-    }
-  )
-  -> (
-    [rows__s1017 inner__s1018 columns__s1019 block_width__s1023 grid__s4468 global__s4478 global__s4488 global__s4498 block__s4515 thread__s4516 . ]
-    {
-      (
-        (
-          {
-            (
-              {
-                (
-                  {
-                    (
-                      {
-                        (
-                          {
-                            (
-                              {
-                                ({[ . rows__s1017] ({} type.const.u32.0x00000000)} prop.Greater)
-                                ({[ . inner__s1018] ({} type.const.u32.0x00000000)} prop.Greater)
-                              }
-                              prop.And
-                            )
-                            ({[ . columns__s1019] ({} type.const.u32.0x00000000)} prop.Greater)
-                          }
-                          prop.And
-                        )
-                        ({[ . block_width__s1023] ({} type.const.u32.0x00000000)} prop.Greater)
-                      }
-                      prop.And
-                    )
-                    (
-                      {
-                        (
-                          {
-                            (
-                              {[ . columns__s1019] [ . block_width__s1023]}
-                              type.stdlib.numeric.ceil_div
-                            )
-                            (
-                              {[ . rows__s1017] [ . block_width__s1023]}
-                              type.stdlib.numeric.ceil_div
-                            )
-                          }
-                          stdlib.gpu.geometry.sort.D2
-                        )
-                        (
-                          {[ . block_width__s1023] [ . block_width__s1023]}
-                          stdlib.gpu.geometry.sort.D2
-                        )
-                        [ . grid__s4468]
-                        [ . block__s4515]
-                        ({[ . rows__s1017] [ . inner__s1018]} type.stdlib.numeric.*)
-                        u64
-                        [ . thread__s4516]
-                        [ . global__s4478]
-                        stdlib.gpu.memory.sort.All
-                      }
-                      stdlib.gpu.memory.prop.GlobalRead
-                    )
-                  }
-                  prop.And
-                )
-                (
-                  {
-                    (
-                      {
-                        ({[ . columns__s1019] [ . block_width__s1023]} type.stdlib.numeric.ceil_div)
-                        ({[ . rows__s1017] [ . block_width__s1023]} type.stdlib.numeric.ceil_div)
-                      }
-                      stdlib.gpu.geometry.sort.D2
-                    )
-                    ({[ . block_width__s1023] [ . block_width__s1023]} stdlib.gpu.geometry.sort.D2)
-                    [ . grid__s4468]
-                    [ . block__s4515]
-                    ({[ . inner__s1018] [ . columns__s1019]} type.stdlib.numeric.*)
-                    u64
-                    [ . thread__s4516]
-                    [ . global__s4488]
-                    stdlib.gpu.memory.sort.All
-                  }
-                  stdlib.gpu.memory.prop.GlobalRead
-                )
-              }
-              prop.And
-            )
-            (
-              {
-                (
-                  {
-                    (
-                      {
-                        (
-                          {
-                            (
-                              {
-                                (
-                                  {
-                                    (
-                                      {[ . columns__s1019] [ . block_width__s1023]}
-                                      type.stdlib.numeric.ceil_div
-                                    )
-                                    (
-                                      {[ . rows__s1017] [ . block_width__s1023]}
-                                      type.stdlib.numeric.ceil_div
-                                    )
-                                  }
-                                  stdlib.gpu.geometry.sort.D2
-                                )
-                                (
-                                  {[ . block_width__s1023] [ . block_width__s1023]}
-                                  stdlib.gpu.geometry.sort.D2
-                                )
-                              }
-                              stdlib.gpu.geometry.sort.GridExtent
-                            )
-                            (
-                              {
-                                (
-                                  {
-                                    (
-                                      {[ . columns__s1019] [ . block_width__s1023]}
-                                      type.stdlib.numeric.ceil_div
-                                    )
-                                    (
-                                      {[ . rows__s1017] [ . block_width__s1023]}
-                                      type.stdlib.numeric.ceil_div
-                                    )
-                                  }
-                                  stdlib.gpu.geometry.sort.D2
-                                )
-                                (
-                                  {[ . block_width__s1023] [ . block_width__s1023]}
-                                  stdlib.gpu.geometry.sort.D2
-                                )
-                                [ . grid__s4468]
-                                [ . block__s4515]
-                                [ . thread__s4516]
-                              }
-                              stdlib.gpu.geometry.sort.InGrid
-                            )
-                          }
-                          stdlib.gpu.geometry.sort.Y
-                        )
-                        [ . rows__s1017]
-                      }
-                      prop.Less
-                    )
-                    (
-                      {
-                        (
-                          {
-                            (
-                              {
-                                (
-                                  {
-                                    (
-                                      {[ . columns__s1019] [ . block_width__s1023]}
-                                      type.stdlib.numeric.ceil_div
-                                    )
-                                    (
-                                      {[ . rows__s1017] [ . block_width__s1023]}
-                                      type.stdlib.numeric.ceil_div
-                                    )
-                                  }
-                                  stdlib.gpu.geometry.sort.D2
-                                )
-                                (
-                                  {[ . block_width__s1023] [ . block_width__s1023]}
-                                  stdlib.gpu.geometry.sort.D2
-                                )
-                              }
-                              stdlib.gpu.geometry.sort.GridExtent
-                            )
-                            (
-                              {
-                                (
-                                  {
-                                    (
-                                      {[ . columns__s1019] [ . block_width__s1023]}
-                                      type.stdlib.numeric.ceil_div
-                                    )
-                                    (
-                                      {[ . rows__s1017] [ . block_width__s1023]}
-                                      type.stdlib.numeric.ceil_div
-                                    )
-                                  }
-                                  stdlib.gpu.geometry.sort.D2
-                                )
-                                (
-                                  {[ . block_width__s1023] [ . block_width__s1023]}
-                                  stdlib.gpu.geometry.sort.D2
-                                )
-                                [ . grid__s4468]
-                                [ . block__s4515]
-                                [ . thread__s4516]
-                              }
-                              stdlib.gpu.geometry.sort.InGrid
-                            )
-                          }
-                          stdlib.gpu.geometry.sort.X
-                        )
-                        [ . columns__s1019]
-                      }
-                      prop.Less
-                    )
-                  }
-                  prop.And
-                )
-                (
-                  {
-                    (
-                      {
-                        ({[ . columns__s1019] [ . block_width__s1023]} type.stdlib.numeric.ceil_div)
-                        ({[ . rows__s1017] [ . block_width__s1023]} type.stdlib.numeric.ceil_div)
-                      }
-                      stdlib.gpu.geometry.sort.D2
-                    )
-                    ({[ . block_width__s1023] [ . block_width__s1023]} stdlib.gpu.geometry.sort.D2)
-                    [ . grid__s4468]
-                    [ . block__s4515]
-                    ({[ . rows__s1017] [ . columns__s1019]} type.stdlib.numeric.*)
-                    u64
-                    [ . thread__s4516]
-                    [ . global__s4498]
-                    (
-                      {
-                        ({[ . rows__s1017] [ . columns__s1019]} type.stdlib.numeric.*)
-                        (
-                          {
-                            (
-                              {
-                                (
-                                  {
-                                    (
-                                      {
-                                        (
-                                          {
-                                            (
-                                              {[ . columns__s1019] [ . block_width__s1023]}
-                                              type.stdlib.numeric.ceil_div
-                                            )
-                                            (
-                                              {[ . rows__s1017] [ . block_width__s1023]}
-                                              type.stdlib.numeric.ceil_div
-                                            )
-                                          }
-                                          stdlib.gpu.geometry.sort.D2
-                                        )
-                                        (
-                                          {[ . block_width__s1023] [ . block_width__s1023]}
-                                          stdlib.gpu.geometry.sort.D2
-                                        )
-                                      }
-                                      stdlib.gpu.geometry.sort.GridExtent
-                                    )
-                                    (
-                                      {
-                                        (
-                                          {
-                                            (
-                                              {[ . columns__s1019] [ . block_width__s1023]}
-                                              type.stdlib.numeric.ceil_div
-                                            )
-                                            (
-                                              {[ . rows__s1017] [ . block_width__s1023]}
-                                              type.stdlib.numeric.ceil_div
-                                            )
-                                          }
-                                          stdlib.gpu.geometry.sort.D2
-                                        )
-                                        (
-                                          {[ . block_width__s1023] [ . block_width__s1023]}
-                                          stdlib.gpu.geometry.sort.D2
-                                        )
-                                        [ . grid__s4468]
-                                        [ . block__s4515]
-                                        [ . thread__s4516]
-                                      }
-                                      stdlib.gpu.geometry.sort.InGrid
-                                    )
-                                  }
-                                  stdlib.gpu.geometry.sort.Y
-                                )
-                                [ . columns__s1019]
-                              }
-                              type.stdlib.numeric.*
-                            )
-                            (
-                              {
-                                (
-                                  {
-                                    (
-                                      {
-                                        (
-                                          {[ . columns__s1019] [ . block_width__s1023]}
-                                          type.stdlib.numeric.ceil_div
-                                        )
-                                        (
-                                          {[ . rows__s1017] [ . block_width__s1023]}
-                                          type.stdlib.numeric.ceil_div
-                                        )
-                                      }
-                                      stdlib.gpu.geometry.sort.D2
-                                    )
-                                    (
-                                      {[ . block_width__s1023] [ . block_width__s1023]}
-                                      stdlib.gpu.geometry.sort.D2
-                                    )
-                                  }
-                                  stdlib.gpu.geometry.sort.GridExtent
-                                )
-                                (
-                                  {
-                                    (
-                                      {
-                                        (
-                                          {[ . columns__s1019] [ . block_width__s1023]}
-                                          type.stdlib.numeric.ceil_div
-                                        )
-                                        (
-                                          {[ . rows__s1017] [ . block_width__s1023]}
-                                          type.stdlib.numeric.ceil_div
-                                        )
-                                      }
-                                      stdlib.gpu.geometry.sort.D2
-                                    )
-                                    (
-                                      {[ . block_width__s1023] [ . block_width__s1023]}
-                                      stdlib.gpu.geometry.sort.D2
-                                    )
-                                    [ . grid__s4468]
-                                    [ . block__s4515]
-                                    [ . thread__s4516]
-                                  }
-                                  stdlib.gpu.geometry.sort.InGrid
-                                )
-                              }
-                              stdlib.gpu.geometry.sort.X
-                            )
-                          }
-                          type.stdlib.numeric.+
-                        )
-                      }
-                      stdlib.gpu.memory.sort.At
-                    )
-                  }
-                  stdlib.gpu.memory.prop.GlobalOwn
-                )
-              }
-              ==>
-            )
-          }
-          prop.And
-        )
-        |-
-      )
-    }
-  )
-  = {
-    [arg0__input0__v0 rows__input1__v1 inner__input2__v2 columns__input3__v3 block_width__input4__v4 grid__input5__v5 global__input6__v6 global__input7__v7 global__input8__v8 block__input9__v9 thread__input10__v10 . ]
-    (
-      [ . arg0__input0__v0 rows__input1__v1 inner__input2__v2 columns__input3__v3 block_width__input4__v4 grid__input5__v5 global__input6__v6 global__input7__v7 global__input8__v8 block__input9__v9 thread__input10__v10]
-      (
-        meta.matmul_simple_naive.main.matmul.helper.instantiate.unsafe_assume.1.arguments
-        {{_} (name.unsafe.assume lift)}
-        evaluate
-        {_}
-      )
-      [output0__v11 . ]
-    )
-    [ . output0__v11]
-  }
-)
-
-(def program matmul_simple_naive.main.matmul.helper.launch_unsafe.kernel.0
-  : (
-    [rows__s1017 inner__s1018 columns__s1019 block_width__s1023 grid__s4468 global__s4478 global__s4488 global__s4498 block__s4515 . ]
-    {
-      (
-        {
-          [ . global__s4478]
-          (
-            {({[ . rows__s1017] [ . inner__s1018]} type.stdlib.numeric.*) u64}
-            stdlib.gpu.memory.type.Global
-          )
-        }
-        :
-      )
-      (
-        {
-          [ . global__s4488]
-          (
-            {({[ . inner__s1018] [ . columns__s1019]} type.stdlib.numeric.*) u64}
-            stdlib.gpu.memory.type.Global
-          )
-        }
-        :
-      )
-      ({[ . block_width__s1023] u32} :)
-      (
-        {
-          [ . global__s4498]
-          (
-            {({[ . rows__s1017] [ . columns__s1019]} type.stdlib.numeric.*) u64}
-            stdlib.gpu.memory.type.Global
-          )
-        }
-        :
-      )
-      ({[ . columns__s1019] u32} :)
-      (
-        {
-          [ . grid__s4468]
-          (
-            {
-              (
-                {
-                  ({[ . columns__s1019] [ . block_width__s1023]} type.stdlib.numeric.ceil_div)
-                  ({[ . rows__s1017] [ . block_width__s1023]} type.stdlib.numeric.ceil_div)
-                }
-                stdlib.gpu.geometry.sort.D2
-              )
-              ({[ . block_width__s1023] [ . block_width__s1023]} stdlib.gpu.geometry.sort.D2)
-            }
-            stdlib.gpu.geometry.type.Grid
-          )
-        }
-        :
-      )
-      ({[ . inner__s1018] u32} :)
-      ({[ . rows__s1017] u32} :)
-      (
-        {
-          [ . block__s4515]
-          (
-            {
-              (
-                {
-                  ({[ . columns__s1019] [ . block_width__s1023]} type.stdlib.numeric.ceil_div)
-                  ({[ . rows__s1017] [ . block_width__s1023]} type.stdlib.numeric.ceil_div)
-                }
-                stdlib.gpu.geometry.sort.D2
-              )
-              ({[ . block_width__s1023] [ . block_width__s1023]} stdlib.gpu.geometry.sort.D2)
-              [ . grid__s4468]
-            }
-            stdlib.gpu.geometry.type.Block
-          )
-        }
-        :
-      )
-      (
-        (
-          {
-            (
-              {
-                ({[ . columns__s1019] [ . block_width__s1023]} type.stdlib.numeric.ceil_div)
-                ({[ . rows__s1017] [ . block_width__s1023]} type.stdlib.numeric.ceil_div)
-              }
-              stdlib.gpu.geometry.sort.D2
-            )
-            ({[ . block_width__s1023] [ . block_width__s1023]} stdlib.gpu.geometry.sort.D2)
-            [ . grid__s4468]
-            [ . block__s4515]
-          }
-          stdlib.gpu.geometry.type.Thread
-        )
-        val
-      )
-    }
-  )
-  -> (
-    [rows__s1017 inner__s1018 columns__s1019 block_width__s1023 grid__s4468 global__s4478 global__s4488 global__s4498 block__s4515 . ]
-    {1}
-  )
-  = {
-    [a__v4517__input b__v4519__input block_width__v4521__input c__v4523__input columns__v4525 grid__v4527__input inner__v4529 rows__v4531 block__v4533__input thread__v4534__input . ]
-    (
-      [ . a__v4517__input]
-      ({_} meta.matmul_simple_naive.main.matmul.helper.callback_metavars.rows.inner.global.0)
-      [a__v4517 __smolcat_rows__v4575 __smolcat_inner__v4576 __smolcat_global__v4577 . ]
-    )
-    (
-      [ . b__v4519__input]
-      ({_} meta.matmul_simple_naive.main.matmul.helper.callback_metavars.columns.global.0)
-      [b__v4519 __smolcat_columns__v4578 __smolcat_global__v4579 . ]
-    )
-    (
-      [ . block_width__v4521__input]
-      ({_} meta.matmul_simple_naive.main.matmul.helper.callback_metavars.block_width.1)
-      [block_width__v4521 __smolcat_block_width__v4580 . ]
-    )
-    (
-      [ . c__v4523__input]
-      ({_} meta.matmul_simple_naive.main.matmul.helper.callback_metavars.global.3)
-      [c__v4523 __smolcat_global__v4581 . ]
-    )
-    (
-      [ . grid__v4527__input]
-      ({_} meta.matmul_simple_naive.main.matmul.helper.callback_metavars.grid.1)
-      [grid__v4527 __smolcat_grid__v4582 . ]
-    )
-    (
-      [ . block__v4533__input]
-      ({_} meta.matmul_simple_naive.main.matmul.helper.callback_metavars.block.0)
-      [block__v4533 __smolcat_block__v4583 . ]
-    )
-    (
-      [ . thread__v4534__input]
-      (smolcat.value.named meta.matmul_simple_naive.main.matmul.helper.callback_metavars.thread.0)
-      [thread__v4534 __smolcat_thread__v4584 . ]
-    )
-    ([ . block_width__v4521] [op0_value__v4585 . ] [])
-    ([ . grid__v4527] [op1_value__v4586 . ] [])
-    ([] unit.intro [unit__v4538 . ])
-    (
-      [ . unit__v4538]
-      (
-        {
-          {_}
-          [ . __smolcat_rows__v4575 __smolcat_columns__v4578 __smolcat_block_width__v4580 __smolcat_grid__v4582 __smolcat_block__v4583]
-        }
-        matmul_simple_naive.main.matmul.helper.instantiate.unsafe_assume.0
-      )
-      [trace__v4540 . ]
-    )
-    ([] unit.intro [unit__v4545 . ])
-    (
-      [ . unit__v4545]
-      (
-        {
-          {_}
-          [ . __smolcat_rows__v4575 __smolcat_inner__v4576 __smolcat_columns__v4578 __smolcat_block_width__v4580 __smolcat_grid__v4582 __smolcat_global__v4577 __smolcat_global__v4579 __smolcat_global__v4581 __smolcat_block__v4583 __smolcat_thread__v4584]
-        }
-        matmul_simple_naive.main.matmul.helper.instantiate.unsafe_assume.1
-      )
-      [permissions__v4547 . ]
-    )
-    ([] stdlib.numeric.numeric.u64 [numeric_u64__v4552 . ])
-    (
-      [ . rows__v4531 inner__v4529 columns__v4525 a__v4517 b__v4519 c__v4523 block__v4533 thread__v4534 trace__v4540 permissions__v4547 numeric_u64__v4552]
-      stdlib.gpu.matmul.naive
-      [unit__v4556 trace__v4557 returned__v4558 . ]
-    )
-    ([ . unit__v4556] unit.elim [])
-    ([ . trace__v4557] unsafe.discard [unit__v4564 . ])
-    ([ . unit__v4564] unit.elim [])
-    ([ . returned__v4558] unsafe.discard [unit__v4568 . ])
-    ([ . unit__v4568] unit.elim [])
-    ([] unit.intro [unit__v4574 . ])
-    [ . unit__v4574]
-  }
-)

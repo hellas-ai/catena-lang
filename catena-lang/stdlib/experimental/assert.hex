@@ -1,69 +1,69 @@
 (theory program type {
   (arr meta.stdlib.assert.helper.callback_metavars.p.0
     : (
-      [p__s405 value__s392 . ]
-      {({({[ . value__s392] bool} :) (({({[ . value__s392] bool.t} =) [ . p__s405]} ==>) |-)} *)}
+      [p__s472 value__s1247 . ]
+      {({({[ . value__s1247] bool} :) (({({[ . value__s1247] bool.t} =) [ . p__s472]} ==>) |-)} *)}
     )
     -> (
-      [p__s405 value__s392 . ]
+      [p__s472 value__s1247 . ]
       {
-        ({({[ . value__s392] bool} :) (({({[ . value__s392] bool.t} =) [ . p__s405]} ==>) |-)} *)
-        [ . p__s405]
+        ({({[ . value__s1247] bool} :) (({({[ . value__s1247] bool.t} =) [ . p__s472]} ==>) |-)} *)
+        [ . p__s472]
       }
     )
   )
 
   (arr meta.stdlib.assert.helper.callback_metavars.value.0
-    : ([value__s392 . ] {({[ . value__s392] bool} :)})
-    -> ([value__s392 . ] {({[ . value__s392] bool} :) [ . value__s392]})
+    : ([value__s1247 . ] {({[ . value__s1247] bool} :)})
+    -> ([value__s1247 . ] {({[ . value__s1247] bool} :) [ . value__s1247]})
   )
 
   (def stdlib.assert
     : (
-      [p__s405 . ]
-      {({({[ . value__s392] bool} :) (({({[ . value__s392] bool.t} =) [ . p__s405]} ==>) |-)} *)}
+      [p__s472 . ]
+      {({({[ . value__s1247] bool} :) (({({[ . value__s1247] bool.t} =) [ . p__s472]} ==>) |-)} *)}
     )
-    -> ([p__s405 . ] {1 ([ . p__s405] |-)})
+    -> ([p__s472 . ] {1 ([ . p__s472] |-)})
     = {
-      [condition__v1050__input . ]
+      [condition__v1297__input . ]
       (
-        [ . condition__v1050__input]
+        [ . condition__v1297__input]
         ({_} meta.stdlib.assert.helper.callback_metavars.p.0)
-        [condition__v1050 __smolcat_p__v1067 . ]
+        [condition__v1297 __smolcat_p__v1314 . ]
       )
-      ([ . condition__v1050] (*.elim {{_} {_}}) [value__v1059__result meaning__v1060 . ])
+      ([ . condition__v1297] (*.elim {{_} {_}}) [value__v1306__result meaning__v1307 . ])
       (
-        [ . value__v1059__result]
+        [ . value__v1306__result]
         ({_} meta.stdlib.assert.helper.callback_metavars.value.0)
-        [value__v1059 __smolcat_value__v1068 . ]
+        [value__v1306 __smolcat_value__v1315 . ]
       )
-      ([ . value__v1059 meaning__v1060] stdlib.assert.then [unit__v1065 proven__v1066 . ])
-      [ . unit__v1065 proven__v1066]
+      ([ . value__v1306 meaning__v1307] stdlib.assert.then [unit__v1312 proven__v1313 . ])
+      [ . unit__v1312 proven__v1313]
     }
   )
 
   (arr stdlib.assert.assert_true
-    : ([condition__s394 . ] {({[ . condition__s394] bool} :)})
-    -> ([condition__s394 . ] {1 (({[ . condition__s394] bool.t} =) |-)})
+    : ([condition__s461 . ] {({[ . condition__s461] bool} :)})
+    -> ([condition__s461 . ] {1 (({[ . condition__s461] bool.t} =) |-)})
   )
 
   (arr stdlib.assert.ax_mp
-    : ([p__s396 q__s397 . ] {([ . p__s396] |-) (({[ . p__s396] [ . q__s397]} ==>) |-)})
-    -> ([p__s396 q__s397 . ] {1 ([ . q__s397] |-)})
+    : ([p__s463 q__s464 . ] {([ . p__s463] |-) (({[ . p__s463] [ . q__s464]} ==>) |-)})
+    -> ([p__s463 q__s464 . ] {1 ([ . q__s464] |-)})
   )
 
   (def stdlib.assert.then
     : (
-      [p__s401 condition__s402 . ]
-      {({[ . condition__s402] bool} :) (({({[ . condition__s402] bool.t} =) [ . p__s401]} ==>) |-)}
+      [p__s468 condition__s469 . ]
+      {({[ . condition__s469] bool} :) (({({[ . condition__s469] bool.t} =) [ . p__s468]} ==>) |-)}
     )
-    -> ([p__s401 condition__s402 . ] {1 ([ . p__s401] |-)})
+    -> ([p__s468 condition__s469 . ] {1 ([ . p__s468] |-)})
     = {
-      [condition__v1035 meaning__v1037 . ]
-      ([ . condition__v1035] stdlib.assert.assert_true [unit__v1041 checked__v1042 . ])
-      ([ . unit__v1041] unit.elim [])
-      ([ . checked__v1042 meaning__v1037] stdlib.assert.ax_mp [unit__v1048 conclusion__v1049 . ])
-      [ . unit__v1048 conclusion__v1049]
+      [condition__v1282 meaning__v1284 . ]
+      ([ . condition__v1282] stdlib.assert.assert_true [unit__v1288 checked__v1289 . ])
+      ([ . unit__v1288] unit.elim [])
+      ([ . checked__v1289 meaning__v1284] stdlib.assert.ax_mp [unit__v1295 conclusion__v1296 . ])
+      [ . unit__v1295 conclusion__v1296]
     }
   )
 })

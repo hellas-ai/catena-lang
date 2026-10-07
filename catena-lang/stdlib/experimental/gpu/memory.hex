@@ -1,16 +1,124 @@
 (theory program type {
+  (arr meta.stdlib.gpu.memory.mem_cast_exact_own_f32.helper.callback_metavars.count.0
+    : ([count__s1422 . ] {({[ . count__s1422] u64} :)})
+    -> ([count__s1422 . ] {({[ . count__s1422] u64} :) [ . count__s1422]})
+  )
+
+  (arr meta.stdlib.gpu.memory.mem_cast_exact_own_f32.helper.callback_metavars.expected_count.0
+    : ([expected_count__s1074 . ] {({[ . expected_count__s1074] u64} :)})
+    -> (
+      [expected_count__s1074 . ]
+      {({[ . expected_count__s1074] u64} :) [ . expected_count__s1074]}
+    )
+  )
+
+  (arr meta.stdlib.gpu.memory.mem_cast_exact_own_f32.helper.callback_metavars.global.0
+    : (
+      [count__s1422 global__s1423 . ]
+      {({[ . global__s1423] ({[ . count__s1422] f32} stdlib.gpu.memory.type.Global)} :)}
+    )
+    -> (
+      [count__s1422 global__s1423 . ]
+      {
+        ({[ . global__s1423] ({[ . count__s1422] f32} stdlib.gpu.memory.type.Global)} :)
+        [ . global__s1423]
+      }
+    )
+  )
+
+  (arr meta.stdlib.gpu.memory.mem_cast_exact_own_u64.helper.callback_metavars.count.0
+    : ([count__s1476 . ] {({[ . count__s1476] u64} :)})
+    -> ([count__s1476 . ] {({[ . count__s1476] u64} :) [ . count__s1476]})
+  )
+
+  (arr meta.stdlib.gpu.memory.mem_cast_exact_own_u64.helper.callback_metavars.expected_count.0
+    : ([expected_count__s1079 . ] {({[ . expected_count__s1079] u64} :)})
+    -> (
+      [expected_count__s1079 . ]
+      {({[ . expected_count__s1079] u64} :) [ . expected_count__s1079]}
+    )
+  )
+
+  (arr meta.stdlib.gpu.memory.mem_cast_exact_own_u64.helper.callback_metavars.global.0
+    : (
+      [count__s1476 global__s1477 . ]
+      {({[ . global__s1477] ({[ . count__s1476] u64} stdlib.gpu.memory.type.Global)} :)}
+    )
+    -> (
+      [count__s1476 global__s1477 . ]
+      {
+        ({[ . global__s1477] ({[ . count__s1476] u64} stdlib.gpu.memory.type.Global)} :)
+        [ . global__s1477]
+      }
+    )
+  )
+
+  (arr meta.stdlib.gpu.memory.mem_cast_exact_ref_f32.helper.callback_metavars.count.0
+    : ([count__s1326 . ] {({[ . count__s1326] u64} :)})
+    -> ([count__s1326 . ] {({[ . count__s1326] u64} :) [ . count__s1326]})
+  )
+
+  (arr meta.stdlib.gpu.memory.mem_cast_exact_ref_f32.helper.callback_metavars.expected_count.0
+    : ([expected_count__s1066 . ] {({[ . expected_count__s1066] u64} :)})
+    -> (
+      [expected_count__s1066 . ]
+      {({[ . expected_count__s1066] u64} :) [ . expected_count__s1066]}
+    )
+  )
+
+  (arr meta.stdlib.gpu.memory.mem_cast_exact_ref_f32.helper.callback_metavars.global.0
+    : (
+      [count__s1326 global__s1327 . ]
+      {({[ . global__s1327] ({[ . count__s1326] f32} stdlib.gpu.memory.type.Global)} :)}
+    )
+    -> (
+      [count__s1326 global__s1327 . ]
+      {
+        ({[ . global__s1327] ({[ . count__s1326] f32} stdlib.gpu.memory.type.Global)} :)
+        [ . global__s1327]
+      }
+    )
+  )
+
+  (arr meta.stdlib.gpu.memory.mem_cast_exact_ref_u64.helper.callback_metavars.count.0
+    : ([count__s1374 . ] {({[ . count__s1374] u64} :)})
+    -> ([count__s1374 . ] {({[ . count__s1374] u64} :) [ . count__s1374]})
+  )
+
+  (arr meta.stdlib.gpu.memory.mem_cast_exact_ref_u64.helper.callback_metavars.expected_count.0
+    : ([expected_count__s1070 . ] {({[ . expected_count__s1070] u64} :)})
+    -> (
+      [expected_count__s1070 . ]
+      {({[ . expected_count__s1070] u64} :) [ . expected_count__s1070]}
+    )
+  )
+
+  (arr meta.stdlib.gpu.memory.mem_cast_exact_ref_u64.helper.callback_metavars.global.0
+    : (
+      [count__s1374 global__s1375 . ]
+      {({[ . global__s1375] ({[ . count__s1374] u64} stdlib.gpu.memory.type.Global)} :)}
+    )
+    -> (
+      [count__s1374 global__s1375 . ]
+      {
+        ({[ . global__s1375] ({[ . count__s1374] u64} stdlib.gpu.memory.type.Global)} :)
+        [ . global__s1375]
+      }
+    )
+  )
+
   (arr stdlib.gpu.memory.add_shared_slot
     : (
-      [index__s827 element__s828 rest__s829 count__s832 . ]
+      [index__s965 element__s966 rest__s967 count__s970 . ]
       {
-        (({[ . index__s827]} stdlib.gpu.memory.type.SlotName) val)
-        ({({[ . element__s828]} stdlib.numeric.sort.size_of) u32} :)
-        ({[ . count__s832] u32} :)
-        (({[ . rest__s829]} stdlib.gpu.memory.type.SharedLayout) val)
+        (({[ . index__s965]} stdlib.gpu.memory.type.SlotName) val)
+        ({({[ . element__s966]} stdlib.numeric.sort.size_of) u32} :)
+        ({[ . count__s970] u64} :)
+        (({[ . rest__s967]} stdlib.gpu.memory.type.SharedLayout) val)
       }
     )
     -> (
-      [index__s827 element__s828 rest__s829 count__s832 . ]
+      [index__s965 element__s966 rest__s967 count__s970 . ]
       {
         (
           (
@@ -19,13 +127,13 @@
                 {
                   (
                     {
-                      ({[ . index__s827]} stdlib.gpu.memory.type.SlotName)
-                      [ . count__s832]
-                      [ . element__s828]
+                      ({[ . index__s965]} stdlib.gpu.memory.type.SlotName)
+                      [ . count__s970]
+                      [ . element__s966]
                     }
                     stdlib.gpu.memory.sort.Slot
                   )
-                  [ . rest__s829]
+                  [ . rest__s967]
                 }
                 list.Cons
               )
@@ -38,41 +146,249 @@
     )
   )
 
+  (arr stdlib.gpu.memory.allocate
+    : (
+      [element__s986 . ]
+      {(u64 val) (({[ . element__s986]} stdlib.gpu.memory.prop.MemoryElement) |-)}
+    )
+    -> ([element__s986 . ] {(({cap.own} mem) val)})
+  )
+
   (arr stdlib.gpu.memory.empty_shared_layout
     : ([] {1})
     -> ([] {(({list.Nil} stdlib.gpu.memory.type.SharedLayout) val)})
   )
 
-  (arr stdlib.gpu.memory.global_read
+  (arr stdlib.gpu.memory.free
     : (
-      [element__s770 blocks__s771 threads__s772 grid__s773 block__s774 count__s775 thread__s776 memory__s777 . ]
+      [count__s989 element__s990 memory__s991 . ]
+      {
+        (
+          {[ . memory__s991] ({[ . count__s989] [ . element__s990]} stdlib.gpu.memory.type.Global)}
+          :
+        )
+        (
+          (
+            {[ . count__s989] [ . element__s990] [ . memory__s991]}
+            stdlib.gpu.memory.prop.Allocation
+          )
+          |-
+        )
+      }
+    )
+    -> ([count__s989 element__s990 memory__s991 . ] {1})
+  )
+
+  (arr stdlib.gpu.memory.global_cast_equal_own
+    : (
+      [count__s1055 element__s1056 memory__s1057 expected_count__s1058 . ]
       {
         (
           {
-            [ . thread__s776]
+            [ . memory__s1057]
+            ({[ . count__s1055] [ . element__s1056]} stdlib.gpu.memory.type.Global)
+          }
+          :
+        )
+        ({[ . expected_count__s1058] u64} :)
+        (({[ . count__s1055] [ . expected_count__s1058]} =) |-)
+        (
+          (
+            {[ . count__s1055] [ . element__s1056] [ . memory__s1057]}
+            stdlib.gpu.memory.prop.Allocation
+          )
+          |-
+        )
+        (
+          (
+            {[ . count__s1055] [ . element__s1056] [ . memory__s1057]}
+            stdlib.gpu.memory.prop.Readable
+          )
+          |-
+        )
+      }
+    )
+    -> (
+      [count__s1055 element__s1056 memory__s1057 expected_count__s1058 . ]
+      {
+        (
+          {
             (
-              {[ . blocks__s771] [ . threads__s772] [ . grid__s773] [ . block__s774]}
+              {
+                [ . global__s1269]
+                ({[ . expected_count__s1058] [ . element__s1056]} stdlib.gpu.memory.type.Global)
+              }
+              :
+            )
+            (
+              {
+                (
+                  (
+                    {[ . expected_count__s1058] [ . element__s1056] [ . global__s1269]}
+                    stdlib.gpu.memory.prop.Allocation
+                  )
+                  |-
+                )
+                (
+                  (
+                    {[ . expected_count__s1058] [ . element__s1056] [ . global__s1269]}
+                    stdlib.gpu.memory.prop.Readable
+                  )
+                  |-
+                )
+              }
+              *
+            )
+          }
+          *
+        )
+      }
+    )
+  )
+
+  (arr stdlib.gpu.memory.global_cast_equal_ref
+    : (
+      [count__s1047 element__s1048 memory__s1049 expected_count__s1050 . ]
+      {
+        (
+          {
+            [ . memory__s1049]
+            ({[ . count__s1047] [ . element__s1048]} stdlib.gpu.memory.type.Global)
+          }
+          :
+        )
+        ({[ . expected_count__s1050] u64} :)
+        (({[ . count__s1047] [ . expected_count__s1050]} =) |-)
+        (
+          (
+            {[ . count__s1047] [ . element__s1048] [ . memory__s1049]}
+            stdlib.gpu.memory.prop.Readable
+          )
+          |-
+        )
+      }
+    )
+    -> (
+      [count__s1047 element__s1048 memory__s1049 expected_count__s1050 . ]
+      {
+        (
+          {
+            (
+              {
+                [ . global__s1267]
+                ({[ . expected_count__s1050] [ . element__s1048]} stdlib.gpu.memory.type.Global)
+              }
+              :
+            )
+            (
+              (
+                {[ . expected_count__s1050] [ . element__s1048] [ . global__s1267]}
+                stdlib.gpu.memory.prop.Readable
+              )
+              |-
+            )
+          }
+          *
+        )
+      }
+    )
+  )
+
+  (arr stdlib.gpu.memory.global_f32_to_mem
+    : (
+      [count__s1026 memory__s1027 . ]
+      {
+        ({[ . memory__s1027] ({[ . count__s1026] f32} stdlib.gpu.memory.type.Global)} :)
+        (({[ . count__s1026] f32 [ . memory__s1027]} stdlib.gpu.memory.prop.Allocation) |-)
+      }
+    )
+    -> ([count__s1026 memory__s1027 . ] {(({cap.own} mem) val)})
+  )
+
+  (arr stdlib.gpu.memory.global_own_f32
+    : ([count__s1022 global__s1023 . ] {(({cap.own} mem) val) ({[ . count__s1022] u64} :)})
+    -> (
+      [count__s1022 global__s1023 . ]
+      {
+        ({[ . global__s1023] ({[ . count__s1022] f32} stdlib.gpu.memory.type.Global)} :)
+        (({[ . count__s1022] f32 [ . global__s1023]} stdlib.gpu.memory.prop.Allocation) |-)
+        (
+          (
+            {({[ . count__s1022] f32} stdlib.gpu.memory.type.Global) [ . global__s1023]}
+            stdlib.gpu.memory.prop.Available
+          )
+          |-
+        )
+      }
+    )
+  )
+
+  (arr stdlib.gpu.memory.global_own_u32
+    : ([count__s998 global__s999 . ] {(({cap.own} mem) val) ({[ . count__s998] u64} :)})
+    -> (
+      [count__s998 global__s999 . ]
+      {
+        ({[ . global__s999] ({[ . count__s998] u32} stdlib.gpu.memory.type.Global)} :)
+        (({[ . count__s998] u32 [ . global__s999]} stdlib.gpu.memory.prop.Allocation) |-)
+        (
+          (
+            {({[ . count__s998] u32} stdlib.gpu.memory.type.Global) [ . global__s999]}
+            stdlib.gpu.memory.prop.Available
+          )
+          |-
+        )
+      }
+    )
+  )
+
+  (arr stdlib.gpu.memory.global_own_u64
+    : ([count__s1010 global__s1011 . ] {(({cap.own} mem) val) ({[ . count__s1010] u64} :)})
+    -> (
+      [count__s1010 global__s1011 . ]
+      {
+        ({[ . global__s1011] ({[ . count__s1010] u64} stdlib.gpu.memory.type.Global)} :)
+        (({[ . count__s1010] u64 [ . global__s1011]} stdlib.gpu.memory.prop.Allocation) |-)
+        (
+          (
+            {({[ . count__s1010] u64} stdlib.gpu.memory.type.Global) [ . global__s1011]}
+            stdlib.gpu.memory.prop.Available
+          )
+          |-
+        )
+      }
+    )
+  )
+
+  (arr stdlib.gpu.memory.global_read
+    : (
+      [element__s910 blocks__s911 threads__s912 grid__s913 block__s914 count__s915 thread__s916 memory__s917 . ]
+      {
+        (
+          {
+            [ . thread__s916]
+            (
+              {[ . blocks__s911] [ . threads__s912] [ . grid__s913] [ . block__s914]}
               stdlib.gpu.geometry.type.Thread
             )
           }
           :
         )
         (
-          {[ . memory__s777] ({[ . count__s775] [ . element__s770]} stdlib.gpu.memory.type.Global)}
+          {[ . memory__s917] ({[ . count__s915] [ . element__s910]} stdlib.gpu.memory.type.Global)}
           :
         )
-        (({[ . count__s775]} stdlib.gpu.memory.type.Ix) val)
+        (({[ . count__s915]} stdlib.gpu.memory.type.Ix) val)
         (
           (
             {
-              [ . blocks__s771]
-              [ . threads__s772]
-              [ . grid__s773]
-              [ . block__s774]
-              [ . count__s775]
-              [ . element__s770]
-              [ . thread__s776]
-              [ . memory__s777]
+              [ . blocks__s911]
+              [ . threads__s912]
+              [ . grid__s913]
+              [ . block__s914]
+              [ . count__s915]
+              [ . element__s910]
+              [ . thread__s916]
+              [ . memory__s917]
               stdlib.gpu.memory.sort.All
             }
             stdlib.gpu.memory.prop.GlobalRead
@@ -82,20 +398,20 @@
       }
     )
     -> (
-      [element__s770 blocks__s771 threads__s772 grid__s773 block__s774 count__s775 thread__s776 memory__s777 . ]
+      [element__s910 blocks__s911 threads__s912 grid__s913 block__s914 count__s915 thread__s916 memory__s917 . ]
       {
-        ([ . element__s770] val)
+        ([ . element__s910] val)
         (
           (
             {
-              [ . blocks__s771]
-              [ . threads__s772]
-              [ . grid__s773]
-              [ . block__s774]
-              [ . count__s775]
-              [ . element__s770]
-              [ . thread__s776]
-              [ . memory__s777]
+              [ . blocks__s911]
+              [ . threads__s912]
+              [ . grid__s913]
+              [ . block__s914]
+              [ . count__s915]
+              [ . element__s910]
+              [ . thread__s916]
+              [ . memory__s917]
               stdlib.gpu.memory.sort.All
             }
             stdlib.gpu.memory.prop.GlobalRead
@@ -106,28 +422,83 @@
     )
   )
 
+  (arr stdlib.gpu.memory.global_ref_f32
+    : ([count__s1018 global__s1019 . ] {(({cap.ref} mem) val) ({[ . count__s1018] u64} :)})
+    -> (
+      [count__s1018 global__s1019 . ]
+      {
+        ({[ . global__s1019] ({[ . count__s1018] f32} stdlib.gpu.memory.type.Global)} :)
+        (({[ . count__s1018] f32 [ . global__s1019]} stdlib.gpu.memory.prop.Readable) |-)
+      }
+    )
+  )
+
+  (arr stdlib.gpu.memory.global_ref_u32
+    : ([count__s994 global__s995 . ] {(({cap.ref} mem) val) ({[ . count__s994] u64} :)})
+    -> (
+      [count__s994 global__s995 . ]
+      {
+        ({[ . global__s995] ({[ . count__s994] u32} stdlib.gpu.memory.type.Global)} :)
+        (({[ . count__s994] u32 [ . global__s995]} stdlib.gpu.memory.prop.Readable) |-)
+      }
+    )
+  )
+
+  (arr stdlib.gpu.memory.global_ref_u64
+    : ([count__s1006 global__s1007 . ] {(({cap.ref} mem) val) ({[ . count__s1006] u64} :)})
+    -> (
+      [count__s1006 global__s1007 . ]
+      {
+        ({[ . global__s1007] ({[ . count__s1006] u64} stdlib.gpu.memory.type.Global)} :)
+        (({[ . count__s1006] u64 [ . global__s1007]} stdlib.gpu.memory.prop.Readable) |-)
+      }
+    )
+  )
+
+  (arr stdlib.gpu.memory.global_u32_to_mem
+    : (
+      [count__s1002 memory__s1003 . ]
+      {
+        ({[ . memory__s1003] ({[ . count__s1002] u32} stdlib.gpu.memory.type.Global)} :)
+        (({[ . count__s1002] u32 [ . memory__s1003]} stdlib.gpu.memory.prop.Allocation) |-)
+      }
+    )
+    -> ([count__s1002 memory__s1003 . ] {(({cap.own} mem) val)})
+  )
+
+  (arr stdlib.gpu.memory.global_u64_to_mem
+    : (
+      [count__s1014 memory__s1015 . ]
+      {
+        ({[ . memory__s1015] ({[ . count__s1014] u64} stdlib.gpu.memory.type.Global)} :)
+        (({[ . count__s1014] u64 [ . memory__s1015]} stdlib.gpu.memory.prop.Allocation) |-)
+      }
+    )
+    -> ([count__s1014 memory__s1015 . ] {(({cap.own} mem) val)})
+  )
+
   (arr stdlib.gpu.memory.global_write
     : (
-      [element__s812 blocks__s813 threads__s814 grid__s815 block__s816 thread__s817 count__s818 memory__s819 index__s820 . ]
+      [element__s952 blocks__s953 threads__s954 grid__s955 block__s956 thread__s957 count__s958 memory__s959 index__s960 . ]
       {
         (
-          {[ . memory__s819] ({[ . count__s818] [ . element__s812]} stdlib.gpu.memory.type.Global)}
+          {[ . memory__s959] ({[ . count__s958] [ . element__s952]} stdlib.gpu.memory.type.Global)}
           :
         )
-        ({[ . index__s820] ({[ . count__s818]} stdlib.gpu.memory.type.Ix)} :)
-        ([ . element__s812] val)
+        ({[ . index__s960] ({[ . count__s958]} stdlib.gpu.memory.type.Ix)} :)
+        ([ . element__s952] val)
         (
           (
             {
-              [ . blocks__s813]
-              [ . threads__s814]
-              [ . grid__s815]
-              [ . block__s816]
-              [ . count__s818]
-              [ . element__s812]
-              [ . thread__s817]
-              [ . memory__s819]
-              [ . index__s820]
+              [ . blocks__s953]
+              [ . threads__s954]
+              [ . grid__s955]
+              [ . block__s956]
+              [ . count__s958]
+              [ . element__s952]
+              [ . thread__s957]
+              [ . memory__s959]
+              [ . index__s960]
             }
             stdlib.gpu.memory.prop.GlobalOwn
           )
@@ -136,23 +507,23 @@
       }
     )
     -> (
-      [element__s812 blocks__s813 threads__s814 grid__s815 block__s816 thread__s817 count__s818 memory__s819 index__s820 . ]
+      [element__s952 blocks__s953 threads__s954 grid__s955 block__s956 thread__s957 count__s958 memory__s959 index__s960 . ]
       {1}
     )
   )
 
   (arr stdlib.gpu.memory.ix
     : (
-      [count__s766 x__s767 . ]
-      {({[ . x__s767] u32} :) (({[ . x__s767] [ . count__s766]} prop.Less) |-)}
+      [count__s906 x__s907 . ]
+      {({[ . x__s907] u64} :) (({[ . x__s907] [ . count__s906]} prop.Less) |-)}
     )
     -> (
-      [count__s766 x__s767 . ]
+      [count__s906 x__s907 . ]
       {
         (
           {
-            ({[ . count__s766] [ . x__s767]} stdlib.gpu.memory.sort.At)
-            ({[ . count__s766]} stdlib.gpu.memory.type.Ix)
+            ({[ . count__s906] [ . x__s907]} stdlib.gpu.memory.sort.At)
+            ({[ . count__s906]} stdlib.gpu.memory.type.Ix)
           }
           :
         )
@@ -160,22 +531,473 @@
     )
   )
 
-  (arr stdlib.gpu.memory.reserve_shared
-    : (
-      [blocks__s834 threads__s835 layout__s836 grid__s837 shared_memory__s839 . ]
-      {
-        ({[ . grid__s837] ({[ . blocks__s834] [ . threads__s835]} stdlib.gpu.geometry.type.Grid)} :)
-        (({[ . layout__s836]} stdlib.gpu.memory.type.SharedLayout) val)
-      }
-    )
+  (def stdlib.gpu.memory.mem_cast_exact_own_f32
+    : ([expected_count__s1074 . ] {(({cap.own} mem) val) ({[ . expected_count__s1074] u64} :)})
     -> (
-      [blocks__s834 threads__s835 layout__s836 grid__s837 shared_memory__s839 . ]
+      [expected_count__s1074 . ]
       {
         (
           {
-            [ . shared_memory__s839]
             (
-              {[ . blocks__s834] [ . threads__s835] [ . grid__s837] [ . layout__s836]}
+              {[ . global__s1276] ({[ . expected_count__s1074] f32} stdlib.gpu.memory.type.Global)}
+              :
+            )
+            (
+              {
+                (
+                  (
+                    {[ . expected_count__s1074] f32 [ . global__s1276]}
+                    stdlib.gpu.memory.prop.Allocation
+                  )
+                  |-
+                )
+                (
+                  (
+                    {[ . expected_count__s1074] f32 [ . global__s1276]}
+                    stdlib.gpu.memory.prop.Readable
+                  )
+                  |-
+                )
+              }
+              *
+            )
+          }
+          *
+        )
+      }
+    )
+    = {
+      [memory__v1417 expected_count__v1419__input . ]
+      (
+        [ . expected_count__v1419__input]
+        (
+          {_}
+          meta.stdlib.gpu.memory.mem_cast_exact_own_f32.helper.callback_metavars.expected_count.0
+        )
+        [expected_count__v1419 __smolcat_expected_count__v1469 . ]
+      )
+      (
+        [ . expected_count__v1419]
+        [op0_value__v1470 . op0_value__v1470 op0_value__v1470]
+        [expected_count__v1467 expected_count__v1468 . ]
+      )
+      ([ . memory__v1417] stdlib.gpu.memory.mem_cast_own_f32 [mem_cast_own_f32__v1426 . ])
+      (
+        [ . mem_cast_own_f32__v1426]
+        (*.elim {{_} (*.elim {{_} (*.elim {{_} {_}})})})
+        [count__v1437__result global__v1438__result allocation__v1439 readable__v1440 . ]
+      )
+      (
+        [ . count__v1437__result]
+        ({_} meta.stdlib.gpu.memory.mem_cast_exact_own_f32.helper.callback_metavars.count.0)
+        [count__v1437 __smolcat_count__v1471 . ]
+      )
+      (
+        [ . global__v1438__result]
+        ({_} meta.stdlib.gpu.memory.mem_cast_exact_own_f32.helper.callback_metavars.global.0)
+        [global__v1438 __smolcat_global__v1472 . ]
+      )
+      ([] stdlib.numeric.numeric.u64 [numeric_u64__v1446 . ])
+      (
+        [ . count__v1437 expected_count__v1468 numeric_u64__v1446]
+        stdlib.numeric.equal
+        [equal__v1450 . ]
+      )
+      (
+        [ . equal__v1450]
+        ({((*.elim {{_} {_}}) {{_} {_}} ({{_} {_}} *.intro))} stdlib.assert)
+        [unit__v1453 same_count__v1454 . ]
+      )
+      ([ . unit__v1453] unit.elim [])
+      (
+        [ . global__v1438 expected_count__v1467 same_count__v1454 allocation__v1439 readable__v1440]
+        stdlib.gpu.memory.global_cast_equal_own
+        [global_cast_equal_own__v1462 . ]
+      )
+      (
+        [ . global_cast_equal_own__v1462]
+        {((*.elim {{_} (*.elim {{_} {_}})}) {{_} {_} {_}} ({{_} ({{_} {_}} *.intro)} *.intro))}
+      )
+    }
+  )
+
+  (def stdlib.gpu.memory.mem_cast_exact_own_u64
+    : ([expected_count__s1079 . ] {(({cap.own} mem) val) ({[ . expected_count__s1079] u64} :)})
+    -> (
+      [expected_count__s1079 . ]
+      {
+        (
+          {
+            (
+              {[ . global__s1279] ({[ . expected_count__s1079] u64} stdlib.gpu.memory.type.Global)}
+              :
+            )
+            (
+              {
+                (
+                  (
+                    {[ . expected_count__s1079] u64 [ . global__s1279]}
+                    stdlib.gpu.memory.prop.Allocation
+                  )
+                  |-
+                )
+                (
+                  (
+                    {[ . expected_count__s1079] u64 [ . global__s1279]}
+                    stdlib.gpu.memory.prop.Readable
+                  )
+                  |-
+                )
+              }
+              *
+            )
+          }
+          *
+        )
+      }
+    )
+    = {
+      [memory__v1471 expected_count__v1473__input . ]
+      (
+        [ . expected_count__v1473__input]
+        (
+          {_}
+          meta.stdlib.gpu.memory.mem_cast_exact_own_u64.helper.callback_metavars.expected_count.0
+        )
+        [expected_count__v1473 __smolcat_expected_count__v1523 . ]
+      )
+      (
+        [ . expected_count__v1473]
+        [op0_value__v1524 . op0_value__v1524 op0_value__v1524]
+        [expected_count__v1521 expected_count__v1522 . ]
+      )
+      ([ . memory__v1471] stdlib.gpu.memory.mem_cast_own_u64 [mem_cast_own_u64__v1480 . ])
+      (
+        [ . mem_cast_own_u64__v1480]
+        (*.elim {{_} (*.elim {{_} (*.elim {{_} {_}})})})
+        [count__v1491__result global__v1492__result allocation__v1493 readable__v1494 . ]
+      )
+      (
+        [ . count__v1491__result]
+        ({_} meta.stdlib.gpu.memory.mem_cast_exact_own_u64.helper.callback_metavars.count.0)
+        [count__v1491 __smolcat_count__v1525 . ]
+      )
+      (
+        [ . global__v1492__result]
+        ({_} meta.stdlib.gpu.memory.mem_cast_exact_own_u64.helper.callback_metavars.global.0)
+        [global__v1492 __smolcat_global__v1526 . ]
+      )
+      ([] stdlib.numeric.numeric.u64 [numeric_u64__v1500 . ])
+      (
+        [ . count__v1491 expected_count__v1522 numeric_u64__v1500]
+        stdlib.numeric.equal
+        [equal__v1504 . ]
+      )
+      (
+        [ . equal__v1504]
+        ({((*.elim {{_} {_}}) {{_} {_}} ({{_} {_}} *.intro))} stdlib.assert)
+        [unit__v1507 same_count__v1508 . ]
+      )
+      ([ . unit__v1507] unit.elim [])
+      (
+        [ . global__v1492 expected_count__v1521 same_count__v1508 allocation__v1493 readable__v1494]
+        stdlib.gpu.memory.global_cast_equal_own
+        [global_cast_equal_own__v1516 . ]
+      )
+      (
+        [ . global_cast_equal_own__v1516]
+        {((*.elim {{_} (*.elim {{_} {_}})}) {{_} {_} {_}} ({{_} ({{_} {_}} *.intro)} *.intro))}
+      )
+    }
+  )
+
+  (def stdlib.gpu.memory.mem_cast_exact_ref_f32
+    : ([expected_count__s1066 . ] {(({cap.ref} mem) val) ({[ . expected_count__s1066] u64} :)})
+    -> (
+      [expected_count__s1066 . ]
+      {
+        (
+          {
+            (
+              {[ . global__s1272] ({[ . expected_count__s1066] f32} stdlib.gpu.memory.type.Global)}
+              :
+            )
+            (
+              ({[ . expected_count__s1066] f32 [ . global__s1272]} stdlib.gpu.memory.prop.Readable)
+              |-
+            )
+          }
+          *
+        )
+      }
+    )
+    = {
+      [memory__v1321 expected_count__v1323__input . ]
+      (
+        [ . expected_count__v1323__input]
+        (
+          {_}
+          meta.stdlib.gpu.memory.mem_cast_exact_ref_f32.helper.callback_metavars.expected_count.0
+        )
+        [expected_count__v1323 __smolcat_expected_count__v1367 . ]
+      )
+      (
+        [ . expected_count__v1323]
+        [op0_value__v1368 . op0_value__v1368 op0_value__v1368]
+        [expected_count__v1365 expected_count__v1366 . ]
+      )
+      ([ . memory__v1321] stdlib.gpu.memory.mem_cast_ref_f32 [mem_cast_ref_f32__v1329 . ])
+      (
+        [ . mem_cast_ref_f32__v1329]
+        (*.elim {{_} (*.elim {{_} {_}})})
+        [count__v1338__result global__v1339__result readable__v1340 . ]
+      )
+      (
+        [ . count__v1338__result]
+        ({_} meta.stdlib.gpu.memory.mem_cast_exact_ref_f32.helper.callback_metavars.count.0)
+        [count__v1338 __smolcat_count__v1369 . ]
+      )
+      (
+        [ . global__v1339__result]
+        ({_} meta.stdlib.gpu.memory.mem_cast_exact_ref_f32.helper.callback_metavars.global.0)
+        [global__v1339 __smolcat_global__v1370 . ]
+      )
+      ([] stdlib.numeric.numeric.u64 [numeric_u64__v1345 . ])
+      (
+        [ . count__v1338 expected_count__v1366 numeric_u64__v1345]
+        stdlib.numeric.equal
+        [equal__v1349 . ]
+      )
+      (
+        [ . equal__v1349]
+        ({((*.elim {{_} {_}}) {{_} {_}} ({{_} {_}} *.intro))} stdlib.assert)
+        [unit__v1352 same_count__v1353 . ]
+      )
+      ([ . unit__v1352] unit.elim [])
+      (
+        [ . global__v1339 expected_count__v1365 same_count__v1353 readable__v1340]
+        stdlib.gpu.memory.global_cast_equal_ref
+        [global_cast_equal_ref__v1360 . ]
+      )
+      ([ . global_cast_equal_ref__v1360] {((*.elim {{_} {_}}) {{_} {_}} ({{_} {_}} *.intro))})
+    }
+  )
+
+  (def stdlib.gpu.memory.mem_cast_exact_ref_u64
+    : ([expected_count__s1070 . ] {(({cap.ref} mem) val) ({[ . expected_count__s1070] u64} :)})
+    -> (
+      [expected_count__s1070 . ]
+      {
+        (
+          {
+            (
+              {[ . global__s1274] ({[ . expected_count__s1070] u64} stdlib.gpu.memory.type.Global)}
+              :
+            )
+            (
+              ({[ . expected_count__s1070] u64 [ . global__s1274]} stdlib.gpu.memory.prop.Readable)
+              |-
+            )
+          }
+          *
+        )
+      }
+    )
+    = {
+      [memory__v1369 expected_count__v1371__input . ]
+      (
+        [ . expected_count__v1371__input]
+        (
+          {_}
+          meta.stdlib.gpu.memory.mem_cast_exact_ref_u64.helper.callback_metavars.expected_count.0
+        )
+        [expected_count__v1371 __smolcat_expected_count__v1415 . ]
+      )
+      (
+        [ . expected_count__v1371]
+        [op0_value__v1416 . op0_value__v1416 op0_value__v1416]
+        [expected_count__v1413 expected_count__v1414 . ]
+      )
+      ([ . memory__v1369] stdlib.gpu.memory.mem_cast_ref_u64 [mem_cast_ref_u64__v1377 . ])
+      (
+        [ . mem_cast_ref_u64__v1377]
+        (*.elim {{_} (*.elim {{_} {_}})})
+        [count__v1386__result global__v1387__result readable__v1388 . ]
+      )
+      (
+        [ . count__v1386__result]
+        ({_} meta.stdlib.gpu.memory.mem_cast_exact_ref_u64.helper.callback_metavars.count.0)
+        [count__v1386 __smolcat_count__v1417 . ]
+      )
+      (
+        [ . global__v1387__result]
+        ({_} meta.stdlib.gpu.memory.mem_cast_exact_ref_u64.helper.callback_metavars.global.0)
+        [global__v1387 __smolcat_global__v1418 . ]
+      )
+      ([] stdlib.numeric.numeric.u64 [numeric_u64__v1393 . ])
+      (
+        [ . count__v1386 expected_count__v1414 numeric_u64__v1393]
+        stdlib.numeric.equal
+        [equal__v1397 . ]
+      )
+      (
+        [ . equal__v1397]
+        ({((*.elim {{_} {_}}) {{_} {_}} ({{_} {_}} *.intro))} stdlib.assert)
+        [unit__v1400 same_count__v1401 . ]
+      )
+      ([ . unit__v1400] unit.elim [])
+      (
+        [ . global__v1387 expected_count__v1413 same_count__v1401 readable__v1388]
+        stdlib.gpu.memory.global_cast_equal_ref
+        [global_cast_equal_ref__v1408 . ]
+      )
+      ([ . global_cast_equal_ref__v1408] {((*.elim {{_} {_}}) {{_} {_}} ({{_} {_}} *.intro))})
+    }
+  )
+
+  (arr stdlib.gpu.memory.mem_cast_own_f32
+    : ([] {(({cap.own} mem) val)})
+    -> (
+      []
+      {
+        (
+          {
+            ({[ . count__s1259] u64} :)
+            (
+              {
+                ({[ . global__s1260] ({[ . count__s1259] f32} stdlib.gpu.memory.type.Global)} :)
+                (
+                  {
+                    (
+                      ({[ . count__s1259] f32 [ . global__s1260]} stdlib.gpu.memory.prop.Allocation)
+                      |-
+                    )
+                    (
+                      ({[ . count__s1259] f32 [ . global__s1260]} stdlib.gpu.memory.prop.Readable)
+                      |-
+                    )
+                  }
+                  *
+                )
+              }
+              *
+            )
+          }
+          *
+        )
+      }
+    )
+  )
+
+  (arr stdlib.gpu.memory.mem_cast_own_u64
+    : ([] {(({cap.own} mem) val)})
+    -> (
+      []
+      {
+        (
+          {
+            ({[ . count__s1263] u64} :)
+            (
+              {
+                ({[ . global__s1264] ({[ . count__s1263] u64} stdlib.gpu.memory.type.Global)} :)
+                (
+                  {
+                    (
+                      ({[ . count__s1263] u64 [ . global__s1264]} stdlib.gpu.memory.prop.Allocation)
+                      |-
+                    )
+                    (
+                      ({[ . count__s1263] u64 [ . global__s1264]} stdlib.gpu.memory.prop.Readable)
+                      |-
+                    )
+                  }
+                  *
+                )
+              }
+              *
+            )
+          }
+          *
+        )
+      }
+    )
+  )
+
+  (arr stdlib.gpu.memory.mem_cast_ref_f32
+    : ([] {(({cap.ref} mem) val)})
+    -> (
+      []
+      {
+        (
+          {
+            ({[ . count__s1253] u64} :)
+            (
+              {
+                ({[ . global__s1254] ({[ . count__s1253] f32} stdlib.gpu.memory.type.Global)} :)
+                (({[ . count__s1253] f32 [ . global__s1254]} stdlib.gpu.memory.prop.Readable) |-)
+              }
+              *
+            )
+          }
+          *
+        )
+      }
+    )
+  )
+
+  (arr stdlib.gpu.memory.mem_cast_ref_u64
+    : ([] {(({cap.ref} mem) val)})
+    -> (
+      []
+      {
+        (
+          {
+            ({[ . count__s1256] u64} :)
+            (
+              {
+                ({[ . global__s1257] ({[ . count__s1256] u64} stdlib.gpu.memory.type.Global)} :)
+                (({[ . count__s1256] u64 [ . global__s1257]} stdlib.gpu.memory.prop.Readable) |-)
+              }
+              *
+            )
+          }
+          *
+        )
+      }
+    )
+  )
+
+  (arr stdlib.gpu.memory.memoryelement.f32
+    : ([] {})
+    -> ([] {(({f32} stdlib.gpu.memory.prop.MemoryElement) |-)})
+  )
+
+  (arr stdlib.gpu.memory.memoryelement.u32
+    : ([] {})
+    -> ([] {(({u32} stdlib.gpu.memory.prop.MemoryElement) |-)})
+  )
+
+  (arr stdlib.gpu.memory.memoryelement.u64
+    : ([] {})
+    -> ([] {(({u64} stdlib.gpu.memory.prop.MemoryElement) |-)})
+  )
+
+  (arr stdlib.gpu.memory.reserve_shared
+    : (
+      [blocks__s972 threads__s973 layout__s974 grid__s975 shared_memory__s977 . ]
+      {
+        ({[ . grid__s975] ({[ . blocks__s972] [ . threads__s973]} stdlib.gpu.geometry.type.Grid)} :)
+        (({[ . layout__s974]} stdlib.gpu.memory.type.SharedLayout) val)
+      }
+    )
+    -> (
+      [blocks__s972 threads__s973 layout__s974 grid__s975 shared_memory__s977 . ]
+      {
+        (
+          {
+            [ . shared_memory__s977]
+            (
+              {[ . blocks__s972] [ . threads__s973] [ . grid__s975] [ . layout__s974]}
               stdlib.gpu.memory.type.SharedMemory
             )
           }
@@ -185,10 +1007,10 @@
           (
             {
               (
-                {[ . blocks__s834] [ . threads__s835] [ . grid__s837] [ . layout__s836]}
+                {[ . blocks__s972] [ . threads__s973] [ . grid__s975] [ . layout__s974]}
                 stdlib.gpu.memory.type.SharedMemory
               )
-              [ . shared_memory__s839]
+              [ . shared_memory__s977]
             }
             stdlib.gpu.memory.prop.Available
           )
@@ -200,37 +1022,37 @@
 
   (arr stdlib.gpu.memory.shared_read
     : (
-      [phase__s797 element__s798 blocks__s799 threads__s800 grid__s801 layout__s802 count__s803 memory__s804 block__s805 slot__s806 thread__s807 . ]
+      [phase__s937 element__s938 blocks__s939 threads__s940 grid__s941 layout__s942 count__s943 memory__s944 block__s945 slot__s946 thread__s947 . ]
       {
         (
           (
             {
-              [ . blocks__s799]
-              [ . threads__s800]
-              [ . grid__s801]
-              [ . layout__s802]
-              [ . memory__s804]
-              [ . block__s805]
-              [ . slot__s806]
-              [ . count__s803]
-              [ . element__s798]
+              [ . blocks__s939]
+              [ . threads__s940]
+              [ . grid__s941]
+              [ . layout__s942]
+              [ . memory__s944]
+              [ . block__s945]
+              [ . slot__s946]
+              [ . count__s943]
+              [ . element__s938]
             }
             stdlib.gpu.memory.type.Shared
           )
           val
         )
-        (({[ . count__s803]} stdlib.gpu.memory.type.Ix) val)
+        (({[ . count__s943]} stdlib.gpu.memory.type.Ix) val)
         (
           (
             {
-              [ . blocks__s799]
-              [ . threads__s800]
-              [ . grid__s801]
-              [ . block__s805]
-              [ . layout__s802]
-              [ . phase__s797]
-              [ . thread__s807]
-              [ . memory__s804]
+              [ . blocks__s939]
+              [ . threads__s940]
+              [ . grid__s941]
+              [ . block__s945]
+              [ . layout__s942]
+              [ . phase__s937]
+              [ . thread__s947]
+              [ . memory__s944]
               stdlib.gpu.memory.sort.All
             }
             stdlib.gpu.memory.prop.SharedRead
@@ -240,13 +1062,13 @@
         (
           (
             {
-              [ . blocks__s799]
-              [ . threads__s800]
-              [ . grid__s801]
-              [ . layout__s802]
-              [ . memory__s804]
-              [ . block__s805]
-              [ . slot__s806]
+              [ . blocks__s939]
+              [ . threads__s940]
+              [ . grid__s941]
+              [ . layout__s942]
+              [ . memory__s944]
+              [ . block__s945]
+              [ . slot__s946]
               stdlib.gpu.memory.sort.All
             }
             stdlib.gpu.memory.prop.Defined
@@ -256,20 +1078,20 @@
       }
     )
     -> (
-      [phase__s797 element__s798 blocks__s799 threads__s800 grid__s801 layout__s802 count__s803 memory__s804 block__s805 slot__s806 thread__s807 . ]
+      [phase__s937 element__s938 blocks__s939 threads__s940 grid__s941 layout__s942 count__s943 memory__s944 block__s945 slot__s946 thread__s947 . ]
       {
-        ([ . element__s798] val)
+        ([ . element__s938] val)
         (
           (
             {
-              [ . blocks__s799]
-              [ . threads__s800]
-              [ . grid__s801]
-              [ . block__s805]
-              [ . layout__s802]
-              [ . phase__s797]
-              [ . thread__s807]
-              [ . memory__s804]
+              [ . blocks__s939]
+              [ . threads__s940]
+              [ . grid__s941]
+              [ . block__s945]
+              [ . layout__s942]
+              [ . phase__s937]
+              [ . thread__s947]
+              [ . memory__s944]
               stdlib.gpu.memory.sort.All
             }
             stdlib.gpu.memory.prop.SharedRead
@@ -279,13 +1101,13 @@
         (
           (
             {
-              [ . blocks__s799]
-              [ . threads__s800]
-              [ . grid__s801]
-              [ . layout__s802]
-              [ . memory__s804]
-              [ . block__s805]
-              [ . slot__s806]
+              [ . blocks__s939]
+              [ . threads__s940]
+              [ . grid__s941]
+              [ . layout__s942]
+              [ . memory__s944]
+              [ . block__s945]
+              [ . slot__s946]
               stdlib.gpu.memory.sort.All
             }
             stdlib.gpu.memory.prop.Defined
@@ -298,14 +1120,14 @@
 
   (arr stdlib.gpu.memory.shared_slot
     : (
-      [blocks__s749 threads__s750 grid__s751 layout__s752 index__s753 element__s754 memory__s756 block__s757 count__s758 . ]
+      [blocks__s889 threads__s890 grid__s891 layout__s892 index__s893 element__s894 memory__s896 block__s897 count__s898 . ]
       {
-        (({[ . index__s753]} stdlib.gpu.memory.type.SlotName) val)
+        (({[ . index__s893]} stdlib.gpu.memory.type.SlotName) val)
         (
           {
-            [ . memory__s756]
+            [ . memory__s896]
             (
-              {[ . blocks__s749] [ . threads__s750] [ . grid__s751] [ . layout__s752]}
+              {[ . blocks__s889] [ . threads__s890] [ . grid__s891] [ . layout__s892]}
               stdlib.gpu.memory.type.SharedMemory
             )
           }
@@ -313,29 +1135,29 @@
         )
         (
           {
-            [ . block__s757]
-            ({[ . blocks__s749] [ . threads__s750] [ . grid__s751]} stdlib.gpu.geometry.type.Block)
+            [ . block__s897]
+            ({[ . blocks__s889] [ . threads__s890] [ . grid__s891]} stdlib.gpu.geometry.type.Block)
           }
           :
         )
-        ({[ . count__s758] u32} :)
+        ({[ . count__s898] u64} :)
       }
     )
     -> (
-      [blocks__s749 threads__s750 grid__s751 layout__s752 index__s753 element__s754 memory__s756 block__s757 count__s758 . ]
+      [blocks__s889 threads__s890 grid__s891 layout__s892 index__s893 element__s894 memory__s896 block__s897 count__s898 . ]
       {
         (
           (
             {
-              [ . blocks__s749]
-              [ . threads__s750]
-              [ . grid__s751]
-              [ . layout__s752]
-              [ . memory__s756]
-              [ . block__s757]
-              ({[ . index__s753]} stdlib.gpu.memory.type.SlotName)
-              [ . count__s758]
-              [ . element__s754]
+              [ . blocks__s889]
+              [ . threads__s890]
+              [ . grid__s891]
+              [ . layout__s892]
+              [ . memory__s896]
+              [ . block__s897]
+              ({[ . index__s893]} stdlib.gpu.memory.type.SlotName)
+              [ . count__s898]
+              [ . element__s894]
             }
             stdlib.gpu.memory.type.Shared
           )
@@ -347,40 +1169,40 @@
 
   (arr stdlib.gpu.memory.shared_write
     : (
-      [phase__s780 element__s781 blocks__s782 threads__s783 grid__s784 layout__s785 count__s786 memory__s787 block__s788 slot__s789 thread__s790 index__s792 . ]
+      [phase__s920 element__s921 blocks__s922 threads__s923 grid__s924 layout__s925 count__s926 memory__s927 block__s928 slot__s929 thread__s930 index__s932 . ]
       {
         (
           (
             {
-              [ . blocks__s782]
-              [ . threads__s783]
-              [ . grid__s784]
-              [ . layout__s785]
-              [ . memory__s787]
-              [ . block__s788]
-              [ . slot__s789]
-              [ . count__s786]
-              [ . element__s781]
+              [ . blocks__s922]
+              [ . threads__s923]
+              [ . grid__s924]
+              [ . layout__s925]
+              [ . memory__s927]
+              [ . block__s928]
+              [ . slot__s929]
+              [ . count__s926]
+              [ . element__s921]
             }
             stdlib.gpu.memory.type.Shared
           )
           val
         )
-        ({[ . index__s792] ({[ . count__s786]} stdlib.gpu.memory.type.Ix)} :)
-        ([ . element__s781] val)
+        ({[ . index__s932] ({[ . count__s926]} stdlib.gpu.memory.type.Ix)} :)
+        ([ . element__s921] val)
         (
           (
             {
-              [ . blocks__s782]
-              [ . threads__s783]
-              [ . grid__s784]
-              [ . block__s788]
-              [ . count__s786]
-              [ . layout__s785]
-              [ . phase__s780]
-              [ . thread__s790]
-              [ . index__s792]
-              [ . memory__s787]
+              [ . blocks__s922]
+              [ . threads__s923]
+              [ . grid__s924]
+              [ . block__s928]
+              [ . count__s926]
+              [ . layout__s925]
+              [ . phase__s920]
+              [ . thread__s930]
+              [ . index__s932]
+              [ . memory__s927]
             }
             stdlib.gpu.memory.prop.SharedOwn
           )
@@ -389,22 +1211,22 @@
       }
     )
     -> (
-      [phase__s780 element__s781 blocks__s782 threads__s783 grid__s784 layout__s785 count__s786 memory__s787 block__s788 slot__s789 thread__s790 index__s792 . ]
+      [phase__s920 element__s921 blocks__s922 threads__s923 grid__s924 layout__s925 count__s926 memory__s927 block__s928 slot__s929 thread__s930 index__s932 . ]
       {
         1
         (
           (
             {
-              [ . blocks__s782]
-              [ . threads__s783]
-              [ . grid__s784]
-              [ . block__s788]
-              [ . count__s786]
-              [ . layout__s785]
-              [ . phase__s780]
-              [ . thread__s790]
-              [ . index__s792]
-              [ . memory__s787]
+              [ . blocks__s922]
+              [ . threads__s923]
+              [ . grid__s924]
+              [ . block__s928]
+              [ . count__s926]
+              [ . layout__s925]
+              [ . phase__s920]
+              [ . thread__s930]
+              [ . index__s932]
+              [ . memory__s927]
             }
             stdlib.gpu.memory.prop.SharedOwn
           )
@@ -413,15 +1235,15 @@
         (
           (
             {
-              [ . blocks__s782]
-              [ . threads__s783]
-              [ . grid__s784]
-              [ . layout__s785]
-              [ . count__s786]
-              [ . memory__s787]
-              [ . block__s788]
-              [ . slot__s789]
-              [ . index__s792]
+              [ . blocks__s922]
+              [ . threads__s923]
+              [ . grid__s924]
+              [ . layout__s925]
+              [ . count__s926]
+              [ . memory__s927]
+              [ . block__s928]
+              [ . slot__s929]
+              [ . index__s932]
             }
             stdlib.gpu.memory.prop.Written
           )
@@ -433,19 +1255,21 @@
 
   (arr stdlib.gpu.memory.size
     : (
-      [count__s762 element__s763 . ]
-      {(({[ . count__s762] [ . element__s763]} stdlib.gpu.memory.type.Global) val)}
+      [count__s902 element__s903 . ]
+      {(({[ . count__s902] [ . element__s903]} stdlib.gpu.memory.type.Global) val)}
     )
-    -> ([count__s762 element__s763 . ] {({[ . count__s762] u32} :)})
+    -> ([count__s902 element__s903 . ] {({[ . count__s902] u64} :)})
   )
 
   (arr stdlib.gpu.memory.slot_name
-    : ([index__s678 . ] {({[ . index__s678] u32} :)})
-    -> ([index__s678 . ] {(({[ . index__s678]} stdlib.gpu.memory.type.SlotName) val)})
+    : ([index__s818 . ] {({[ . index__s818] u64} :)})
+    -> ([index__s818 . ] {(({[ . index__s818]} stdlib.gpu.memory.type.SlotName) val)})
   )
 })
 
 (theory type nat {
+  (arr stdlib.gpu.memory.prop.Allocation : 3 -> 1)
+
   (arr stdlib.gpu.memory.prop.Available : 2 -> 1)
 
   (arr stdlib.gpu.memory.prop.Defined : 8 -> 1)
@@ -453,6 +1277,10 @@
   (arr stdlib.gpu.memory.prop.GlobalOwn : 9 -> 1)
 
   (arr stdlib.gpu.memory.prop.GlobalRead : 9 -> 1)
+
+  (arr stdlib.gpu.memory.prop.MemoryElement : 1 -> 1)
+
+  (arr stdlib.gpu.memory.prop.Readable : 3 -> 1)
 
   (arr stdlib.gpu.memory.prop.SharedOwn : 10 -> 1)
 

@@ -1,5 +1,5 @@
 (theory program type {
-  (arr unsafe.assume : ([p__s1031 . ] {1}) -> ([p__s1031 . ] {([ . p__s1031] |-)}))
+  (arr unsafe.assume : ([p__s1239 . ] {1}) -> ([p__s1239 . ] {([ . p__s1239] |-)}))
 
-  (arr unsafe.discard : ([p__s1033 . ] {([ . p__s1033] |-)}) -> ([p__s1033 . ] {1}))
+  (arr unsafe.discard : ([p__s1241 . ] {([ . p__s1241] |-)}) -> ([p__s1241 . ] {1}))
 })

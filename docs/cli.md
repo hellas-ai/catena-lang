@@ -125,6 +125,17 @@ list, for example `"files": ["operations.hex", "arrays.hex"]`. Paths are relativ
 to the bundle directory and cannot contain `..`. An empty list loads no source
 files from that bundle. Unknown manifest fields are rejected.
 
+## Embedding the experimental library in Rust
+
+Rust callers can use `catena_lang::stdlib::experimental_sources()` to get the
+checked-in experimental library as static source strings in manifest order.
+Chain this iterator with your program's `include_str!` sources, parse them with
+`RawTheorySet::from_texts`, and select `CodegenKind::Experimental` when compiling.
+No application build script or bundle registry is needed for this path.
+
+This additive API leaves `stdlib::sources()` and the CLI's named bundles
+unchanged. Selecting a backend still does not select a library automatically.
+
 ## Plain-value experimental execution
 
 The experimental library also provides `execution.hex` for programs that use

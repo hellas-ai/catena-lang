@@ -45,6 +45,40 @@ pub fn sources() -> impl ExactSizeIterator<Item = &'static str> {
     FILES.iter().map(|file| file.source)
 }
 
+/// Checked-in experimental library sources in manifest order.
+///
+/// This library is standalone. Selecting a code generator does not load it;
+/// callers combine these sources with their program and select
+/// [`crate::codegen::CodegenKind::Experimental`] explicitly.
+pub fn experimental_sources() -> impl ExactSizeIterator<Item = &'static str> {
+    EXPERIMENTAL_SOURCES.iter().copied()
+}
+
+const EXPERIMENTAL_SOURCES: &[&str] = &[
+    include_str!("../stdlib/experimental/metacat/cmc.hex"),
+    include_str!("../stdlib/experimental/metacat/fn.hex"),
+    include_str!("../stdlib/experimental/metacat/literals.hex"),
+    include_str!("../stdlib/experimental/metacat/product.hex"),
+    include_str!("../stdlib/experimental/metacat/value.hex"),
+    include_str!("../stdlib/experimental/metacat/witnesses.hex"),
+    include_str!("../stdlib/experimental/assert.hex"),
+    include_str!("../stdlib/experimental/equality.hex"),
+    include_str!("../stdlib/experimental/fold.hex"),
+    include_str!("../stdlib/experimental/gpu.hex"),
+    include_str!("../stdlib/experimental/lists.hex"),
+    include_str!("../stdlib/experimental/numeric.hex"),
+    include_str!("../stdlib/experimental/prelude.hex"),
+    include_str!("../stdlib/experimental/runtime.hex"),
+    include_str!("../stdlib/experimental/unsafe.hex"),
+    include_str!("../stdlib/experimental/gpu/barriers.hex"),
+    include_str!("../stdlib/experimental/gpu/geometry.hex"),
+    include_str!("../stdlib/experimental/gpu/launch.hex"),
+    include_str!("../stdlib/experimental/gpu/matmul.hex"),
+    include_str!("../stdlib/experimental/gpu/memory.hex"),
+    include_str!("../stdlib/experimental/gpu/protocol.hex"),
+    include_str!("../stdlib/experimental/execution.hex"),
+];
+
 pub fn paths_from(root: impl AsRef<Path>) -> impl ExactSizeIterator<Item = PathBuf> {
     let stdlib = root.as_ref().join("stdlib/default");
     FILES.iter().map(move |file| stdlib.join(file.filename))

@@ -99,3 +99,20 @@ fn collect_operations(
         _ => {}
     }
 }
+
+#[test]
+fn embedded_experimental_sources_match_the_manifest() -> anyhow::Result<()> {
+    let mut registry = BundleRegistry::new(&[])?;
+    let name = registry.add_directory(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/experimental"),
+    )?;
+    let files = registry.resolve(&[&name])?;
+    assert_eq!(
+        catena_lang::stdlib::experimental_sources().collect::<Vec<_>>(),
+        files
+            .iter()
+            .map(|file| file.source.as_ref())
+            .collect::<Vec<_>>()
+    );
+    Ok(())
+}

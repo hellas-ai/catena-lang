@@ -6,6 +6,56 @@ use super::super::{
     values::*,
 };
 
+/// Runtime expressions are launch arguments, not kernel specializations. Keep
+/// full Hex types and compile-time function captures in the key: equal C++
+/// representations alone do not imply equal callback behavior.
+#[derive(PartialEq, Eq)]
+pub(in crate::codegen::experimental) struct KernelKey {
+    linear: bool,
+    function: hexpr::Operation,
+    function_type: Obj,
+    captures: Vec<(Obj, CaptureKind)>,
+}
+
+#[derive(PartialEq, Eq)]
+enum CaptureKind {
+    Runtime,
+    Erased,
+    Function(hexpr::Operation),
+}
+
+fn key(linear: bool, kernel: &Value, captured: &[Value]) -> Option<KernelKey> {
+    let Repr::Function(function) = &kernel.repr else {
+        return None;
+    };
+    let captures = captured
+        .iter()
+        .map(|value| {
+            let function = match &value.repr {
+                Repr::Runtime(_) => CaptureKind::Runtime,
+                Repr::Erased => CaptureKind::Erased,
+                Repr::Function(function) => CaptureKind::Function(function.clone()),
+                Repr::Product(_) => return None,
+            };
+            Some((value.ty.clone(), function))
+        })
+        .collect::<Option<Vec<_>>>()?;
+    Some(KernelKey {
+        linear,
+        function: function.clone(),
+        function_type: kernel.ty.clone(),
+        captures,
+    })
+}
+
+fn cached(l: &Lowerer<'_>, key: &Option<KernelKey>) -> Option<String> {
+    let key = key.as_ref()?;
+    l.kernel_cache
+        .iter()
+        .find(|(previous, _)| previous == key)
+        .map(|(_, symbol)| symbol.clone())
+}
+
 fn kernel_argument(
     l: &mut Lowerer<'_>,
     op: &str,
@@ -79,6 +129,21 @@ pub(in crate::codegen::experimental) fn lower(
     let mut arguments = vec![grid_expression.clone()];
     let mut captured = Vec::new();
     environment.clone().flatten(&mut captured);
+    let specialization = key(false, kernel, &captured);
+    if let Some(symbol) = cached(l, &specialization) {
+        for value in &captured {
+            if let Repr::Runtime(expression) = &value.repr {
+                arguments.push(expression.clone());
+            }
+        }
+        l.body.push(Instruction::Launch {
+            kernel: symbol,
+            grid: grid_expression,
+            shared_bytes,
+            arguments,
+        });
+        return outputs.iter().map(|ty| l.erased(ty)).collect();
+    }
     for value in &mut captured {
         if let Repr::Runtime(expression) = &mut value.repr {
             let name = l.fresh("capture");
@@ -119,6 +184,9 @@ pub(in crate::codegen::experimental) fn lower(
             body,
         },
     );
+    if let Some(specialization) = specialization {
+        l.kernel_cache.push((specialization, symbol.clone()));
+    }
     l.body.push(Instruction::Launch {
         kernel: symbol,
         grid: grid_expression,
@@ -173,6 +241,21 @@ pub(in crate::codegen::experimental) fn linear(
     let mut arguments = vec![expr(&grid)?.into(), count_expr];
     let mut captured = vec![];
     environment.clone().flatten(&mut captured);
+    let specialization = key(true, kernel, &captured);
+    if let Some(symbol) = cached(l, &specialization) {
+        for value in &captured {
+            if let Repr::Runtime(expression) = &value.repr {
+                arguments.push(expression.clone());
+            }
+        }
+        l.body.push(Instruction::Launch {
+            kernel: symbol,
+            grid: expr(&grid)?.into(),
+            shared_bytes: "0".into(),
+            arguments,
+        });
+        return outputs.iter().map(|ty| l.erased(ty)).collect();
+    }
     for value in &mut captured {
         if let Repr::Runtime(expression) = &mut value.repr {
             let name = l.fresh("capture");
@@ -220,6 +303,9 @@ pub(in crate::codegen::experimental) fn linear(
             ],
         },
     );
+    if let Some(specialization) = specialization {
+        l.kernel_cache.push((specialization, symbol.clone()));
+    }
     l.body.push(Instruction::Launch {
         kernel: symbol,
         grid: expr(&grid)?.into(),

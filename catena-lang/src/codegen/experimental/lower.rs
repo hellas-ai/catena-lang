@@ -80,6 +80,7 @@ impl<'a> Lowerer<'a> {
             next: 0,
             next_type,
             stack: vec![],
+            kernel_cache: vec![],
         }
     }
     pub(super) fn fresh(&mut self, prefix: &str) -> String {

@@ -65,6 +65,7 @@ struct Lowerer<'a> {
     next: usize,
     next_type: usize,
     stack: Vec<Operation>,
+    kernel_cache: Vec<(ops::launch::KernelKey, String)>,
 }
 
 pub(super) fn codegen(

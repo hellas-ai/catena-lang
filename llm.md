@@ -116,6 +116,24 @@ checked for overflow; the model widens size products before checked narrowing.
 Separate f32 multiply/add expressions and the existing native compilation flags
 preserve the reference arithmetic order without implicit contraction to FMA.
 
+## Kernel reuse
+
+The experimental backend now emits one device kernel per matching launch
+callback specialization within a compilation. The key includes the callback
+identity, its full Hex type, ordered capture types, and any captured function
+identities. Linear-index kernels and block/thread kernels use separate keys.
+Runtime buffer pointers, scalar values, grid dimensions, and shared-memory sizes
+remain per-launch arguments, so different decoder layers can share device code
+while using different weights. Launch order, synchronization, and arithmetic
+remain unchanged. This is a codegen optimization; it requires no new primitive
+or model Hex changes.
+
+For the f32 SmolLM2 model, this reduced emitted kernels from 403 to 10 and HIP
+source from 1.95 MB to 380 KB. On the measured machine, native HIP compilation
+for `gfx1151` fell from about 9 seconds to 2 seconds. The roughly 9-second shared
+front-end cost remains, chiefly closure conversion and type checking. The host
+launch sequence remains expanded across all 30 layers.
+
 ## Integration and validation
 
 The model combines its Hex definitions with the experimental library, runs the

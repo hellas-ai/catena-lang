@@ -379,3 +379,96 @@ fn plain_numeric_adapters_reject_invalid_types_and_emit_checked_narrowing() {
         assert!(source.contains(dialect.device_free_fn()));
     }
 }
+
+#[test]
+fn reused_kernels_keep_per_launch_arguments_and_shared_memory() {
+    let templates = BTreeMap::new();
+    let mut l = lowerer(&templates);
+    let grid_type = node(
+        "val",
+        vec![node(
+            "stdlib.gpu.geometry.type.Grid",
+            vec![node("1", vec![]), node("1", vec![])],
+        )],
+    );
+    let layout_type = node(
+        "val",
+        vec![node(
+            "stdlib.gpu.memory.type.SharedLayout",
+            vec![node("list.Nil", vec![])],
+        )],
+    );
+    let callback = Value {
+        ty: node("val", vec![node("->", vec![scalar("bool"), proof()])]),
+        repr: Repr::Function("stdlib.assert.assert_true".parse().unwrap()),
+    };
+    let unit = node("1", vec![]);
+    for (grid, flag, shared) in [
+        ("grid_a", "flag_a", None),
+        ("grid_b", "flag_b", Some("layout_b")),
+    ] {
+        let mut args = vec![value(grid_type.clone(), grid)];
+        if let Some(layout) = shared {
+            args.push(value(layout_type.clone(), layout));
+        }
+        args.extend([value(scalar("bool"), flag), callback.clone()]);
+        l.lower_operation(
+            if shared.is_some() {
+                "unsafe.launch_shared"
+            } else {
+                "unsafe.launch"
+            },
+            args,
+            &[unit.clone()],
+        )
+        .unwrap();
+    }
+    assert_eq!(l.modules.kernels.len(), 1);
+    let launches = l
+        .body
+        .iter()
+        .filter_map(|instruction| match instruction {
+            Instruction::Launch {
+                kernel,
+                arguments,
+                shared_bytes,
+                ..
+            } => Some((kernel, arguments, shared_bytes)),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(launches.len(), 2);
+    assert_eq!(launches[0].0, launches[1].0);
+    assert_eq!(launches[0].1, &["grid_a", "flag_a"]);
+    assert_eq!(launches[1].1, &["grid_b", "flag_b"]);
+    assert_eq!(launches[0].2, "0");
+    assert_eq!(launches[1].2, "layout_b.bytes");
+
+    // A distinct Hex callback signature must not reuse a merely ABI-compatible kernel.
+    let different = Value {
+        ty: node(
+            "val",
+            vec![node(
+                "->",
+                vec![
+                    scalar("bool"),
+                    node("|-", vec![node("different.proposition", vec![])]),
+                ],
+            )],
+        ),
+        repr: callback.repr,
+    };
+    l.lower_operation(
+        "unsafe.launch",
+        vec![
+            value(grid_type, "grid_c"),
+            value(scalar("bool"), "flag_c"),
+            different,
+        ],
+        &[unit.clone()],
+    )
+    .unwrap();
+    assert_eq!(l.modules.kernels.len(), 2);
+    l.place = Place::Device;
+    assert!(l.lower_operation("unsafe.launch", vec![], &[unit]).is_err());
+}

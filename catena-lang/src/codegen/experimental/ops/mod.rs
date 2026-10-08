@@ -4,6 +4,7 @@ mod barriers;
 pub(super) mod control;
 mod geometry;
 pub(super) mod launch;
+mod math;
 mod memory;
 mod numeric;
 pub(super) mod structure;
@@ -29,6 +30,9 @@ pub(super) fn lower(
         || op == "u32.bitcast-f32"
     {
         return numeric::lower(l, op, &args, outputs);
+    }
+    if op.starts_with("stdlib.math.") {
+        return math::lower(l, op, &args, outputs);
     }
     if op.starts_with("stdlib.gpu.geometry.") {
         return geometry::lower(l, op, &args, outputs);

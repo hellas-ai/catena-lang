@@ -403,6 +403,56 @@ fn new_numeric_primitives_lower_with_erased_evidence() {
 }
 
 #[test]
+fn math_primitives_lower_and_reject_invalid_interfaces() {
+    let templates = BTreeMap::new();
+    for (op, inputs, output, expected) in [
+        ("f32_bits", vec!["f32"], "u32", "catena_f32_bitcast_u32(x0)"),
+        (
+            "from_bits",
+            vec!["u32"],
+            "f32",
+            "catena_u32_bitcast_f32(x0)",
+        ),
+        (
+            "round_to_u32",
+            vec!["f32"],
+            "u32",
+            "catena_round_to_u32(x0)",
+        ),
+        ("shift_right", vec!["u32", "u32"], "u32", "(x0 >> x1)"),
+    ] {
+        let name = format!("stdlib.math.{op}");
+        let args = inputs
+            .iter()
+            .enumerate()
+            .map(|(i, ty)| value(scalar(ty), &format!("x{i}")))
+            .collect::<Vec<_>>();
+        let mut l = lowerer(&templates);
+        l.lower_operation(&name, args.clone(), &[scalar(output)])
+            .unwrap();
+        assert!(l.body.iter().any(|instruction| matches!(instruction,
+            Instruction::Let(_, expression) if expression == expected)));
+        if op == "shift_right" {
+            assert!(l.body.iter().any(|instruction| matches!(instruction,
+                Instruction::Assert { condition } if condition == "x1 < 32")));
+        }
+        assert!(l.lower_operation(&name, vec![], &[scalar(output)]).is_err());
+        assert!(
+            l.lower_operation(&name, args.clone(), &[scalar("bool")])
+                .is_err()
+        );
+        let mut wrong = args;
+        wrong[0] = value(scalar("u64"), "wrong");
+        assert!(l.lower_operation(&name, wrong, &[scalar(output)]).is_err());
+    }
+    for dialect in [GpuDialect::Hip, GpuDialect::Cuda] {
+        let source = prelude::render(dialect);
+        assert!(source.contains("__host__ __device__ inline uint32_t catena_round_to_u32"));
+        assert!(source.contains("__host__ __device__ inline uint32_t catena_f32_bitcast_u32"));
+    }
+}
+
+#[test]
 fn kernel_allocation_is_rejected() {
     let templates = BTreeMap::new();
     let mut l = lowerer(&templates);

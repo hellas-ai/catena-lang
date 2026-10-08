@@ -31,6 +31,22 @@ __host__ __device__ inline float catena_u32_bitcast_f32(uint32_t bits) {
     value.u = bits;
     return value.f;
 }
+__host__ __device__ inline uint32_t catena_f32_bitcast_u32(float input) {
+    union { uint32_t u; float f; } value;
+    value.f = input;
+    return value.u;
+}
+__host__ __device__ inline uint32_t catena_round_to_u32(float value) {
+    // Comparisons also reject NaN and infinities before the integer cast.
+    catena_assert(value >= 0.0f && double(value) <= double(UINT32_MAX));
+    uint32_t result = uint32_t(value);
+    float fraction = value - float(result);
+    if (fraction > 0.5f || (fraction == 0.5f && (result & 1))) {
+        catena_assert(result < UINT32_MAX);
+        ++result;
+    }
+    return result;
+}
 struct catena_mem_own_t { void* data; uint64_t len; };
 struct catena_mem_ref_t { void* data; uint64_t len; };
 struct catena_index { uint64_t x,y,z; };

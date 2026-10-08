@@ -3,6 +3,7 @@ use metacat::theory::{
     RawTheorySet,
     ast::{RawTheory, RawTheoryArrow},
 };
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{
     elaborate::ElaborateError,
@@ -39,6 +40,121 @@ pub fn elaborate(raw: &mut RawTheorySet, kind: ConstantKind) -> Result<(), Elabo
         elaborate_theory(theory, kind)?;
     }
     Ok(())
+}
+
+/// Named literals denote nullary operations in the syntax theory and program
+/// primitives whose result retains the literal as its symbolic identity.
+pub(super) fn elaborate_type_literals(
+    raw: &mut RawTheorySet,
+    kind: ConstantKind,
+) -> Result<(), ElaborateError> {
+    let mut literals = BTreeSet::new();
+    let prefix = format!("type.{}", kind.prefix);
+    fn collect(expr: &Hexpr, prefix: &str, literals: &mut BTreeSet<Operation>) {
+        match expr {
+            Hexpr::Composition(parts) | Hexpr::Tensor(parts) => {
+                for part in parts {
+                    collect(part, prefix, literals);
+                }
+            }
+            Hexpr::Frobenius { sources, targets } => {
+                for variable in sources.iter().chain(targets) {
+                    if let Some(label) = &variable.label {
+                        collect(label, prefix, literals);
+                    }
+                }
+            }
+            Hexpr::Wire(inner) => collect(inner, prefix, literals),
+            Hexpr::Operation(op) if op.as_str().starts_with(prefix) => {
+                literals.insert(op.clone());
+            }
+            Hexpr::Hole | Hexpr::Operation(_) => {}
+        }
+    }
+    let mut program_literals = BTreeMap::new();
+    for theory in raw
+        .theories
+        .values()
+        .filter(|theory| theory.syntax_category.as_str() == "type")
+    {
+        let mut referenced = BTreeSet::new();
+        for arrow in theory.arrows.values() {
+            collect(&arrow.type_maps.0, &prefix, &mut referenced);
+            collect(&arrow.type_maps.1, &prefix, &mut referenced);
+            if let Some(definition) = &arrow.definition {
+                collect(definition, &prefix, &mut referenced);
+            }
+        }
+        literals.extend(referenced.iter().cloned());
+        program_literals.insert(theory.name.clone(), referenced);
+    }
+    if literals.is_empty() {
+        return Ok(());
+    }
+    let theory = raw
+        .theories
+        .get_mut(&"type".parse().expect("internal theory name"))
+        .ok_or_else(|| ElaborateError::MissingTheory("type".into()))?;
+    for literal in literals {
+        let constant = literal
+            .as_str()
+            .strip_prefix("type.")
+            .expect("type literal prefix")
+            .parse()
+            .expect("constant operation name");
+        validate_constant(&constant, kind)?;
+        let expected = RawTheoryArrow {
+            name: literal.clone(),
+            type_maps: (op("0"), op("1")),
+            definition: None,
+        };
+        if let Some(existing) = theory.arrows.get(&literal) {
+            if existing.definition.is_some() || existing.type_maps != expected.type_maps {
+                return Err(ElaborateError::InvalidConstant {
+                    operation: literal.to_string(),
+                    reason: "type literal must be a primitive with interface 0 -> 1".into(),
+                });
+            }
+        } else {
+            theory.arrows.insert(literal, expected);
+        }
+    }
+    for (theory_name, literals) in program_literals {
+        let theory = raw
+            .theories
+            .get_mut(&theory_name)
+            .expect("collected theory");
+        for literal in literals {
+            let expected = symbolic_const_arrow(literal.clone(), kind);
+            if let Some(existing) = theory.arrows.get(&literal) {
+                if existing.definition.is_some() || existing.type_maps != expected.type_maps {
+                    return Err(ElaborateError::InvalidConstant {
+                        operation: literal.to_string(),
+                        reason: format!(
+                            "program literal must be a primitive returning the symbolic constant as {}",
+                            kind.type_name
+                        ),
+                    });
+                }
+            } else {
+                theory.arrows.insert(literal, expected);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn symbolic_const_arrow(name: Operation, kind: ConstantKind) -> RawTheoryArrow {
+    RawTheoryArrow {
+        type_maps: (
+            "([] {})".parse().expect("constant source map"),
+            format!("([] {{({{{name} {}}} :)}})", kind.type_name)
+                .parse()
+                .expect("symbolic constant target map"),
+        ),
+        name,
+        definition: None,
+    }
 }
 
 fn elaborate_theory(theory: &mut RawTheory, kind: ConstantKind) -> Result<(), ElaborateError> {
@@ -127,4 +243,73 @@ fn const_arrow(name: Operation, kind: ConstantKind) -> RawTheoryArrow {
 
 fn op(name: &str) -> Hexpr {
     Hexpr::Operation(name.parse().expect("generated operation should parse"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn raw(type_declarations: &str, literal: &str) -> RawTheorySet {
+        RawTheorySet::from_text(&format!(
+            "(theory type nat {{{type_declarations}}})
+             (theory program type {{
+                (arr literal : ([] {{}}) -> ([] {{({{{literal} u64}} :)}}))
+             }})"
+        ))
+        .unwrap()
+    }
+
+    #[test]
+    fn interface_literals_get_missing_type_declarations() {
+        for (kind, literal) in [
+            (U64, "type.const.u64.0x0000000000000080"),
+            (U32, "type.const.u32.0x00000080"),
+        ] {
+            let mut theories = raw("", literal);
+            elaborate_type_literals(&mut theories, kind).unwrap();
+            let theory = &theories.theories[&"type".parse().unwrap()];
+            let arrow = &theory.arrows[&literal.parse().unwrap()];
+            assert_eq!(arrow.type_maps, (op("0"), op("1")));
+            assert!(arrow.definition.is_none());
+            let program = &theories.theories[&"program".parse().unwrap()];
+            let primitive = &program.arrows[&literal.parse().unwrap()];
+            assert_eq!(
+                primitive.type_maps,
+                symbolic_const_arrow(literal.parse().unwrap(), kind).type_maps
+            );
+            assert!(primitive.definition.is_none());
+            elaborate_type_literals(&mut theories, kind).unwrap();
+            assert_eq!(theories.theories[&"type".parse().unwrap()].arrows.len(), 1);
+            assert_eq!(
+                theories.theories[&"program".parse().unwrap()].arrows.len(),
+                2
+            );
+        }
+    }
+
+    #[test]
+    fn explicit_type_literals_must_have_the_expected_interface() {
+        let literal = "type.const.u64.0x0000000000000080";
+        for declaration in [
+            format!("(arr {literal} : 0 -> 1)"),
+            format!("(arr {literal} : 1 -> 1)"),
+            format!("(def {literal} : 0 -> 1 = 1)"),
+        ] {
+            let mut theories = raw(&declaration, literal);
+            assert_eq!(
+                elaborate_type_literals(&mut theories, U64).is_ok(),
+                declaration.starts_with("(arr") && declaration.contains(": 0 -> 1")
+            );
+        }
+    }
+
+    #[test]
+    fn malformed_type_literals_are_rejected() {
+        for literal in ["type.const.u64.0x80", "type.const.u64.0x00000000000000zz"] {
+            assert!(matches!(
+                elaborate_type_literals(&mut raw("", literal), U64),
+                Err(ElaborateError::InvalidConstant { .. })
+            ));
+        }
+    }
 }

@@ -97,6 +97,8 @@ pub enum ElaborateError {
 
 pub fn elaborate(mut raw: RawTheorySet) -> Result<RawTheorySet, ElaborateError> {
     raw = raw.with_extensions()?;
+    constants::elaborate_type_literals(&mut raw, constants::U64)?;
+    constants::elaborate_type_literals(&mut raw, constants::U32)?;
     validate::pre_elaboration_invariants(&raw)?;
     constants::elaborate(&mut raw, constants::U64)?;
     constants::elaborate(&mut raw, constants::U32)?;

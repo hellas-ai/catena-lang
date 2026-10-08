@@ -82,14 +82,14 @@
       {
         ({[ . n__s489] u32} :)
         ({[ . d__s490] u32} :)
-        (({[ . d__s490] ({} type.const.u32.0x00000000)} prop.Greater) |-)
+        (({[ . d__s490] type.const.u32.0x00000000} prop.Greater) |-)
       }
     )
     -> (
       [n__s489 d__s490 . ]
       {
         ({({[ . n__s489] [ . d__s490]} type.stdlib.numeric.ceil_div) u32} :)
-        (({[ . d__s490] ({} type.const.u32.0x00000000)} prop.Greater) |-)
+        (({[ . d__s490] type.const.u32.0x00000000} prop.Greater) |-)
       }
     )
   )
@@ -100,14 +100,14 @@
       {
         ({[ . n__s493] u64} :)
         ({[ . d__s494] u64} :)
-        (({[ . d__s494] ({} type.const.u64.0x0000000000000000)} prop.Greater) |-)
+        (({[ . d__s494] type.const.u64.0x0000000000000000} prop.Greater) |-)
       }
     )
     -> (
       [n__s493 d__s494 . ]
       {
         ({({[ . n__s493] [ . d__s494]} type.stdlib.numeric.ceil_div) u64} :)
-        (({[ . d__s494] ({} type.const.u64.0x0000000000000000)} prop.Greater) |-)
+        (({[ . d__s494] type.const.u64.0x0000000000000000} prop.Greater) |-)
       }
     )
   )
@@ -378,10 +378,6 @@
   (arr stdlib.numeric.sort.size_of : 1 -> 1)
 
   (arr type.Int : 0 -> 1)
-
-  (arr type.const.u32.0x00000000 : 0 -> 1)
-
-  (arr type.const.u64.0x0000000000000000 : 0 -> 1)
 
   (arr type.stdlib.numeric.* : 2 -> 1)
 

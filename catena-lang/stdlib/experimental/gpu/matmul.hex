@@ -863,7 +863,7 @@
                   {
                     (
                       {
-                        ({({} type.const.u64.0x0000000000000000)} stdlib.gpu.memory.type.SlotName)
+                        ({type.const.u64.0x0000000000000000} stdlib.gpu.memory.type.SlotName)
                         ({[ . tile_width__s1203] [ . tile_width__s1203]} type.stdlib.numeric.*)
                         [ . element__s1199]
                       }
@@ -873,10 +873,7 @@
                       {
                         (
                           {
-                            (
-                              {({} type.const.u64.0x0000000000000001)}
-                              stdlib.gpu.memory.type.SlotName
-                            )
+                            ({type.const.u64.0x0000000000000001} stdlib.gpu.memory.type.SlotName)
                             ({[ . tile_width__s1203] [ . tile_width__s1203]} type.stdlib.numeric.*)
                             [ . element__s1199]
                           }
@@ -918,7 +915,7 @@
                   {
                     (
                       {
-                        ({({} type.const.u64.0x0000000000000000)} stdlib.gpu.memory.type.SlotName)
+                        ({type.const.u64.0x0000000000000000} stdlib.gpu.memory.type.SlotName)
                         ({[ . tile_width__s1203] [ . tile_width__s1203]} type.stdlib.numeric.*)
                         [ . element__s1199]
                       }
@@ -928,10 +925,7 @@
                       {
                         (
                           {
-                            (
-                              {({} type.const.u64.0x0000000000000001)}
-                              stdlib.gpu.memory.type.SlotName
-                            )
+                            ({type.const.u64.0x0000000000000001} stdlib.gpu.memory.type.SlotName)
                             ({[ . tile_width__s1203] [ . tile_width__s1203]} type.stdlib.numeric.*)
                             [ . element__s1199]
                           }
@@ -986,7 +980,7 @@
                 {
                   (
                     {
-                      ({({} type.const.u64.0x0000000000000000)} stdlib.gpu.memory.type.SlotName)
+                      ({type.const.u64.0x0000000000000000} stdlib.gpu.memory.type.SlotName)
                       ({[ . tile_width__s1203] [ . tile_width__s1203]} type.stdlib.numeric.*)
                       [ . element__s1199]
                     }
@@ -996,7 +990,7 @@
                     {
                       (
                         {
-                          ({({} type.const.u64.0x0000000000000001)} stdlib.gpu.memory.type.SlotName)
+                          ({type.const.u64.0x0000000000000001} stdlib.gpu.memory.type.SlotName)
                           ({[ . tile_width__s1203] [ . tile_width__s1203]} type.stdlib.numeric.*)
                           [ . element__s1199]
                         }
@@ -1011,7 +1005,7 @@
               )
               [ . shared_memory__s1208]
               [ . block__s1209]
-              ({({} type.const.u64.0x0000000000000000)} stdlib.gpu.memory.type.SlotName)
+              ({type.const.u64.0x0000000000000000} stdlib.gpu.memory.type.SlotName)
               ({[ . tile_width__s1203] [ . tile_width__s1203]} type.stdlib.numeric.*)
               [ . element__s1199]
             }
@@ -1040,7 +1034,7 @@
                 {
                   (
                     {
-                      ({({} type.const.u64.0x0000000000000000)} stdlib.gpu.memory.type.SlotName)
+                      ({type.const.u64.0x0000000000000000} stdlib.gpu.memory.type.SlotName)
                       ({[ . tile_width__s1203] [ . tile_width__s1203]} type.stdlib.numeric.*)
                       [ . element__s1199]
                     }
@@ -1050,7 +1044,7 @@
                     {
                       (
                         {
-                          ({({} type.const.u64.0x0000000000000001)} stdlib.gpu.memory.type.SlotName)
+                          ({type.const.u64.0x0000000000000001} stdlib.gpu.memory.type.SlotName)
                           ({[ . tile_width__s1203] [ . tile_width__s1203]} type.stdlib.numeric.*)
                           [ . element__s1199]
                         }
@@ -1065,7 +1059,7 @@
               )
               [ . shared_memory__s1208]
               [ . block__s1209]
-              ({({} type.const.u64.0x0000000000000000)} stdlib.gpu.memory.type.SlotName)
+              ({type.const.u64.0x0000000000000000} stdlib.gpu.memory.type.SlotName)
               ({[ . tile_width__s1203] [ . tile_width__s1203]} type.stdlib.numeric.*)
               [ . element__s1199]
             }
@@ -1263,7 +1257,7 @@
     : (
       [block__s1209 columns__s1202 element__s1199 grid__s1204 rows__s1200 shared_memory__s1208 tile_width__s1203 . ]
       {
-        (({({} type.const.u64.0x0000000000000000)} stdlib.gpu.memory.type.SlotName) val)
+        (({type.const.u64.0x0000000000000000} stdlib.gpu.memory.type.SlotName) val)
         (
           {
             [ . shared_memory__s1208]
@@ -1282,7 +1276,7 @@
                   {
                     (
                       {
-                        ({({} type.const.u64.0x0000000000000000)} stdlib.gpu.memory.type.SlotName)
+                        ({type.const.u64.0x0000000000000000} stdlib.gpu.memory.type.SlotName)
                         ({[ . tile_width__s1203] [ . tile_width__s1203]} type.stdlib.numeric.*)
                         [ . element__s1199]
                       }
@@ -1292,10 +1286,7 @@
                       {
                         (
                           {
-                            (
-                              {({} type.const.u64.0x0000000000000001)}
-                              stdlib.gpu.memory.type.SlotName
-                            )
+                            ({type.const.u64.0x0000000000000001} stdlib.gpu.memory.type.SlotName)
                             ({[ . tile_width__s1203] [ . tile_width__s1203]} type.stdlib.numeric.*)
                             [ . element__s1199]
                           }
@@ -1340,7 +1331,7 @@
     -> (
       [block__s1209 columns__s1202 element__s1199 grid__s1204 rows__s1200 shared_memory__s1208 tile_width__s1203 . ]
       {
-        (({({} type.const.u64.0x0000000000000000)} stdlib.gpu.memory.type.SlotName) val)
+        (({type.const.u64.0x0000000000000000} stdlib.gpu.memory.type.SlotName) val)
         (
           {
             [ . shared_memory__s1208]
@@ -1359,7 +1350,7 @@
                   {
                     (
                       {
-                        ({({} type.const.u64.0x0000000000000000)} stdlib.gpu.memory.type.SlotName)
+                        ({type.const.u64.0x0000000000000000} stdlib.gpu.memory.type.SlotName)
                         ({[ . tile_width__s1203] [ . tile_width__s1203]} type.stdlib.numeric.*)
                         [ . element__s1199]
                       }
@@ -1369,10 +1360,7 @@
                       {
                         (
                           {
-                            (
-                              {({} type.const.u64.0x0000000000000001)}
-                              stdlib.gpu.memory.type.SlotName
-                            )
+                            ({type.const.u64.0x0000000000000001} stdlib.gpu.memory.type.SlotName)
                             ({[ . tile_width__s1203] [ . tile_width__s1203]} type.stdlib.numeric.*)
                             [ . element__s1199]
                           }
@@ -1425,7 +1413,7 @@
           {
             (
               {
-                ({({} type.const.u64.0x0000000000000000)} stdlib.gpu.memory.type.SlotName)
+                ({type.const.u64.0x0000000000000000} stdlib.gpu.memory.type.SlotName)
                 ({[ . tile_width__s1203] [ . tile_width__s1203]} type.stdlib.numeric.*)
                 [ . element__s1199]
               }
@@ -1435,7 +1423,7 @@
               {
                 (
                   {
-                    ({({} type.const.u64.0x0000000000000001)} stdlib.gpu.memory.type.SlotName)
+                    ({type.const.u64.0x0000000000000001} stdlib.gpu.memory.type.SlotName)
                     ({[ . tile_width__s1203] [ . tile_width__s1203]} type.stdlib.numeric.*)
                     [ . element__s1199]
                   }
@@ -1448,7 +1436,7 @@
           }
           list.Cons
         )
-        ({} type.const.u64.0x0000000000000000)
+        type.const.u64.0x0000000000000000
         [ . element__s1199]
         [ . shared_memory__s1208]
         [ . block__s1209]
@@ -1461,7 +1449,7 @@
     : (
       [block__s1209 columns__s1202 element__s1199 grid__s1204 rows__s1200 shared_memory__s1208 tile_width__s1203 . ]
       {
-        (({({} type.const.u64.0x0000000000000001)} stdlib.gpu.memory.type.SlotName) val)
+        (({type.const.u64.0x0000000000000001} stdlib.gpu.memory.type.SlotName) val)
         (
           {
             [ . shared_memory__s1208]
@@ -1480,7 +1468,7 @@
                   {
                     (
                       {
-                        ({({} type.const.u64.0x0000000000000000)} stdlib.gpu.memory.type.SlotName)
+                        ({type.const.u64.0x0000000000000000} stdlib.gpu.memory.type.SlotName)
                         ({[ . tile_width__s1203] [ . tile_width__s1203]} type.stdlib.numeric.*)
                         [ . element__s1199]
                       }
@@ -1490,10 +1478,7 @@
                       {
                         (
                           {
-                            (
-                              {({} type.const.u64.0x0000000000000001)}
-                              stdlib.gpu.memory.type.SlotName
-                            )
+                            ({type.const.u64.0x0000000000000001} stdlib.gpu.memory.type.SlotName)
                             ({[ . tile_width__s1203] [ . tile_width__s1203]} type.stdlib.numeric.*)
                             [ . element__s1199]
                           }
@@ -1538,7 +1523,7 @@
     -> (
       [block__s1209 columns__s1202 element__s1199 grid__s1204 rows__s1200 shared_memory__s1208 tile_width__s1203 . ]
       {
-        (({({} type.const.u64.0x0000000000000001)} stdlib.gpu.memory.type.SlotName) val)
+        (({type.const.u64.0x0000000000000001} stdlib.gpu.memory.type.SlotName) val)
         (
           {
             [ . shared_memory__s1208]
@@ -1557,7 +1542,7 @@
                   {
                     (
                       {
-                        ({({} type.const.u64.0x0000000000000000)} stdlib.gpu.memory.type.SlotName)
+                        ({type.const.u64.0x0000000000000000} stdlib.gpu.memory.type.SlotName)
                         ({[ . tile_width__s1203] [ . tile_width__s1203]} type.stdlib.numeric.*)
                         [ . element__s1199]
                       }
@@ -1567,10 +1552,7 @@
                       {
                         (
                           {
-                            (
-                              {({} type.const.u64.0x0000000000000001)}
-                              stdlib.gpu.memory.type.SlotName
-                            )
+                            ({type.const.u64.0x0000000000000001} stdlib.gpu.memory.type.SlotName)
                             ({[ . tile_width__s1203] [ . tile_width__s1203]} type.stdlib.numeric.*)
                             [ . element__s1199]
                           }
@@ -1623,7 +1605,7 @@
           {
             (
               {
-                ({({} type.const.u64.0x0000000000000000)} stdlib.gpu.memory.type.SlotName)
+                ({type.const.u64.0x0000000000000000} stdlib.gpu.memory.type.SlotName)
                 ({[ . tile_width__s1203] [ . tile_width__s1203]} type.stdlib.numeric.*)
                 [ . element__s1199]
               }
@@ -1633,7 +1615,7 @@
               {
                 (
                   {
-                    ({({} type.const.u64.0x0000000000000001)} stdlib.gpu.memory.type.SlotName)
+                    ({type.const.u64.0x0000000000000001} stdlib.gpu.memory.type.SlotName)
                     ({[ . tile_width__s1203] [ . tile_width__s1203]} type.stdlib.numeric.*)
                     [ . element__s1199]
                   }
@@ -1646,7 +1628,7 @@
           }
           list.Cons
         )
-        ({} type.const.u64.0x0000000000000001)
+        type.const.u64.0x0000000000000001
         [ . element__s1199]
         [ . shared_memory__s1208]
         [ . block__s1209]
@@ -1766,27 +1748,21 @@
                               (
                                 {
                                   (
-                                    {[ . rows__s1129] ({} type.const.u64.0x0000000000000000)}
+                                    {[ . rows__s1129] type.const.u64.0x0000000000000000}
                                     prop.Greater
                                   )
                                   (
-                                    {[ . inner__s1130] ({} type.const.u64.0x0000000000000000)}
+                                    {[ . inner__s1130] type.const.u64.0x0000000000000000}
                                     prop.Greater
                                   )
                                 }
                                 prop.And
                               )
-                              (
-                                {[ . columns__s1131] ({} type.const.u64.0x0000000000000000)}
-                                prop.Greater
-                              )
+                              ({[ . columns__s1131] type.const.u64.0x0000000000000000} prop.Greater)
                             }
                             prop.And
                           )
-                          (
-                            {[ . block_width__s1132] ({} type.const.u64.0x0000000000000000)}
-                            prop.Greater
-                          )
+                          ({[ . block_width__s1132] type.const.u64.0x0000000000000000} prop.Greater)
                         }
                         prop.And
                       )
@@ -2165,28 +2141,16 @@
                         {
                           (
                             {
-                              (
-                                {[ . rows__s1129] ({} type.const.u64.0x0000000000000000)}
-                                prop.Greater
-                              )
-                              (
-                                {[ . inner__s1130] ({} type.const.u64.0x0000000000000000)}
-                                prop.Greater
-                              )
+                              ({[ . rows__s1129] type.const.u64.0x0000000000000000} prop.Greater)
+                              ({[ . inner__s1130] type.const.u64.0x0000000000000000} prop.Greater)
                             }
                             prop.And
                           )
-                          (
-                            {[ . columns__s1131] ({} type.const.u64.0x0000000000000000)}
-                            prop.Greater
-                          )
+                          ({[ . columns__s1131] type.const.u64.0x0000000000000000} prop.Greater)
                         }
                         prop.And
                       )
-                      (
-                        {[ . block_width__s1132] ({} type.const.u64.0x0000000000000000)}
-                        prop.Greater
-                      )
+                      ({[ . block_width__s1132] type.const.u64.0x0000000000000000} prop.Greater)
                     }
                     prop.And
                   )
@@ -4223,8 +4187,8 @@
     : (
       [element__s1216 tile_width__s1220 . ]
       {
-        (({({} type.const.u64.0x0000000000000000)} stdlib.gpu.memory.type.SlotName) val)
-        (({({} type.const.u64.0x0000000000000001)} stdlib.gpu.memory.type.SlotName) val)
+        (({type.const.u64.0x0000000000000000} stdlib.gpu.memory.type.SlotName) val)
+        (({type.const.u64.0x0000000000000001} stdlib.gpu.memory.type.SlotName) val)
         ({({[ . element__s1216]} stdlib.numeric.sort.size_of) u32} :)
         ({[ . tile_width__s1220] u64} :)
         (({[ . element__s1216]} stdlib.numeric.prop.Numeric) |-)
@@ -4240,7 +4204,7 @@
                 {
                   (
                     {
-                      ({({} type.const.u64.0x0000000000000000)} stdlib.gpu.memory.type.SlotName)
+                      ({type.const.u64.0x0000000000000000} stdlib.gpu.memory.type.SlotName)
                       ({[ . tile_width__s1220] [ . tile_width__s1220]} type.stdlib.numeric.*)
                       [ . element__s1216]
                     }
@@ -4250,7 +4214,7 @@
                     {
                       (
                         {
-                          ({({} type.const.u64.0x0000000000000001)} stdlib.gpu.memory.type.SlotName)
+                          ({type.const.u64.0x0000000000000001} stdlib.gpu.memory.type.SlotName)
                           ({[ . tile_width__s1220] [ . tile_width__s1220]} type.stdlib.numeric.*)
                           [ . element__s1216]
                         }
@@ -4366,7 +4330,7 @@
                   {
                     (
                       {
-                        ({({} type.const.u64.0x0000000000000000)} stdlib.gpu.memory.type.SlotName)
+                        ({type.const.u64.0x0000000000000000} stdlib.gpu.memory.type.SlotName)
                         ({[ . tile_width__s1203] [ . tile_width__s1203]} type.stdlib.numeric.*)
                         [ . element__s1199]
                       }
@@ -4376,10 +4340,7 @@
                       {
                         (
                           {
-                            (
-                              {({} type.const.u64.0x0000000000000001)}
-                              stdlib.gpu.memory.type.SlotName
-                            )
+                            ({type.const.u64.0x0000000000000001} stdlib.gpu.memory.type.SlotName)
                             ({[ . tile_width__s1203] [ . tile_width__s1203]} type.stdlib.numeric.*)
                             [ . element__s1199]
                           }
@@ -4493,7 +4454,7 @@
                                           (
                                             {
                                               (
-                                                {({} type.const.u64.0x0000000000000000)}
+                                                {type.const.u64.0x0000000000000000}
                                                 stdlib.gpu.memory.type.SlotName
                                               )
                                               (
@@ -4509,7 +4470,7 @@
                                               (
                                                 {
                                                   (
-                                                    {({} type.const.u64.0x0000000000000001)}
+                                                    {type.const.u64.0x0000000000000001}
                                                     stdlib.gpu.memory.type.SlotName
                                                   )
                                                   (
@@ -4667,7 +4628,7 @@
                                           (
                                             {
                                               (
-                                                {({} type.const.u64.0x0000000000000000)}
+                                                {type.const.u64.0x0000000000000000}
                                                 stdlib.gpu.memory.type.SlotName
                                               )
                                               (
@@ -4683,7 +4644,7 @@
                                               (
                                                 {
                                                   (
-                                                    {({} type.const.u64.0x0000000000000001)}
+                                                    {type.const.u64.0x0000000000000001}
                                                     stdlib.gpu.memory.type.SlotName
                                                   )
                                                   (
@@ -4708,7 +4669,7 @@
                                       [ . shared_memory__s1208]
                                       [ . block__s1209]
                                       (
-                                        {({} type.const.u64.0x0000000000000000)}
+                                        {type.const.u64.0x0000000000000000}
                                         stdlib.gpu.memory.type.SlotName
                                       )
                                       (
@@ -4851,7 +4812,7 @@
                                       (
                                         {
                                           (
-                                            {({} type.const.u64.0x0000000000000000)}
+                                            {type.const.u64.0x0000000000000000}
                                             stdlib.gpu.memory.type.SlotName
                                           )
                                           (
@@ -4867,7 +4828,7 @@
                                           (
                                             {
                                               (
-                                                {({} type.const.u64.0x0000000000000001)}
+                                                {type.const.u64.0x0000000000000001}
                                                 stdlib.gpu.memory.type.SlotName
                                               )
                                               (
@@ -4892,7 +4853,7 @@
                                   [ . shared_memory__s1208]
                                   [ . block__s1209]
                                   (
-                                    {({} type.const.u64.0x0000000000000001)}
+                                    {type.const.u64.0x0000000000000001}
                                     stdlib.gpu.memory.type.SlotName
                                   )
                                   (
@@ -5028,7 +4989,7 @@
                                           (
                                             {
                                               (
-                                                {({} type.const.u64.0x0000000000000000)}
+                                                {type.const.u64.0x0000000000000000}
                                                 stdlib.gpu.memory.type.SlotName
                                               )
                                               (
@@ -5044,7 +5005,7 @@
                                               (
                                                 {
                                                   (
-                                                    {({} type.const.u64.0x0000000000000001)}
+                                                    {type.const.u64.0x0000000000000001}
                                                     stdlib.gpu.memory.type.SlotName
                                                   )
                                                   (
@@ -5094,7 +5055,7 @@
                                           (
                                             {
                                               (
-                                                {({} type.const.u64.0x0000000000000000)}
+                                                {type.const.u64.0x0000000000000000}
                                                 stdlib.gpu.memory.type.SlotName
                                               )
                                               (
@@ -5110,7 +5071,7 @@
                                               (
                                                 {
                                                   (
-                                                    {({} type.const.u64.0x0000000000000001)}
+                                                    {type.const.u64.0x0000000000000001}
                                                     stdlib.gpu.memory.type.SlotName
                                                   )
                                                   (
@@ -5131,7 +5092,7 @@
                                       [ . shared_memory__s1208]
                                       [ . block__s1209]
                                       (
-                                        {({} type.const.u64.0x0000000000000000)}
+                                        {type.const.u64.0x0000000000000000}
                                         stdlib.gpu.memory.type.SlotName
                                       )
                                       stdlib.gpu.memory.sort.All
@@ -5166,7 +5127,7 @@
                                       (
                                         {
                                           (
-                                            {({} type.const.u64.0x0000000000000000)}
+                                            {type.const.u64.0x0000000000000000}
                                             stdlib.gpu.memory.type.SlotName
                                           )
                                           (
@@ -5182,7 +5143,7 @@
                                           (
                                             {
                                               (
-                                                {({} type.const.u64.0x0000000000000001)}
+                                                {type.const.u64.0x0000000000000001}
                                                 stdlib.gpu.memory.type.SlotName
                                               )
                                               (
@@ -5203,7 +5164,7 @@
                                   [ . shared_memory__s1208]
                                   [ . block__s1209]
                                   (
-                                    {({} type.const.u64.0x0000000000000001)}
+                                    {type.const.u64.0x0000000000000001}
                                     stdlib.gpu.memory.type.SlotName
                                   )
                                   stdlib.gpu.memory.sort.All
@@ -5250,7 +5211,7 @@
                                               (
                                                 {
                                                   (
-                                                    {({} type.const.u64.0x0000000000000000)}
+                                                    {type.const.u64.0x0000000000000000}
                                                     stdlib.gpu.memory.type.SlotName
                                                   )
                                                   (
@@ -5266,7 +5227,7 @@
                                                   (
                                                     {
                                                       (
-                                                        {({} type.const.u64.0x0000000000000001)}
+                                                        {type.const.u64.0x0000000000000001}
                                                         stdlib.gpu.memory.type.SlotName
                                                       )
                                                       (
@@ -5319,7 +5280,7 @@
                                               (
                                                 {
                                                   (
-                                                    {({} type.const.u64.0x0000000000000000)}
+                                                    {type.const.u64.0x0000000000000000}
                                                     stdlib.gpu.memory.type.SlotName
                                                   )
                                                   (
@@ -5335,7 +5296,7 @@
                                                   (
                                                     {
                                                       (
-                                                        {({} type.const.u64.0x0000000000000001)}
+                                                        {type.const.u64.0x0000000000000001}
                                                         stdlib.gpu.memory.type.SlotName
                                                       )
                                                       (
@@ -5359,7 +5320,7 @@
                                           [ . shared_memory__s1208]
                                           [ . block__s1209]
                                           (
-                                            {({} type.const.u64.0x0000000000000000)}
+                                            {type.const.u64.0x0000000000000000}
                                             stdlib.gpu.memory.type.SlotName
                                           )
                                           stdlib.gpu.memory.sort.All
@@ -5394,7 +5355,7 @@
                                           (
                                             {
                                               (
-                                                {({} type.const.u64.0x0000000000000000)}
+                                                {type.const.u64.0x0000000000000000}
                                                 stdlib.gpu.memory.type.SlotName
                                               )
                                               (
@@ -5410,7 +5371,7 @@
                                               (
                                                 {
                                                   (
-                                                    {({} type.const.u64.0x0000000000000001)}
+                                                    {type.const.u64.0x0000000000000001}
                                                     stdlib.gpu.memory.type.SlotName
                                                   )
                                                   (
@@ -5431,7 +5392,7 @@
                                       [ . shared_memory__s1208]
                                       [ . block__s1209]
                                       (
-                                        {({} type.const.u64.0x0000000000000001)}
+                                        {type.const.u64.0x0000000000000001}
                                         stdlib.gpu.memory.type.SlotName
                                       )
                                       stdlib.gpu.memory.sort.All
@@ -5471,7 +5432,7 @@
                                       (
                                         {
                                           (
-                                            {({} type.const.u64.0x0000000000000000)}
+                                            {type.const.u64.0x0000000000000000}
                                             stdlib.gpu.memory.type.SlotName
                                           )
                                           (
@@ -5487,7 +5448,7 @@
                                           (
                                             {
                                               (
-                                                {({} type.const.u64.0x0000000000000001)}
+                                                {type.const.u64.0x0000000000000001}
                                                 stdlib.gpu.memory.type.SlotName
                                               )
                                               (
@@ -5643,25 +5604,25 @@
                                   (
                                     {
                                       (
-                                        {[ . rows__s1200] ({} type.const.u64.0x0000000000000000)}
+                                        {[ . rows__s1200] type.const.u64.0x0000000000000000}
                                         prop.Greater
                                       )
                                       (
-                                        {[ . inner__s1201] ({} type.const.u64.0x0000000000000000)}
+                                        {[ . inner__s1201] type.const.u64.0x0000000000000000}
                                         prop.Greater
                                       )
                                     }
                                     prop.And
                                   )
                                   (
-                                    {[ . columns__s1202] ({} type.const.u64.0x0000000000000000)}
+                                    {[ . columns__s1202] type.const.u64.0x0000000000000000}
                                     prop.Greater
                                   )
                                 }
                                 prop.And
                               )
                               (
-                                {[ . tile_width__s1203] ({} type.const.u64.0x0000000000000000)}
+                                {[ . tile_width__s1203] type.const.u64.0x0000000000000000}
                                 prop.Greater
                               )
                             }
@@ -6026,7 +5987,7 @@
                     {
                       (
                         {
-                          ({({} type.const.u64.0x0000000000000000)} stdlib.gpu.memory.type.SlotName)
+                          ({type.const.u64.0x0000000000000000} stdlib.gpu.memory.type.SlotName)
                           ({[ . tile_width__s1203] [ . tile_width__s1203]} type.stdlib.numeric.*)
                           [ . element__s1199]
                         }
@@ -6036,10 +5997,7 @@
                         {
                           (
                             {
-                              (
-                                {({} type.const.u64.0x0000000000000001)}
-                                stdlib.gpu.memory.type.SlotName
-                              )
+                              ({type.const.u64.0x0000000000000001} stdlib.gpu.memory.type.SlotName)
                               (
                                 {[ . tile_width__s1203] [ . tile_width__s1203]}
                                 type.stdlib.numeric.*
@@ -6191,27 +6149,21 @@
                               (
                                 {
                                   (
-                                    {[ . rows__s1200] ({} type.const.u64.0x0000000000000000)}
+                                    {[ . rows__s1200] type.const.u64.0x0000000000000000}
                                     prop.Greater
                                   )
                                   (
-                                    {[ . inner__s1201] ({} type.const.u64.0x0000000000000000)}
+                                    {[ . inner__s1201] type.const.u64.0x0000000000000000}
                                     prop.Greater
                                   )
                                 }
                                 prop.And
                               )
-                              (
-                                {[ . columns__s1202] ({} type.const.u64.0x0000000000000000)}
-                                prop.Greater
-                              )
+                              ({[ . columns__s1202] type.const.u64.0x0000000000000000} prop.Greater)
                             }
                             prop.And
                           )
-                          (
-                            {[ . tile_width__s1203] ({} type.const.u64.0x0000000000000000)}
-                            prop.Greater
-                          )
+                          ({[ . tile_width__s1203] type.const.u64.0x0000000000000000} prop.Greater)
                         }
                         prop.And
                       )
@@ -6290,7 +6242,7 @@
                     {
                       (
                         {
-                          ({({} type.const.u64.0x0000000000000000)} stdlib.gpu.memory.type.SlotName)
+                          ({type.const.u64.0x0000000000000000} stdlib.gpu.memory.type.SlotName)
                           ({[ . tile_width__s1203] [ . tile_width__s1203]} type.stdlib.numeric.*)
                           [ . element__s1199]
                         }
@@ -6300,10 +6252,7 @@
                         {
                           (
                             {
-                              (
-                                {({} type.const.u64.0x0000000000000001)}
-                                stdlib.gpu.memory.type.SlotName
-                              )
+                              ({type.const.u64.0x0000000000000001} stdlib.gpu.memory.type.SlotName)
                               (
                                 {[ . tile_width__s1203] [ . tile_width__s1203]}
                                 type.stdlib.numeric.*
@@ -7095,7 +7044,7 @@
                 {
                   (
                     {
-                      ({({} type.const.u64.0x0000000000000000)} stdlib.gpu.memory.type.SlotName)
+                      ({type.const.u64.0x0000000000000000} stdlib.gpu.memory.type.SlotName)
                       ({[ . tile_width__s1203] [ . tile_width__s1203]} type.stdlib.numeric.*)
                       [ . element__s1199]
                     }
@@ -7105,7 +7054,7 @@
                     {
                       (
                         {
-                          ({({} type.const.u64.0x0000000000000001)} stdlib.gpu.memory.type.SlotName)
+                          ({type.const.u64.0x0000000000000001} stdlib.gpu.memory.type.SlotName)
                           ({[ . tile_width__s1203] [ . tile_width__s1203]} type.stdlib.numeric.*)
                           [ . element__s1199]
                         }
@@ -7120,7 +7069,7 @@
               )
               [ . shared_memory__s1208]
               [ . block__s1209]
-              ({({} type.const.u64.0x0000000000000000)} stdlib.gpu.memory.type.SlotName)
+              ({type.const.u64.0x0000000000000000} stdlib.gpu.memory.type.SlotName)
               ({[ . tile_width__s1203] [ . tile_width__s1203]} type.stdlib.numeric.*)
               [ . element__s1199]
             }
@@ -7144,7 +7093,7 @@
                 {
                   (
                     {
-                      ({({} type.const.u64.0x0000000000000000)} stdlib.gpu.memory.type.SlotName)
+                      ({type.const.u64.0x0000000000000000} stdlib.gpu.memory.type.SlotName)
                       ({[ . tile_width__s1203] [ . tile_width__s1203]} type.stdlib.numeric.*)
                       [ . element__s1199]
                     }
@@ -7154,7 +7103,7 @@
                     {
                       (
                         {
-                          ({({} type.const.u64.0x0000000000000001)} stdlib.gpu.memory.type.SlotName)
+                          ({type.const.u64.0x0000000000000001} stdlib.gpu.memory.type.SlotName)
                           ({[ . tile_width__s1203] [ . tile_width__s1203]} type.stdlib.numeric.*)
                           [ . element__s1199]
                         }
@@ -7169,7 +7118,7 @@
               )
               [ . shared_memory__s1208]
               [ . block__s1209]
-              ({({} type.const.u64.0x0000000000000001)} stdlib.gpu.memory.type.SlotName)
+              ({type.const.u64.0x0000000000000001} stdlib.gpu.memory.type.SlotName)
               ({[ . tile_width__s1203] [ . tile_width__s1203]} type.stdlib.numeric.*)
               [ . element__s1199]
             }
@@ -7358,7 +7307,7 @@
                     {
                       (
                         {
-                          ({({} type.const.u64.0x0000000000000000)} stdlib.gpu.memory.type.SlotName)
+                          ({type.const.u64.0x0000000000000000} stdlib.gpu.memory.type.SlotName)
                           ({[ . tile_width__s1203] [ . tile_width__s1203]} type.stdlib.numeric.*)
                           [ . element__s1199]
                         }
@@ -7368,10 +7317,7 @@
                         {
                           (
                             {
-                              (
-                                {({} type.const.u64.0x0000000000000001)}
-                                stdlib.gpu.memory.type.SlotName
-                              )
+                              ({type.const.u64.0x0000000000000001} stdlib.gpu.memory.type.SlotName)
                               (
                                 {[ . tile_width__s1203] [ . tile_width__s1203]}
                                 type.stdlib.numeric.*
@@ -7534,7 +7480,7 @@
                                       (
                                         {
                                           (
-                                            {({} type.const.u64.0x0000000000000000)}
+                                            {type.const.u64.0x0000000000000000}
                                             stdlib.gpu.memory.type.SlotName
                                           )
                                           (
@@ -7550,7 +7496,7 @@
                                           (
                                             {
                                               (
-                                                {({} type.const.u64.0x0000000000000001)}
+                                                {type.const.u64.0x0000000000000001}
                                                 stdlib.gpu.memory.type.SlotName
                                               )
                                               (
@@ -7696,7 +7642,7 @@
                                       (
                                         {
                                           (
-                                            {({} type.const.u64.0x0000000000000000)}
+                                            {type.const.u64.0x0000000000000000}
                                             stdlib.gpu.memory.type.SlotName
                                           )
                                           (
@@ -7712,7 +7658,7 @@
                                           (
                                             {
                                               (
-                                                {({} type.const.u64.0x0000000000000001)}
+                                                {type.const.u64.0x0000000000000001}
                                                 stdlib.gpu.memory.type.SlotName
                                               )
                                               (
@@ -7737,7 +7683,7 @@
                                   [ . shared_memory__s1208]
                                   [ . block__s1209]
                                   (
-                                    {({} type.const.u64.0x0000000000000000)}
+                                    {type.const.u64.0x0000000000000000}
                                     stdlib.gpu.memory.type.SlotName
                                   )
                                   (
@@ -7868,7 +7814,7 @@
                                   (
                                     {
                                       (
-                                        {({} type.const.u64.0x0000000000000000)}
+                                        {type.const.u64.0x0000000000000000}
                                         stdlib.gpu.memory.type.SlotName
                                       )
                                       (
@@ -7884,7 +7830,7 @@
                                       (
                                         {
                                           (
-                                            {({} type.const.u64.0x0000000000000001)}
+                                            {type.const.u64.0x0000000000000001}
                                             stdlib.gpu.memory.type.SlotName
                                           )
                                           (
@@ -7908,10 +7854,7 @@
                               )
                               [ . shared_memory__s1208]
                               [ . block__s1209]
-                              (
-                                {({} type.const.u64.0x0000000000000001)}
-                                stdlib.gpu.memory.type.SlotName
-                              )
+                              ({type.const.u64.0x0000000000000001} stdlib.gpu.memory.type.SlotName)
                               (
                                 {
                                   (
@@ -8036,7 +7979,7 @@
                                       (
                                         {
                                           (
-                                            {({} type.const.u64.0x0000000000000000)}
+                                            {type.const.u64.0x0000000000000000}
                                             stdlib.gpu.memory.type.SlotName
                                           )
                                           (
@@ -8052,7 +7995,7 @@
                                           (
                                             {
                                               (
-                                                {({} type.const.u64.0x0000000000000001)}
+                                                {type.const.u64.0x0000000000000001}
                                                 stdlib.gpu.memory.type.SlotName
                                               )
                                               (
@@ -8102,7 +8045,7 @@
                                       (
                                         {
                                           (
-                                            {({} type.const.u64.0x0000000000000000)}
+                                            {type.const.u64.0x0000000000000000}
                                             stdlib.gpu.memory.type.SlotName
                                           )
                                           (
@@ -8118,7 +8061,7 @@
                                           (
                                             {
                                               (
-                                                {({} type.const.u64.0x0000000000000001)}
+                                                {type.const.u64.0x0000000000000001}
                                                 stdlib.gpu.memory.type.SlotName
                                               )
                                               (
@@ -8139,7 +8082,7 @@
                                   [ . shared_memory__s1208]
                                   [ . block__s1209]
                                   (
-                                    {({} type.const.u64.0x0000000000000000)}
+                                    {type.const.u64.0x0000000000000000}
                                     stdlib.gpu.memory.type.SlotName
                                   )
                                   stdlib.gpu.memory.sort.All
@@ -8174,7 +8117,7 @@
                                   (
                                     {
                                       (
-                                        {({} type.const.u64.0x0000000000000000)}
+                                        {type.const.u64.0x0000000000000000}
                                         stdlib.gpu.memory.type.SlotName
                                       )
                                       (
@@ -8190,7 +8133,7 @@
                                       (
                                         {
                                           (
-                                            {({} type.const.u64.0x0000000000000001)}
+                                            {type.const.u64.0x0000000000000001}
                                             stdlib.gpu.memory.type.SlotName
                                           )
                                           (
@@ -8210,10 +8153,7 @@
                               )
                               [ . shared_memory__s1208]
                               [ . block__s1209]
-                              (
-                                {({} type.const.u64.0x0000000000000001)}
-                                stdlib.gpu.memory.type.SlotName
-                              )
+                              ({type.const.u64.0x0000000000000001} stdlib.gpu.memory.type.SlotName)
                               stdlib.gpu.memory.sort.All
                             }
                             stdlib.gpu.memory.prop.Defined
@@ -8258,7 +8198,7 @@
                                           (
                                             {
                                               (
-                                                {({} type.const.u64.0x0000000000000000)}
+                                                {type.const.u64.0x0000000000000000}
                                                 stdlib.gpu.memory.type.SlotName
                                               )
                                               (
@@ -8274,7 +8214,7 @@
                                               (
                                                 {
                                                   (
-                                                    {({} type.const.u64.0x0000000000000001)}
+                                                    {type.const.u64.0x0000000000000001}
                                                     stdlib.gpu.memory.type.SlotName
                                                   )
                                                   (
@@ -8324,7 +8264,7 @@
                                           (
                                             {
                                               (
-                                                {({} type.const.u64.0x0000000000000000)}
+                                                {type.const.u64.0x0000000000000000}
                                                 stdlib.gpu.memory.type.SlotName
                                               )
                                               (
@@ -8340,7 +8280,7 @@
                                               (
                                                 {
                                                   (
-                                                    {({} type.const.u64.0x0000000000000001)}
+                                                    {type.const.u64.0x0000000000000001}
                                                     stdlib.gpu.memory.type.SlotName
                                                   )
                                                   (
@@ -8361,7 +8301,7 @@
                                       [ . shared_memory__s1208]
                                       [ . block__s1209]
                                       (
-                                        {({} type.const.u64.0x0000000000000000)}
+                                        {type.const.u64.0x0000000000000000}
                                         stdlib.gpu.memory.type.SlotName
                                       )
                                       stdlib.gpu.memory.sort.All
@@ -8396,7 +8336,7 @@
                                       (
                                         {
                                           (
-                                            {({} type.const.u64.0x0000000000000000)}
+                                            {type.const.u64.0x0000000000000000}
                                             stdlib.gpu.memory.type.SlotName
                                           )
                                           (
@@ -8412,7 +8352,7 @@
                                           (
                                             {
                                               (
-                                                {({} type.const.u64.0x0000000000000001)}
+                                                {type.const.u64.0x0000000000000001}
                                                 stdlib.gpu.memory.type.SlotName
                                               )
                                               (
@@ -8433,7 +8373,7 @@
                                   [ . shared_memory__s1208]
                                   [ . block__s1209]
                                   (
-                                    {({} type.const.u64.0x0000000000000001)}
+                                    {type.const.u64.0x0000000000000001}
                                     stdlib.gpu.memory.type.SlotName
                                   )
                                   stdlib.gpu.memory.sort.All
@@ -8473,7 +8413,7 @@
                                   (
                                     {
                                       (
-                                        {({} type.const.u64.0x0000000000000000)}
+                                        {type.const.u64.0x0000000000000000}
                                         stdlib.gpu.memory.type.SlotName
                                       )
                                       (
@@ -8489,7 +8429,7 @@
                                       (
                                         {
                                           (
-                                            {({} type.const.u64.0x0000000000000001)}
+                                            {type.const.u64.0x0000000000000001}
                                             stdlib.gpu.memory.type.SlotName
                                           )
                                           (
@@ -8789,7 +8729,7 @@
                     {
                       (
                         {
-                          ({({} type.const.u64.0x0000000000000000)} stdlib.gpu.memory.type.SlotName)
+                          ({type.const.u64.0x0000000000000000} stdlib.gpu.memory.type.SlotName)
                           ({[ . tile_width__s1203] [ . tile_width__s1203]} type.stdlib.numeric.*)
                           [ . element__s1199]
                         }
@@ -8799,10 +8739,7 @@
                         {
                           (
                             {
-                              (
-                                {({} type.const.u64.0x0000000000000001)}
-                                stdlib.gpu.memory.type.SlotName
-                              )
+                              ({type.const.u64.0x0000000000000001} stdlib.gpu.memory.type.SlotName)
                               (
                                 {[ . tile_width__s1203] [ . tile_width__s1203]}
                                 type.stdlib.numeric.*
@@ -9421,7 +9358,7 @@
                 {
                   (
                     {
-                      ({({} type.const.u64.0x0000000000000000)} stdlib.gpu.memory.type.SlotName)
+                      ({type.const.u64.0x0000000000000000} stdlib.gpu.memory.type.SlotName)
                       ({[ . tile_width__s1203] [ . tile_width__s1203]} type.stdlib.numeric.*)
                       [ . element__s1199]
                     }
@@ -9431,7 +9368,7 @@
                     {
                       (
                         {
-                          ({({} type.const.u64.0x0000000000000001)} stdlib.gpu.memory.type.SlotName)
+                          ({type.const.u64.0x0000000000000001} stdlib.gpu.memory.type.SlotName)
                           ({[ . tile_width__s1203] [ . tile_width__s1203]} type.stdlib.numeric.*)
                           [ . element__s1199]
                         }
@@ -9446,7 +9383,7 @@
               )
               [ . shared_memory__s1208]
               [ . block__s1209]
-              ({({} type.const.u64.0x0000000000000000)} stdlib.gpu.memory.type.SlotName)
+              ({type.const.u64.0x0000000000000000} stdlib.gpu.memory.type.SlotName)
               ({[ . tile_width__s1203] [ . tile_width__s1203]} type.stdlib.numeric.*)
               [ . element__s1199]
             }
@@ -9470,7 +9407,7 @@
                 {
                   (
                     {
-                      ({({} type.const.u64.0x0000000000000000)} stdlib.gpu.memory.type.SlotName)
+                      ({type.const.u64.0x0000000000000000} stdlib.gpu.memory.type.SlotName)
                       ({[ . tile_width__s1203] [ . tile_width__s1203]} type.stdlib.numeric.*)
                       [ . element__s1199]
                     }
@@ -9480,7 +9417,7 @@
                     {
                       (
                         {
-                          ({({} type.const.u64.0x0000000000000001)} stdlib.gpu.memory.type.SlotName)
+                          ({type.const.u64.0x0000000000000001} stdlib.gpu.memory.type.SlotName)
                           ({[ . tile_width__s1203] [ . tile_width__s1203]} type.stdlib.numeric.*)
                           [ . element__s1199]
                         }
@@ -9495,7 +9432,7 @@
               )
               [ . shared_memory__s1208]
               [ . block__s1209]
-              ({({} type.const.u64.0x0000000000000001)} stdlib.gpu.memory.type.SlotName)
+              ({type.const.u64.0x0000000000000001} stdlib.gpu.memory.type.SlotName)
               ({[ . tile_width__s1203] [ . tile_width__s1203]} type.stdlib.numeric.*)
               [ . element__s1199]
             }
@@ -9626,7 +9563,7 @@
                               (
                                 {
                                   (
-                                    {({} type.const.u64.0x0000000000000000)}
+                                    {type.const.u64.0x0000000000000000}
                                     stdlib.gpu.memory.type.SlotName
                                   )
                                   (
@@ -9642,7 +9579,7 @@
                                   (
                                     {
                                       (
-                                        {({} type.const.u64.0x0000000000000001)}
+                                        {type.const.u64.0x0000000000000001}
                                         stdlib.gpu.memory.type.SlotName
                                       )
                                       (
@@ -9688,10 +9625,7 @@
                         {
                           (
                             {
-                              (
-                                {({} type.const.u64.0x0000000000000000)}
-                                stdlib.gpu.memory.type.SlotName
-                              )
+                              ({type.const.u64.0x0000000000000000} stdlib.gpu.memory.type.SlotName)
                               (
                                 {[ . tile_width__s1203] [ . tile_width__s1203]}
                                 type.stdlib.numeric.*
@@ -9705,7 +9639,7 @@
                               (
                                 {
                                   (
-                                    {({} type.const.u64.0x0000000000000001)}
+                                    {type.const.u64.0x0000000000000001}
                                     stdlib.gpu.memory.type.SlotName
                                   )
                                   (
@@ -9725,7 +9659,7 @@
                       )
                       [ . shared_memory__s1208]
                       [ . block__s1209]
-                      ({({} type.const.u64.0x0000000000000000)} stdlib.gpu.memory.type.SlotName)
+                      ({type.const.u64.0x0000000000000000} stdlib.gpu.memory.type.SlotName)
                       stdlib.gpu.memory.sort.All
                     }
                     stdlib.gpu.memory.prop.Defined
@@ -9748,7 +9682,7 @@
                     {
                       (
                         {
-                          ({({} type.const.u64.0x0000000000000000)} stdlib.gpu.memory.type.SlotName)
+                          ({type.const.u64.0x0000000000000000} stdlib.gpu.memory.type.SlotName)
                           ({[ . tile_width__s1203] [ . tile_width__s1203]} type.stdlib.numeric.*)
                           [ . element__s1199]
                         }
@@ -9758,10 +9692,7 @@
                         {
                           (
                             {
-                              (
-                                {({} type.const.u64.0x0000000000000001)}
-                                stdlib.gpu.memory.type.SlotName
-                              )
+                              ({type.const.u64.0x0000000000000001} stdlib.gpu.memory.type.SlotName)
                               (
                                 {[ . tile_width__s1203] [ . tile_width__s1203]}
                                 type.stdlib.numeric.*
@@ -9779,7 +9710,7 @@
                   )
                   [ . shared_memory__s1208]
                   [ . block__s1209]
-                  ({({} type.const.u64.0x0000000000000001)} stdlib.gpu.memory.type.SlotName)
+                  ({type.const.u64.0x0000000000000001} stdlib.gpu.memory.type.SlotName)
                   stdlib.gpu.memory.sort.All
                 }
                 stdlib.gpu.memory.prop.Defined
@@ -9913,7 +9844,7 @@
                               (
                                 {
                                   (
-                                    {({} type.const.u64.0x0000000000000000)}
+                                    {type.const.u64.0x0000000000000000}
                                     stdlib.gpu.memory.type.SlotName
                                   )
                                   (
@@ -9929,7 +9860,7 @@
                                   (
                                     {
                                       (
-                                        {({} type.const.u64.0x0000000000000001)}
+                                        {type.const.u64.0x0000000000000001}
                                         stdlib.gpu.memory.type.SlotName
                                       )
                                       (
@@ -9975,10 +9906,7 @@
                         {
                           (
                             {
-                              (
-                                {({} type.const.u64.0x0000000000000000)}
-                                stdlib.gpu.memory.type.SlotName
-                              )
+                              ({type.const.u64.0x0000000000000000} stdlib.gpu.memory.type.SlotName)
                               (
                                 {[ . tile_width__s1203] [ . tile_width__s1203]}
                                 type.stdlib.numeric.*
@@ -9992,7 +9920,7 @@
                               (
                                 {
                                   (
-                                    {({} type.const.u64.0x0000000000000001)}
+                                    {type.const.u64.0x0000000000000001}
                                     stdlib.gpu.memory.type.SlotName
                                   )
                                   (
@@ -10012,7 +9940,7 @@
                       )
                       [ . shared_memory__s1208]
                       [ . block__s1209]
-                      ({({} type.const.u64.0x0000000000000000)} stdlib.gpu.memory.type.SlotName)
+                      ({type.const.u64.0x0000000000000000} stdlib.gpu.memory.type.SlotName)
                       stdlib.gpu.memory.sort.All
                     }
                     stdlib.gpu.memory.prop.Defined
@@ -10035,7 +9963,7 @@
                     {
                       (
                         {
-                          ({({} type.const.u64.0x0000000000000000)} stdlib.gpu.memory.type.SlotName)
+                          ({type.const.u64.0x0000000000000000} stdlib.gpu.memory.type.SlotName)
                           ({[ . tile_width__s1203] [ . tile_width__s1203]} type.stdlib.numeric.*)
                           [ . element__s1199]
                         }
@@ -10045,10 +9973,7 @@
                         {
                           (
                             {
-                              (
-                                {({} type.const.u64.0x0000000000000001)}
-                                stdlib.gpu.memory.type.SlotName
-                              )
+                              ({type.const.u64.0x0000000000000001} stdlib.gpu.memory.type.SlotName)
                               (
                                 {[ . tile_width__s1203] [ . tile_width__s1203]}
                                 type.stdlib.numeric.*
@@ -10066,7 +9991,7 @@
                   )
                   [ . shared_memory__s1208]
                   [ . block__s1209]
-                  ({({} type.const.u64.0x0000000000000001)} stdlib.gpu.memory.type.SlotName)
+                  ({type.const.u64.0x0000000000000001} stdlib.gpu.memory.type.SlotName)
                   stdlib.gpu.memory.sort.All
                 }
                 stdlib.gpu.memory.prop.Defined
@@ -12384,7 +12309,7 @@
     : (
       [element__s1199 rows__s1200 columns__s1202 tile_width__s1203 grid__s1204 shared_memory__s1208 block__s1209 . ]
       {
-        (({({} type.const.u64.0x0000000000000000)} stdlib.gpu.memory.type.SlotName) val)
+        (({type.const.u64.0x0000000000000000} stdlib.gpu.memory.type.SlotName) val)
         (
           {
             [ . shared_memory__s1208]
@@ -12403,7 +12328,7 @@
                   {
                     (
                       {
-                        ({({} type.const.u64.0x0000000000000000)} stdlib.gpu.memory.type.SlotName)
+                        ({type.const.u64.0x0000000000000000} stdlib.gpu.memory.type.SlotName)
                         ({[ . tile_width__s1203] [ . tile_width__s1203]} type.stdlib.numeric.*)
                         [ . element__s1199]
                       }
@@ -12413,10 +12338,7 @@
                       {
                         (
                           {
-                            (
-                              {({} type.const.u64.0x0000000000000001)}
-                              stdlib.gpu.memory.type.SlotName
-                            )
+                            ({type.const.u64.0x0000000000000001} stdlib.gpu.memory.type.SlotName)
                             ({[ . tile_width__s1203] [ . tile_width__s1203]} type.stdlib.numeric.*)
                             [ . element__s1199]
                           }
@@ -12477,7 +12399,7 @@
                 {
                   (
                     {
-                      ({({} type.const.u64.0x0000000000000000)} stdlib.gpu.memory.type.SlotName)
+                      ({type.const.u64.0x0000000000000000} stdlib.gpu.memory.type.SlotName)
                       ({[ . tile_width__s1203] [ . tile_width__s1203]} type.stdlib.numeric.*)
                       [ . element__s1199]
                     }
@@ -12487,7 +12409,7 @@
                     {
                       (
                         {
-                          ({({} type.const.u64.0x0000000000000001)} stdlib.gpu.memory.type.SlotName)
+                          ({type.const.u64.0x0000000000000001} stdlib.gpu.memory.type.SlotName)
                           ({[ . tile_width__s1203] [ . tile_width__s1203]} type.stdlib.numeric.*)
                           [ . element__s1199]
                         }
@@ -12502,7 +12424,7 @@
               )
               [ . shared_memory__s1208]
               [ . block__s1209]
-              ({({} type.const.u64.0x0000000000000000)} stdlib.gpu.memory.type.SlotName)
+              ({type.const.u64.0x0000000000000000} stdlib.gpu.memory.type.SlotName)
               ({[ . tile_width__s1203] [ . tile_width__s1203]} type.stdlib.numeric.*)
               [ . element__s1199]
             }
@@ -12535,7 +12457,7 @@
     : (
       [element__s1199 rows__s1200 columns__s1202 tile_width__s1203 grid__s1204 shared_memory__s1208 block__s1209 . ]
       {
-        (({({} type.const.u64.0x0000000000000001)} stdlib.gpu.memory.type.SlotName) val)
+        (({type.const.u64.0x0000000000000001} stdlib.gpu.memory.type.SlotName) val)
         (
           {
             [ . shared_memory__s1208]
@@ -12554,7 +12476,7 @@
                   {
                     (
                       {
-                        ({({} type.const.u64.0x0000000000000000)} stdlib.gpu.memory.type.SlotName)
+                        ({type.const.u64.0x0000000000000000} stdlib.gpu.memory.type.SlotName)
                         ({[ . tile_width__s1203] [ . tile_width__s1203]} type.stdlib.numeric.*)
                         [ . element__s1199]
                       }
@@ -12564,10 +12486,7 @@
                       {
                         (
                           {
-                            (
-                              {({} type.const.u64.0x0000000000000001)}
-                              stdlib.gpu.memory.type.SlotName
-                            )
+                            ({type.const.u64.0x0000000000000001} stdlib.gpu.memory.type.SlotName)
                             ({[ . tile_width__s1203] [ . tile_width__s1203]} type.stdlib.numeric.*)
                             [ . element__s1199]
                           }
@@ -12628,7 +12547,7 @@
                 {
                   (
                     {
-                      ({({} type.const.u64.0x0000000000000000)} stdlib.gpu.memory.type.SlotName)
+                      ({type.const.u64.0x0000000000000000} stdlib.gpu.memory.type.SlotName)
                       ({[ . tile_width__s1203] [ . tile_width__s1203]} type.stdlib.numeric.*)
                       [ . element__s1199]
                     }
@@ -12638,7 +12557,7 @@
                     {
                       (
                         {
-                          ({({} type.const.u64.0x0000000000000001)} stdlib.gpu.memory.type.SlotName)
+                          ({type.const.u64.0x0000000000000001} stdlib.gpu.memory.type.SlotName)
                           ({[ . tile_width__s1203] [ . tile_width__s1203]} type.stdlib.numeric.*)
                           [ . element__s1199]
                         }
@@ -12653,7 +12572,7 @@
               )
               [ . shared_memory__s1208]
               [ . block__s1209]
-              ({({} type.const.u64.0x0000000000000001)} stdlib.gpu.memory.type.SlotName)
+              ({type.const.u64.0x0000000000000001} stdlib.gpu.memory.type.SlotName)
               ({[ . tile_width__s1203] [ . tile_width__s1203]} type.stdlib.numeric.*)
               [ . element__s1199]
             }
@@ -12681,18 +12600,4 @@
       [ . output0__v4]
     }
   )
-
-  (arr type.const.u64.0x0000000000000000
-    : ([] {})
-    -> ([] {({type.const.u64.0x0000000000000000 u64} :)})
-  )
-
-  (arr type.const.u64.0x0000000000000001
-    : ([] {})
-    -> ([] {({type.const.u64.0x0000000000000001 u64} :)})
-  )
-})
-
-(theory type nat {
-  (arr type.const.u64.0x0000000000000001 : 0 -> 1)
 })

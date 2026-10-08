@@ -1,4 +1,8 @@
-use std::{fs, path::PathBuf};
+use std::{
+    collections::BTreeSet,
+    fs,
+    path::{Path, PathBuf},
+};
 
 use anyhow::Context;
 use catena_lang::{
@@ -11,9 +15,12 @@ use catena_lang::{
 use clap::{Parser, ValueEnum};
 use metacat::theory::RawTheorySet;
 
+mod source_merge;
+
 #[derive(Parser)]
 #[command(name = "catena", version = env!("CARGO_PKG_VERSION"))]
 struct Cli {
+    /// Input files or directories. Directories load all .hex files recursively.
     #[arg(required = true)]
     paths: Vec<PathBuf>,
 
@@ -36,7 +43,7 @@ struct Cli {
     #[arg(long = "stdlib", value_name = "NAME")]
     stdlibs: Vec<String>,
 
-    /// Load a local bundle's stdlib.json (repeatable). Replaces the implicit default.
+    /// Load all .hex files recursively from a directory (repeatable). Replaces the implicit default.
     #[arg(long = "stdlib-dir", value_name = "PATH")]
     stdlib_dirs: Vec<PathBuf>,
 
@@ -140,33 +147,86 @@ fn selected_stdlib(cli: &Cli) -> anyhow::Result<Vec<SourceFile>> {
     if cli.no_stdlib {
         return Ok(Vec::new());
     }
-    let mut registry = BundleRegistry::default();
+    let registry = BundleRegistry::default();
     let mut names = cli.stdlibs.clone();
-    for directory in &cli.stdlib_dirs {
-        names.push(registry.add_directory(directory)?);
-    }
-    if names.is_empty() {
+    if names.is_empty() && cli.stdlib_dirs.is_empty() {
         names.push("default".into());
     }
-    registry.resolve(&names.iter().map(String::as_str).collect::<Vec<_>>())
+    let mut sources = registry.resolve(&names.iter().map(String::as_str).collect::<Vec<_>>())?;
+    for filename in input_files(&cli.stdlib_dirs)? {
+        sources.push(read_source(filename)?);
+    }
+    Ok(sources)
+}
+
+fn collect_hex_files(directory: &Path, files: &mut Vec<PathBuf>) -> anyhow::Result<()> {
+    let mut entries = fs::read_dir(directory)
+        .with_context(|| format!("failed to read input directory {}", directory.display()))?
+        .collect::<Result<Vec<_>, _>>()?;
+    entries.sort_by_key(|entry| entry.path());
+    for entry in entries {
+        let path = entry.path();
+        // Do not follow directory symlinks, which can introduce traversal cycles.
+        if entry.file_type()?.is_dir() {
+            collect_hex_files(&path, files)?;
+        } else if path.extension().is_some_and(|extension| extension == "hex") && path.is_file() {
+            files.push(path);
+        }
+    }
+    Ok(())
+}
+
+fn input_files(paths: &[PathBuf]) -> anyhow::Result<Vec<PathBuf>> {
+    let mut files = Vec::new();
+    for path in paths {
+        if path.is_dir() {
+            let start = files.len();
+            collect_hex_files(path, &mut files)?;
+            anyhow::ensure!(
+                files.len() > start,
+                "no .hex files found in {}",
+                path.display()
+            );
+        } else {
+            files.push(path.clone());
+        }
+    }
+    let mut seen = BTreeSet::new();
+    let mut unique = Vec::new();
+    for path in files {
+        let canonical = fs::canonicalize(&path)
+            .with_context(|| format!("failed to resolve input {}", path.display()))?;
+        if seen.insert(canonical) {
+            unique.push(path);
+        }
+    }
+    Ok(unique)
+}
+
+fn read_source(filename: PathBuf) -> anyhow::Result<SourceFile> {
+    let source = fs::read_to_string(&filename)
+        .with_context(|| format!("failed to read input {}", filename.display()))?;
+    Ok(SourceFile {
+        filename,
+        source: source.into(),
+    })
 }
 
 fn load_theories(cli: &Cli) -> anyhow::Result<RawTheorySet> {
     let mut sources = selected_stdlib(cli)?;
-    for filename in &cli.paths {
-        let source = fs::read_to_string(filename)
-            .with_context(|| format!("failed to read input {}", filename.display()))?;
-        sources.push(SourceFile {
-            filename: filename.clone(),
-            source: source.into(),
-        });
+    for filename in input_files(&cli.paths)? {
+        sources.push(read_source(filename)?);
     }
+    let mut seen = BTreeSet::new();
     let mut theories = RawTheorySet::from_texts(std::iter::empty::<&str>())?;
     for file in sources {
+        let identity = fs::canonicalize(&file.filename).unwrap_or_else(|_| file.filename.clone());
+        if !seen.insert(identity) {
+            continue;
+        }
         let parsed = RawTheorySet::from_text(&file.source)
             .with_context(|| format!("failed to parse {}", file.filename.display()))?;
-        theories = theories
-            .merge(parsed)
+        theories = source_merge::merge(theories, parsed)
             .with_context(|| format!("failed to merge {}", file.filename.display()))?;
     }
     Ok(theories)
@@ -175,6 +235,41 @@ fn load_theories(cli: &Cli) -> anyhow::Result<RawTheorySet> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn directory_inputs_are_recursive_sorted_and_deduplicated() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir()?;
+        let root = directory.path();
+        fs::create_dir_all(root.join("nested/deeper"))?;
+        let first = root.join("a.hex");
+        let second = root.join("nested/deeper/b.hex");
+        fs::write(
+            &first,
+            "(theory program type {(arr first : ([] {}) -> ([] {}))})",
+        )?;
+        fs::write(
+            &second,
+            "(theory program type {(arr second : ([] {}) -> ([] {}))})",
+        )?;
+        fs::write(root.join("ignored.txt"), "invalid hex syntax")?;
+        fs::write(root.join("nested/ignored.cpp"), "invalid hex syntax")?;
+        let mut cli = cli_with(&["--no-stdlib"]);
+        cli.paths = vec![root.to_path_buf(), first.clone(), root.join("nested")];
+        assert_eq!(input_files(&cli.paths)?, [first, second]);
+        let theories = load_theories(&cli)?;
+        let arrows = &theories.theories[&"program".parse()?].arrows;
+        assert!(arrows.contains_key(&"first".parse()?));
+        assert!(arrows.contains_key(&"second".parse()?));
+        Ok(())
+    }
+
+    #[test]
+    fn empty_input_directory_is_an_error() -> anyhow::Result<()> {
+        let directory = tempfile::tempdir()?;
+        let error = input_files(&[directory.path().to_path_buf()]).unwrap_err();
+        assert!(error.to_string().contains("no .hex files found"));
+        Ok(())
+    }
 
     fn cli_with(flags: &[&str]) -> Cli {
         Cli::try_parse_from(
@@ -214,38 +309,33 @@ mod tests {
     }
 
     #[test]
-    fn local_bundles_replace_default_and_can_depend_on_each_other() -> anyhow::Result<()> {
+    fn local_directories_load_recursively_without_manifests() -> anyhow::Result<()> {
         let directory = tempfile::tempdir()?;
         let base = directory.path().join("base");
         let extension = directory.path().join("extension");
-        fs::create_dir(&base)?;
+        fs::create_dir_all(base.join("nested"))?;
         fs::create_dir(&extension)?;
-        fs::write(
-            base.join("stdlib.json"),
-            r#"{"name":"base","files":["base.hex"]}"#,
-        )?;
-        fs::write(base.join("base.hex"), "# base")?;
-        fs::write(
-            extension.join("stdlib.json"),
-            r#"{"name":"extension","extends":["base"],"files":["extension.hex"]}"#,
-        )?;
+        fs::write(base.join("nested/base.hex"), "# base")?;
         fs::write(extension.join("extension.hex"), "# extension")?;
         let cli = cli_with(&[
-            "--stdlib",
-            "extension",
-            "--stdlib-dir",
-            extension.to_str().unwrap(),
             "--stdlib-dir",
             base.to_str().unwrap(),
+            "--stdlib-dir",
+            extension.to_str().unwrap(),
         ]);
-        let files = selected_stdlib(&cli)?;
-        assert_eq!(
-            files
-                .iter()
-                .map(|file| file.source.as_ref())
-                .collect::<Vec<_>>(),
-            ["# base", "# extension"]
-        );
+        for manifest in [None, Some("invalid manifest that must be ignored")] {
+            if let Some(contents) = manifest {
+                fs::write(base.join("stdlib.json"), contents)?;
+            }
+            let files = selected_stdlib(&cli)?;
+            assert_eq!(
+                files
+                    .iter()
+                    .map(|file| file.source.as_ref())
+                    .collect::<Vec<_>>(),
+                ["# base", "# extension"]
+            );
+        }
         Ok(())
     }
 
@@ -263,7 +353,12 @@ mod tests {
             &input,
             "(def program main : [] -> (u64 val) = (custom.one))",
         )?;
-        let mut cli = cli_with(&["--stdlib-dir", directory.path().to_str().unwrap()]);
+        let mut cli = cli_with(&[
+            "--stdlib",
+            "default",
+            "--stdlib-dir",
+            directory.path().to_str().unwrap(),
+        ]);
         cli.paths = vec![input.clone()];
         catena_lang::compile::compile(
             &mut CompileReport::new(load_theories(&cli)?),

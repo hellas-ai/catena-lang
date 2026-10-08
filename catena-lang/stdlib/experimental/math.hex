@@ -1,299 +1,299 @@
 (theory program type {
   (arr meta.stdlib.math.exp.helper.callback_metavars.branch_result.0
-    : ([branch_result__s4537 . ] {({[ . branch_result__s4537] f32} :)})
-    -> ([branch_result__s4537 . ] {({[ . branch_result__s4537] f32} :) [ . branch_result__s4537]})
+    : ([branch_result__s4543 . ] {({[ . branch_result__s4543] f32} :)})
+    -> ([branch_result__s4543 . ] {({[ . branch_result__s4543] f32} :) [ . branch_result__s4543]})
   )
 
   (arr meta.stdlib.math.exp.helper.callback_metavars.branch_result.1
-    : ([branch_result__s4649 . ] {({[ . branch_result__s4649] f32} :)})
-    -> ([branch_result__s4649 . ] {({[ . branch_result__s4649] f32} :) [ . branch_result__s4649]})
+    : ([branch_result__s4655 . ] {({[ . branch_result__s4655] f32} :)})
+    -> ([branch_result__s4655 . ] {({[ . branch_result__s4655] f32} :) [ . branch_result__s4655]})
   )
 
   (arr meta.stdlib.math.exp.helper.callback_metavars.v.0
-    : ([v__s4503 . ] {({[ . v__s4503] bool} :)})
-    -> ([v__s4503 . ] {({[ . v__s4503] bool} :) [ . v__s4503]})
+    : ([v__s4509 . ] {({[ . v__s4509] bool} :)})
+    -> ([v__s4509 . ] {({[ . v__s4509] bool} :) [ . v__s4509]})
   )
 
   (arr meta.stdlib.math.exp.helper.callback_metavars.v.1
-    : ([v__s4595 . ] {({[ . v__s4595] f32} :)})
-    -> ([v__s4595 . ] {({[ . v__s4595] f32} :) [ . v__s4595]})
-  )
-
-  (arr meta.stdlib.math.exp.helper.callback_metavars.v.2
     : ([v__s4601 . ] {({[ . v__s4601] f32} :)})
     -> ([v__s4601 . ] {({[ . v__s4601] f32} :) [ . v__s4601]})
   )
 
+  (arr meta.stdlib.math.exp.helper.callback_metavars.v.2
+    : ([v__s4607 . ] {({[ . v__s4607] f32} :)})
+    -> ([v__s4607 . ] {({[ . v__s4607] f32} :) [ . v__s4607]})
+  )
+
   (arr meta.stdlib.math.exp.helper.callback_metavars.v.3
-    : ([v__s4615 . ] {({[ . v__s4615] bool} :)})
-    -> ([v__s4615 . ] {({[ . v__s4615] bool} :) [ . v__s4615]})
+    : ([v__s4621 . ] {({[ . v__s4621] bool} :)})
+    -> ([v__s4621 . ] {({[ . v__s4621] bool} :) [ . v__s4621]})
   )
 
   (arr meta.stdlib.math.exp.helper.callback_metavars.x.0
-    : ([x__s1236 . ] {({[ . x__s1236] f32} :)})
-    -> ([x__s1236 . ] {({[ . x__s1236] f32} :) [ . x__s1236]})
+    : ([x__s1242 . ] {({[ . x__s1242] f32} :)})
+    -> ([x__s1242 . ] {({[ . x__s1242] f32} :) [ . x__s1242]})
   )
 
   (arr meta.stdlib.math.sqrt.helper.callback_metavars.branch_result.0
-    : ([branch_result__s4891 . ] {({[ . branch_result__s4891] f32} :)})
-    -> ([branch_result__s4891 . ] {({[ . branch_result__s4891] f32} :) [ . branch_result__s4891]})
+    : ([branch_result__s4897 . ] {({[ . branch_result__s4897] f32} :)})
+    -> ([branch_result__s4897 . ] {({[ . branch_result__s4897] f32} :) [ . branch_result__s4897]})
   )
 
   (arr meta.stdlib.math.sqrt.helper.callback_metavars.v.0
-    : ([v__s4766 . ] {({[ . v__s4766] u32} :)})
-    -> ([v__s4766 . ] {({[ . v__s4766] u32} :) [ . v__s4766]})
+    : ([v__s4772 . ] {({[ . v__s4772] u32} :)})
+    -> ([v__s4772 . ] {({[ . v__s4772] u32} :) [ . v__s4772]})
   )
 
   (arr meta.stdlib.math.sqrt.helper.callback_metavars.v.1
-    : ([v__s4777 . ] {({[ . v__s4777] f32} :)})
-    -> ([v__s4777 . ] {({[ . v__s4777] f32} :) [ . v__s4777]})
+    : ([v__s4783 . ] {({[ . v__s4783] f32} :)})
+    -> ([v__s4783 . ] {({[ . v__s4783] f32} :) [ . v__s4783]})
   )
 
   (arr meta.stdlib.math.sqrt.helper.callback_metavars.v.2
-    : ([v__s4791 . ] {({[ . v__s4791] f32} :)})
-    -> ([v__s4791 . ] {({[ . v__s4791] f32} :) [ . v__s4791]})
+    : ([v__s4797 . ] {({[ . v__s4797] f32} :)})
+    -> ([v__s4797 . ] {({[ . v__s4797] f32} :) [ . v__s4797]})
   )
 
   (arr meta.stdlib.math.sqrt.helper.callback_metavars.v.3
-    : ([v__s4809 . ] {({[ . v__s4809] f32} :)})
-    -> ([v__s4809 . ] {({[ . v__s4809] f32} :) [ . v__s4809]})
+    : ([v__s4815 . ] {({[ . v__s4815] f32} :)})
+    -> ([v__s4815 . ] {({[ . v__s4815] f32} :) [ . v__s4815]})
   )
 
   (arr meta.stdlib.math.sqrt.helper.callback_metavars.v.4
-    : ([v__s4827 . ] {({[ . v__s4827] f32} :)})
-    -> ([v__s4827 . ] {({[ . v__s4827] f32} :) [ . v__s4827]})
+    : ([v__s4833 . ] {({[ . v__s4833] f32} :)})
+    -> ([v__s4833 . ] {({[ . v__s4833] f32} :) [ . v__s4833]})
   )
 
   (arr meta.stdlib.math.sqrt.helper.callback_metavars.v.5
-    : ([v__s4845 . ] {({[ . v__s4845] f32} :)})
-    -> ([v__s4845 . ] {({[ . v__s4845] f32} :) [ . v__s4845]})
+    : ([v__s4851 . ] {({[ . v__s4851] f32} :)})
+    -> ([v__s4851 . ] {({[ . v__s4851] f32} :) [ . v__s4851]})
   )
 
   (arr meta.stdlib.math.sqrt.helper.callback_metavars.v.6
-    : ([v__s4859 . ] {({[ . v__s4859] bool} :)})
-    -> ([v__s4859 . ] {({[ . v__s4859] bool} :) [ . v__s4859]})
+    : ([v__s4865 . ] {({[ . v__s4865] bool} :)})
+    -> ([v__s4865 . ] {({[ . v__s4865] bool} :) [ . v__s4865]})
   )
 
   (arr meta.stdlib.math.sqrt.helper.callback_metavars.x.0
-    : ([x__s1238 . ] {({[ . x__s1238] f32} :)})
-    -> ([x__s1238 . ] {({[ . x__s1238] f32} :) [ . x__s1238]})
+    : ([x__s1244 . ] {({[ . x__s1244] f32} :)})
+    -> ([x__s1244 . ] {({[ . x__s1244] f32} :) [ . x__s1244]})
   )
 
   (def stdlib.math.exp
     : ([] {(f32 val)})
     -> ([] {(f32 val)})
     = {
-      [x__v4489__input . ]
+      [x__v4495__input . ]
       (
-        [ . x__v4489__input]
+        [ . x__v4495__input]
         (smolcat.value.named meta.stdlib.math.exp.helper.callback_metavars.x.0)
-        [x__v4489 __smolcat_x__v4725 . ]
+        [x__v4495 __smolcat_x__v4731 . ]
       )
-      ([ . x__v4489] [op0_value__v4726 . op0_value__v4726 op0_value__v4726] [x__v4710 x__v4711 . ])
-      ([ . x__v4711] [op1_value__v4727 . op1_value__v4727 op1_value__v4727] [x__v4712 x__v4713 . ])
-      ([ . x__v4713] [op2_value__v4728 . op2_value__v4728 op2_value__v4728] [x__v4714 x__v4715 . ])
-      ([] stdlib.numeric.signed.f32 [signed_f32__v4492 . ])
-      ([ . x__v4715 signed_f32__v4492] stdlib.numeric.negate [negative__v4494 . ])
-      ([] (const.u32.0x00000000 u32.bitcast-f32) [literal__v4500 . ])
-      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4502 . ])
+      ([ . x__v4495] [op0_value__v4732 . op0_value__v4732 op0_value__v4732] [x__v4716 x__v4717 . ])
+      ([ . x__v4717] [op1_value__v4733 . op1_value__v4733 op1_value__v4733] [x__v4718 x__v4719 . ])
+      ([ . x__v4719] [op2_value__v4734 . op2_value__v4734 op2_value__v4734] [x__v4720 x__v4721 . ])
+      ([] stdlib.numeric.signed.f32 [signed_f32__v4498 . ])
+      ([ . x__v4721 signed_f32__v4498] stdlib.numeric.negate [negative__v4500 . ])
+      ([] (const.u32.0x00000000 u32.bitcast-f32) [literal__v4506 . ])
+      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4508 . ])
       (
-        [ . x__v4714 literal__v4500 numeric_f32__v4502]
+        [ . x__v4720 literal__v4506 numeric_f32__v4508]
         ({:.forget {_} {_}} stdlib.numeric.less)
-        [less__v4504__result . ]
+        [less__v4510__result . ]
       )
       (
-        [ . less__v4504__result]
+        [ . less__v4510__result]
         (smolcat.value.named meta.stdlib.math.exp.helper.callback_metavars.v.0)
-        [less__v4504 __smolcat_v__v4729 . ]
+        [less__v4510 __smolcat_v__v4735 . ]
       )
-      ([ . negative__v4494 x__v4712] ({{_} {_}} *.intro) [tuple__v4514 . ])
-      ([] unit.intro [unit__v4518 . ])
+      ([ . negative__v4500 x__v4718] ({{_} {_}} *.intro) [tuple__v4520 . ])
+      ([] unit.intro [unit__v4524 . ])
       (
         []
         (
-          [ . __smolcat_x__v4725 __smolcat_v__v4729]
+          [ . __smolcat_x__v4731 __smolcat_v__v4735]
           name.stdlib.math.exp.helper.if_then_else.then_branch.0
           lift
         )
-        [callback__v4551 . ]
+        [callback__v4557 . ]
       )
       (
         []
         (
-          [ . __smolcat_x__v4725 __smolcat_v__v4729]
+          [ . __smolcat_x__v4731 __smolcat_v__v4735]
           name.stdlib.math.exp.helper.if_then_else.else_branch.0
           lift
         )
-        [callback__v4584 . ]
+        [callback__v4590 . ]
       )
       (
-        [ . less__v4504 tuple__v4514 callback__v4551 callback__v4584 unit__v4518]
+        [ . less__v4510 tuple__v4520 callback__v4557 callback__v4590 unit__v4524]
         ({:.forget {_} {_} {_} {_}} core.if)
-        [if_then_else__v4588 . ]
+        [if_then_else__v4594 . ]
       )
-      ([ . if_then_else__v4588] {_} [magnitude__v4593__result . ])
+      ([ . if_then_else__v4594] {_} [magnitude__v4599__result . ])
       (
-        [ . magnitude__v4593__result]
+        [ . magnitude__v4599__result]
         (smolcat.value.named meta.stdlib.math.exp.helper.callback_metavars.branch_result.0)
-        [magnitude__v4593 __smolcat_branch_result__v4730 . ]
+        [magnitude__v4599 __smolcat_branch_result__v4736 . ]
       )
-      ([ . magnitude__v4593] ({:.forget} stdlib.math.exp_nonneg) [positive__v4596__result . ])
+      ([ . magnitude__v4599] ({:.forget} stdlib.math.exp_nonneg) [positive__v4602__result . ])
       (
-        [ . positive__v4596__result]
+        [ . positive__v4602__result]
         (smolcat.value.named meta.stdlib.math.exp.helper.callback_metavars.v.1)
-        [positive__v4596 __smolcat_v__v4731 . ]
+        [positive__v4602 __smolcat_v__v4737 . ]
       )
       (
-        [ . positive__v4596]
-        [op15_value__v4732 . op15_value__v4732 op15_value__v4732]
-        [positive__v4723 positive__v4724 . ]
+        [ . positive__v4602]
+        [op15_value__v4738 . op15_value__v4738 op15_value__v4738]
+        [positive__v4729 positive__v4730 . ]
       )
-      ([] (const.u32.0x3f800000 u32.bitcast-f32) [literal__v4602__result . ])
+      ([] (const.u32.0x3f800000 u32.bitcast-f32) [literal__v4608__result . ])
       (
-        [ . literal__v4602__result]
+        [ . literal__v4608__result]
         (smolcat.value.named meta.stdlib.math.exp.helper.callback_metavars.v.2)
-        [literal__v4602 __smolcat_v__v4733 . ]
+        [literal__v4608 __smolcat_v__v4739 . ]
       )
-      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4604 . ])
+      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4610 . ])
       (
-        [ . literal__v4602 positive__v4724 numeric_f32__v4604]
+        [ . literal__v4608 positive__v4730 numeric_f32__v4610]
         stdlib.numeric./
-        [reciprocal__v4606 . ]
+        [reciprocal__v4612 . ]
       )
-      ([] (const.u32.0x00000000 u32.bitcast-f32) [literal__v4612 . ])
-      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4614 . ])
+      ([] (const.u32.0x00000000 u32.bitcast-f32) [literal__v4618 . ])
+      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4620 . ])
       (
-        [ . x__v4710 literal__v4612 numeric_f32__v4614]
+        [ . x__v4716 literal__v4618 numeric_f32__v4620]
         ({:.forget {_} {_}} stdlib.numeric.less)
-        [less__v4616__result . ]
+        [less__v4622__result . ]
       )
       (
-        [ . less__v4616__result]
+        [ . less__v4622__result]
         (smolcat.value.named meta.stdlib.math.exp.helper.callback_metavars.v.3)
-        [less__v4616 __smolcat_v__v4734 . ]
+        [less__v4622 __smolcat_v__v4740 . ]
       )
-      ([ . positive__v4723 reciprocal__v4606] ({{_} {_}} *.intro) [tuple__v4626 . ])
-      ([] unit.intro [unit__v4630 . ])
+      ([ . positive__v4729 reciprocal__v4612] ({{_} {_}} *.intro) [tuple__v4632 . ])
+      ([] unit.intro [unit__v4636 . ])
       (
         []
         (
-          [ . __smolcat_v__v4731 __smolcat_v__v4733 __smolcat_v__v4734]
+          [ . __smolcat_v__v4737 __smolcat_v__v4739 __smolcat_v__v4740]
           name.stdlib.math.exp.helper.if_then_else.then_branch.1
           lift
         )
-        [callback__v4663 . ]
+        [callback__v4669 . ]
       )
       (
         []
         (
-          [ . __smolcat_v__v4731 __smolcat_v__v4733 __smolcat_v__v4734]
+          [ . __smolcat_v__v4737 __smolcat_v__v4739 __smolcat_v__v4740]
           name.stdlib.math.exp.helper.if_then_else.else_branch.1
           lift
         )
-        [callback__v4696 . ]
+        [callback__v4702 . ]
       )
       (
-        [ . less__v4616 tuple__v4626 callback__v4663 callback__v4696 unit__v4630]
+        [ . less__v4622 tuple__v4632 callback__v4669 callback__v4702 unit__v4636]
         ({:.forget {_} {_} {_} {_}} core.if)
-        [if_then_else__v4700 . ]
+        [if_then_else__v4706 . ]
       )
-      ([ . if_then_else__v4700] {_} [branch_result__v4705__result . ])
+      ([ . if_then_else__v4706] {_} [branch_result__v4711__result . ])
       (
-        [ . branch_result__v4705__result]
+        [ . branch_result__v4711__result]
         (smolcat.value.named meta.stdlib.math.exp.helper.callback_metavars.branch_result.1)
-        [branch_result__v4705 __smolcat_branch_result__v4735 . ]
+        [branch_result__v4711 __smolcat_branch_result__v4741 . ]
       )
-      ([ . branch_result__v4705] {:.forget})
+      ([ . branch_result__v4711] {:.forget})
     }
   )
 
   (def stdlib.math.exp.helper.if_then_else.else_branch.0
     : (
-      [x__s1236 v__s4503 . ]
+      [x__s1242 v__s4509 . ]
       {
-        ({({({[ . x__s1236]} type.stdlib.numeric.negate) f32} :) ({[ . x__s1236] f32} :)} *)
-        (({({[ . v__s4503]} prop.IsTrue)} stdlib.prelude.prop.Not) |-)
+        ({({({[ . x__s1242]} type.stdlib.numeric.negate) f32} :) ({[ . x__s1242] f32} :)} *)
+        (({({[ . v__s4509]} prop.IsTrue)} stdlib.prelude.prop.Not) |-)
         1
       }
     )
-    -> ([x__s1236 v__s4503 . ] {(f32 val)})
+    -> ([x__s1242 v__s4509 . ] {(f32 val)})
     = {
-      [context__v4554 condition__v4566 common__v4568 . ]
-      ([ . condition__v4566] [op0_value__v4576 . ] [])
-      ([ . context__v4554] (*.elim {{_} {_}}) [negative__v4561 x__v4562 . ])
-      ([ . negative__v4561] [op2_value__v4577 . ] [])
-      ([ . common__v4568] unit.elim [])
-      ([ . x__v4562] {_} [tuple__v4575 . ])
-      ([ . tuple__v4575] {({_} {:.forget} {_})})
+      [context__v4560 condition__v4572 common__v4574 . ]
+      ([ . condition__v4572] [op0_value__v4582 . ] [])
+      ([ . context__v4560] (*.elim {{_} {_}}) [negative__v4567 x__v4568 . ])
+      ([ . negative__v4567] [op2_value__v4583 . ] [])
+      ([ . common__v4574] unit.elim [])
+      ([ . x__v4568] {_} [tuple__v4581 . ])
+      ([ . tuple__v4581] {({_} {:.forget} {_})})
     }
   )
 
   (def stdlib.math.exp.helper.if_then_else.else_branch.1
     : (
-      [v__s4595 v__s4601 v__s4615 . ]
+      [v__s4601 v__s4607 v__s4621 . ]
       {
         (
-          {({[ . v__s4595] f32} :) ({({[ . v__s4601] [ . v__s4595]} type.stdlib.numeric./) f32} :)}
+          {({[ . v__s4601] f32} :) ({({[ . v__s4607] [ . v__s4601]} type.stdlib.numeric./) f32} :)}
           *
         )
-        (({({[ . v__s4615]} prop.IsTrue)} stdlib.prelude.prop.Not) |-)
+        (({({[ . v__s4621]} prop.IsTrue)} stdlib.prelude.prop.Not) |-)
         1
       }
     )
-    -> ([v__s4595 v__s4601 v__s4615 . ] {(f32 val)})
+    -> ([v__s4601 v__s4607 v__s4621 . ] {(f32 val)})
     = {
-      [context__v4666 condition__v4678 common__v4680 . ]
-      ([ . condition__v4678] [op0_value__v4688 . ] [])
-      ([ . context__v4666] (*.elim {{_} {_}}) [positive__v4673 reciprocal__v4674 . ])
-      ([ . reciprocal__v4674] [op2_value__v4689 . ] [])
-      ([ . common__v4680] unit.elim [])
-      ([ . positive__v4673] {_} [tuple__v4687 . ])
-      ([ . tuple__v4687] {({_} {:.forget} {_})})
+      [context__v4672 condition__v4684 common__v4686 . ]
+      ([ . condition__v4684] [op0_value__v4694 . ] [])
+      ([ . context__v4672] (*.elim {{_} {_}}) [positive__v4679 reciprocal__v4680 . ])
+      ([ . reciprocal__v4680] [op2_value__v4695 . ] [])
+      ([ . common__v4686] unit.elim [])
+      ([ . positive__v4679] {_} [tuple__v4693 . ])
+      ([ . tuple__v4693] {({_} {:.forget} {_})})
     }
   )
 
   (def stdlib.math.exp.helper.if_then_else.then_branch.0
     : (
-      [x__s1236 v__s4503 . ]
+      [x__s1242 v__s4509 . ]
       {
-        ({({({[ . x__s1236]} type.stdlib.numeric.negate) f32} :) ({[ . x__s1236] f32} :)} *)
-        (({[ . v__s4503]} prop.IsTrue) |-)
+        ({({({[ . x__s1242]} type.stdlib.numeric.negate) f32} :) ({[ . x__s1242] f32} :)} *)
+        (({[ . v__s4509]} prop.IsTrue) |-)
         1
       }
     )
-    -> ([x__s1236 v__s4503 . ] {(f32 val)})
+    -> ([x__s1242 v__s4509 . ] {(f32 val)})
     = {
-      [context__v4520 condition__v4532 common__v4534 . ]
-      ([ . condition__v4532] [op0_value__v4543 . ] [])
-      ([ . context__v4520] (*.elim {{_} {_}}) [negative__v4527 x__v4528 . ])
-      ([ . x__v4528] [op2_value__v4544 . ] [])
-      ([ . common__v4534] unit.elim [])
-      ([ . negative__v4527] {_} [tuple__v4542 . ])
-      ([ . tuple__v4542] {({_} {:.forget} {_})})
+      [context__v4526 condition__v4538 common__v4540 . ]
+      ([ . condition__v4538] [op0_value__v4549 . ] [])
+      ([ . context__v4526] (*.elim {{_} {_}}) [negative__v4533 x__v4534 . ])
+      ([ . x__v4534] [op2_value__v4550 . ] [])
+      ([ . common__v4540] unit.elim [])
+      ([ . negative__v4533] {_} [tuple__v4548 . ])
+      ([ . tuple__v4548] {({_} {:.forget} {_})})
     }
   )
 
   (def stdlib.math.exp.helper.if_then_else.then_branch.1
     : (
-      [v__s4595 v__s4601 v__s4615 . ]
+      [v__s4601 v__s4607 v__s4621 . ]
       {
         (
-          {({[ . v__s4595] f32} :) ({({[ . v__s4601] [ . v__s4595]} type.stdlib.numeric./) f32} :)}
+          {({[ . v__s4601] f32} :) ({({[ . v__s4607] [ . v__s4601]} type.stdlib.numeric./) f32} :)}
           *
         )
-        (({[ . v__s4615]} prop.IsTrue) |-)
+        (({[ . v__s4621]} prop.IsTrue) |-)
         1
       }
     )
-    -> ([v__s4595 v__s4601 v__s4615 . ] {(f32 val)})
+    -> ([v__s4601 v__s4607 v__s4621 . ] {(f32 val)})
     = {
-      [context__v4632 condition__v4644 common__v4646 . ]
-      ([ . condition__v4644] [op0_value__v4655 . ] [])
-      ([ . context__v4632] (*.elim {{_} {_}}) [positive__v4639 reciprocal__v4640 . ])
-      ([ . positive__v4639] [op2_value__v4656 . ] [])
-      ([ . common__v4646] unit.elim [])
-      ([ . reciprocal__v4640] {_} [tuple__v4654 . ])
-      ([ . tuple__v4654] {({_} {:.forget} {_})})
+      [context__v4638 condition__v4650 common__v4652 . ]
+      ([ . condition__v4650] [op0_value__v4661 . ] [])
+      ([ . context__v4638] (*.elim {{_} {_}}) [positive__v4645 reciprocal__v4646 . ])
+      ([ . positive__v4645] [op2_value__v4662 . ] [])
+      ([ . common__v4652] unit.elim [])
+      ([ . reciprocal__v4646] {_} [tuple__v4660 . ])
+      ([ . tuple__v4660] {({_} {:.forget} {_})})
     }
   )
 
@@ -301,115 +301,115 @@
     : ([] {(f32 val)})
     -> ([] {(f32 val)})
     = {
-      [x__v4275__input . ]
-      ([ . x__v4275__input] (smolcat.value.named {_}) [x__v4275 . ])
-      ([ . x__v4275] [op0_value__v4482 . op0_value__v4482 op0_value__v4482] [x__v4449 x__v4450 . ])
-      ([] type.const.u32.0x3fb8aa3b [literal__v4281 . ])
-      ([ . literal__v4281] ({:.forget} stdlib.math.from_bits) [from_bits__v4283__result . ])
-      ([ . from_bits__v4283__result] (smolcat.value.named {_}) [from_bits__v4283 . ])
-      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4285 . ])
-      ([ . x__v4450 from_bits__v4283 numeric_f32__v4285] stdlib.numeric.* [result__v4287 . ])
-      ([ . result__v4287] ({:.forget} stdlib.math.round_to_u32) [k__v4289__result . ])
-      ([ . k__v4289__result] (smolcat.value.named {_}) [k__v4289 . ])
-      ([ . k__v4289] [op6_value__v4483 . op6_value__v4483 op6_value__v4483] [k__v4456 k__v4457 . ])
-      ([ . k__v4457] stdlib.numeric.u32_to_f32 [kf__v4292 . ])
+      [x__v4281__input . ]
+      ([ . x__v4281__input] (smolcat.value.named {_}) [x__v4281 . ])
+      ([ . x__v4281] [op0_value__v4488 . op0_value__v4488 op0_value__v4488] [x__v4455 x__v4456 . ])
+      ([] type.const.u32.0x3fb8aa3b [literal__v4287 . ])
+      ([ . literal__v4287] ({:.forget} stdlib.math.from_bits) [from_bits__v4289__result . ])
+      ([ . from_bits__v4289__result] (smolcat.value.named {_}) [from_bits__v4289 . ])
+      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4291 . ])
+      ([ . x__v4456 from_bits__v4289 numeric_f32__v4291] stdlib.numeric.* [result__v4293 . ])
+      ([ . result__v4293] ({:.forget} stdlib.math.round_to_u32) [k__v4295__result . ])
+      ([ . k__v4295__result] (smolcat.value.named {_}) [k__v4295 . ])
+      ([ . k__v4295] [op6_value__v4489 . op6_value__v4489 op6_value__v4489] [k__v4462 k__v4463 . ])
+      ([ . k__v4463] stdlib.numeric.u32_to_f32 [kf__v4298 . ])
       (
-        [ . kf__v4292]
-        [op8_value__v4484 . op8_value__v4484 op8_value__v4484]
-        [kf__v4463 kf__v4464 . ]
+        [ . kf__v4298]
+        [op8_value__v4490 . op8_value__v4490 op8_value__v4490]
+        [kf__v4469 kf__v4470 . ]
       )
-      ([] type.const.u32.0x3f317200 [literal__v4298 . ])
-      ([ . literal__v4298] ({:.forget} stdlib.math.from_bits) [from_bits__v4300__result . ])
-      ([ . from_bits__v4300__result] (smolcat.value.named {_}) [from_bits__v4300 . ])
-      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4302 . ])
-      ([ . kf__v4464 from_bits__v4300 numeric_f32__v4302] stdlib.numeric.* [result__v4304 . ])
-      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4306 . ])
-      ([ . x__v4449 result__v4304 numeric_f32__v4306] stdlib.numeric.- [result__v4308 . ])
-      ([] type.const.u32.0x35bfbe8e [literal__v4313 . ])
-      ([ . literal__v4313] ({:.forget} stdlib.math.from_bits) [from_bits__v4315__result . ])
-      ([ . from_bits__v4315__result] (smolcat.value.named {_}) [from_bits__v4315 . ])
-      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4317 . ])
-      ([ . kf__v4463 from_bits__v4315 numeric_f32__v4317] stdlib.numeric.* [result__v4319 . ])
-      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4321 . ])
-      ([ . result__v4308 result__v4319 numeric_f32__v4321] stdlib.numeric.- [r__v4323 . ])
+      ([] type.const.u32.0x3f317200 [literal__v4304 . ])
+      ([ . literal__v4304] ({:.forget} stdlib.math.from_bits) [from_bits__v4306__result . ])
+      ([ . from_bits__v4306__result] (smolcat.value.named {_}) [from_bits__v4306 . ])
+      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4308 . ])
+      ([ . kf__v4470 from_bits__v4306 numeric_f32__v4308] stdlib.numeric.* [result__v4310 . ])
+      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4312 . ])
+      ([ . x__v4455 result__v4310 numeric_f32__v4312] stdlib.numeric.- [result__v4314 . ])
+      ([] type.const.u32.0x35bfbe8e [literal__v4319 . ])
+      ([ . literal__v4319] ({:.forget} stdlib.math.from_bits) [from_bits__v4321__result . ])
+      ([ . from_bits__v4321__result] (smolcat.value.named {_}) [from_bits__v4321 . ])
+      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4323 . ])
+      ([ . kf__v4469 from_bits__v4321 numeric_f32__v4323] stdlib.numeric.* [result__v4325 . ])
+      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4327 . ])
+      ([ . result__v4314 result__v4325 numeric_f32__v4327] stdlib.numeric.- [r__v4329 . ])
       (
-        [ . r__v4323]
-        [op21_value__v4485 . op21_value__v4485 op21_value__v4485]
-        [r__v4472 r__v4473 . ]
-      )
-      (
-        [ . r__v4473]
-        [op22_value__v4486 . op22_value__v4486 op22_value__v4486]
-        [r__v4474 r__v4475 . ]
-      )
-      (
-        [ . r__v4475]
-        [op23_value__v4487 . op23_value__v4487 op23_value__v4487]
-        [r__v4476 r__v4477 . ]
-      )
-      (
-        [ . r__v4477]
-        [op24_value__v4488 . op24_value__v4488 op24_value__v4488]
+        [ . r__v4329]
+        [op21_value__v4491 . op21_value__v4491 op21_value__v4491]
         [r__v4478 r__v4479 . ]
       )
       (
         [ . r__v4479]
-        [op25_value__v4489 . op25_value__v4489 op25_value__v4489]
+        [op22_value__v4492 . op22_value__v4492 op22_value__v4492]
         [r__v4480 r__v4481 . ]
       )
-      ([] type.const.u32.0x3c088889 [literal__v4329 . ])
-      ([ . literal__v4329] ({:.forget} stdlib.math.from_bits) [from_bits__v4331__result . ])
-      ([ . from_bits__v4331__result] (smolcat.value.named {_}) [from_bits__v4331 . ])
-      ([] type.const.u32.0x3ab60b61 [literal__v4336 . ])
-      ([ . literal__v4336] ({:.forget} stdlib.math.from_bits) [from_bits__v4338__result . ])
-      ([ . from_bits__v4338__result] (smolcat.value.named {_}) [from_bits__v4338 . ])
-      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4340 . ])
-      ([ . r__v4481 from_bits__v4338 numeric_f32__v4340] stdlib.numeric.* [result__v4342 . ])
-      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4344 . ])
-      ([ . from_bits__v4331 result__v4342 numeric_f32__v4344] stdlib.numeric.+ [p5__v4346 . ])
-      ([] type.const.u32.0x3d2aaaab [literal__v4352 . ])
-      ([ . literal__v4352] ({:.forget} stdlib.math.from_bits) [from_bits__v4354__result . ])
-      ([ . from_bits__v4354__result] (smolcat.value.named {_}) [from_bits__v4354 . ])
-      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4356 . ])
-      ([ . r__v4480 p5__v4346 numeric_f32__v4356] stdlib.numeric.* [result__v4358 . ])
-      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4360 . ])
-      ([ . from_bits__v4354 result__v4358 numeric_f32__v4360] stdlib.numeric.+ [p4__v4362 . ])
-      ([] type.const.u32.0x3e2aaaab [literal__v4368 . ])
-      ([ . literal__v4368] ({:.forget} stdlib.math.from_bits) [from_bits__v4370__result . ])
-      ([ . from_bits__v4370__result] (smolcat.value.named {_}) [from_bits__v4370 . ])
-      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4372 . ])
-      ([ . r__v4478 p4__v4362 numeric_f32__v4372] stdlib.numeric.* [result__v4374 . ])
-      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4376 . ])
-      ([ . from_bits__v4370 result__v4374 numeric_f32__v4376] stdlib.numeric.+ [p3__v4378 . ])
-      ([] (const.u32.0x3f000000 u32.bitcast-f32) [literal__v4384__result . ])
-      ([ . literal__v4384__result] (smolcat.value.named {_}) [literal__v4384 . ])
-      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4386 . ])
-      ([ . r__v4476 p3__v4378 numeric_f32__v4386] stdlib.numeric.* [result__v4388 . ])
-      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4390 . ])
-      ([ . literal__v4384 result__v4388 numeric_f32__v4390] stdlib.numeric.+ [p2__v4392 . ])
-      ([] (const.u32.0x3f800000 u32.bitcast-f32) [literal__v4398__result . ])
-      ([ . literal__v4398__result] (smolcat.value.named {_}) [literal__v4398 . ])
-      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4400 . ])
-      ([ . r__v4474 p2__v4392 numeric_f32__v4400] stdlib.numeric.* [result__v4402 . ])
-      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4404 . ])
-      ([ . literal__v4398 result__v4402 numeric_f32__v4404] stdlib.numeric.+ [p1__v4406 . ])
-      ([] (const.u32.0x3f800000 u32.bitcast-f32) [literal__v4412__result . ])
-      ([ . literal__v4412__result] (smolcat.value.named {_}) [literal__v4412 . ])
-      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4414 . ])
-      ([ . r__v4472 p1__v4406 numeric_f32__v4414] stdlib.numeric.* [result__v4416 . ])
-      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4418 . ])
-      ([ . literal__v4412 result__v4416 numeric_f32__v4418] stdlib.numeric.+ [result__v4420 . ])
-      ([] type.const.u32.0x0000007f [literal__v4425 . ])
-      ([] stdlib.numeric.numeric.u32 [numeric_u32__v4427 . ])
-      ([ . k__v4456 literal__v4425 numeric_u32__v4427] stdlib.numeric.+ [result__v4429 . ])
-      ([] type.const.u32.0x00800000 [literal__v4434 . ])
-      ([] stdlib.numeric.numeric.u32 [numeric_u32__v4436 . ])
-      ([ . result__v4429 literal__v4434 numeric_u32__v4436] stdlib.numeric.* [result__v4438 . ])
-      ([ . result__v4438] ({:.forget} stdlib.math.from_bits) [from_bits__v4440__result . ])
-      ([ . from_bits__v4440__result] (smolcat.value.named {_}) [from_bits__v4440 . ])
-      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4442 . ])
-      ([ . result__v4420 from_bits__v4440 numeric_f32__v4442] stdlib.numeric.* [result__v4444 . ])
-      ([ . result__v4444] {:.forget})
+      (
+        [ . r__v4481]
+        [op23_value__v4493 . op23_value__v4493 op23_value__v4493]
+        [r__v4482 r__v4483 . ]
+      )
+      (
+        [ . r__v4483]
+        [op24_value__v4494 . op24_value__v4494 op24_value__v4494]
+        [r__v4484 r__v4485 . ]
+      )
+      (
+        [ . r__v4485]
+        [op25_value__v4495 . op25_value__v4495 op25_value__v4495]
+        [r__v4486 r__v4487 . ]
+      )
+      ([] type.const.u32.0x3c088889 [literal__v4335 . ])
+      ([ . literal__v4335] ({:.forget} stdlib.math.from_bits) [from_bits__v4337__result . ])
+      ([ . from_bits__v4337__result] (smolcat.value.named {_}) [from_bits__v4337 . ])
+      ([] type.const.u32.0x3ab60b61 [literal__v4342 . ])
+      ([ . literal__v4342] ({:.forget} stdlib.math.from_bits) [from_bits__v4344__result . ])
+      ([ . from_bits__v4344__result] (smolcat.value.named {_}) [from_bits__v4344 . ])
+      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4346 . ])
+      ([ . r__v4487 from_bits__v4344 numeric_f32__v4346] stdlib.numeric.* [result__v4348 . ])
+      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4350 . ])
+      ([ . from_bits__v4337 result__v4348 numeric_f32__v4350] stdlib.numeric.+ [p5__v4352 . ])
+      ([] type.const.u32.0x3d2aaaab [literal__v4358 . ])
+      ([ . literal__v4358] ({:.forget} stdlib.math.from_bits) [from_bits__v4360__result . ])
+      ([ . from_bits__v4360__result] (smolcat.value.named {_}) [from_bits__v4360 . ])
+      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4362 . ])
+      ([ . r__v4486 p5__v4352 numeric_f32__v4362] stdlib.numeric.* [result__v4364 . ])
+      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4366 . ])
+      ([ . from_bits__v4360 result__v4364 numeric_f32__v4366] stdlib.numeric.+ [p4__v4368 . ])
+      ([] type.const.u32.0x3e2aaaab [literal__v4374 . ])
+      ([ . literal__v4374] ({:.forget} stdlib.math.from_bits) [from_bits__v4376__result . ])
+      ([ . from_bits__v4376__result] (smolcat.value.named {_}) [from_bits__v4376 . ])
+      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4378 . ])
+      ([ . r__v4484 p4__v4368 numeric_f32__v4378] stdlib.numeric.* [result__v4380 . ])
+      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4382 . ])
+      ([ . from_bits__v4376 result__v4380 numeric_f32__v4382] stdlib.numeric.+ [p3__v4384 . ])
+      ([] (const.u32.0x3f000000 u32.bitcast-f32) [literal__v4390__result . ])
+      ([ . literal__v4390__result] (smolcat.value.named {_}) [literal__v4390 . ])
+      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4392 . ])
+      ([ . r__v4482 p3__v4384 numeric_f32__v4392] stdlib.numeric.* [result__v4394 . ])
+      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4396 . ])
+      ([ . literal__v4390 result__v4394 numeric_f32__v4396] stdlib.numeric.+ [p2__v4398 . ])
+      ([] (const.u32.0x3f800000 u32.bitcast-f32) [literal__v4404__result . ])
+      ([ . literal__v4404__result] (smolcat.value.named {_}) [literal__v4404 . ])
+      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4406 . ])
+      ([ . r__v4480 p2__v4398 numeric_f32__v4406] stdlib.numeric.* [result__v4408 . ])
+      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4410 . ])
+      ([ . literal__v4404 result__v4408 numeric_f32__v4410] stdlib.numeric.+ [p1__v4412 . ])
+      ([] (const.u32.0x3f800000 u32.bitcast-f32) [literal__v4418__result . ])
+      ([ . literal__v4418__result] (smolcat.value.named {_}) [literal__v4418 . ])
+      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4420 . ])
+      ([ . r__v4478 p1__v4412 numeric_f32__v4420] stdlib.numeric.* [result__v4422 . ])
+      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4424 . ])
+      ([ . literal__v4418 result__v4422 numeric_f32__v4424] stdlib.numeric.+ [result__v4426 . ])
+      ([] type.const.u32.0x0000007f [literal__v4431 . ])
+      ([] stdlib.numeric.numeric.u32 [numeric_u32__v4433 . ])
+      ([ . k__v4462 literal__v4431 numeric_u32__v4433] stdlib.numeric.+ [result__v4435 . ])
+      ([] type.const.u32.0x00800000 [literal__v4440 . ])
+      ([] stdlib.numeric.numeric.u32 [numeric_u32__v4442 . ])
+      ([ . result__v4435 literal__v4440 numeric_u32__v4442] stdlib.numeric.* [result__v4444 . ])
+      ([ . result__v4444] ({:.forget} stdlib.math.from_bits) [from_bits__v4446__result . ])
+      ([ . from_bits__v4446__result] (smolcat.value.named {_}) [from_bits__v4446 . ])
+      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4448 . ])
+      ([ . result__v4426 from_bits__v4446 numeric_f32__v4448] stdlib.numeric.* [result__v4450 . ])
+      ([ . result__v4450] {:.forget})
     }
   )
 
@@ -425,20 +425,20 @@
     : ([] {(f32 val)})
     -> ([] {(f32 val)})
     = {
-      [x__v4728__input . ]
-      ([ . x__v4728__input] (smolcat.value.named {_}) [x__v4728 . ])
-      ([ . x__v4728] [op0_value__v4755 . op0_value__v4755 op0_value__v4755] [x__v4753 x__v4754 . ])
-      ([] (const.u32.0x3f800000 u32.bitcast-f32) [literal__v4734__result . ])
-      ([ . literal__v4734__result] (smolcat.value.named {_}) [literal__v4734 . ])
-      ([] stdlib.numeric.signed.f32 [signed_f32__v4736 . ])
-      ([ . x__v4754 signed_f32__v4736] stdlib.numeric.negate [result__v4738 . ])
-      ([ . result__v4738] ({:.forget} stdlib.math.exp) [exp__v4740__result . ])
-      ([ . exp__v4740__result] (smolcat.value.named {_}) [exp__v4740 . ])
-      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4742 . ])
-      ([ . literal__v4734 exp__v4740 numeric_f32__v4742] stdlib.numeric.+ [result__v4744 . ])
-      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4746 . ])
-      ([ . x__v4753 result__v4744 numeric_f32__v4746] stdlib.numeric./ [result__v4748 . ])
-      ([ . result__v4748] {:.forget})
+      [x__v4734__input . ]
+      ([ . x__v4734__input] (smolcat.value.named {_}) [x__v4734 . ])
+      ([ . x__v4734] [op0_value__v4761 . op0_value__v4761 op0_value__v4761] [x__v4759 x__v4760 . ])
+      ([] (const.u32.0x3f800000 u32.bitcast-f32) [literal__v4740__result . ])
+      ([ . literal__v4740__result] (smolcat.value.named {_}) [literal__v4740 . ])
+      ([] stdlib.numeric.signed.f32 [signed_f32__v4742 . ])
+      ([ . x__v4760 signed_f32__v4742] stdlib.numeric.negate [result__v4744 . ])
+      ([ . result__v4744] ({:.forget} stdlib.math.exp) [exp__v4746__result . ])
+      ([ . exp__v4746__result] (smolcat.value.named {_}) [exp__v4746 . ])
+      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4748 . ])
+      ([ . literal__v4740 exp__v4746 numeric_f32__v4748] stdlib.numeric.+ [result__v4750 . ])
+      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4752 . ])
+      ([ . x__v4759 result__v4750 numeric_f32__v4752] stdlib.numeric./ [result__v4754 . ])
+      ([ . result__v4754] {:.forget})
     }
   )
 
@@ -446,160 +446,160 @@
     : ([] {(f32 val)})
     -> ([] {(f32 val)})
     = {
-      [x__v4757__input . ]
+      [x__v4763__input . ]
       (
-        [ . x__v4757__input]
+        [ . x__v4763__input]
         (smolcat.value.named meta.stdlib.math.sqrt.helper.callback_metavars.x.0)
-        [x__v4757 __smolcat_x__v4988 . ]
+        [x__v4763 __smolcat_x__v4994 . ]
       )
-      ([ . x__v4757] [op0_value__v4989 . op0_value__v4989 op0_value__v4989] [x__v4944 x__v4945 . ])
-      ([ . x__v4945] [op1_value__v4990 . op1_value__v4990 op1_value__v4990] [x__v4946 x__v4947 . ])
-      ([ . x__v4947] [op2_value__v4991 . op2_value__v4991 op2_value__v4991] [x__v4948 x__v4949 . ])
-      ([ . x__v4949] [op3_value__v4992 . op3_value__v4992 op3_value__v4992] [x__v4950 x__v4951 . ])
-      ([ . x__v4951] [op4_value__v4993 . op4_value__v4993 op4_value__v4993] [x__v4952 x__v4953 . ])
-      ([ . x__v4953] ({:.forget} stdlib.math.f32_bits) [f32_bits__v4760 . ])
-      ([] type.const.u32.0x00000001 [literal__v4765 . ])
+      ([ . x__v4763] [op0_value__v4995 . op0_value__v4995 op0_value__v4995] [x__v4950 x__v4951 . ])
+      ([ . x__v4951] [op1_value__v4996 . op1_value__v4996 op1_value__v4996] [x__v4952 x__v4953 . ])
+      ([ . x__v4953] [op2_value__v4997 . op2_value__v4997 op2_value__v4997] [x__v4954 x__v4955 . ])
+      ([ . x__v4955] [op3_value__v4998 . op3_value__v4998 op3_value__v4998] [x__v4956 x__v4957 . ])
+      ([ . x__v4957] [op4_value__v4999 . op4_value__v4999 op4_value__v4999] [x__v4958 x__v4959 . ])
+      ([ . x__v4959] ({:.forget} stdlib.math.f32_bits) [f32_bits__v4766 . ])
+      ([] type.const.u32.0x00000001 [literal__v4771 . ])
       (
-        [ . f32_bits__v4760 literal__v4765]
+        [ . f32_bits__v4766 literal__v4771]
         ({{_} :.forget} stdlib.math.shift_right)
-        [shift_right__v4767__result . ]
+        [shift_right__v4773__result . ]
       )
       (
-        [ . shift_right__v4767__result]
+        [ . shift_right__v4773__result]
         (smolcat.value.named meta.stdlib.math.sqrt.helper.callback_metavars.v.0)
-        [shift_right__v4767 __smolcat_v__v4994 . ]
+        [shift_right__v4773 __smolcat_v__v5000 . ]
       )
-      ([] type.const.u32.0x1fc00000 [literal__v4772 . ])
-      ([] stdlib.numeric.numeric.u32 [numeric_u32__v4774 . ])
+      ([] type.const.u32.0x1fc00000 [literal__v4778 . ])
+      ([] stdlib.numeric.numeric.u32 [numeric_u32__v4780 . ])
       (
-        [ . shift_right__v4767 literal__v4772 numeric_u32__v4774]
+        [ . shift_right__v4773 literal__v4778 numeric_u32__v4780]
         stdlib.numeric.+
-        [result__v4776 . ]
+        [result__v4782 . ]
       )
-      ([ . result__v4776] ({:.forget} stdlib.math.from_bits) [g0__v4778__result . ])
+      ([ . result__v4782] ({:.forget} stdlib.math.from_bits) [g0__v4784__result . ])
       (
-        [ . g0__v4778__result]
+        [ . g0__v4784__result]
         (smolcat.value.named meta.stdlib.math.sqrt.helper.callback_metavars.v.1)
-        [g0__v4778 __smolcat_v__v4995 . ]
+        [g0__v4784 __smolcat_v__v5001 . ]
       )
       (
-        [ . g0__v4778]
-        [op12_value__v4996 . op12_value__v4996 op12_value__v4996]
-        [g0__v4959 g0__v4960 . ]
+        [ . g0__v4784]
+        [op12_value__v5002 . op12_value__v5002 op12_value__v5002]
+        [g0__v4965 g0__v4966 . ]
       )
-      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4781 . ])
-      ([ . x__v4952 g0__v4960 numeric_f32__v4781] stdlib.numeric./ [result__v4783 . ])
-      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4785 . ])
-      ([ . g0__v4959 result__v4783 numeric_f32__v4785] stdlib.numeric.+ [result__v4787 . ])
-      ([] (const.u32.0x3f000000 u32.bitcast-f32) [literal__v4792__result . ])
+      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4787 . ])
+      ([ . x__v4958 g0__v4966 numeric_f32__v4787] stdlib.numeric./ [result__v4789 . ])
+      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4791 . ])
+      ([ . g0__v4965 result__v4789 numeric_f32__v4791] stdlib.numeric.+ [result__v4793 . ])
+      ([] (const.u32.0x3f000000 u32.bitcast-f32) [literal__v4798__result . ])
       (
-        [ . literal__v4792__result]
+        [ . literal__v4798__result]
         (smolcat.value.named meta.stdlib.math.sqrt.helper.callback_metavars.v.2)
-        [literal__v4792 __smolcat_v__v4997 . ]
+        [literal__v4798 __smolcat_v__v5003 . ]
       )
-      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4794 . ])
-      ([ . result__v4787 literal__v4792 numeric_f32__v4794] stdlib.numeric.* [g1__v4796 . ])
+      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4800 . ])
+      ([ . result__v4793 literal__v4798 numeric_f32__v4800] stdlib.numeric.* [g1__v4802 . ])
       (
-        [ . g1__v4796]
-        [op20_value__v4998 . op20_value__v4998 op20_value__v4998]
-        [g1__v4968 g1__v4969 . ]
+        [ . g1__v4802]
+        [op20_value__v5004 . op20_value__v5004 op20_value__v5004]
+        [g1__v4974 g1__v4975 . ]
       )
-      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4799 . ])
-      ([ . x__v4950 g1__v4969 numeric_f32__v4799] stdlib.numeric./ [result__v4801 . ])
-      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4803 . ])
-      ([ . g1__v4968 result__v4801 numeric_f32__v4803] stdlib.numeric.+ [result__v4805 . ])
-      ([] (const.u32.0x3f000000 u32.bitcast-f32) [literal__v4810__result . ])
+      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4805 . ])
+      ([ . x__v4956 g1__v4975 numeric_f32__v4805] stdlib.numeric./ [result__v4807 . ])
+      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4809 . ])
+      ([ . g1__v4974 result__v4807 numeric_f32__v4809] stdlib.numeric.+ [result__v4811 . ])
+      ([] (const.u32.0x3f000000 u32.bitcast-f32) [literal__v4816__result . ])
       (
-        [ . literal__v4810__result]
+        [ . literal__v4816__result]
         (smolcat.value.named meta.stdlib.math.sqrt.helper.callback_metavars.v.3)
-        [literal__v4810 __smolcat_v__v4999 . ]
+        [literal__v4816 __smolcat_v__v5005 . ]
       )
-      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4812 . ])
-      ([ . result__v4805 literal__v4810 numeric_f32__v4812] stdlib.numeric.* [g2__v4814 . ])
+      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4818 . ])
+      ([ . result__v4811 literal__v4816 numeric_f32__v4818] stdlib.numeric.* [g2__v4820 . ])
       (
-        [ . g2__v4814]
-        [op28_value__v5000 . op28_value__v5000 op28_value__v5000]
-        [g2__v4977 g2__v4978 . ]
+        [ . g2__v4820]
+        [op28_value__v5006 . op28_value__v5006 op28_value__v5006]
+        [g2__v4983 g2__v4984 . ]
       )
-      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4817 . ])
-      ([ . x__v4948 g2__v4978 numeric_f32__v4817] stdlib.numeric./ [result__v4819 . ])
-      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4821 . ])
-      ([ . g2__v4977 result__v4819 numeric_f32__v4821] stdlib.numeric.+ [result__v4823 . ])
-      ([] (const.u32.0x3f000000 u32.bitcast-f32) [literal__v4828__result . ])
+      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4823 . ])
+      ([ . x__v4954 g2__v4984 numeric_f32__v4823] stdlib.numeric./ [result__v4825 . ])
+      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4827 . ])
+      ([ . g2__v4983 result__v4825 numeric_f32__v4827] stdlib.numeric.+ [result__v4829 . ])
+      ([] (const.u32.0x3f000000 u32.bitcast-f32) [literal__v4834__result . ])
       (
-        [ . literal__v4828__result]
+        [ . literal__v4834__result]
         (smolcat.value.named meta.stdlib.math.sqrt.helper.callback_metavars.v.4)
-        [literal__v4828 __smolcat_v__v5001 . ]
+        [literal__v4834 __smolcat_v__v5007 . ]
       )
-      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4830 . ])
-      ([ . result__v4823 literal__v4828 numeric_f32__v4830] stdlib.numeric.* [g3__v4832 . ])
+      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4836 . ])
+      ([ . result__v4829 literal__v4834 numeric_f32__v4836] stdlib.numeric.* [g3__v4838 . ])
       (
-        [ . g3__v4832]
-        [op36_value__v5002 . op36_value__v5002 op36_value__v5002]
-        [g3__v4986 g3__v4987 . ]
+        [ . g3__v4838]
+        [op36_value__v5008 . op36_value__v5008 op36_value__v5008]
+        [g3__v4992 g3__v4993 . ]
       )
-      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4835 . ])
-      ([ . x__v4946 g3__v4987 numeric_f32__v4835] stdlib.numeric./ [result__v4837 . ])
-      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4839 . ])
-      ([ . g3__v4986 result__v4837 numeric_f32__v4839] stdlib.numeric.+ [result__v4841 . ])
-      ([] (const.u32.0x3f000000 u32.bitcast-f32) [literal__v4846__result . ])
+      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4841 . ])
+      ([ . x__v4952 g3__v4993 numeric_f32__v4841] stdlib.numeric./ [result__v4843 . ])
+      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4845 . ])
+      ([ . g3__v4992 result__v4843 numeric_f32__v4845] stdlib.numeric.+ [result__v4847 . ])
+      ([] (const.u32.0x3f000000 u32.bitcast-f32) [literal__v4852__result . ])
       (
-        [ . literal__v4846__result]
+        [ . literal__v4852__result]
         (smolcat.value.named meta.stdlib.math.sqrt.helper.callback_metavars.v.5)
-        [literal__v4846 __smolcat_v__v5003 . ]
+        [literal__v4852 __smolcat_v__v5009 . ]
       )
-      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4848 . ])
-      ([ . result__v4841 literal__v4846 numeric_f32__v4848] stdlib.numeric.* [g4__v4850 . ])
-      ([] (const.u32.0x00000000 u32.bitcast-f32) [literal__v4856 . ])
-      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4858 . ])
+      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4854 . ])
+      ([ . result__v4847 literal__v4852 numeric_f32__v4854] stdlib.numeric.* [g4__v4856 . ])
+      ([] (const.u32.0x00000000 u32.bitcast-f32) [literal__v4862 . ])
+      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4864 . ])
       (
-        [ . x__v4944 literal__v4856 numeric_f32__v4858]
+        [ . x__v4950 literal__v4862 numeric_f32__v4864]
         ({:.forget {_} {_}} stdlib.numeric.less_equal)
-        [less_equal__v4860__result . ]
+        [less_equal__v4866__result . ]
       )
       (
-        [ . less_equal__v4860__result]
+        [ . less_equal__v4866__result]
         (smolcat.value.named meta.stdlib.math.sqrt.helper.callback_metavars.v.6)
-        [less_equal__v4860 __smolcat_v__v5004 . ]
+        [less_equal__v4866 __smolcat_v__v5010 . ]
       )
-      ([ . g4__v4850] {_} [tuple__v4867 . ])
-      ([] unit.intro [unit__v4871 . ])
+      ([ . g4__v4856] {_} [tuple__v4873 . ])
+      ([] unit.intro [unit__v4877 . ])
       (
         []
         (
-          [ . __smolcat_x__v4988 __smolcat_v__v4995 __smolcat_v__v4997 __smolcat_v__v4999 __smolcat_v__v5001 __smolcat_v__v5003 __smolcat_v__v5004]
+          [ . __smolcat_x__v4994 __smolcat_v__v5001 __smolcat_v__v5003 __smolcat_v__v5005 __smolcat_v__v5007 __smolcat_v__v5009 __smolcat_v__v5010]
           name.stdlib.math.sqrt.helper.if_then_else.then_branch.0
           lift
         )
-        [callback__v4905 . ]
+        [callback__v4911 . ]
       )
       (
         []
         (
-          [ . __smolcat_x__v4988 __smolcat_v__v4995 __smolcat_v__v4997 __smolcat_v__v4999 __smolcat_v__v5001 __smolcat_v__v5003 __smolcat_v__v5004]
+          [ . __smolcat_x__v4994 __smolcat_v__v5001 __smolcat_v__v5003 __smolcat_v__v5005 __smolcat_v__v5007 __smolcat_v__v5009 __smolcat_v__v5010]
           name.stdlib.math.sqrt.helper.if_then_else.else_branch.0
           lift
         )
-        [callback__v4930 . ]
+        [callback__v4936 . ]
       )
       (
-        [ . less_equal__v4860 tuple__v4867 callback__v4905 callback__v4930 unit__v4871]
+        [ . less_equal__v4866 tuple__v4873 callback__v4911 callback__v4936 unit__v4877]
         ({:.forget {_} {_} {_} {_}} core.if)
-        [if_then_else__v4934 . ]
+        [if_then_else__v4940 . ]
       )
-      ([ . if_then_else__v4934] {_} [branch_result__v4939__result . ])
+      ([ . if_then_else__v4940] {_} [branch_result__v4945__result . ])
       (
-        [ . branch_result__v4939__result]
+        [ . branch_result__v4945__result]
         (smolcat.value.named meta.stdlib.math.sqrt.helper.callback_metavars.branch_result.0)
-        [branch_result__v4939 __smolcat_branch_result__v5005 . ]
+        [branch_result__v4945 __smolcat_branch_result__v5011 . ]
       )
-      ([ . branch_result__v4939] {:.forget})
+      ([ . branch_result__v4945] {:.forget})
     }
   )
 
   (def stdlib.math.sqrt.helper.if_then_else.else_branch.0
     : (
-      [x__s1238 v__s4777 v__s4791 v__s4809 v__s4827 v__s4845 v__s4859 . ]
+      [x__s1244 v__s4783 v__s4797 v__s4815 v__s4833 v__s4851 v__s4865 . ]
       {
         (
           {
@@ -619,31 +619,31 @@
                                       {
                                         (
                                           {
-                                            [ . v__s4777]
-                                            ({[ . x__s1238] [ . v__s4777]} type.stdlib.numeric./)
+                                            [ . v__s4783]
+                                            ({[ . x__s1244] [ . v__s4783]} type.stdlib.numeric./)
                                           }
                                           type.stdlib.numeric.+
                                         )
-                                        [ . v__s4791]
+                                        [ . v__s4797]
                                       }
                                       type.stdlib.numeric.*
                                     )
                                     (
                                       {
-                                        [ . x__s1238]
+                                        [ . x__s1244]
                                         (
                                           {
                                             (
                                               {
-                                                [ . v__s4777]
+                                                [ . v__s4783]
                                                 (
-                                                  {[ . x__s1238] [ . v__s4777]}
+                                                  {[ . x__s1244] [ . v__s4783]}
                                                   type.stdlib.numeric./
                                                 )
                                               }
                                               type.stdlib.numeric.+
                                             )
-                                            [ . v__s4791]
+                                            [ . v__s4797]
                                           }
                                           type.stdlib.numeric.*
                                         )
@@ -653,13 +653,13 @@
                                   }
                                   type.stdlib.numeric.+
                                 )
-                                [ . v__s4809]
+                                [ . v__s4815]
                               }
                               type.stdlib.numeric.*
                             )
                             (
                               {
-                                [ . x__s1238]
+                                [ . x__s1244]
                                 (
                                   {
                                     (
@@ -668,34 +668,34 @@
                                           {
                                             (
                                               {
-                                                [ . v__s4777]
+                                                [ . v__s4783]
                                                 (
-                                                  {[ . x__s1238] [ . v__s4777]}
+                                                  {[ . x__s1244] [ . v__s4783]}
                                                   type.stdlib.numeric./
                                                 )
                                               }
                                               type.stdlib.numeric.+
                                             )
-                                            [ . v__s4791]
+                                            [ . v__s4797]
                                           }
                                           type.stdlib.numeric.*
                                         )
                                         (
                                           {
-                                            [ . x__s1238]
+                                            [ . x__s1244]
                                             (
                                               {
                                                 (
                                                   {
-                                                    [ . v__s4777]
+                                                    [ . v__s4783]
                                                     (
-                                                      {[ . x__s1238] [ . v__s4777]}
+                                                      {[ . x__s1244] [ . v__s4783]}
                                                       type.stdlib.numeric./
                                                     )
                                                   }
                                                   type.stdlib.numeric.+
                                                 )
-                                                [ . v__s4791]
+                                                [ . v__s4797]
                                               }
                                               type.stdlib.numeric.*
                                             )
@@ -705,7 +705,7 @@
                                       }
                                       type.stdlib.numeric.+
                                     )
-                                    [ . v__s4809]
+                                    [ . v__s4815]
                                   }
                                   type.stdlib.numeric.*
                                 )
@@ -715,13 +715,13 @@
                           }
                           type.stdlib.numeric.+
                         )
-                        [ . v__s4827]
+                        [ . v__s4833]
                       }
                       type.stdlib.numeric.*
                     )
                     (
                       {
-                        [ . x__s1238]
+                        [ . x__s1244]
                         (
                           {
                             (
@@ -734,34 +734,34 @@
                                           {
                                             (
                                               {
-                                                [ . v__s4777]
+                                                [ . v__s4783]
                                                 (
-                                                  {[ . x__s1238] [ . v__s4777]}
+                                                  {[ . x__s1244] [ . v__s4783]}
                                                   type.stdlib.numeric./
                                                 )
                                               }
                                               type.stdlib.numeric.+
                                             )
-                                            [ . v__s4791]
+                                            [ . v__s4797]
                                           }
                                           type.stdlib.numeric.*
                                         )
                                         (
                                           {
-                                            [ . x__s1238]
+                                            [ . x__s1244]
                                             (
                                               {
                                                 (
                                                   {
-                                                    [ . v__s4777]
+                                                    [ . v__s4783]
                                                     (
-                                                      {[ . x__s1238] [ . v__s4777]}
+                                                      {[ . x__s1244] [ . v__s4783]}
                                                       type.stdlib.numeric./
                                                     )
                                                   }
                                                   type.stdlib.numeric.+
                                                 )
-                                                [ . v__s4791]
+                                                [ . v__s4797]
                                               }
                                               type.stdlib.numeric.*
                                             )
@@ -771,13 +771,13 @@
                                       }
                                       type.stdlib.numeric.+
                                     )
-                                    [ . v__s4809]
+                                    [ . v__s4815]
                                   }
                                   type.stdlib.numeric.*
                                 )
                                 (
                                   {
-                                    [ . x__s1238]
+                                    [ . x__s1244]
                                     (
                                       {
                                         (
@@ -786,34 +786,34 @@
                                               {
                                                 (
                                                   {
-                                                    [ . v__s4777]
+                                                    [ . v__s4783]
                                                     (
-                                                      {[ . x__s1238] [ . v__s4777]}
+                                                      {[ . x__s1244] [ . v__s4783]}
                                                       type.stdlib.numeric./
                                                     )
                                                   }
                                                   type.stdlib.numeric.+
                                                 )
-                                                [ . v__s4791]
+                                                [ . v__s4797]
                                               }
                                               type.stdlib.numeric.*
                                             )
                                             (
                                               {
-                                                [ . x__s1238]
+                                                [ . x__s1244]
                                                 (
                                                   {
                                                     (
                                                       {
-                                                        [ . v__s4777]
+                                                        [ . v__s4783]
                                                         (
-                                                          {[ . x__s1238] [ . v__s4777]}
+                                                          {[ . x__s1244] [ . v__s4783]}
                                                           type.stdlib.numeric./
                                                         )
                                                       }
                                                       type.stdlib.numeric.+
                                                     )
-                                                    [ . v__s4791]
+                                                    [ . v__s4797]
                                                   }
                                                   type.stdlib.numeric.*
                                                 )
@@ -823,7 +823,7 @@
                                           }
                                           type.stdlib.numeric.+
                                         )
-                                        [ . v__s4809]
+                                        [ . v__s4815]
                                       }
                                       type.stdlib.numeric.*
                                     )
@@ -833,7 +833,7 @@
                               }
                               type.stdlib.numeric.+
                             )
-                            [ . v__s4827]
+                            [ . v__s4833]
                           }
                           type.stdlib.numeric.*
                         )
@@ -843,7 +843,7 @@
                   }
                   type.stdlib.numeric.+
                 )
-                [ . v__s4845]
+                [ . v__s4851]
               }
               type.stdlib.numeric.*
             )
@@ -851,24 +851,24 @@
           }
           :
         )
-        (({({[ . v__s4859]} prop.IsTrue)} stdlib.prelude.prop.Not) |-)
+        (({({[ . v__s4865]} prop.IsTrue)} stdlib.prelude.prop.Not) |-)
         1
       }
     )
-    -> ([x__s1238 v__s4777 v__s4791 v__s4809 v__s4827 v__s4845 v__s4859 . ] {(f32 val)})
+    -> ([x__s1244 v__s4783 v__s4797 v__s4815 v__s4833 v__s4851 v__s4865 . ] {(f32 val)})
     = {
-      [context__v4908 condition__v4916 common__v4918 . ]
-      ([ . condition__v4916] [op0_value__v4926 . ] [])
-      ([ . context__v4908] {_} [g4__v4913 . ])
-      ([ . common__v4918] unit.elim [])
-      ([ . g4__v4913] {_} [tuple__v4925 . ])
-      ([ . tuple__v4925] {({_} {:.forget} {_})})
+      [context__v4914 condition__v4922 common__v4924 . ]
+      ([ . condition__v4922] [op0_value__v4932 . ] [])
+      ([ . context__v4914] {_} [g4__v4919 . ])
+      ([ . common__v4924] unit.elim [])
+      ([ . g4__v4919] {_} [tuple__v4931 . ])
+      ([ . tuple__v4931] {({_} {:.forget} {_})})
     }
   )
 
   (def stdlib.math.sqrt.helper.if_then_else.then_branch.0
     : (
-      [x__s1238 v__s4777 v__s4791 v__s4809 v__s4827 v__s4845 v__s4859 . ]
+      [x__s1244 v__s4783 v__s4797 v__s4815 v__s4833 v__s4851 v__s4865 . ]
       {
         (
           {
@@ -888,31 +888,31 @@
                                       {
                                         (
                                           {
-                                            [ . v__s4777]
-                                            ({[ . x__s1238] [ . v__s4777]} type.stdlib.numeric./)
+                                            [ . v__s4783]
+                                            ({[ . x__s1244] [ . v__s4783]} type.stdlib.numeric./)
                                           }
                                           type.stdlib.numeric.+
                                         )
-                                        [ . v__s4791]
+                                        [ . v__s4797]
                                       }
                                       type.stdlib.numeric.*
                                     )
                                     (
                                       {
-                                        [ . x__s1238]
+                                        [ . x__s1244]
                                         (
                                           {
                                             (
                                               {
-                                                [ . v__s4777]
+                                                [ . v__s4783]
                                                 (
-                                                  {[ . x__s1238] [ . v__s4777]}
+                                                  {[ . x__s1244] [ . v__s4783]}
                                                   type.stdlib.numeric./
                                                 )
                                               }
                                               type.stdlib.numeric.+
                                             )
-                                            [ . v__s4791]
+                                            [ . v__s4797]
                                           }
                                           type.stdlib.numeric.*
                                         )
@@ -922,13 +922,13 @@
                                   }
                                   type.stdlib.numeric.+
                                 )
-                                [ . v__s4809]
+                                [ . v__s4815]
                               }
                               type.stdlib.numeric.*
                             )
                             (
                               {
-                                [ . x__s1238]
+                                [ . x__s1244]
                                 (
                                   {
                                     (
@@ -937,34 +937,34 @@
                                           {
                                             (
                                               {
-                                                [ . v__s4777]
+                                                [ . v__s4783]
                                                 (
-                                                  {[ . x__s1238] [ . v__s4777]}
+                                                  {[ . x__s1244] [ . v__s4783]}
                                                   type.stdlib.numeric./
                                                 )
                                               }
                                               type.stdlib.numeric.+
                                             )
-                                            [ . v__s4791]
+                                            [ . v__s4797]
                                           }
                                           type.stdlib.numeric.*
                                         )
                                         (
                                           {
-                                            [ . x__s1238]
+                                            [ . x__s1244]
                                             (
                                               {
                                                 (
                                                   {
-                                                    [ . v__s4777]
+                                                    [ . v__s4783]
                                                     (
-                                                      {[ . x__s1238] [ . v__s4777]}
+                                                      {[ . x__s1244] [ . v__s4783]}
                                                       type.stdlib.numeric./
                                                     )
                                                   }
                                                   type.stdlib.numeric.+
                                                 )
-                                                [ . v__s4791]
+                                                [ . v__s4797]
                                               }
                                               type.stdlib.numeric.*
                                             )
@@ -974,7 +974,7 @@
                                       }
                                       type.stdlib.numeric.+
                                     )
-                                    [ . v__s4809]
+                                    [ . v__s4815]
                                   }
                                   type.stdlib.numeric.*
                                 )
@@ -984,13 +984,13 @@
                           }
                           type.stdlib.numeric.+
                         )
-                        [ . v__s4827]
+                        [ . v__s4833]
                       }
                       type.stdlib.numeric.*
                     )
                     (
                       {
-                        [ . x__s1238]
+                        [ . x__s1244]
                         (
                           {
                             (
@@ -1003,34 +1003,34 @@
                                           {
                                             (
                                               {
-                                                [ . v__s4777]
+                                                [ . v__s4783]
                                                 (
-                                                  {[ . x__s1238] [ . v__s4777]}
+                                                  {[ . x__s1244] [ . v__s4783]}
                                                   type.stdlib.numeric./
                                                 )
                                               }
                                               type.stdlib.numeric.+
                                             )
-                                            [ . v__s4791]
+                                            [ . v__s4797]
                                           }
                                           type.stdlib.numeric.*
                                         )
                                         (
                                           {
-                                            [ . x__s1238]
+                                            [ . x__s1244]
                                             (
                                               {
                                                 (
                                                   {
-                                                    [ . v__s4777]
+                                                    [ . v__s4783]
                                                     (
-                                                      {[ . x__s1238] [ . v__s4777]}
+                                                      {[ . x__s1244] [ . v__s4783]}
                                                       type.stdlib.numeric./
                                                     )
                                                   }
                                                   type.stdlib.numeric.+
                                                 )
-                                                [ . v__s4791]
+                                                [ . v__s4797]
                                               }
                                               type.stdlib.numeric.*
                                             )
@@ -1040,13 +1040,13 @@
                                       }
                                       type.stdlib.numeric.+
                                     )
-                                    [ . v__s4809]
+                                    [ . v__s4815]
                                   }
                                   type.stdlib.numeric.*
                                 )
                                 (
                                   {
-                                    [ . x__s1238]
+                                    [ . x__s1244]
                                     (
                                       {
                                         (
@@ -1055,34 +1055,34 @@
                                               {
                                                 (
                                                   {
-                                                    [ . v__s4777]
+                                                    [ . v__s4783]
                                                     (
-                                                      {[ . x__s1238] [ . v__s4777]}
+                                                      {[ . x__s1244] [ . v__s4783]}
                                                       type.stdlib.numeric./
                                                     )
                                                   }
                                                   type.stdlib.numeric.+
                                                 )
-                                                [ . v__s4791]
+                                                [ . v__s4797]
                                               }
                                               type.stdlib.numeric.*
                                             )
                                             (
                                               {
-                                                [ . x__s1238]
+                                                [ . x__s1244]
                                                 (
                                                   {
                                                     (
                                                       {
-                                                        [ . v__s4777]
+                                                        [ . v__s4783]
                                                         (
-                                                          {[ . x__s1238] [ . v__s4777]}
+                                                          {[ . x__s1244] [ . v__s4783]}
                                                           type.stdlib.numeric./
                                                         )
                                                       }
                                                       type.stdlib.numeric.+
                                                     )
-                                                    [ . v__s4791]
+                                                    [ . v__s4797]
                                                   }
                                                   type.stdlib.numeric.*
                                                 )
@@ -1092,7 +1092,7 @@
                                           }
                                           type.stdlib.numeric.+
                                         )
-                                        [ . v__s4809]
+                                        [ . v__s4815]
                                       }
                                       type.stdlib.numeric.*
                                     )
@@ -1102,7 +1102,7 @@
                               }
                               type.stdlib.numeric.+
                             )
-                            [ . v__s4827]
+                            [ . v__s4833]
                           }
                           type.stdlib.numeric.*
                         )
@@ -1112,7 +1112,7 @@
                   }
                   type.stdlib.numeric.+
                 )
-                [ . v__s4845]
+                [ . v__s4851]
               }
               type.stdlib.numeric.*
             )
@@ -1120,21 +1120,21 @@
           }
           :
         )
-        (({[ . v__s4859]} prop.IsTrue) |-)
+        (({[ . v__s4865]} prop.IsTrue) |-)
         1
       }
     )
-    -> ([x__s1238 v__s4777 v__s4791 v__s4809 v__s4827 v__s4845 v__s4859 . ] {(f32 val)})
+    -> ([x__s1244 v__s4783 v__s4797 v__s4815 v__s4833 v__s4851 v__s4865 . ] {(f32 val)})
     = {
-      [context__v4873 condition__v4881 common__v4883 . ]
-      ([ . condition__v4881] [op0_value__v4897 . ] [])
-      ([ . context__v4873] {_} [g4__v4878 . ])
-      ([ . g4__v4878] [op2_value__v4898 . ] [])
-      ([ . common__v4883] unit.elim [])
-      ([] (const.u32.0x00000000 u32.bitcast-f32) [literal__v4890__result . ])
-      ([ . literal__v4890__result] (smolcat.value.named {_}) [literal__v4890 . ])
-      ([ . literal__v4890] {_} [tuple__v4896 . ])
-      ([ . tuple__v4896] {({_} {:.forget} {_})})
+      [context__v4879 condition__v4887 common__v4889 . ]
+      ([ . condition__v4887] [op0_value__v4903 . ] [])
+      ([ . context__v4879] {_} [g4__v4884 . ])
+      ([ . g4__v4884] [op2_value__v4904 . ] [])
+      ([ . common__v4889] unit.elim [])
+      ([] (const.u32.0x00000000 u32.bitcast-f32) [literal__v4896__result . ])
+      ([ . literal__v4896__result] (smolcat.value.named {_}) [literal__v4896 . ])
+      ([ . literal__v4896] {_} [tuple__v4902 . ])
+      ([ . tuple__v4902] {({_} {:.forget} {_})})
     }
   )
 })

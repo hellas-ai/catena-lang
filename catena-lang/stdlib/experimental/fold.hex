@@ -1,20 +1,20 @@
 (theory program type {
   (arr core.fold.bounded
     : (
-      [state_type__s626 invariant_type__s627 end__s628 index__s631 . ]
+      [state_type__s628 invariant_type__s629 end__s630 index__s633 . ]
       {
-        ({[ . end__s628] u32} :)
-        [ . state_type__s626]
+        ({[ . end__s630] u32} :)
+        [ . state_type__s628]
         (
           {
             (
               {
-                ({[ . index__s631] u32} :)
+                ({[ . index__s633] u32} :)
                 (
                   {
-                    [ . state_type__s626]
+                    [ . state_type__s628]
                     (
-                      {(({[ . index__s631] [ . end__s628]} prop.Less) |-) [ . invariant_type__s627]}
+                      {(({[ . index__s633] [ . end__s630]} prop.Less) |-) [ . invariant_type__s629]}
                       *
                     )
                   }
@@ -23,37 +23,37 @@
               }
               *
             )
-            ({[ . state_type__s626] [ . invariant_type__s627]} *)
+            ({[ . state_type__s628] [ . invariant_type__s629]} *)
           }
           =>
         )
-        [ . invariant_type__s627]
+        [ . invariant_type__s629]
       }
     )
     -> (
-      [state_type__s626 invariant_type__s627 end__s628 index__s631 . ]
-      {[ . state_type__s626] [ . invariant_type__s627]}
+      [state_type__s628 invariant_type__s629 end__s630 index__s633 . ]
+      {[ . state_type__s628] [ . invariant_type__s629]}
     )
   )
 
   (arr core.fold.bounded_u64
     : (
-      [state_type__s638 invariant_type__s639 end__s640 index__s643 . ]
+      [state_type__s640 invariant_type__s641 end__s642 index__s645 . ]
       {
-        ({[ . end__s640] u64} :)
-        ([ . state_type__s638] val)
+        ({[ . end__s642] u64} :)
+        ([ . state_type__s640] val)
         (
           {
             (
               {
-                ({[ . index__s643] u64} :)
+                ({[ . index__s645] u64} :)
                 (
                   {
-                    ([ . state_type__s638] val)
+                    ([ . state_type__s640] val)
                     (
                       {
-                        (({[ . index__s643] [ . end__s640]} prop.Less) |-)
-                        ([ . invariant_type__s639] |-)
+                        (({[ . index__s645] [ . end__s642]} prop.Less) |-)
+                        ([ . invariant_type__s641] |-)
                       }
                       *
                     )
@@ -63,16 +63,16 @@
               }
               *
             )
-            ({([ . state_type__s638] val) ([ . invariant_type__s639] |-)} *)
+            ({([ . state_type__s640] val) ([ . invariant_type__s641] |-)} *)
           }
           =>
         )
-        ([ . invariant_type__s639] |-)
+        ([ . invariant_type__s641] |-)
       }
     )
     -> (
-      [state_type__s638 invariant_type__s639 end__s640 index__s643 . ]
-      {([ . state_type__s638] val) ([ . invariant_type__s639] |-)}
+      [state_type__s640 invariant_type__s641 end__s642 index__s645 . ]
+      {([ . state_type__s640] val) ([ . invariant_type__s641] |-)}
     )
   )
 })

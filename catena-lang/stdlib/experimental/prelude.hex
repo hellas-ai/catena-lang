@@ -1,24 +1,24 @@
 (theory program type {
   (arr core.and_elim
-    : ([p__s442 q__s443 . ] {(({[ . p__s442] [ . q__s443]} prop.And) |-)})
-    -> ([p__s442 q__s443 . ] {({([ . p__s442] |-) ([ . q__s443] |-)} *)})
+    : ([p__s444 q__s445 . ] {(({[ . p__s444] [ . q__s445]} prop.And) |-)})
+    -> ([p__s444 q__s445 . ] {({([ . p__s444] |-) ([ . q__s445] |-)} *)})
   )
 
   (arr core.and_intro
-    : ([p__s437 q__s438 . ] {({([ . p__s437] |-) ([ . q__s438] |-)} *)})
-    -> ([p__s437 q__s438 . ] {(({[ . p__s437] [ . q__s438]} prop.And) |-)})
+    : ([p__s439 q__s440 . ] {({([ . p__s439] |-) ([ . q__s440] |-)} *)})
+    -> ([p__s439 q__s440 . ] {(({[ . p__s439] [ . q__s440]} prop.And) |-)})
   )
 
   (arr core.if
     : (
-      [p__s404 result_type__s405 context_type__s406 contracts_type__s407 . ]
+      [p__s406 result_type__s407 context_type__s408 contracts_type__s409 . ]
       {
         (bool val)
-        [ . context_type__s406]
+        [ . context_type__s408]
         (
           {
-            ({[ . context_type__s406] ({([ . p__s404] |-) [ . contracts_type__s407]} *)} *)
-            [ . result_type__s405]
+            ({[ . context_type__s408] ({([ . p__s406] |-) [ . contracts_type__s409]} *)} *)
+            [ . result_type__s407]
           }
           =>
         )
@@ -26,40 +26,40 @@
           {
             (
               {
-                [ . context_type__s406]
-                ({(({[ . p__s404]} stdlib.prelude.prop.Not) |-) [ . contracts_type__s407]} *)
+                [ . context_type__s408]
+                ({(({[ . p__s406]} stdlib.prelude.prop.Not) |-) [ . contracts_type__s409]} *)
               }
               *
             )
-            [ . result_type__s405]
+            [ . result_type__s407]
           }
           =>
         )
-        [ . contracts_type__s407]
+        [ . contracts_type__s409]
       }
     )
     -> (
-      [p__s404 result_type__s405 context_type__s406 contracts_type__s407 . ]
-      {[ . result_type__s405]}
+      [p__s406 result_type__s407 context_type__s408 contracts_type__s409 . ]
+      {[ . result_type__s407]}
     )
   )
 
   (arr core.if_guarded
     : (
-      [p__s419 permissions__s420 result_type__s421 context_type__s422 contracts_type__s423 . ]
+      [p__s421 permissions__s422 result_type__s423 context_type__s424 contracts_type__s425 . ]
       {
         (bool val)
-        [ . context_type__s422]
+        [ . context_type__s424]
         (
           {
             (
               {
-                [ . context_type__s422]
-                ({([ . p__s419] |-) ({[ . contracts_type__s423] ([ . permissions__s420] |-)} *)} *)
+                [ . context_type__s424]
+                ({([ . p__s421] |-) ({[ . contracts_type__s425] ([ . permissions__s422] |-)} *)} *)
               }
               *
             )
-            [ . result_type__s421]
+            [ . result_type__s423]
           }
           =>
         )
@@ -67,28 +67,28 @@
           {
             (
               {
-                [ . context_type__s422]
-                ({(({[ . p__s419]} stdlib.prelude.prop.Not) |-) [ . contracts_type__s423]} *)
+                [ . context_type__s424]
+                ({(({[ . p__s421]} stdlib.prelude.prop.Not) |-) [ . contracts_type__s425]} *)
               }
               *
             )
-            [ . result_type__s421]
+            [ . result_type__s423]
           }
           =>
         )
-        [ . contracts_type__s423]
-        (({[ . p__s419] [ . permissions__s420]} ==>) |-)
+        [ . contracts_type__s425]
+        (({[ . p__s421] [ . permissions__s422]} ==>) |-)
       }
     )
     -> (
-      [p__s419 permissions__s420 result_type__s421 context_type__s422 contracts_type__s423 . ]
-      {[ . result_type__s421]}
+      [p__s421 permissions__s422 result_type__s423 context_type__s424 contracts_type__s425 . ]
+      {[ . result_type__s423]}
     )
   )
 
   (def core.implication_apply
-    : ([p__s447 q__s448 . ] {(({[ . p__s447] [ . q__s448]} ==>) |-) ([ . p__s447] |-)})
-    -> ([p__s447 q__s448 . ] {([ . q__s448] |-)})
+    : ([p__s449 q__s450 . ] {(({[ . p__s449] [ . q__s450]} ==>) |-) ([ . p__s449] |-)})
+    -> ([p__s449 q__s450 . ] {([ . q__s450] |-)})
     = {
       [rule__input0__v0 premise__input1__v1 . ]
       (

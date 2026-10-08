@@ -77,7 +77,12 @@ pub(super) fn lower(
     }
     if matches!(
         name,
-        "global_read" | "global_write" | "shared_read" | "shared_write" | "shared_slot"
+        "global_read"
+            | "global_read_unsafe"
+            | "global_write"
+            | "shared_read"
+            | "shared_write"
+            | "shared_slot"
     ) && l.place != Place::Device
     {
         return Err(invalid(op, "requires device execution"));
@@ -99,11 +104,10 @@ pub(super) fn lower(
         return results(l, outputs, vec![]);
     }
     let ty = single_output(outputs)?;
-    if matches!(name, "global_read" | "shared_read") {
+    if matches!(name, "global_read" | "global_read_unsafe" | "shared_read") {
         let (memory, index) = match (name, values.as_slice()) {
-            ("global_read", [_, memory, index]) | ("shared_read", [memory, index]) => {
-                (memory, index)
-            }
+            ("global_read", [_, memory, index])
+            | ("global_read_unsafe" | "shared_read", [memory, index]) => (memory, index),
             _ => return Err(invalid(op, "invalid read operands")),
         };
         let buffer = operand(memory)?;

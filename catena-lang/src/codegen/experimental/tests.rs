@@ -1,3 +1,4 @@
+use super::lower_types::CType;
 use super::*;
 
 fn scalar(name: &str) -> Obj {
@@ -158,6 +159,92 @@ fn writes_assertions_and_barriers_survive_proof_erasure() {
             .iter()
             .any(|i| matches!(i,Instruction::Assert {condition} if condition=="condition"))
     );
+}
+
+#[test]
+fn unsafe_global_read_loads_on_device_without_thread_or_permissions() {
+    for kind in ["u32", "u64", "f32"] {
+        let templates = BTreeMap::new();
+        let mut l = lowerer(&templates);
+        l.place = Place::Device;
+        let buffer = node(
+            "val",
+            vec![node(
+                "stdlib.gpu.memory.type.Global",
+                vec![Tree::Leaf(0, ()), node(kind, vec![])],
+            )],
+        );
+        let index = node(
+            "val",
+            vec![node("stdlib.gpu.memory.type.Ix", vec![Tree::Leaf(0, ())])],
+        );
+        let result = l
+            .lower_operation(
+                "stdlib.gpu.memory.global_read_unsafe",
+                vec![
+                    value(buffer.clone(), "buffer"),
+                    value(index.clone(), "index"),
+                ],
+                &[scalar(kind)],
+            )
+            .unwrap();
+        assert_eq!(result.len(), 1);
+        assert!(
+            matches!(&l.body[0], Instruction::Assert { condition } if condition == "index < buffer.count")
+        );
+        assert!(
+            matches!(&l.body[1], Instruction::Load { result: loaded, buffer, index }
+            if loaded.name == expr(&result[0]).unwrap()
+                && buffer.ty == CType::Global(Box::new(runtime(&scalar(kind)).unwrap().unwrap()))
+                && index.ty == CType::U64)
+        );
+        l.modules.kernels.insert(
+            "read".into(),
+            Function {
+                symbol: "read".into(),
+                inputs: vec![
+                    Variable {
+                        name: "buffer".into(),
+                        ty: runtime(&buffer).unwrap().unwrap(),
+                    },
+                    Variable {
+                        name: "index".into(),
+                        ty: runtime(&index).unwrap().unwrap(),
+                    },
+                ],
+                outputs: vec![],
+                body: l.body,
+            },
+        );
+        for dialect in [GpuDialect::Hip, GpuDialect::Cuda] {
+            let source = render_runtime_module(&l.modules, dialect).unwrap().source;
+            assert!(source.contains("catena_assert(index < buffer.count);"));
+            assert!(source.contains("= buffer.data[index];"));
+        }
+    }
+}
+
+#[test]
+fn unsafe_global_read_rejects_host_execution_and_missing_operands() {
+    let templates = BTreeMap::new();
+    let mut l = lowerer(&templates);
+    let buffer = node(
+        "val",
+        vec![node(
+            "stdlib.gpu.memory.type.Global",
+            vec![Tree::Leaf(0, ()), node("u64", vec![])],
+        )],
+    );
+    let args = vec![value(buffer, "buffer"), value(scalar("u64"), "index")];
+    assert!(matches!(l.lower_operation(
+        "stdlib.gpu.memory.global_read_unsafe", args.clone(), &[scalar("u64")],
+    ), Err(CodegenError::Invalid { reason, .. }) if reason == "requires device execution"));
+    assert!(l.body.is_empty());
+    l.place = Place::Device;
+    assert!(matches!(l.lower_operation(
+        "stdlib.gpu.memory.global_read_unsafe", args[..1].to_vec(), &[scalar("u64")],
+    ), Err(CodegenError::Invalid { reason, .. }) if reason == "invalid read operands"));
+    assert!(l.body.is_empty());
 }
 
 #[test]

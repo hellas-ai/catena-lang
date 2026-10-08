@@ -5,7 +5,7 @@
 
 mod default;
 mod dialect;
-mod experimental;
+pub(crate) mod experimental;
 
 use hexpr::Operation;
 use thiserror::Error;

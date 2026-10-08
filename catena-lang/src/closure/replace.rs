@@ -27,6 +27,9 @@ use crate::{
 
 type Obj = Tree<(), Operation>;
 
+mod experimental;
+pub(super) use experimental::patch as patch_experimental;
+
 const CONVERTED_PRIMITIVES: &[(&str, &str)] = &[
     ("if", "ifc"),
     ("bool.if", "bool.ifc"),

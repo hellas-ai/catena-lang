@@ -1,6 +1,6 @@
 //! Experimental GPU lowering of typed, closure-converted graphs.
 //!
-//! Only `codegen` and its error type cross the backend boundary. Lowering, IR,
+//! The compiler also reads callback aliases from `primitives`. Lowering, IR,
 //! and rendering are private to this module and its descendants.
 
 mod gpu;
@@ -10,6 +10,7 @@ mod lower_types;
 mod meta;
 mod ops;
 mod prelude;
+pub(crate) mod primitives;
 mod smolcat_compat;
 #[cfg(test)]
 mod tests;

@@ -276,7 +276,7 @@ impl<'a> Lowerer<'a> {
         args: Vec<Value>,
         outputs: &[Obj],
     ) -> Result<Vec<Value>, CodegenError> {
-        let op = crate::closure::replace::source_primitive(op);
+        let op = super::primitives::source_primitive(op);
         if let Some(name) = op.strip_prefix("name.") {
             let [ty] = outputs else {
                 return Err(invalid(op, "function reference must have one output"));

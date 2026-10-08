@@ -3,7 +3,7 @@ use metacat::theory::{
     RawTheorySet,
     ast::{RawTheory, RawTheoryArrow},
 };
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{
     elaborate::ElaborateError,
@@ -42,8 +42,8 @@ pub fn elaborate(raw: &mut RawTheorySet, kind: ConstantKind) -> Result<(), Elabo
     Ok(())
 }
 
-/// Named literals in dependent interfaces denote nullary operations in the
-/// syntax theory, even when generated source omitted their declarations.
+/// Named literals denote nullary operations in the syntax theory and program
+/// primitives whose result retains the literal as its symbolic identity.
 pub(super) fn elaborate_type_literals(
     raw: &mut RawTheorySet,
     kind: ConstantKind,
@@ -71,15 +71,22 @@ pub(super) fn elaborate_type_literals(
             Hexpr::Hole | Hexpr::Operation(_) => {}
         }
     }
+    let mut program_literals = BTreeMap::new();
     for theory in raw
         .theories
         .values()
         .filter(|theory| theory.syntax_category.as_str() == "type")
     {
+        let mut referenced = BTreeSet::new();
         for arrow in theory.arrows.values() {
-            collect(&arrow.type_maps.0, &prefix, &mut literals);
-            collect(&arrow.type_maps.1, &prefix, &mut literals);
+            collect(&arrow.type_maps.0, &prefix, &mut referenced);
+            collect(&arrow.type_maps.1, &prefix, &mut referenced);
+            if let Some(definition) = &arrow.definition {
+                collect(definition, &prefix, &mut referenced);
+            }
         }
+        literals.extend(referenced.iter().cloned());
+        program_literals.insert(theory.name.clone(), referenced);
     }
     if literals.is_empty() {
         return Ok(());
@@ -112,7 +119,42 @@ pub(super) fn elaborate_type_literals(
             theory.arrows.insert(literal, expected);
         }
     }
+    for (theory_name, literals) in program_literals {
+        let theory = raw
+            .theories
+            .get_mut(&theory_name)
+            .expect("collected theory");
+        for literal in literals {
+            let expected = symbolic_const_arrow(literal.clone(), kind);
+            if let Some(existing) = theory.arrows.get(&literal) {
+                if existing.definition.is_some() || existing.type_maps != expected.type_maps {
+                    return Err(ElaborateError::InvalidConstant {
+                        operation: literal.to_string(),
+                        reason: format!(
+                            "program literal must be a primitive returning the symbolic constant as {}",
+                            kind.type_name
+                        ),
+                    });
+                }
+            } else {
+                theory.arrows.insert(literal, expected);
+            }
+        }
+    }
     Ok(())
+}
+
+fn symbolic_const_arrow(name: Operation, kind: ConstantKind) -> RawTheoryArrow {
+    RawTheoryArrow {
+        type_maps: (
+            "([] {})".parse().expect("constant source map"),
+            format!("([] {{({{{name} {}}} :)}})", kind.type_name)
+                .parse()
+                .expect("symbolic constant target map"),
+        ),
+        name,
+        definition: None,
+    }
 }
 
 fn elaborate_theory(theory: &mut RawTheory, kind: ConstantKind) -> Result<(), ElaborateError> {
@@ -229,8 +271,19 @@ mod tests {
             let arrow = &theory.arrows[&literal.parse().unwrap()];
             assert_eq!(arrow.type_maps, (op("0"), op("1")));
             assert!(arrow.definition.is_none());
+            let program = &theories.theories[&"program".parse().unwrap()];
+            let primitive = &program.arrows[&literal.parse().unwrap()];
+            assert_eq!(
+                primitive.type_maps,
+                symbolic_const_arrow(literal.parse().unwrap(), kind).type_maps
+            );
+            assert!(primitive.definition.is_none());
             elaborate_type_literals(&mut theories, kind).unwrap();
             assert_eq!(theories.theories[&"type".parse().unwrap()].arrows.len(), 1);
+            assert_eq!(
+                theories.theories[&"program".parse().unwrap()].arrows.len(),
+                2
+            );
         }
     }
 

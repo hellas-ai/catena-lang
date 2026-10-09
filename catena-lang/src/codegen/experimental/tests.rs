@@ -263,20 +263,20 @@ fn fold_emits_loop_and_preserves_carried_state() {
             ty: node("val", vec![node("->", vec![domain, ty.clone()])]),
             repr: Repr::Function("stdlib.numeric.+".parse().unwrap()),
         };
-        let result = l
-            .lower_operation(
-                op,
-                vec![
-                    value(ty.clone(), "end"),
-                    value(ty.clone(), "initial"),
-                    Value::erased(node("1", vec![])),
-                    callback,
-                    Value::erased(proof()),
-                ],
-                &[ty, proof()],
-            )
-            .unwrap();
-        assert_eq!(result.len(), 2);
+        let mut args = vec![
+            value(ty.clone(), "end"),
+            value(ty.clone(), "initial"),
+            Value::erased(node("1", vec![])),
+            callback,
+            Value::erased(proof()),
+        ];
+        let mut outputs = vec![ty, proof()];
+        if op.contains("trace") {
+            args.push(Value::erased(proof()));
+            outputs.push(proof());
+        }
+        let result = l.lower_operation(op, args, &outputs).unwrap();
+        assert_eq!(result.len(), outputs.len());
         let Instruction::For {
             body, index_type, ..
         } = l.body.last().unwrap()
@@ -556,4 +556,94 @@ fn memory_conversions_allocation_and_free_use_current_namespace() {
         assert!(source.contains(&format!("{}(buffer.data)", dialect.device_free_fn())));
         assert!(source.contains("uint64_t count"));
     }
+}
+
+#[test]
+fn converted_conditionals_inline_distinct_captured_branches() {
+    for op in ["core.ifc", "core.if_guardedc"] {
+        let templates = BTreeMap::new();
+        let mut l = lowerer(&templates);
+        let ty = scalar("u32");
+        let function_ty = node(
+            "val",
+            vec![node(
+                "->",
+                vec![node("*", vec![ty.clone(), ty.clone()]), ty.clone()],
+            )],
+        );
+        let function = |name: &str| Value {
+            ty: function_ty.clone(),
+            repr: Repr::Function(name.parse().unwrap()),
+        };
+        let mut args = vec![
+            value(scalar("bool"), "condition"),
+            value(ty.clone(), "context"),
+            value(ty.clone(), "yes_capture"),
+            function("stdlib.numeric.+"),
+            value(ty.clone(), "no_capture"),
+            function("stdlib.numeric.-"),
+            Value::erased(node("1", vec![])),
+        ];
+        if op == "core.if_guardedc" {
+            args.push(Value::erased(proof()));
+        }
+        let result = l.lower_operation(op, args, &[ty]).unwrap();
+        assert_eq!(result.len(), 1);
+        let Instruction::If { yes, no, .. } = l.body.last().unwrap() else {
+            panic!("expected conditional")
+        };
+        assert!(yes.iter().any(|i| matches!(i, Instruction::Let(_, expression) if expression.contains("yes_capture + context"))));
+        assert!(no.iter().any(|i| matches!(i, Instruction::Let(_, expression) if expression.contains("no_capture - context"))));
+    }
+}
+
+#[test]
+fn callback_primitives_reject_missing_and_extra_ports() {
+    for (op, arity) in [
+        ("core.ifc", 7),
+        ("core.if_guardedc", 8),
+        ("core.fold.boundedc", 5),
+        ("core.fold.bounded_u64c", 5),
+        ("core.fold.tracec", 6),
+        ("core.fold.trace_u64c", 6),
+        ("unsafe.launchc", 3),
+        ("unsafe.launch_sharedc", 4),
+    ] {
+        for count in [arity - 1, arity + 1] {
+            let templates = BTreeMap::new();
+            let mut l = lowerer(&templates);
+            let args = vec![Value::erased(node("1", vec![])); count];
+            assert!(
+                matches!(l.lower_operation(op, args, &[]), Err(CodegenError::Invalid { reason, .. }) if reason.contains("operands")),
+                "{op}: {count}"
+            );
+            assert!(l.body.is_empty());
+        }
+    }
+}
+
+#[test]
+fn callback_binding_preserves_erased_captures_and_rejects_dynamic_functions() {
+    let ty = scalar("u32");
+    let environment_ty = node("*", vec![proof(), ty.clone()]);
+    let environment = product(
+        environment_ty.clone(),
+        vec![Value::erased(proof()), value(ty.clone(), "capture")],
+    );
+    let mut function = Value {
+        ty: node(
+            "val",
+            vec![node(
+                "->",
+                vec![node("*", vec![environment_ty, ty.clone()]), ty.clone()],
+            )],
+        ),
+        repr: Repr::Function("test".parse().unwrap()),
+    };
+    let callback = Callback::new(&function, &environment).unwrap();
+    assert_eq!(callback.captures.len(), 2);
+    assert!(matches!(callback.captures[0].repr, Repr::Erased));
+    assert_eq!(callback.parameters, vec![ty]);
+    function.repr = Repr::Runtime("dynamic_function".into());
+    assert!(Callback::new(&function, &environment).is_err());
 }

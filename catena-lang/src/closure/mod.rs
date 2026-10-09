@@ -74,7 +74,7 @@ pub enum ConversionError {
 /// remain separate implementation modules, but callers receive one coherent
 /// result which preserves every useful intermediate representation.
 /// This entry point uses default stdlib primitives; the compiler selects the
-/// experimental compatibility patch explicitly through `run_with_progress`.
+/// experimental primitive policy explicitly through `run_with_progress`.
 pub fn run(
     theory_set: &TheorySet,
     forgotten: &TheoryTermMap<ClosureForgotten<Operation>>,
@@ -99,17 +99,15 @@ pub(crate) fn run_with_progress(
     let inlined_definitions = inline_named_calls::run(theory_set, forgotten)?;
     let closure_forgotten_definitions = inlined_definitions.clone();
 
-    // Discover and replace closures using the existing conversion loop.
-    let mut converted = region_conversion::run(theory_set, inlined_definitions, progress)?;
-
-    // TEMPORARY experimental path: callback environments add graph ports,
-    // including for empty environments, that the source signatures lack.
-    // Patch the completed graphs and declare their runtime interfaces before
-    // validation. Default conversion skips this patch entirely.
-    // TODO: review this compatibility path when the experimental stdlib ABI settles.
-    if matches!(codegen, crate::codegen::CodegenKind::Experimental) {
-        replace::patch_experimental(&mut converted)?;
-    }
+    // Both stdlibs declare their converted interfaces; only the name table differs.
+    let primitives = match codegen {
+        crate::codegen::CodegenKind::Default => replace::CONVERTED_PRIMITIVES,
+        // TODO stdlib also might define callbacks without val wrapper
+        crate::codegen::CodegenKind::Experimental => {
+            crate::codegen::experimental::primitives::CONVERTED_PRIMITIVES
+        }
+    };
+    let converted = region_conversion::run(theory_set, inlined_definitions, primitives, progress)?;
     let region_conversion::RegionConversion {
         terms: working,
         initial_regions: regions,
@@ -128,7 +126,7 @@ pub(crate) fn run_with_progress(
     })?;
     progress("Rewriting definitions and erasing contexts");
     let rewritten_definitions =
-        replace::build_rewritten_definitions(&working, &generated_functions)?;
+        replace::build_rewritten_definitions(&working, &generated_functions, primitives)?;
     let runtime_functions = context::erase(&rewritten_definitions)?;
     let replacement_theory = generated_theory.clone();
 

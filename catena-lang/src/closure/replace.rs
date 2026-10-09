@@ -27,10 +27,7 @@ use crate::{
 
 type Obj = Tree<(), Operation>;
 
-mod experimental;
-pub(super) use experimental::patch as patch_experimental;
-
-const CONVERTED_PRIMITIVES: &[(&str, &str)] = &[
+pub(super) const CONVERTED_PRIMITIVES: &[(&str, &str)] = &[
     ("if", "ifc"),
     ("bool.if", "bool.ifc"),
     ("reduce", "reducec"),
@@ -122,16 +119,9 @@ pub(super) fn replace_region_with_closure_representation(
     })
 }
 
-fn rewrite_all_converted_primitives(terms: &mut TheoryTermMap) {
-    for definitions in terms.values_mut() {
-        for term in definitions.values_mut() {
-            rewrite_converted_primitives(term);
-        }
-    }
-}
-
 pub(super) fn rewrite_ready_converted_primitives(
     terms: &mut TheoryTermMap<ClosureForgotten<Operation>>,
+    primitives: &[(&str, &str)],
 ) {
     for definitions in terms.values_mut() {
         for term in definitions.values_mut() {
@@ -151,7 +141,7 @@ pub(super) fn rewrite_ready_converted_primitives(
                 if has_closure_source {
                     continue;
                 }
-                if let Some((_, converted)) = CONVERTED_PRIMITIVES
+                if let Some((_, converted)) = primitives
                     .iter()
                     .find(|(source, _)| operation.as_str() == *source)
                 {
@@ -219,6 +209,7 @@ pub enum ReplaceClosuresError {
 pub(super) fn build_rewritten_definitions(
     forgotten: &TheoryTermMap<ClosureForgotten<Operation>>,
     generated_functions: &TheoryTermMap,
+    primitives: &[(&str, &str)],
 ) -> Result<TheoryTermMap, ReplaceClosuresError> {
     // Generated closure bodies are already ordinary operation graphs. Seed the
     // final map with them, then add the converted caller definitions below.
@@ -235,7 +226,11 @@ pub(super) fn build_rewritten_definitions(
             .extend(finalized);
     }
 
-    rewrite_all_converted_primitives(&mut terms);
+    for definitions in terms.values_mut() {
+        for term in definitions.values_mut() {
+            rewrite_converted_primitives(term, primitives);
+        }
+    }
     Ok(terms)
 }
 
@@ -673,7 +668,7 @@ fn unwrap_operations(term: ClosureForgottenTerm) -> Result<AnnotatedTerm, Replac
     }))
 }
 
-fn rewrite_converted_primitives(term: &mut AnnotatedTerm) {
+fn rewrite_converted_primitives(term: &mut AnnotatedTerm, primitives: &[(&str, &str)]) {
     // Splicing expands each closure input:
     //
     //     primitive(..., Closure, ...)
@@ -685,7 +680,7 @@ fn rewrite_converted_primitives(term: &mut AnnotatedTerm) {
     // The graph boundary already has the expanded arity; select the matching
     // runtime primitive after all regions have been replaced.
     for operation in &mut term.hypergraph.edges {
-        if let Some((_, converted)) = CONVERTED_PRIMITIVES
+        if let Some((_, converted)) = primitives
             .iter()
             .find(|(source, _)| operation.as_str() == *source)
         {
@@ -967,5 +962,192 @@ mod tests {
         };
 
         let _ = plan_region_deletion(&definition, &region);
+    }
+
+    #[test]
+    fn nested_experimental_primitive_checks_with_converted_signature() {
+        use crate::codegen::experimental::primitives::CONVERTED_PRIMITIVES;
+        let source = r#"
+        (theory program type {
+        (arr core.if
+          : ([a b .] {(bool val) [.a] ({[.a] [.b]} =>) ({[.a] [.b]} =>) 1})
+          -> ([a b .] {[.b]}))
+        (arr core.ifc
+          : ([a b left_env right_env .]
+             {(bool val) [.a]
+              [.left_env] (({({[.left_env] [.a]} *) [.b]} ->) val)
+              [.right_env] (({({[.right_env] [.a]} *) [.b]} ->) val) 1})
+          -> ([a b left_env right_env .] {[.b]}))
+        (def choose
+          : {({(bool val) (bool val)} =>) ({(bool val) (bool val)} =>)
+             (bool val) (bool val)}
+          -> (bool val)
+          = ([left right flag value .]
+              {[.flag value left right] unit.intro} core.if))
+        (def nested
+          : {(bool val) (bool val)} -> (bool val)
+          = ([flag value .]
+              {[.flag value]
+               ({(name.bool.id lift) (name.bool.not lift) [.flag]} partial.choose.3)
+               (name.bool.id lift) unit.intro}
+              core.if))
+        })
+        "#;
+        let raw =
+            metacat::theory::RawTheorySet::from_texts(crate::stdlib::sources().chain([source]))
+                .unwrap();
+        let mut theory = TheorySet::from_raw(crate::elaborate::elaborate(raw).unwrap()).unwrap();
+        let Theory::Theory { arrows, .. } = theory
+            .theories
+            .get_mut(&TheoryId("program".parse().unwrap()))
+            .unwrap()
+        else {
+            unreachable!()
+        };
+        for (name, arrow) in arrows {
+            // Default library bodies belong to default conversion. Keep only
+            // this experimental fixture and its synthesized partial helpers.
+            if name.as_str() != "nested" && !name.as_str().contains("choose") {
+                arrow.definition = None;
+            }
+        }
+        let theory = crate::pass::inline_definitions::run(
+            &theory,
+            &BTreeMap::from([(
+                TheoryId("program".parse().unwrap()),
+                BTreeSet::from([
+                    "choose".parse().unwrap(),
+                    "partial.choose.3".parse().unwrap(),
+                ]),
+            )]),
+        )
+        .unwrap();
+        let types = crate::check::check(&theory).unwrap();
+        let forgotten = crate::pass::forget_closures::run(&theory, &types).unwrap();
+        // Validate extraction directly: nested calls must already use runtime
+        // signatures, without a post-conversion repair of generated bodies.
+        let inlined = crate::closure::inline_named_calls::run(&theory, &forgotten).unwrap();
+        let extracted = crate::closure::region_conversion::run(
+            &theory,
+            inlined,
+            CONVERTED_PRIMITIVES,
+            &mut |_| {},
+        )
+        .unwrap();
+        crate::check::check(&extracted.theory).unwrap();
+        assert!(
+            extracted
+                .generated_functions
+                .values()
+                .flat_map(|definitions| definitions.values())
+                .any(|body| body
+                    .hypergraph
+                    .edges
+                    .iter()
+                    .any(|op| op.as_str() == "core.ifc"))
+        );
+        let conversion = crate::closure::run_with_progress(
+            &theory,
+            &forgotten,
+            crate::codegen::CodegenKind::Experimental,
+            &mut |_| {},
+        )
+        .unwrap();
+        let program = &conversion.generated_theory.theories[&TheoryId("program".parse().unwrap())];
+        assert_eq!(
+            program
+                .get_arrow(&"core.if".parse().unwrap())
+                .unwrap()
+                .type_maps
+                .0
+                .targets
+                .len(),
+            5
+        );
+        assert_eq!(
+            program
+                .get_arrow(&"core.ifc".parse().unwrap())
+                .unwrap()
+                .type_maps
+                .0
+                .targets
+                .len(),
+            7
+        );
+        assert!(
+            conversion
+                .generated_functions
+                .values()
+                .flat_map(|definitions| definitions.values())
+                .any(|body| body
+                    .hypergraph
+                    .edges
+                    .iter()
+                    .any(|op| op.as_str() == "core.ifc"))
+        );
+        crate::check::check(&conversion.generated_theory).unwrap();
+    }
+
+    #[test]
+    fn experimental_stdlib_declares_matching_converted_interfaces() {
+        use crate::{
+            codegen::experimental::primitives::CONVERTED_PRIMITIVES, stdlib::BundleRegistry,
+        };
+        let mut registry = BundleRegistry::new(&[]).unwrap();
+        let name = registry
+            .add_directory(
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/experimental"),
+            )
+            .unwrap();
+        let files = registry.resolve(&[&name]).unwrap();
+        let raw = metacat::theory::RawTheorySet::from_texts(
+            files.iter().map(|file| file.source.as_ref()),
+        )
+        .unwrap();
+        let theory = TheorySet::from_raw(crate::elaborate::elaborate(raw).unwrap()).unwrap();
+        let program = &theory.theories[&TheoryId("program".parse().unwrap())];
+        for &(source, converted) in CONVERTED_PRIMITIVES {
+            let source = program.get_arrow(&source.parse().unwrap()).unwrap();
+            let converted = program.get_arrow(&converted.parse().unwrap()).unwrap();
+            let mut environment_index = source.type_maps.0.sources.len();
+            let mut expected = Vec::new();
+            for input in interface_types(&source.type_maps.0).unwrap() {
+                if let Tree::Node(operation, _, parts) = &input
+                    && operation.as_str() == "=>"
+                    && let [domain, codomain] = parts.as_slice()
+                {
+                    let environment = Tree::Leaf(environment_index, ());
+                    environment_index += 1;
+                    let domain = Tree::Node(
+                        "*".parse().unwrap(),
+                        0,
+                        vec![environment.clone(), domain.clone()],
+                    );
+                    let function =
+                        Tree::Node("->".parse().unwrap(), 0, vec![domain, codomain.clone()]);
+                    expected.extend([
+                        environment,
+                        Tree::Node("val".parse().unwrap(), 0, vec![function]),
+                    ]);
+                } else {
+                    expected.push(input);
+                }
+            }
+            assert_eq!(
+                interface_types(&converted.type_maps.0).unwrap(),
+                expected,
+                "{} inputs",
+                converted.name
+            );
+            assert_eq!(
+                interface_types(&converted.type_maps.1).unwrap(),
+                interface_types(&source.type_maps.1).unwrap(),
+                "{} outputs",
+                converted.name
+            );
+            assert_eq!(converted.type_maps.0.sources.len(), environment_index);
+            assert_eq!(converted.type_maps.1.sources.len(), environment_index);
+            assert!(converted.definition.is_none());
+        }
     }
 }

@@ -3,6 +3,7 @@
   "files": [
     "abi.hex",
     "assert.hex",
+    "closure_converted.hex",
     "equality.hex",
     "fold.hex",
     "gpu.hex",

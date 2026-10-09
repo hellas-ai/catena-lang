@@ -49,3 +49,20 @@ pub fn paths_from(root: impl AsRef<Path>) -> impl ExactSizeIterator<Item = PathB
     let stdlib = root.as_ref().join("stdlib/default");
     FILES.iter().map(move |file| stdlib.join(file.filename))
 }
+
+/// Standalone experimental library, embedded in manifest order.
+/// Select experimental codegen separately; these sources are not the default library.
+pub fn experimental_sources() -> impl ExactSizeIterator<Item = &'static str> {
+    EXPERIMENTAL_FILES.iter().map(|file| file.source)
+}
+
+/// Experimental primitives and core helpers, excluding optional matmul helpers.
+pub fn experimental_core_sources() -> impl Iterator<Item = &'static str> {
+    EXPERIMENTAL_FILES
+        .iter()
+        .filter(|file| file.filename != "gpu/matmul.hex")
+        .map(|file| file.source)
+}
+
+const EXPERIMENTAL_FILES: &[StdlibFile] =
+    include!(concat!(env!("OUT_DIR"), "/experimental_stdlib_files.rs"));

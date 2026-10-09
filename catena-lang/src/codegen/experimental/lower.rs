@@ -276,6 +276,7 @@ impl<'a> Lowerer<'a> {
         args: Vec<Value>,
         outputs: &[Obj],
     ) -> Result<Vec<Value>, CodegenError> {
+        let op = super::primitives::source_primitive(op);
         if let Some(name) = op.strip_prefix("name.") {
             let [ty] = outputs else {
                 return Err(invalid(op, "function reference must have one output"));
@@ -306,9 +307,12 @@ impl<'a> Lowerer<'a> {
             return super::smolcat_compat::lower(self, op, &args, outputs);
         }
         match op {
-            "core.if" | "core.if_guarded" | "core.fold.bounded" | "core.fold.trace" => {
-                ops::control::lower(self, op, args, outputs)
-            }
+            "core.if"
+            | "core.if_guarded"
+            | "core.fold.bounded"
+            | "core.fold.trace"
+            | "core.fold.bounded_u64"
+            | "core.fold.trace_u64" => ops::control::lower(self, op, args, outputs),
             "unsafe.launch" | "unsafe.launch_shared" => {
                 ops::launch::lower(self, op, &args, outputs)
             }
@@ -337,22 +341,16 @@ impl<'a> Lowerer<'a> {
         environment: &Value,
         inputs: Vec<Value>,
     ) -> Result<Vec<Value>, CodegenError> {
-        let (domain, codomain) = super::function_parts(&function.ty)?;
-        let types = crate::pass::unpack_products::flatten_object(domain);
-        let outputs = crate::pass::unpack_products::flatten_object(codomain);
-        let mut args = Vec::new();
-        environment.clone().flatten(&mut args);
+        let callback = Callback::new(function, environment)?;
+        let mut args = callback.captures;
         let mut data = inputs.into_iter();
-        let remaining = types
-            .get(args.len()..)
-            .ok_or_else(|| invalid("callback", "environment exceeds function domain"))?;
-        for ty in remaining {
+        for ty in &callback.parameters {
             args.push(self.argument(ty, &mut data)?);
         }
         if data.next().is_some() {
             return Err(invalid("callback", "too many runtime operands"));
         }
-        self.call_function(function, args, &outputs)
+        self.call_function(callback.function, args, &callback.outputs)
     }
     /// Rebuild a callback argument, filling only its erased fields implicitly.
     pub(super) fn argument(

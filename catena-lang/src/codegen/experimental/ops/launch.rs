@@ -69,7 +69,7 @@ pub(in crate::codegen::experimental) fn lower(
     } else {
         "0".into()
     };
-    let (domain, codomain) = super::super::function_parts(&kernel.ty)?;
+    let callback = Callback::new(kernel, environment)?;
     let grid_expression = expr(grid)?.to_owned();
     let grid_parameter = l.fresh("grid");
     let mut inputs = vec![Variable {
@@ -77,8 +77,7 @@ pub(in crate::codegen::experimental) fn lower(
         ty: CType::Grid,
     }];
     let mut arguments = vec![grid_expression.clone()];
-    let mut captured = Vec::new();
-    environment.clone().flatten(&mut captured);
+    let mut captured = callback.captures;
     for value in &mut captured {
         if let Repr::Runtime(expression) = &mut value.repr {
             let name = l.fresh("capture");
@@ -92,18 +91,10 @@ pub(in crate::codegen::experimental) fn lower(
     }
     let outer = std::mem::take(&mut l.body);
     l.place = Place::Device;
-    let types = crate::pass::unpack_products::flatten_object(domain);
-    let remaining = types
-        .get(captured.len()..)
-        .ok_or_else(|| invalid(op, "environment exceeds kernel domain"))?;
-    for ty in remaining {
+    for ty in &callback.parameters {
         captured.push(kernel_argument(l, op, ty, &grid_parameter)?);
     }
-    let results = l.call_function(
-        kernel,
-        captured,
-        &crate::pass::unpack_products::flatten_object(codomain),
-    )?;
+    let results = l.call_function(callback.function, captured, &callback.outputs)?;
     for result in results {
         l.erased(&result.ty)?;
     }

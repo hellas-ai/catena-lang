@@ -1,0 +1,7 @@
+(theory type nat {
+  (arr cap.own : 0 -> 1)
+
+  (arr cap.ref : 0 -> 1)
+
+  (arr mem : 1 -> 1)
+})

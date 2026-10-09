@@ -48,9 +48,12 @@ fn experimental_library_typechecks_without_default_sources() -> anyhow::Result<(
     )?;
     let files = registry.resolve(&[&name])?;
     let raw = RawTheorySet::from_texts(files.iter().map(|file| file.source.as_ref()))?;
-    let types = &raw.theories[&"type".parse()?].arrows;
+    // Literal declarations are synthesized by elaboration rather than exported
+    // with every stdlib source file.
+    let elaborated = elaborate::elaborate(raw)?;
+    let types = &elaborated.theories[&"type".parse()?].arrows;
     let mut referenced = std::collections::BTreeSet::new();
-    for arrow in raw.theories[&"program".parse()?].arrows.values() {
+    for arrow in elaborated.theories[&"program".parse()?].arrows.values() {
         collect_operations(&arrow.type_maps.0, &mut referenced);
         collect_operations(&arrow.type_maps.1, &mut referenced);
     }
@@ -62,7 +65,6 @@ fn experimental_library_typechecks_without_default_sources() -> anyhow::Result<(
         missing.is_empty(),
         "undeclared foundational types: {missing:?}"
     );
-    let elaborated = elaborate::elaborate(raw)?;
     let mut referenced = std::collections::BTreeSet::new();
     let program = &elaborated.theories[&"program".parse()?].arrows;
     for arrow in program.values() {

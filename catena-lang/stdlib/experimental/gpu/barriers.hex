@@ -1,32 +1,32 @@
 (theory program type {
   (arr core.fold.trace
     : (
-      [state_type__s654 invariant_type__s655 blocks__s656 threads__s657 grid__s658 block__s659 steps__s660 count__s661 index__s664 . ]
+      [state_type__s763 invariant_type__s764 blocks__s765 threads__s766 grid__s767 block__s768 steps__s769 count__s770 index__s773 . ]
       {
-        ({[ . count__s661] u32} :)
-        [ . state_type__s654]
+        ({[ . count__s770] u32} :)
+        [ . state_type__s763]
         (
           {
             (
               {
-                ({[ . index__s664] u32} :)
+                ({[ . index__s773] u32} :)
                 (
                   {
-                    [ . state_type__s654]
+                    [ . state_type__s763]
                     (
                       {
-                        (({[ . index__s664] [ . count__s661]} prop.Less) |-)
+                        (({[ . index__s773] [ . count__s770]} prop.Less) |-)
                         (
                           {
-                            [ . invariant_type__s655]
+                            [ . invariant_type__s764]
                             (
                               (
                                 {
-                                  [ . blocks__s656]
-                                  [ . threads__s657]
-                                  [ . grid__s658]
-                                  [ . block__s659]
-                                  [ . steps__s660]
+                                  [ . blocks__s765]
+                                  [ . threads__s766]
+                                  [ . grid__s767]
+                                  [ . block__s768]
+                                  [ . steps__s769]
                                 }
                                 stdlib.gpu.barriers.prop.Trace
                               )
@@ -46,17 +46,17 @@
             )
             (
               {
-                [ . state_type__s654]
+                [ . state_type__s763]
                 (
                   {
-                    [ . invariant_type__s655]
+                    [ . invariant_type__s764]
                     (
                       (
                         {
-                          [ . blocks__s656]
-                          [ . threads__s657]
-                          [ . grid__s658]
-                          [ . block__s659]
+                          [ . blocks__s765]
+                          [ . threads__s766]
+                          [ . grid__s767]
+                          [ . block__s768]
                           list.Nil
                         }
                         stdlib.gpu.barriers.prop.Trace
@@ -72,15 +72,15 @@
           }
           =>
         )
-        [ . invariant_type__s655]
+        [ . invariant_type__s764]
         (
           (
             {
-              [ . blocks__s656]
-              [ . threads__s657]
-              [ . grid__s658]
-              [ . block__s659]
-              ({[ . count__s661] [ . steps__s660] list.Nil} stdlib.gpu.barriers.sort.Repeat)
+              [ . blocks__s765]
+              [ . threads__s766]
+              [ . grid__s767]
+              [ . block__s768]
+              ({[ . count__s770] [ . steps__s769] list.Nil} stdlib.gpu.barriers.sort.Repeat)
             }
             stdlib.gpu.barriers.prop.Trace
           )
@@ -89,13 +89,118 @@
       }
     )
     -> (
-      [state_type__s654 invariant_type__s655 blocks__s656 threads__s657 grid__s658 block__s659 steps__s660 count__s661 index__s664 . ]
+      [state_type__s763 invariant_type__s764 blocks__s765 threads__s766 grid__s767 block__s768 steps__s769 count__s770 index__s773 . ]
       {
-        [ . state_type__s654]
-        [ . invariant_type__s655]
+        [ . state_type__s763]
+        [ . invariant_type__s764]
         (
           (
-            {[ . blocks__s656] [ . threads__s657] [ . grid__s658] [ . block__s659] list.Nil}
+            {[ . blocks__s765] [ . threads__s766] [ . grid__s767] [ . block__s768] list.Nil}
+            stdlib.gpu.barriers.prop.Trace
+          )
+          |-
+        )
+      }
+    )
+  )
+
+  (arr core.fold.trace_u64
+    : (
+      [count__s787 state_type__s788 invariant_type__s789 blocks__s790 threads__s791 grid__s792 block__s793 steps__s794 index__s798 . ]
+      {
+        ({[ . count__s787] u64} :)
+        ([ . state_type__s788] val)
+        (
+          {
+            (
+              {
+                ({[ . index__s798] u64} :)
+                (
+                  {
+                    ([ . state_type__s788] val)
+                    (
+                      {
+                        (({[ . index__s798] [ . count__s787]} prop.Less) |-)
+                        (
+                          {
+                            ([ . invariant_type__s789] |-)
+                            (
+                              (
+                                {
+                                  [ . blocks__s790]
+                                  [ . threads__s791]
+                                  [ . grid__s792]
+                                  [ . block__s793]
+                                  [ . steps__s794]
+                                }
+                                stdlib.gpu.barriers.prop.Trace
+                              )
+                              |-
+                            )
+                          }
+                          *
+                        )
+                      }
+                      *
+                    )
+                  }
+                  *
+                )
+              }
+              *
+            )
+            (
+              {
+                ([ . state_type__s788] val)
+                (
+                  {
+                    ([ . invariant_type__s789] |-)
+                    (
+                      (
+                        {
+                          [ . blocks__s790]
+                          [ . threads__s791]
+                          [ . grid__s792]
+                          [ . block__s793]
+                          list.Nil
+                        }
+                        stdlib.gpu.barriers.prop.Trace
+                      )
+                      |-
+                    )
+                  }
+                  *
+                )
+              }
+              *
+            )
+          }
+          =>
+        )
+        ([ . invariant_type__s789] |-)
+        (
+          (
+            {
+              [ . blocks__s790]
+              [ . threads__s791]
+              [ . grid__s792]
+              [ . block__s793]
+              ({[ . count__s787] [ . steps__s794] list.Nil} stdlib.gpu.barriers.sort.Repeat64)
+            }
+            stdlib.gpu.barriers.prop.Trace
+          )
+          |-
+        )
+      }
+    )
+    -> (
+      [count__s787 state_type__s788 invariant_type__s789 blocks__s790 threads__s791 grid__s792 block__s793 steps__s794 index__s798 . ]
+      {
+        ([ . state_type__s788] val)
+        ([ . invariant_type__s789] |-)
+        (
+          (
+            {[ . blocks__s790] [ . threads__s791] [ . grid__s792] [ . block__s793] list.Nil}
             stdlib.gpu.barriers.prop.Trace
           )
           |-
@@ -106,20 +211,20 @@
 
   (arr stdlib.gpu.barriers.sync
     : (
-      [blocks__s642 threads__s643 grid__s644 block__s645 pre__s646 post__s647 rest__s648 . ]
+      [blocks__s751 threads__s752 grid__s753 block__s754 pre__s755 post__s756 rest__s757 . ]
       {
         1
         (
           (
             {
-              [ . blocks__s642]
-              [ . threads__s643]
-              [ . grid__s644]
-              [ . block__s645]
+              [ . blocks__s751]
+              [ . threads__s752]
+              [ . grid__s753]
+              [ . block__s754]
               (
                 {
-                  ({[ . pre__s646] [ . post__s647]} stdlib.gpu.barriers.sort.Barrier)
-                  [ . rest__s648]
+                  ({[ . pre__s755] [ . post__s756]} stdlib.gpu.barriers.sort.Barrier)
+                  [ . rest__s757]
                 }
                 list.Cons
               )
@@ -128,21 +233,21 @@
           )
           |-
         )
-        ([ . pre__s646] |-)
+        ([ . pre__s755] |-)
       }
     )
     -> (
-      [blocks__s642 threads__s643 grid__s644 block__s645 pre__s646 post__s647 rest__s648 . ]
+      [blocks__s751 threads__s752 grid__s753 block__s754 pre__s755 post__s756 rest__s757 . ]
       {
         1
         (
           (
-            {[ . blocks__s642] [ . threads__s643] [ . grid__s644] [ . block__s645] [ . rest__s648]}
+            {[ . blocks__s751] [ . threads__s752] [ . grid__s753] [ . block__s754] [ . rest__s757]}
             stdlib.gpu.barriers.prop.Trace
           )
           |-
         )
-        ([ . post__s647] |-)
+        ([ . post__s756] |-)
       }
     )
   )
@@ -154,4 +259,6 @@
   (arr stdlib.gpu.barriers.sort.Barrier : 2 -> 1)
 
   (arr stdlib.gpu.barriers.sort.Repeat : 3 -> 1)
+
+  (arr stdlib.gpu.barriers.sort.Repeat64 : 3 -> 1)
 })

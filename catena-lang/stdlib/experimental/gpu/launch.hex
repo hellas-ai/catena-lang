@@ -1,13 +1,16 @@
 (theory program type {
   (arr unsafe.launch
     : (
-      [blocks__s841 width__s842 height__s843 grid__s844 block__s846 . ]
+      [blocks__s1089 width__s1090 height__s1091 grid__s1092 block__s1094 . ]
       {
         (
           {
-            [ . grid__s844]
+            [ . grid__s1092]
             (
-              {[ . blocks__s841] ({[ . width__s842] [ . height__s843]} stdlib.gpu.geometry.sort.D2)}
+              {
+                [ . blocks__s1089]
+                ({[ . width__s1090] [ . height__s1091]} stdlib.gpu.geometry.sort.D2)
+              }
               stdlib.gpu.geometry.type.Grid
             )
           }
@@ -19,12 +22,12 @@
               {
                 (
                   {
-                    [ . block__s846]
+                    [ . block__s1094]
                     (
                       {
-                        [ . blocks__s841]
-                        ({[ . width__s842] [ . height__s843]} stdlib.gpu.geometry.sort.D2)
-                        [ . grid__s844]
+                        [ . blocks__s1089]
+                        ({[ . width__s1090] [ . height__s1091]} stdlib.gpu.geometry.sort.D2)
+                        [ . grid__s1092]
                       }
                       stdlib.gpu.geometry.type.Block
                     )
@@ -34,10 +37,10 @@
                 (
                   (
                     {
-                      [ . blocks__s841]
-                      ({[ . width__s842] [ . height__s843]} stdlib.gpu.geometry.sort.D2)
-                      [ . grid__s844]
-                      [ . block__s846]
+                      [ . blocks__s1089]
+                      ({[ . width__s1090] [ . height__s1091]} stdlib.gpu.geometry.sort.D2)
+                      [ . grid__s1092]
+                      [ . block__s1094]
                     }
                     stdlib.gpu.geometry.type.Thread
                   )
@@ -52,18 +55,21 @@
         )
       }
     )
-    -> ([blocks__s841 width__s842 height__s843 grid__s844 block__s846 . ] {1})
+    -> ([blocks__s1089 width__s1090 height__s1091 grid__s1092 block__s1094 . ] {1})
   )
 
   (arr unsafe.launch_shared
     : (
-      [blocks__s848 width__s849 height__s850 layout__s851 grid__s852 block__s855 . ]
+      [blocks__s1096 width__s1097 height__s1098 layout__s1099 grid__s1100 block__s1103 . ]
       {
         (
           {
-            [ . grid__s852]
+            [ . grid__s1100]
             (
-              {[ . blocks__s848] ({[ . width__s849] [ . height__s850]} stdlib.gpu.geometry.sort.D2)}
+              {
+                [ . blocks__s1096]
+                ({[ . width__s1097] [ . height__s1098]} stdlib.gpu.geometry.sort.D2)
+              }
               stdlib.gpu.geometry.type.Grid
             )
           }
@@ -72,10 +78,10 @@
         (
           (
             {
-              [ . blocks__s848]
-              ({[ . width__s849] [ . height__s850]} stdlib.gpu.geometry.sort.D2)
-              [ . grid__s852]
-              [ . layout__s851]
+              [ . blocks__s1096]
+              ({[ . width__s1097] [ . height__s1098]} stdlib.gpu.geometry.sort.D2)
+              [ . grid__s1100]
+              [ . layout__s1099]
             }
             stdlib.gpu.memory.type.SharedMemory
           )
@@ -87,12 +93,12 @@
               {
                 (
                   {
-                    [ . block__s855]
+                    [ . block__s1103]
                     (
                       {
-                        [ . blocks__s848]
-                        ({[ . width__s849] [ . height__s850]} stdlib.gpu.geometry.sort.D2)
-                        [ . grid__s852]
+                        [ . blocks__s1096]
+                        ({[ . width__s1097] [ . height__s1098]} stdlib.gpu.geometry.sort.D2)
+                        [ . grid__s1100]
                       }
                       stdlib.gpu.geometry.type.Block
                     )
@@ -102,10 +108,10 @@
                 (
                   (
                     {
-                      [ . blocks__s848]
-                      ({[ . width__s849] [ . height__s850]} stdlib.gpu.geometry.sort.D2)
-                      [ . grid__s852]
-                      [ . block__s855]
+                      [ . blocks__s1096]
+                      ({[ . width__s1097] [ . height__s1098]} stdlib.gpu.geometry.sort.D2)
+                      [ . grid__s1100]
+                      [ . block__s1103]
                     }
                     stdlib.gpu.geometry.type.Thread
                   )
@@ -120,6 +126,6 @@
         )
       }
     )
-    -> ([blocks__s848 width__s849 height__s850 layout__s851 grid__s852 block__s855 . ] {1})
+    -> ([blocks__s1096 width__s1097 height__s1098 layout__s1099 grid__s1100 block__s1103 . ] {1})
   )
 })

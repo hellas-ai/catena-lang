@@ -1,20 +1,20 @@
 (theory program type {
   (arr core.fold.bounded
     : (
-      [state_type__s531 invariant_type__s532 end__s533 index__s536 . ]
+      [state_type__s628 invariant_type__s629 end__s630 index__s633 . ]
       {
-        ({[ . end__s533] u32} :)
-        [ . state_type__s531]
+        ({[ . end__s630] u32} :)
+        [ . state_type__s628]
         (
           {
             (
               {
-                ({[ . index__s536] u32} :)
+                ({[ . index__s633] u32} :)
                 (
                   {
-                    [ . state_type__s531]
+                    [ . state_type__s628]
                     (
-                      {(({[ . index__s536] [ . end__s533]} prop.Less) |-) [ . invariant_type__s532]}
+                      {(({[ . index__s633] [ . end__s630]} prop.Less) |-) [ . invariant_type__s629]}
                       *
                     )
                   }
@@ -23,16 +23,56 @@
               }
               *
             )
-            ({[ . state_type__s531] [ . invariant_type__s532]} *)
+            ({[ . state_type__s628] [ . invariant_type__s629]} *)
           }
           =>
         )
-        [ . invariant_type__s532]
+        [ . invariant_type__s629]
       }
     )
     -> (
-      [state_type__s531 invariant_type__s532 end__s533 index__s536 . ]
-      {[ . state_type__s531] [ . invariant_type__s532]}
+      [state_type__s628 invariant_type__s629 end__s630 index__s633 . ]
+      {[ . state_type__s628] [ . invariant_type__s629]}
+    )
+  )
+
+  (arr core.fold.bounded_u64
+    : (
+      [state_type__s640 invariant_type__s641 end__s642 index__s645 . ]
+      {
+        ({[ . end__s642] u64} :)
+        ([ . state_type__s640] val)
+        (
+          {
+            (
+              {
+                ({[ . index__s645] u64} :)
+                (
+                  {
+                    ([ . state_type__s640] val)
+                    (
+                      {
+                        (({[ . index__s645] [ . end__s642]} prop.Less) |-)
+                        ([ . invariant_type__s641] |-)
+                      }
+                      *
+                    )
+                  }
+                  *
+                )
+              }
+              *
+            )
+            ({([ . state_type__s640] val) ([ . invariant_type__s641] |-)} *)
+          }
+          =>
+        )
+        ([ . invariant_type__s641] |-)
+      }
+    )
+    -> (
+      [state_type__s640 invariant_type__s641 end__s642 index__s645 . ]
+      {([ . state_type__s640] val) ([ . invariant_type__s641] |-)}
     )
   )
 })

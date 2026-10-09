@@ -1,0 +1,1140 @@
+(theory program type {
+  (arr meta.stdlib.math.exp.helper.callback_metavars.branch_result.0
+    : ([branch_result__s4543 . ] {({[ . branch_result__s4543] f32} :)})
+    -> ([branch_result__s4543 . ] {({[ . branch_result__s4543] f32} :) [ . branch_result__s4543]})
+  )
+
+  (arr meta.stdlib.math.exp.helper.callback_metavars.branch_result.1
+    : ([branch_result__s4655 . ] {({[ . branch_result__s4655] f32} :)})
+    -> ([branch_result__s4655 . ] {({[ . branch_result__s4655] f32} :) [ . branch_result__s4655]})
+  )
+
+  (arr meta.stdlib.math.exp.helper.callback_metavars.v.0
+    : ([v__s4509 . ] {({[ . v__s4509] bool} :)})
+    -> ([v__s4509 . ] {({[ . v__s4509] bool} :) [ . v__s4509]})
+  )
+
+  (arr meta.stdlib.math.exp.helper.callback_metavars.v.1
+    : ([v__s4601 . ] {({[ . v__s4601] f32} :)})
+    -> ([v__s4601 . ] {({[ . v__s4601] f32} :) [ . v__s4601]})
+  )
+
+  (arr meta.stdlib.math.exp.helper.callback_metavars.v.2
+    : ([v__s4607 . ] {({[ . v__s4607] f32} :)})
+    -> ([v__s4607 . ] {({[ . v__s4607] f32} :) [ . v__s4607]})
+  )
+
+  (arr meta.stdlib.math.exp.helper.callback_metavars.v.3
+    : ([v__s4621 . ] {({[ . v__s4621] bool} :)})
+    -> ([v__s4621 . ] {({[ . v__s4621] bool} :) [ . v__s4621]})
+  )
+
+  (arr meta.stdlib.math.exp.helper.callback_metavars.x.0
+    : ([x__s1242 . ] {({[ . x__s1242] f32} :)})
+    -> ([x__s1242 . ] {({[ . x__s1242] f32} :) [ . x__s1242]})
+  )
+
+  (arr meta.stdlib.math.sqrt.helper.callback_metavars.branch_result.0
+    : ([branch_result__s4897 . ] {({[ . branch_result__s4897] f32} :)})
+    -> ([branch_result__s4897 . ] {({[ . branch_result__s4897] f32} :) [ . branch_result__s4897]})
+  )
+
+  (arr meta.stdlib.math.sqrt.helper.callback_metavars.v.0
+    : ([v__s4772 . ] {({[ . v__s4772] u32} :)})
+    -> ([v__s4772 . ] {({[ . v__s4772] u32} :) [ . v__s4772]})
+  )
+
+  (arr meta.stdlib.math.sqrt.helper.callback_metavars.v.1
+    : ([v__s4783 . ] {({[ . v__s4783] f32} :)})
+    -> ([v__s4783 . ] {({[ . v__s4783] f32} :) [ . v__s4783]})
+  )
+
+  (arr meta.stdlib.math.sqrt.helper.callback_metavars.v.2
+    : ([v__s4797 . ] {({[ . v__s4797] f32} :)})
+    -> ([v__s4797 . ] {({[ . v__s4797] f32} :) [ . v__s4797]})
+  )
+
+  (arr meta.stdlib.math.sqrt.helper.callback_metavars.v.3
+    : ([v__s4815 . ] {({[ . v__s4815] f32} :)})
+    -> ([v__s4815 . ] {({[ . v__s4815] f32} :) [ . v__s4815]})
+  )
+
+  (arr meta.stdlib.math.sqrt.helper.callback_metavars.v.4
+    : ([v__s4833 . ] {({[ . v__s4833] f32} :)})
+    -> ([v__s4833 . ] {({[ . v__s4833] f32} :) [ . v__s4833]})
+  )
+
+  (arr meta.stdlib.math.sqrt.helper.callback_metavars.v.5
+    : ([v__s4851 . ] {({[ . v__s4851] f32} :)})
+    -> ([v__s4851 . ] {({[ . v__s4851] f32} :) [ . v__s4851]})
+  )
+
+  (arr meta.stdlib.math.sqrt.helper.callback_metavars.v.6
+    : ([v__s4865 . ] {({[ . v__s4865] bool} :)})
+    -> ([v__s4865 . ] {({[ . v__s4865] bool} :) [ . v__s4865]})
+  )
+
+  (arr meta.stdlib.math.sqrt.helper.callback_metavars.x.0
+    : ([x__s1244 . ] {({[ . x__s1244] f32} :)})
+    -> ([x__s1244 . ] {({[ . x__s1244] f32} :) [ . x__s1244]})
+  )
+
+  (def stdlib.math.exp
+    : ([] {(f32 val)})
+    -> ([] {(f32 val)})
+    = {
+      [x__v4495__input . ]
+      (
+        [ . x__v4495__input]
+        (smolcat.value.named meta.stdlib.math.exp.helper.callback_metavars.x.0)
+        [x__v4495 __smolcat_x__v4731 . ]
+      )
+      ([ . x__v4495] [op0_value__v4732 . op0_value__v4732 op0_value__v4732] [x__v4716 x__v4717 . ])
+      ([ . x__v4717] [op1_value__v4733 . op1_value__v4733 op1_value__v4733] [x__v4718 x__v4719 . ])
+      ([ . x__v4719] [op2_value__v4734 . op2_value__v4734 op2_value__v4734] [x__v4720 x__v4721 . ])
+      ([] stdlib.numeric.signed.f32 [signed_f32__v4498 . ])
+      ([ . x__v4721 signed_f32__v4498] stdlib.numeric.negate [negative__v4500 . ])
+      ([] (const.u32.0x00000000 u32.bitcast-f32) [literal__v4506 . ])
+      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4508 . ])
+      (
+        [ . x__v4720 literal__v4506 numeric_f32__v4508]
+        ({:.forget {_} {_}} stdlib.numeric.less)
+        [less__v4510__result . ]
+      )
+      (
+        [ . less__v4510__result]
+        (smolcat.value.named meta.stdlib.math.exp.helper.callback_metavars.v.0)
+        [less__v4510 __smolcat_v__v4735 . ]
+      )
+      ([ . negative__v4500 x__v4718] ({{_} {_}} *.intro) [tuple__v4520 . ])
+      ([] unit.intro [unit__v4524 . ])
+      (
+        []
+        (
+          [ . __smolcat_x__v4731 __smolcat_v__v4735]
+          name.stdlib.math.exp.helper.if_then_else.then_branch.0
+          lift
+        )
+        [callback__v4557 . ]
+      )
+      (
+        []
+        (
+          [ . __smolcat_x__v4731 __smolcat_v__v4735]
+          name.stdlib.math.exp.helper.if_then_else.else_branch.0
+          lift
+        )
+        [callback__v4590 . ]
+      )
+      (
+        [ . less__v4510 tuple__v4520 callback__v4557 callback__v4590 unit__v4524]
+        ({:.forget {_} {_} {_} {_}} core.if)
+        [if_then_else__v4594 . ]
+      )
+      ([ . if_then_else__v4594] {_} [magnitude__v4599__result . ])
+      (
+        [ . magnitude__v4599__result]
+        (smolcat.value.named meta.stdlib.math.exp.helper.callback_metavars.branch_result.0)
+        [magnitude__v4599 __smolcat_branch_result__v4736 . ]
+      )
+      ([ . magnitude__v4599] ({:.forget} stdlib.math.exp_nonneg) [positive__v4602__result . ])
+      (
+        [ . positive__v4602__result]
+        (smolcat.value.named meta.stdlib.math.exp.helper.callback_metavars.v.1)
+        [positive__v4602 __smolcat_v__v4737 . ]
+      )
+      (
+        [ . positive__v4602]
+        [op15_value__v4738 . op15_value__v4738 op15_value__v4738]
+        [positive__v4729 positive__v4730 . ]
+      )
+      ([] (const.u32.0x3f800000 u32.bitcast-f32) [literal__v4608__result . ])
+      (
+        [ . literal__v4608__result]
+        (smolcat.value.named meta.stdlib.math.exp.helper.callback_metavars.v.2)
+        [literal__v4608 __smolcat_v__v4739 . ]
+      )
+      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4610 . ])
+      (
+        [ . literal__v4608 positive__v4730 numeric_f32__v4610]
+        stdlib.numeric./
+        [reciprocal__v4612 . ]
+      )
+      ([] (const.u32.0x00000000 u32.bitcast-f32) [literal__v4618 . ])
+      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4620 . ])
+      (
+        [ . x__v4716 literal__v4618 numeric_f32__v4620]
+        ({:.forget {_} {_}} stdlib.numeric.less)
+        [less__v4622__result . ]
+      )
+      (
+        [ . less__v4622__result]
+        (smolcat.value.named meta.stdlib.math.exp.helper.callback_metavars.v.3)
+        [less__v4622 __smolcat_v__v4740 . ]
+      )
+      ([ . positive__v4729 reciprocal__v4612] ({{_} {_}} *.intro) [tuple__v4632 . ])
+      ([] unit.intro [unit__v4636 . ])
+      (
+        []
+        (
+          [ . __smolcat_v__v4737 __smolcat_v__v4739 __smolcat_v__v4740]
+          name.stdlib.math.exp.helper.if_then_else.then_branch.1
+          lift
+        )
+        [callback__v4669 . ]
+      )
+      (
+        []
+        (
+          [ . __smolcat_v__v4737 __smolcat_v__v4739 __smolcat_v__v4740]
+          name.stdlib.math.exp.helper.if_then_else.else_branch.1
+          lift
+        )
+        [callback__v4702 . ]
+      )
+      (
+        [ . less__v4622 tuple__v4632 callback__v4669 callback__v4702 unit__v4636]
+        ({:.forget {_} {_} {_} {_}} core.if)
+        [if_then_else__v4706 . ]
+      )
+      ([ . if_then_else__v4706] {_} [branch_result__v4711__result . ])
+      (
+        [ . branch_result__v4711__result]
+        (smolcat.value.named meta.stdlib.math.exp.helper.callback_metavars.branch_result.1)
+        [branch_result__v4711 __smolcat_branch_result__v4741 . ]
+      )
+      ([ . branch_result__v4711] {:.forget})
+    }
+  )
+
+  (def stdlib.math.exp.helper.if_then_else.else_branch.0
+    : (
+      [x__s1242 v__s4509 . ]
+      {
+        ({({({[ . x__s1242]} type.stdlib.numeric.negate) f32} :) ({[ . x__s1242] f32} :)} *)
+        (({({[ . v__s4509]} prop.IsTrue)} stdlib.prelude.prop.Not) |-)
+        1
+      }
+    )
+    -> ([x__s1242 v__s4509 . ] {(f32 val)})
+    = {
+      [context__v4560 condition__v4572 common__v4574 . ]
+      ([ . condition__v4572] [op0_value__v4582 . ] [])
+      ([ . context__v4560] (*.elim {{_} {_}}) [negative__v4567 x__v4568 . ])
+      ([ . negative__v4567] [op2_value__v4583 . ] [])
+      ([ . common__v4574] unit.elim [])
+      ([ . x__v4568] {_} [tuple__v4581 . ])
+      ([ . tuple__v4581] {({_} {:.forget} {_})})
+    }
+  )
+
+  (def stdlib.math.exp.helper.if_then_else.else_branch.1
+    : (
+      [v__s4601 v__s4607 v__s4621 . ]
+      {
+        (
+          {({[ . v__s4601] f32} :) ({({[ . v__s4607] [ . v__s4601]} type.stdlib.numeric./) f32} :)}
+          *
+        )
+        (({({[ . v__s4621]} prop.IsTrue)} stdlib.prelude.prop.Not) |-)
+        1
+      }
+    )
+    -> ([v__s4601 v__s4607 v__s4621 . ] {(f32 val)})
+    = {
+      [context__v4672 condition__v4684 common__v4686 . ]
+      ([ . condition__v4684] [op0_value__v4694 . ] [])
+      ([ . context__v4672] (*.elim {{_} {_}}) [positive__v4679 reciprocal__v4680 . ])
+      ([ . reciprocal__v4680] [op2_value__v4695 . ] [])
+      ([ . common__v4686] unit.elim [])
+      ([ . positive__v4679] {_} [tuple__v4693 . ])
+      ([ . tuple__v4693] {({_} {:.forget} {_})})
+    }
+  )
+
+  (def stdlib.math.exp.helper.if_then_else.then_branch.0
+    : (
+      [x__s1242 v__s4509 . ]
+      {
+        ({({({[ . x__s1242]} type.stdlib.numeric.negate) f32} :) ({[ . x__s1242] f32} :)} *)
+        (({[ . v__s4509]} prop.IsTrue) |-)
+        1
+      }
+    )
+    -> ([x__s1242 v__s4509 . ] {(f32 val)})
+    = {
+      [context__v4526 condition__v4538 common__v4540 . ]
+      ([ . condition__v4538] [op0_value__v4549 . ] [])
+      ([ . context__v4526] (*.elim {{_} {_}}) [negative__v4533 x__v4534 . ])
+      ([ . x__v4534] [op2_value__v4550 . ] [])
+      ([ . common__v4540] unit.elim [])
+      ([ . negative__v4533] {_} [tuple__v4548 . ])
+      ([ . tuple__v4548] {({_} {:.forget} {_})})
+    }
+  )
+
+  (def stdlib.math.exp.helper.if_then_else.then_branch.1
+    : (
+      [v__s4601 v__s4607 v__s4621 . ]
+      {
+        (
+          {({[ . v__s4601] f32} :) ({({[ . v__s4607] [ . v__s4601]} type.stdlib.numeric./) f32} :)}
+          *
+        )
+        (({[ . v__s4621]} prop.IsTrue) |-)
+        1
+      }
+    )
+    -> ([v__s4601 v__s4607 v__s4621 . ] {(f32 val)})
+    = {
+      [context__v4638 condition__v4650 common__v4652 . ]
+      ([ . condition__v4650] [op0_value__v4661 . ] [])
+      ([ . context__v4638] (*.elim {{_} {_}}) [positive__v4645 reciprocal__v4646 . ])
+      ([ . positive__v4645] [op2_value__v4662 . ] [])
+      ([ . common__v4652] unit.elim [])
+      ([ . reciprocal__v4646] {_} [tuple__v4660 . ])
+      ([ . tuple__v4660] {({_} {:.forget} {_})})
+    }
+  )
+
+  (def stdlib.math.exp_nonneg
+    : ([] {(f32 val)})
+    -> ([] {(f32 val)})
+    = {
+      [x__v4281__input . ]
+      ([ . x__v4281__input] (smolcat.value.named {_}) [x__v4281 . ])
+      ([ . x__v4281] [op0_value__v4488 . op0_value__v4488 op0_value__v4488] [x__v4455 x__v4456 . ])
+      ([] type.const.u32.0x3fb8aa3b [literal__v4287 . ])
+      ([ . literal__v4287] ({:.forget} stdlib.math.from_bits) [from_bits__v4289__result . ])
+      ([ . from_bits__v4289__result] (smolcat.value.named {_}) [from_bits__v4289 . ])
+      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4291 . ])
+      ([ . x__v4456 from_bits__v4289 numeric_f32__v4291] stdlib.numeric.* [result__v4293 . ])
+      ([ . result__v4293] ({:.forget} stdlib.math.round_to_u32) [k__v4295__result . ])
+      ([ . k__v4295__result] (smolcat.value.named {_}) [k__v4295 . ])
+      ([ . k__v4295] [op6_value__v4489 . op6_value__v4489 op6_value__v4489] [k__v4462 k__v4463 . ])
+      ([ . k__v4463] stdlib.numeric.u32_to_f32 [kf__v4298 . ])
+      (
+        [ . kf__v4298]
+        [op8_value__v4490 . op8_value__v4490 op8_value__v4490]
+        [kf__v4469 kf__v4470 . ]
+      )
+      ([] type.const.u32.0x3f317200 [literal__v4304 . ])
+      ([ . literal__v4304] ({:.forget} stdlib.math.from_bits) [from_bits__v4306__result . ])
+      ([ . from_bits__v4306__result] (smolcat.value.named {_}) [from_bits__v4306 . ])
+      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4308 . ])
+      ([ . kf__v4470 from_bits__v4306 numeric_f32__v4308] stdlib.numeric.* [result__v4310 . ])
+      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4312 . ])
+      ([ . x__v4455 result__v4310 numeric_f32__v4312] stdlib.numeric.- [result__v4314 . ])
+      ([] type.const.u32.0x35bfbe8e [literal__v4319 . ])
+      ([ . literal__v4319] ({:.forget} stdlib.math.from_bits) [from_bits__v4321__result . ])
+      ([ . from_bits__v4321__result] (smolcat.value.named {_}) [from_bits__v4321 . ])
+      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4323 . ])
+      ([ . kf__v4469 from_bits__v4321 numeric_f32__v4323] stdlib.numeric.* [result__v4325 . ])
+      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4327 . ])
+      ([ . result__v4314 result__v4325 numeric_f32__v4327] stdlib.numeric.- [r__v4329 . ])
+      (
+        [ . r__v4329]
+        [op21_value__v4491 . op21_value__v4491 op21_value__v4491]
+        [r__v4478 r__v4479 . ]
+      )
+      (
+        [ . r__v4479]
+        [op22_value__v4492 . op22_value__v4492 op22_value__v4492]
+        [r__v4480 r__v4481 . ]
+      )
+      (
+        [ . r__v4481]
+        [op23_value__v4493 . op23_value__v4493 op23_value__v4493]
+        [r__v4482 r__v4483 . ]
+      )
+      (
+        [ . r__v4483]
+        [op24_value__v4494 . op24_value__v4494 op24_value__v4494]
+        [r__v4484 r__v4485 . ]
+      )
+      (
+        [ . r__v4485]
+        [op25_value__v4495 . op25_value__v4495 op25_value__v4495]
+        [r__v4486 r__v4487 . ]
+      )
+      ([] type.const.u32.0x3c088889 [literal__v4335 . ])
+      ([ . literal__v4335] ({:.forget} stdlib.math.from_bits) [from_bits__v4337__result . ])
+      ([ . from_bits__v4337__result] (smolcat.value.named {_}) [from_bits__v4337 . ])
+      ([] type.const.u32.0x3ab60b61 [literal__v4342 . ])
+      ([ . literal__v4342] ({:.forget} stdlib.math.from_bits) [from_bits__v4344__result . ])
+      ([ . from_bits__v4344__result] (smolcat.value.named {_}) [from_bits__v4344 . ])
+      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4346 . ])
+      ([ . r__v4487 from_bits__v4344 numeric_f32__v4346] stdlib.numeric.* [result__v4348 . ])
+      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4350 . ])
+      ([ . from_bits__v4337 result__v4348 numeric_f32__v4350] stdlib.numeric.+ [p5__v4352 . ])
+      ([] type.const.u32.0x3d2aaaab [literal__v4358 . ])
+      ([ . literal__v4358] ({:.forget} stdlib.math.from_bits) [from_bits__v4360__result . ])
+      ([ . from_bits__v4360__result] (smolcat.value.named {_}) [from_bits__v4360 . ])
+      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4362 . ])
+      ([ . r__v4486 p5__v4352 numeric_f32__v4362] stdlib.numeric.* [result__v4364 . ])
+      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4366 . ])
+      ([ . from_bits__v4360 result__v4364 numeric_f32__v4366] stdlib.numeric.+ [p4__v4368 . ])
+      ([] type.const.u32.0x3e2aaaab [literal__v4374 . ])
+      ([ . literal__v4374] ({:.forget} stdlib.math.from_bits) [from_bits__v4376__result . ])
+      ([ . from_bits__v4376__result] (smolcat.value.named {_}) [from_bits__v4376 . ])
+      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4378 . ])
+      ([ . r__v4484 p4__v4368 numeric_f32__v4378] stdlib.numeric.* [result__v4380 . ])
+      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4382 . ])
+      ([ . from_bits__v4376 result__v4380 numeric_f32__v4382] stdlib.numeric.+ [p3__v4384 . ])
+      ([] (const.u32.0x3f000000 u32.bitcast-f32) [literal__v4390__result . ])
+      ([ . literal__v4390__result] (smolcat.value.named {_}) [literal__v4390 . ])
+      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4392 . ])
+      ([ . r__v4482 p3__v4384 numeric_f32__v4392] stdlib.numeric.* [result__v4394 . ])
+      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4396 . ])
+      ([ . literal__v4390 result__v4394 numeric_f32__v4396] stdlib.numeric.+ [p2__v4398 . ])
+      ([] (const.u32.0x3f800000 u32.bitcast-f32) [literal__v4404__result . ])
+      ([ . literal__v4404__result] (smolcat.value.named {_}) [literal__v4404 . ])
+      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4406 . ])
+      ([ . r__v4480 p2__v4398 numeric_f32__v4406] stdlib.numeric.* [result__v4408 . ])
+      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4410 . ])
+      ([ . literal__v4404 result__v4408 numeric_f32__v4410] stdlib.numeric.+ [p1__v4412 . ])
+      ([] (const.u32.0x3f800000 u32.bitcast-f32) [literal__v4418__result . ])
+      ([ . literal__v4418__result] (smolcat.value.named {_}) [literal__v4418 . ])
+      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4420 . ])
+      ([ . r__v4478 p1__v4412 numeric_f32__v4420] stdlib.numeric.* [result__v4422 . ])
+      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4424 . ])
+      ([ . literal__v4418 result__v4422 numeric_f32__v4424] stdlib.numeric.+ [result__v4426 . ])
+      ([] type.const.u32.0x0000007f [literal__v4431 . ])
+      ([] stdlib.numeric.numeric.u32 [numeric_u32__v4433 . ])
+      ([ . k__v4462 literal__v4431 numeric_u32__v4433] stdlib.numeric.+ [result__v4435 . ])
+      ([] type.const.u32.0x00800000 [literal__v4440 . ])
+      ([] stdlib.numeric.numeric.u32 [numeric_u32__v4442 . ])
+      ([ . result__v4435 literal__v4440 numeric_u32__v4442] stdlib.numeric.* [result__v4444 . ])
+      ([ . result__v4444] ({:.forget} stdlib.math.from_bits) [from_bits__v4446__result . ])
+      ([ . from_bits__v4446__result] (smolcat.value.named {_}) [from_bits__v4446 . ])
+      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4448 . ])
+      ([ . result__v4426 from_bits__v4446 numeric_f32__v4448] stdlib.numeric.* [result__v4450 . ])
+      ([ . result__v4450] {:.forget})
+    }
+  )
+
+  (arr stdlib.math.f32_bits : ([] {(f32 val)}) -> ([] {(u32 val)}))
+
+  (arr stdlib.math.from_bits : ([] {(u32 val)}) -> ([] {(f32 val)}))
+
+  (arr stdlib.math.round_to_u32 : ([] {(f32 val)}) -> ([] {(u32 val)}))
+
+  (arr stdlib.math.shift_right : ([] {(u32 val) (u32 val)}) -> ([] {(u32 val)}))
+
+  (def stdlib.math.silu
+    : ([] {(f32 val)})
+    -> ([] {(f32 val)})
+    = {
+      [x__v4734__input . ]
+      ([ . x__v4734__input] (smolcat.value.named {_}) [x__v4734 . ])
+      ([ . x__v4734] [op0_value__v4761 . op0_value__v4761 op0_value__v4761] [x__v4759 x__v4760 . ])
+      ([] (const.u32.0x3f800000 u32.bitcast-f32) [literal__v4740__result . ])
+      ([ . literal__v4740__result] (smolcat.value.named {_}) [literal__v4740 . ])
+      ([] stdlib.numeric.signed.f32 [signed_f32__v4742 . ])
+      ([ . x__v4760 signed_f32__v4742] stdlib.numeric.negate [result__v4744 . ])
+      ([ . result__v4744] ({:.forget} stdlib.math.exp) [exp__v4746__result . ])
+      ([ . exp__v4746__result] (smolcat.value.named {_}) [exp__v4746 . ])
+      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4748 . ])
+      ([ . literal__v4740 exp__v4746 numeric_f32__v4748] stdlib.numeric.+ [result__v4750 . ])
+      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4752 . ])
+      ([ . x__v4759 result__v4750 numeric_f32__v4752] stdlib.numeric./ [result__v4754 . ])
+      ([ . result__v4754] {:.forget})
+    }
+  )
+
+  (def stdlib.math.sqrt
+    : ([] {(f32 val)})
+    -> ([] {(f32 val)})
+    = {
+      [x__v4763__input . ]
+      (
+        [ . x__v4763__input]
+        (smolcat.value.named meta.stdlib.math.sqrt.helper.callback_metavars.x.0)
+        [x__v4763 __smolcat_x__v4994 . ]
+      )
+      ([ . x__v4763] [op0_value__v4995 . op0_value__v4995 op0_value__v4995] [x__v4950 x__v4951 . ])
+      ([ . x__v4951] [op1_value__v4996 . op1_value__v4996 op1_value__v4996] [x__v4952 x__v4953 . ])
+      ([ . x__v4953] [op2_value__v4997 . op2_value__v4997 op2_value__v4997] [x__v4954 x__v4955 . ])
+      ([ . x__v4955] [op3_value__v4998 . op3_value__v4998 op3_value__v4998] [x__v4956 x__v4957 . ])
+      ([ . x__v4957] [op4_value__v4999 . op4_value__v4999 op4_value__v4999] [x__v4958 x__v4959 . ])
+      ([ . x__v4959] ({:.forget} stdlib.math.f32_bits) [f32_bits__v4766 . ])
+      ([] type.const.u32.0x00000001 [literal__v4771 . ])
+      (
+        [ . f32_bits__v4766 literal__v4771]
+        ({{_} :.forget} stdlib.math.shift_right)
+        [shift_right__v4773__result . ]
+      )
+      (
+        [ . shift_right__v4773__result]
+        (smolcat.value.named meta.stdlib.math.sqrt.helper.callback_metavars.v.0)
+        [shift_right__v4773 __smolcat_v__v5000 . ]
+      )
+      ([] type.const.u32.0x1fc00000 [literal__v4778 . ])
+      ([] stdlib.numeric.numeric.u32 [numeric_u32__v4780 . ])
+      (
+        [ . shift_right__v4773 literal__v4778 numeric_u32__v4780]
+        stdlib.numeric.+
+        [result__v4782 . ]
+      )
+      ([ . result__v4782] ({:.forget} stdlib.math.from_bits) [g0__v4784__result . ])
+      (
+        [ . g0__v4784__result]
+        (smolcat.value.named meta.stdlib.math.sqrt.helper.callback_metavars.v.1)
+        [g0__v4784 __smolcat_v__v5001 . ]
+      )
+      (
+        [ . g0__v4784]
+        [op12_value__v5002 . op12_value__v5002 op12_value__v5002]
+        [g0__v4965 g0__v4966 . ]
+      )
+      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4787 . ])
+      ([ . x__v4958 g0__v4966 numeric_f32__v4787] stdlib.numeric./ [result__v4789 . ])
+      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4791 . ])
+      ([ . g0__v4965 result__v4789 numeric_f32__v4791] stdlib.numeric.+ [result__v4793 . ])
+      ([] (const.u32.0x3f000000 u32.bitcast-f32) [literal__v4798__result . ])
+      (
+        [ . literal__v4798__result]
+        (smolcat.value.named meta.stdlib.math.sqrt.helper.callback_metavars.v.2)
+        [literal__v4798 __smolcat_v__v5003 . ]
+      )
+      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4800 . ])
+      ([ . result__v4793 literal__v4798 numeric_f32__v4800] stdlib.numeric.* [g1__v4802 . ])
+      (
+        [ . g1__v4802]
+        [op20_value__v5004 . op20_value__v5004 op20_value__v5004]
+        [g1__v4974 g1__v4975 . ]
+      )
+      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4805 . ])
+      ([ . x__v4956 g1__v4975 numeric_f32__v4805] stdlib.numeric./ [result__v4807 . ])
+      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4809 . ])
+      ([ . g1__v4974 result__v4807 numeric_f32__v4809] stdlib.numeric.+ [result__v4811 . ])
+      ([] (const.u32.0x3f000000 u32.bitcast-f32) [literal__v4816__result . ])
+      (
+        [ . literal__v4816__result]
+        (smolcat.value.named meta.stdlib.math.sqrt.helper.callback_metavars.v.3)
+        [literal__v4816 __smolcat_v__v5005 . ]
+      )
+      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4818 . ])
+      ([ . result__v4811 literal__v4816 numeric_f32__v4818] stdlib.numeric.* [g2__v4820 . ])
+      (
+        [ . g2__v4820]
+        [op28_value__v5006 . op28_value__v5006 op28_value__v5006]
+        [g2__v4983 g2__v4984 . ]
+      )
+      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4823 . ])
+      ([ . x__v4954 g2__v4984 numeric_f32__v4823] stdlib.numeric./ [result__v4825 . ])
+      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4827 . ])
+      ([ . g2__v4983 result__v4825 numeric_f32__v4827] stdlib.numeric.+ [result__v4829 . ])
+      ([] (const.u32.0x3f000000 u32.bitcast-f32) [literal__v4834__result . ])
+      (
+        [ . literal__v4834__result]
+        (smolcat.value.named meta.stdlib.math.sqrt.helper.callback_metavars.v.4)
+        [literal__v4834 __smolcat_v__v5007 . ]
+      )
+      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4836 . ])
+      ([ . result__v4829 literal__v4834 numeric_f32__v4836] stdlib.numeric.* [g3__v4838 . ])
+      (
+        [ . g3__v4838]
+        [op36_value__v5008 . op36_value__v5008 op36_value__v5008]
+        [g3__v4992 g3__v4993 . ]
+      )
+      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4841 . ])
+      ([ . x__v4952 g3__v4993 numeric_f32__v4841] stdlib.numeric./ [result__v4843 . ])
+      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4845 . ])
+      ([ . g3__v4992 result__v4843 numeric_f32__v4845] stdlib.numeric.+ [result__v4847 . ])
+      ([] (const.u32.0x3f000000 u32.bitcast-f32) [literal__v4852__result . ])
+      (
+        [ . literal__v4852__result]
+        (smolcat.value.named meta.stdlib.math.sqrt.helper.callback_metavars.v.5)
+        [literal__v4852 __smolcat_v__v5009 . ]
+      )
+      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4854 . ])
+      ([ . result__v4847 literal__v4852 numeric_f32__v4854] stdlib.numeric.* [g4__v4856 . ])
+      ([] (const.u32.0x00000000 u32.bitcast-f32) [literal__v4862 . ])
+      ([] stdlib.numeric.numeric.f32 [numeric_f32__v4864 . ])
+      (
+        [ . x__v4950 literal__v4862 numeric_f32__v4864]
+        ({:.forget {_} {_}} stdlib.numeric.less_equal)
+        [less_equal__v4866__result . ]
+      )
+      (
+        [ . less_equal__v4866__result]
+        (smolcat.value.named meta.stdlib.math.sqrt.helper.callback_metavars.v.6)
+        [less_equal__v4866 __smolcat_v__v5010 . ]
+      )
+      ([ . g4__v4856] {_} [tuple__v4873 . ])
+      ([] unit.intro [unit__v4877 . ])
+      (
+        []
+        (
+          [ . __smolcat_x__v4994 __smolcat_v__v5001 __smolcat_v__v5003 __smolcat_v__v5005 __smolcat_v__v5007 __smolcat_v__v5009 __smolcat_v__v5010]
+          name.stdlib.math.sqrt.helper.if_then_else.then_branch.0
+          lift
+        )
+        [callback__v4911 . ]
+      )
+      (
+        []
+        (
+          [ . __smolcat_x__v4994 __smolcat_v__v5001 __smolcat_v__v5003 __smolcat_v__v5005 __smolcat_v__v5007 __smolcat_v__v5009 __smolcat_v__v5010]
+          name.stdlib.math.sqrt.helper.if_then_else.else_branch.0
+          lift
+        )
+        [callback__v4936 . ]
+      )
+      (
+        [ . less_equal__v4866 tuple__v4873 callback__v4911 callback__v4936 unit__v4877]
+        ({:.forget {_} {_} {_} {_}} core.if)
+        [if_then_else__v4940 . ]
+      )
+      ([ . if_then_else__v4940] {_} [branch_result__v4945__result . ])
+      (
+        [ . branch_result__v4945__result]
+        (smolcat.value.named meta.stdlib.math.sqrt.helper.callback_metavars.branch_result.0)
+        [branch_result__v4945 __smolcat_branch_result__v5011 . ]
+      )
+      ([ . branch_result__v4945] {:.forget})
+    }
+  )
+
+  (def stdlib.math.sqrt.helper.if_then_else.else_branch.0
+    : (
+      [x__s1244 v__s4783 v__s4797 v__s4815 v__s4833 v__s4851 v__s4865 . ]
+      {
+        (
+          {
+            (
+              {
+                (
+                  {
+                    (
+                      {
+                        (
+                          {
+                            (
+                              {
+                                (
+                                  {
+                                    (
+                                      {
+                                        (
+                                          {
+                                            [ . v__s4783]
+                                            ({[ . x__s1244] [ . v__s4783]} type.stdlib.numeric./)
+                                          }
+                                          type.stdlib.numeric.+
+                                        )
+                                        [ . v__s4797]
+                                      }
+                                      type.stdlib.numeric.*
+                                    )
+                                    (
+                                      {
+                                        [ . x__s1244]
+                                        (
+                                          {
+                                            (
+                                              {
+                                                [ . v__s4783]
+                                                (
+                                                  {[ . x__s1244] [ . v__s4783]}
+                                                  type.stdlib.numeric./
+                                                )
+                                              }
+                                              type.stdlib.numeric.+
+                                            )
+                                            [ . v__s4797]
+                                          }
+                                          type.stdlib.numeric.*
+                                        )
+                                      }
+                                      type.stdlib.numeric./
+                                    )
+                                  }
+                                  type.stdlib.numeric.+
+                                )
+                                [ . v__s4815]
+                              }
+                              type.stdlib.numeric.*
+                            )
+                            (
+                              {
+                                [ . x__s1244]
+                                (
+                                  {
+                                    (
+                                      {
+                                        (
+                                          {
+                                            (
+                                              {
+                                                [ . v__s4783]
+                                                (
+                                                  {[ . x__s1244] [ . v__s4783]}
+                                                  type.stdlib.numeric./
+                                                )
+                                              }
+                                              type.stdlib.numeric.+
+                                            )
+                                            [ . v__s4797]
+                                          }
+                                          type.stdlib.numeric.*
+                                        )
+                                        (
+                                          {
+                                            [ . x__s1244]
+                                            (
+                                              {
+                                                (
+                                                  {
+                                                    [ . v__s4783]
+                                                    (
+                                                      {[ . x__s1244] [ . v__s4783]}
+                                                      type.stdlib.numeric./
+                                                    )
+                                                  }
+                                                  type.stdlib.numeric.+
+                                                )
+                                                [ . v__s4797]
+                                              }
+                                              type.stdlib.numeric.*
+                                            )
+                                          }
+                                          type.stdlib.numeric./
+                                        )
+                                      }
+                                      type.stdlib.numeric.+
+                                    )
+                                    [ . v__s4815]
+                                  }
+                                  type.stdlib.numeric.*
+                                )
+                              }
+                              type.stdlib.numeric./
+                            )
+                          }
+                          type.stdlib.numeric.+
+                        )
+                        [ . v__s4833]
+                      }
+                      type.stdlib.numeric.*
+                    )
+                    (
+                      {
+                        [ . x__s1244]
+                        (
+                          {
+                            (
+                              {
+                                (
+                                  {
+                                    (
+                                      {
+                                        (
+                                          {
+                                            (
+                                              {
+                                                [ . v__s4783]
+                                                (
+                                                  {[ . x__s1244] [ . v__s4783]}
+                                                  type.stdlib.numeric./
+                                                )
+                                              }
+                                              type.stdlib.numeric.+
+                                            )
+                                            [ . v__s4797]
+                                          }
+                                          type.stdlib.numeric.*
+                                        )
+                                        (
+                                          {
+                                            [ . x__s1244]
+                                            (
+                                              {
+                                                (
+                                                  {
+                                                    [ . v__s4783]
+                                                    (
+                                                      {[ . x__s1244] [ . v__s4783]}
+                                                      type.stdlib.numeric./
+                                                    )
+                                                  }
+                                                  type.stdlib.numeric.+
+                                                )
+                                                [ . v__s4797]
+                                              }
+                                              type.stdlib.numeric.*
+                                            )
+                                          }
+                                          type.stdlib.numeric./
+                                        )
+                                      }
+                                      type.stdlib.numeric.+
+                                    )
+                                    [ . v__s4815]
+                                  }
+                                  type.stdlib.numeric.*
+                                )
+                                (
+                                  {
+                                    [ . x__s1244]
+                                    (
+                                      {
+                                        (
+                                          {
+                                            (
+                                              {
+                                                (
+                                                  {
+                                                    [ . v__s4783]
+                                                    (
+                                                      {[ . x__s1244] [ . v__s4783]}
+                                                      type.stdlib.numeric./
+                                                    )
+                                                  }
+                                                  type.stdlib.numeric.+
+                                                )
+                                                [ . v__s4797]
+                                              }
+                                              type.stdlib.numeric.*
+                                            )
+                                            (
+                                              {
+                                                [ . x__s1244]
+                                                (
+                                                  {
+                                                    (
+                                                      {
+                                                        [ . v__s4783]
+                                                        (
+                                                          {[ . x__s1244] [ . v__s4783]}
+                                                          type.stdlib.numeric./
+                                                        )
+                                                      }
+                                                      type.stdlib.numeric.+
+                                                    )
+                                                    [ . v__s4797]
+                                                  }
+                                                  type.stdlib.numeric.*
+                                                )
+                                              }
+                                              type.stdlib.numeric./
+                                            )
+                                          }
+                                          type.stdlib.numeric.+
+                                        )
+                                        [ . v__s4815]
+                                      }
+                                      type.stdlib.numeric.*
+                                    )
+                                  }
+                                  type.stdlib.numeric./
+                                )
+                              }
+                              type.stdlib.numeric.+
+                            )
+                            [ . v__s4833]
+                          }
+                          type.stdlib.numeric.*
+                        )
+                      }
+                      type.stdlib.numeric./
+                    )
+                  }
+                  type.stdlib.numeric.+
+                )
+                [ . v__s4851]
+              }
+              type.stdlib.numeric.*
+            )
+            f32
+          }
+          :
+        )
+        (({({[ . v__s4865]} prop.IsTrue)} stdlib.prelude.prop.Not) |-)
+        1
+      }
+    )
+    -> ([x__s1244 v__s4783 v__s4797 v__s4815 v__s4833 v__s4851 v__s4865 . ] {(f32 val)})
+    = {
+      [context__v4914 condition__v4922 common__v4924 . ]
+      ([ . condition__v4922] [op0_value__v4932 . ] [])
+      ([ . context__v4914] {_} [g4__v4919 . ])
+      ([ . common__v4924] unit.elim [])
+      ([ . g4__v4919] {_} [tuple__v4931 . ])
+      ([ . tuple__v4931] {({_} {:.forget} {_})})
+    }
+  )
+
+  (def stdlib.math.sqrt.helper.if_then_else.then_branch.0
+    : (
+      [x__s1244 v__s4783 v__s4797 v__s4815 v__s4833 v__s4851 v__s4865 . ]
+      {
+        (
+          {
+            (
+              {
+                (
+                  {
+                    (
+                      {
+                        (
+                          {
+                            (
+                              {
+                                (
+                                  {
+                                    (
+                                      {
+                                        (
+                                          {
+                                            [ . v__s4783]
+                                            ({[ . x__s1244] [ . v__s4783]} type.stdlib.numeric./)
+                                          }
+                                          type.stdlib.numeric.+
+                                        )
+                                        [ . v__s4797]
+                                      }
+                                      type.stdlib.numeric.*
+                                    )
+                                    (
+                                      {
+                                        [ . x__s1244]
+                                        (
+                                          {
+                                            (
+                                              {
+                                                [ . v__s4783]
+                                                (
+                                                  {[ . x__s1244] [ . v__s4783]}
+                                                  type.stdlib.numeric./
+                                                )
+                                              }
+                                              type.stdlib.numeric.+
+                                            )
+                                            [ . v__s4797]
+                                          }
+                                          type.stdlib.numeric.*
+                                        )
+                                      }
+                                      type.stdlib.numeric./
+                                    )
+                                  }
+                                  type.stdlib.numeric.+
+                                )
+                                [ . v__s4815]
+                              }
+                              type.stdlib.numeric.*
+                            )
+                            (
+                              {
+                                [ . x__s1244]
+                                (
+                                  {
+                                    (
+                                      {
+                                        (
+                                          {
+                                            (
+                                              {
+                                                [ . v__s4783]
+                                                (
+                                                  {[ . x__s1244] [ . v__s4783]}
+                                                  type.stdlib.numeric./
+                                                )
+                                              }
+                                              type.stdlib.numeric.+
+                                            )
+                                            [ . v__s4797]
+                                          }
+                                          type.stdlib.numeric.*
+                                        )
+                                        (
+                                          {
+                                            [ . x__s1244]
+                                            (
+                                              {
+                                                (
+                                                  {
+                                                    [ . v__s4783]
+                                                    (
+                                                      {[ . x__s1244] [ . v__s4783]}
+                                                      type.stdlib.numeric./
+                                                    )
+                                                  }
+                                                  type.stdlib.numeric.+
+                                                )
+                                                [ . v__s4797]
+                                              }
+                                              type.stdlib.numeric.*
+                                            )
+                                          }
+                                          type.stdlib.numeric./
+                                        )
+                                      }
+                                      type.stdlib.numeric.+
+                                    )
+                                    [ . v__s4815]
+                                  }
+                                  type.stdlib.numeric.*
+                                )
+                              }
+                              type.stdlib.numeric./
+                            )
+                          }
+                          type.stdlib.numeric.+
+                        )
+                        [ . v__s4833]
+                      }
+                      type.stdlib.numeric.*
+                    )
+                    (
+                      {
+                        [ . x__s1244]
+                        (
+                          {
+                            (
+                              {
+                                (
+                                  {
+                                    (
+                                      {
+                                        (
+                                          {
+                                            (
+                                              {
+                                                [ . v__s4783]
+                                                (
+                                                  {[ . x__s1244] [ . v__s4783]}
+                                                  type.stdlib.numeric./
+                                                )
+                                              }
+                                              type.stdlib.numeric.+
+                                            )
+                                            [ . v__s4797]
+                                          }
+                                          type.stdlib.numeric.*
+                                        )
+                                        (
+                                          {
+                                            [ . x__s1244]
+                                            (
+                                              {
+                                                (
+                                                  {
+                                                    [ . v__s4783]
+                                                    (
+                                                      {[ . x__s1244] [ . v__s4783]}
+                                                      type.stdlib.numeric./
+                                                    )
+                                                  }
+                                                  type.stdlib.numeric.+
+                                                )
+                                                [ . v__s4797]
+                                              }
+                                              type.stdlib.numeric.*
+                                            )
+                                          }
+                                          type.stdlib.numeric./
+                                        )
+                                      }
+                                      type.stdlib.numeric.+
+                                    )
+                                    [ . v__s4815]
+                                  }
+                                  type.stdlib.numeric.*
+                                )
+                                (
+                                  {
+                                    [ . x__s1244]
+                                    (
+                                      {
+                                        (
+                                          {
+                                            (
+                                              {
+                                                (
+                                                  {
+                                                    [ . v__s4783]
+                                                    (
+                                                      {[ . x__s1244] [ . v__s4783]}
+                                                      type.stdlib.numeric./
+                                                    )
+                                                  }
+                                                  type.stdlib.numeric.+
+                                                )
+                                                [ . v__s4797]
+                                              }
+                                              type.stdlib.numeric.*
+                                            )
+                                            (
+                                              {
+                                                [ . x__s1244]
+                                                (
+                                                  {
+                                                    (
+                                                      {
+                                                        [ . v__s4783]
+                                                        (
+                                                          {[ . x__s1244] [ . v__s4783]}
+                                                          type.stdlib.numeric./
+                                                        )
+                                                      }
+                                                      type.stdlib.numeric.+
+                                                    )
+                                                    [ . v__s4797]
+                                                  }
+                                                  type.stdlib.numeric.*
+                                                )
+                                              }
+                                              type.stdlib.numeric./
+                                            )
+                                          }
+                                          type.stdlib.numeric.+
+                                        )
+                                        [ . v__s4815]
+                                      }
+                                      type.stdlib.numeric.*
+                                    )
+                                  }
+                                  type.stdlib.numeric./
+                                )
+                              }
+                              type.stdlib.numeric.+
+                            )
+                            [ . v__s4833]
+                          }
+                          type.stdlib.numeric.*
+                        )
+                      }
+                      type.stdlib.numeric./
+                    )
+                  }
+                  type.stdlib.numeric.+
+                )
+                [ . v__s4851]
+              }
+              type.stdlib.numeric.*
+            )
+            f32
+          }
+          :
+        )
+        (({[ . v__s4865]} prop.IsTrue) |-)
+        1
+      }
+    )
+    -> ([x__s1244 v__s4783 v__s4797 v__s4815 v__s4833 v__s4851 v__s4865 . ] {(f32 val)})
+    = {
+      [context__v4879 condition__v4887 common__v4889 . ]
+      ([ . condition__v4887] [op0_value__v4903 . ] [])
+      ([ . context__v4879] {_} [g4__v4884 . ])
+      ([ . g4__v4884] [op2_value__v4904 . ] [])
+      ([ . common__v4889] unit.elim [])
+      ([] (const.u32.0x00000000 u32.bitcast-f32) [literal__v4896__result . ])
+      ([ . literal__v4896__result] (smolcat.value.named {_}) [literal__v4896 . ])
+      ([ . literal__v4896] {_} [tuple__v4902 . ])
+      ([ . tuple__v4902] {({_} {:.forget} {_})})
+    }
+  )
+})

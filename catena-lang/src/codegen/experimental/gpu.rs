@@ -80,6 +80,15 @@ fn render_body(out: &mut String, body: &[Instruction], depth: usize, dialect: Gp
                 )
                 .unwrap();
             }
+            Instruction::Free { buffer } => {
+                writeln!(
+                    out,
+                    "{indent}catena_gpu_check({}({}.data));",
+                    dialect.device_free_fn(),
+                    buffer.name
+                )
+                .unwrap();
+            }
             Instruction::If { condition, yes, no } => {
                 writeln!(out, "{indent}if ({condition}) {{").unwrap();
                 render_body(out, yes, depth + 1, dialect);
@@ -87,10 +96,16 @@ fn render_body(out: &mut String, body: &[Instruction], depth: usize, dialect: Gp
                 render_body(out, no, depth + 1, dialect);
                 writeln!(out, "{indent}}}").unwrap();
             }
-            Instruction::For { index, end, body } => {
+            Instruction::For {
+                index,
+                index_type,
+                end,
+                body,
+            } => {
                 writeln!(
                     out,
-                    "{indent}for (uint32_t {index}=0; {index}<{end}; ++{index}) {{"
+                    "{indent}for ({} {index}=0; {index}<{end}; ++{index}) {{",
+                    index_type.c_name()
                 )
                 .unwrap();
                 render_body(out, body, depth + 1, dialect);

@@ -116,7 +116,9 @@ pub fn compile_with_progress(
         &mut report.timings,
         "Closure conversion",
         progress,
-        |update| crate::closure::run_with_progress(&theory_set, &forgotten_closures, update),
+        |update| {
+            crate::closure::run_with_progress(&theory_set, &forgotten_closures, codegen, update)
+        },
     )?;
     report.closure_conversion = Some(closure_conversion);
 

@@ -35,6 +35,7 @@ struct ScheduledRegion {
 pub(super) fn run(
     theory_set: &TheorySet,
     terms: TheoryTermMap<ClosureForgotten<Operation>>,
+    primitives: &[(&str, &str)],
     progress: &mut dyn FnMut(&str),
 ) -> Result<RegionConversion, ConversionError> {
     let mut state = ConversionState {
@@ -81,6 +82,8 @@ pub(super) fn run(
             &original_context_leaves,
             generated_id,
         )?;
+
+        replace::rewrite_ready_converted_primitives(&mut state.terms, primitives);
 
         // Step 4: rediscover regions and rebuild dependencies. Extraction
         // deletes and unifies nodes, so the previous snapshot is now stale.
@@ -178,7 +181,6 @@ fn replace_region_with_closure_representation(
     )?;
     state.theory = replaced.theory_set;
     state.terms = replaced.terms;
-    replace::rewrite_ready_converted_primitives(&mut state.terms);
     Ok(())
 }
 

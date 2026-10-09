@@ -14,7 +14,10 @@ pub(in crate::codegen::experimental) fn lower(
 ) -> Result<Vec<Value>, CodegenError> {
     match op {
         "core.if" | "core.if_guarded" => conditional(l, op, &args, outputs),
-        "core.fold.bounded" | "core.fold.trace" => fold(l, op, &args, outputs),
+        "core.fold.bounded"
+        | "core.fold.trace"
+        | "core.fold.bounded_u64"
+        | "core.fold.trace_u64" => fold(l, op, &args, outputs),
         _ => unreachable!("unexpected callback operation: {op}"),
     }
 }
@@ -25,16 +28,33 @@ fn conditional(
     args: &[Value],
     outputs: &[Obj],
 ) -> Result<Vec<Value>, CodegenError> {
-    if args.len() < 7 {
-        return Err(invalid(op, "missing branch operands"));
+    let [
+        condition,
+        context,
+        yes_env,
+        yes_fn,
+        no_env,
+        no_fn,
+        contracts,
+        extra @ ..,
+    ] = args
+    else {
+        return Err(invalid(op, "invalid conditional operands"));
+    };
+    match (op, extra) {
+        ("core.if", []) => {}
+        ("core.if_guarded", [permission]) => {
+            l.erased(&permission.ty)?;
+        }
+        _ => return Err(invalid(op, "invalid conditional operands")),
     }
-    let condition = expr(&args[0])?.to_owned();
-    let input = runtime_args(&[args[1].clone(), args[6].clone()]);
+    let condition = expr(condition)?.to_owned();
+    let input = runtime_args(&[context.clone(), contracts.clone()]);
     let outer = std::mem::take(&mut l.body);
     let mut bodies = vec![];
     let mut branches = vec![];
-    for pair in args[2..6].chunks_exact(2) {
-        let result = l.callback(&pair[1], &pair[0], input.clone())?;
+    for (environment, function) in [(yes_env, yes_fn), (no_env, no_fn)] {
+        let result = l.callback(function, environment, input.clone())?;
         branches.push(runtime_args(&result));
         bodies.push(std::mem::take(&mut l.body));
     }
@@ -64,11 +84,27 @@ fn fold(
     args: &[Value],
     outputs: &[Obj],
 ) -> Result<Vec<Value>, CodegenError> {
-    if args.len() < 5 {
-        return Err(invalid(op, "missing fold operands"));
+    let (bound, initial, environment, function, invariant) = match (op, args) {
+        (
+            "core.fold.bounded" | "core.fold.bounded_u64",
+            [bound, initial, environment, function, invariant],
+        ) => (bound, initial, environment, function, invariant),
+        (
+            "core.fold.trace" | "core.fold.trace_u64",
+            [bound, initial, environment, function, invariant, trace],
+        ) => {
+            l.erased(&trace.ty)?;
+            (bound, initial, environment, function, invariant)
+        }
+        _ => return Err(invalid(op, "invalid fold operands")),
+    };
+    let index_type = if op.ends_with("_u64") { "u64" } else { "u32" };
+    let index_ty = node("val", vec![node(index_type, vec![])]);
+    if representation(&bound.ty)? != representation(&index_ty)? {
+        return Err(invalid(op, "fold bound type mismatch"));
     }
-    let end = expr(&args[0])?.to_owned();
-    let initial = runtime_args(&[args[1].clone(), args[4].clone()]);
+    let end = expr(bound)?.to_owned();
+    let initial = runtime_args(&[initial.clone(), invariant.clone()]);
     let mut state = vec![];
     for v in initial {
         state.push(l.emit(&v.ty, expr(&v)?)?);
@@ -76,11 +112,11 @@ fn fold(
     let outer = std::mem::take(&mut l.body);
     let index = l.fresh("index");
     let mut fields = vec![Value {
-        ty: node("val", vec![node("u32", vec![])]),
+        ty: index_ty.clone(),
         repr: Repr::Runtime(index.clone()),
     }];
     fields.extend(state.clone());
-    let result = l.callback(&args[3], &args[2], fields)?;
+    let result = l.callback(function, environment, fields)?;
     let next = runtime_args(&result);
     if next.len() != state.len() {
         return Err(invalid(op, "fold state shape changed"));
@@ -98,6 +134,11 @@ fn fold(
             .push(Instruction::Assign(expr(old)?.into(), expr(new)?.into()));
     }
     let body = std::mem::replace(&mut l.body, outer);
-    l.body.push(Instruction::For { index, end, body });
+    l.body.push(Instruction::For {
+        index,
+        index_type: representation(&index_ty)?.unwrap(),
+        end,
+        body,
+    });
     results(l, outputs, state)
 }

@@ -1,4 +1,4 @@
-use crate::codegen::{
+use crate::codegen::default::{
     GpuAssign, GpuDialect, GpuFunction, GpuValue,
     components::{input_components, output_components, single_value, value_expr},
     gpu::GpuRenderError,
@@ -28,7 +28,7 @@ fn parts(assignment: &GpuAssign) -> Result<Parts<'_>, GpuRenderError> {
         .map_err(|_| invalid_inputs(assignment, 12))
 }
 
-pub(in crate::codegen) fn kernel_name(
+pub(in crate::codegen::default) fn kernel_name(
     function: &GpuFunction,
     assignment: &GpuAssign,
 ) -> Result<String, GpuRenderError> {
@@ -58,7 +58,7 @@ fn validate_outputs(assignment: &GpuAssign, storage: StorageType) -> Result<(), 
     Ok(())
 }
 
-pub(in crate::codegen) fn render_kernel(
+pub(in crate::codegen::default) fn render_kernel(
     out: &mut String,
     name: &str,
     assignment: &GpuAssign,
@@ -112,7 +112,7 @@ pub(in crate::codegen) fn render_kernel(
     Ok(())
 }
 
-pub(in crate::codegen) fn render_call(
+pub(in crate::codegen::default) fn render_call(
     out: &mut String,
     function: &GpuFunction,
     assignment: &GpuAssign,

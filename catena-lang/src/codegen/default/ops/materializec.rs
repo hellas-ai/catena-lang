@@ -39,7 +39,7 @@ use crate::codegen::default::{
 const ROUTED_MAX_EXPERTS: u64 = 256;
 const ROUTED_MIN_ROUTES_PER_EXPERT: u64 = 4;
 
-pub(in crate::codegen) fn render_kernel(
+pub(in crate::codegen::default) fn render_kernel(
     out: &mut String,
     kernel_name: &str,
     assignment: &GpuAssign,
@@ -87,7 +87,7 @@ pub(in crate::codegen) fn render_kernel(
     Ok(())
 }
 
-pub(in crate::codegen) fn render_call(
+pub(in crate::codegen::default) fn render_call(
     out: &mut String,
     function: &GpuFunction,
     assignment: &GpuAssign,
@@ -146,7 +146,7 @@ pub(in crate::codegen) fn render_call(
     Ok(())
 }
 
-pub(in crate::codegen) fn render_into_kernel(
+pub(in crate::codegen::default) fn render_into_kernel(
     out: &mut String,
     kernel_name: &str,
     assignment: &GpuAssign,
@@ -194,7 +194,7 @@ pub(in crate::codegen) fn render_into_kernel(
     Ok(())
 }
 
-pub(in crate::codegen) fn render_into_call(
+pub(in crate::codegen::default) fn render_into_call(
     out: &mut String,
     function: &GpuFunction,
     assignment: &GpuAssign,
@@ -232,7 +232,7 @@ pub(in crate::codegen) fn render_into_call(
     Ok(())
 }
 
-pub(in crate::codegen) fn render_borrow_kernel(
+pub(in crate::codegen::default) fn render_borrow_kernel(
     out: &mut String,
     kernel_name: &str,
     assignment: &GpuAssign,
@@ -293,7 +293,7 @@ pub(in crate::codegen) fn render_borrow_kernel(
     Ok(())
 }
 
-pub(in crate::codegen) fn render_borrow_call(
+pub(in crate::codegen::default) fn render_borrow_call(
     out: &mut String,
     function: &GpuFunction,
     assignment: &GpuAssign,
@@ -355,7 +355,7 @@ pub(in crate::codegen) fn render_borrow_call(
     Ok(())
 }
 
-pub(in crate::codegen) fn render_reduce_f32_kernel(
+pub(in crate::codegen::default) fn render_reduce_f32_kernel(
     out: &mut String,
     kernel_name: &str,
     assignment: &GpuAssign,
@@ -452,7 +452,7 @@ pub(in crate::codegen) fn render_reduce_f32_kernel(
     Ok(())
 }
 
-pub(in crate::codegen) fn render_reduce_f32_pair_kernel(
+pub(in crate::codegen::default) fn render_reduce_f32_pair_kernel(
     out: &mut String,
     kernel_name: &str,
     assignment: &GpuAssign,
@@ -577,7 +577,7 @@ pub(in crate::codegen) fn render_reduce_f32_pair_kernel(
     Ok(())
 }
 
-pub(in crate::codegen) fn render_borrow_reduce_f32_kernel(
+pub(in crate::codegen::default) fn render_borrow_reduce_f32_kernel(
     out: &mut String,
     kernel_name: &str,
     assignment: &GpuAssign,
@@ -690,7 +690,7 @@ pub(in crate::codegen) fn render_borrow_reduce_f32_kernel(
     Ok(())
 }
 
-pub(in crate::codegen) fn render_borrow_routed_bf16_gemv_pair_kernel(
+pub(in crate::codegen::default) fn render_borrow_routed_bf16_gemv_pair_kernel(
     out: &mut String,
     kernel_name: &str,
     assignment: &GpuAssign,
@@ -757,7 +757,7 @@ pub(in crate::codegen) fn render_borrow_routed_bf16_gemv_pair_kernel(
     Ok(())
 }
 
-pub(in crate::codegen) fn render_borrow_native_bf16_gemv_pair_kernel(
+pub(in crate::codegen::default) fn render_borrow_native_bf16_gemv_pair_kernel(
     out: &mut String,
     kernel_name: &str,
     assignment: &GpuAssign,
@@ -841,7 +841,7 @@ pub(in crate::codegen) fn render_borrow_native_bf16_gemv_pair_kernel(
     Ok(())
 }
 
-pub(in crate::codegen) fn render_borrow_routed_native_bf16_gemv_pair_kernel(
+pub(in crate::codegen::default) fn render_borrow_routed_native_bf16_gemv_pair_kernel(
     out: &mut String,
     kernel_name: &str,
     assignment: &GpuAssign,
@@ -938,7 +938,7 @@ pub(in crate::codegen) fn render_borrow_routed_native_bf16_gemv_pair_kernel(
     Ok(())
 }
 
-pub(in crate::codegen) fn render_borrow_routed_native_bf16_gemm_wmma_pair_kernels(
+pub(in crate::codegen::default) fn render_borrow_routed_native_bf16_gemm_wmma_pair_kernels(
     out: &mut String,
     kernel_name: &str,
     assignment: &GpuAssign,
@@ -963,8 +963,8 @@ __global__ void __KERNEL__(
     const uint64_t *permutation, catena_bf16_t *gate_out,
     catena_bf16_t *up_out, uint64_t reduction_len, uint64_t slots,
     uint64_t output_features) {
-    using frag_a_t = rocwmma::fragment<rocwmma::matrix_a, 16, 16, 16, catena_bf16_t, rocwmma::row_major>;
-    using frag_b_t = rocwmma::fragment<rocwmma::matrix_b, 16, 16, 16, catena_bf16_t, rocwmma::col_major>;
+    using frag_a_t = rocwmma::fragment<rocwmma::matrix_a, 16, 16, 16, rocwmma::bfloat16_t, rocwmma::row_major>;
+    using frag_b_t = rocwmma::fragment<rocwmma::matrix_b, 16, 16, 16, rocwmma::bfloat16_t, rocwmma::col_major>;
     using frag_c_t = rocwmma::fragment<rocwmma::accumulator, 16, 16, 16, float>;
 
     uint64_t expert = (uint64_t)blockIdx.y;
@@ -1014,13 +1014,13 @@ __global__ void __KERNEL__(
                 }
             }
             __syncthreads();
-            rocwmma::load_matrix_sync(a, tile_a + wave * 16 * 16, 16);
+            rocwmma::load_matrix_sync(a, reinterpret_cast<const rocwmma::bfloat16_t *>(tile_a + wave * 16 * 16), 16);
             #pragma unroll
             for (uint32_t fragment = 0; fragment < __TILE_FRAGMENTS__; ++fragment) {
                 rocwmma::load_matrix_sync(
-                    gate_b[fragment], tile_gate_b + fragment * 16 * 16, 16);
+                    gate_b[fragment], reinterpret_cast<const rocwmma::bfloat16_t *>(tile_gate_b + fragment * 16 * 16), 16);
                 rocwmma::load_matrix_sync(
-                    up_b[fragment], tile_up_b + fragment * 16 * 16, 16);
+                    up_b[fragment], reinterpret_cast<const rocwmma::bfloat16_t *>(tile_up_b + fragment * 16 * 16), 16);
                 rocwmma::mma_sync(
                     gate_c[fragment], a, gate_b[fragment], gate_c[fragment]);
                 rocwmma::mma_sync(
@@ -1059,7 +1059,7 @@ __global__ void __KERNEL__(
     Ok(())
 }
 
-pub(in crate::codegen) fn render_borrow_routed_native_bf16_gemv_residual_kernel(
+pub(in crate::codegen::default) fn render_borrow_routed_native_bf16_gemv_residual_kernel(
     out: &mut String,
     kernel_name: &str,
     assignment: &GpuAssign,
@@ -1151,7 +1151,7 @@ pub(in crate::codegen) fn render_borrow_routed_native_bf16_gemv_residual_kernel(
     Ok(())
 }
 
-pub(in crate::codegen) fn render_borrow_routed_native_bf16_gemm_wmma_residual_kernels(
+pub(in crate::codegen::default) fn render_borrow_routed_native_bf16_gemm_wmma_residual_kernels(
     out: &mut String,
     kernel_name: &str,
     assignment: &GpuAssign,
@@ -1174,8 +1174,8 @@ __global__ void __KERNEL__(
     const catena_bf16_t *active, const catena_bf16_t *down_weight,
     const uint64_t *offsets, const uint64_t *permutation,
     float *route_output, uint64_t intermediate, uint64_t output_features) {
-    using frag_a_t = rocwmma::fragment<rocwmma::matrix_a, 16, 16, 16, catena_bf16_t, rocwmma::row_major>;
-    using frag_b_t = rocwmma::fragment<rocwmma::matrix_b, 16, 16, 16, catena_bf16_t, rocwmma::col_major>;
+    using frag_a_t = rocwmma::fragment<rocwmma::matrix_a, 16, 16, 16, rocwmma::bfloat16_t, rocwmma::row_major>;
+    using frag_b_t = rocwmma::fragment<rocwmma::matrix_b, 16, 16, 16, rocwmma::bfloat16_t, rocwmma::col_major>;
     using frag_c_t = rocwmma::fragment<rocwmma::accumulator, 16, 16, 16, float>;
 
     uint64_t expert = (uint64_t)blockIdx.y;
@@ -1222,11 +1222,11 @@ __global__ void __KERNEL__(
                 }
             }
             __syncthreads();
-            rocwmma::load_matrix_sync(a, tile_a + wave * 16 * 16, 16);
+            rocwmma::load_matrix_sync(a, reinterpret_cast<const rocwmma::bfloat16_t *>(tile_a + wave * 16 * 16), 16);
             #pragma unroll
             for (uint32_t fragment = 0; fragment < __TILE_FRAGMENTS__; ++fragment) {
                 rocwmma::load_matrix_sync(
-                    b[fragment], tile_b + fragment * 16 * 16, 16);
+                    b[fragment], reinterpret_cast<const rocwmma::bfloat16_t *>(tile_b + fragment * 16 * 16), 16);
                 rocwmma::mma_sync(c[fragment], a, b[fragment], c[fragment]);
             }
             __syncthreads();
@@ -1273,7 +1273,7 @@ __global__ void __KERNEL___combine(
     Ok(())
 }
 
-pub(in crate::codegen) fn render_bf16_gemv_kernel(
+pub(in crate::codegen::default) fn render_bf16_gemv_kernel(
     out: &mut String,
     kernel_name: &str,
     assignment: &GpuAssign,
@@ -1379,12 +1379,18 @@ fn render_bf16_gemm_wmma_kernel(out: &mut String, kernel_name: &str, dialect: Gp
                 "nvcuda::wmma::mem_row_major",
             ),
         };
+    // rocWMMA uses hip_bfloat16; master stores BF16 as __hip_bfloat16.
+    // Reinterpret the identical 16-bit storage only at the matrix-load boundary.
+    let mma_element = match dialect {
+        GpuDialect::Hip => "rocwmma::bfloat16_t",
+        GpuDialect::Cuda => "catena_bf16_t",
+    };
     out.push_str(&include);
     out.push_str(&format!(
         "__global__ void {kernel_name}(const catena_bf16_t *input, const catena_bf16_t *weight, catena_bf16_t *out, uint64_t rows, uint64_t reduction_len, uint64_t input_row, uint64_t output_features) {{\n"
     ));
-    out.push_str(&format!("    using frag_a_t = {namespace}::fragment<{matrix_a}, 16, 16, {tile_reduction}, catena_bf16_t, {row_major}>;\n"));
-    out.push_str(&format!("    using frag_b_t = {namespace}::fragment<{matrix_b}, 16, 16, {tile_reduction}, catena_bf16_t, {col_major}>;\n"));
+    out.push_str(&format!("    using frag_a_t = {namespace}::fragment<{matrix_a}, 16, 16, {tile_reduction}, {mma_element}, {row_major}>;\n"));
+    out.push_str(&format!("    using frag_b_t = {namespace}::fragment<{matrix_b}, 16, 16, {tile_reduction}, {mma_element}, {col_major}>;\n"));
     out.push_str(&format!(
         "    using frag_c_t = {namespace}::fragment<{accumulator}, 16, 16, {tile_reduction}, float>;\n"
     ));
@@ -1397,7 +1403,7 @@ fn render_bf16_gemm_wmma_kernel(out: &mut String, kernel_name: &str, dialect: Gp
     out.push_str("            uint32_t tile_row = flat >> 4; uint32_t tile_column = flat & 15;\n            uint64_t row = row_base + tile_row; uint64_t k = k_base + tile_column;\n");
     out.push_str("            tile_a[flat] = (row < rows && k < reduction_len) ? input[(input_row + row) * reduction_len + k] : catena_bf16_from_f32(0.0f);\n");
     out.push_str("            uint64_t column = column_base + tile_row;\n            tile_b[flat] = (column < output_features && k < reduction_len) ? weight[column * reduction_len + k] : catena_bf16_from_f32(0.0f);\n");
-    out.push_str(&format!("        }}\n        __syncthreads();\n        {namespace}::load_matrix_sync(a, tile_a + wave * 16 * {tile_reduction}, {tile_reduction});\n        #pragma unroll\n        for (uint32_t fragment = 0; fragment < {fragments}; ++fragment) {{\n            {namespace}::load_matrix_sync(b[fragment], tile_b + fragment * 16 * {tile_reduction}, {tile_reduction});\n            {namespace}::mma_sync(c[fragment], a, b[fragment], c[fragment]);\n        }}\n        __syncthreads();\n    }}\n"));
+    out.push_str(&format!("        }}\n        __syncthreads();\n        {namespace}::load_matrix_sync(a, reinterpret_cast<const {mma_element} *>(tile_a + wave * 16 * {tile_reduction}), {tile_reduction});\n        #pragma unroll\n        for (uint32_t fragment = 0; fragment < {fragments}; ++fragment) {{\n            {namespace}::load_matrix_sync(b[fragment], reinterpret_cast<const {mma_element} *>(tile_b + fragment * 16 * {tile_reduction}), {tile_reduction});\n            {namespace}::mma_sync(c[fragment], a, b[fragment], c[fragment]);\n        }}\n        __syncthreads();\n    }}\n"));
     out.push_str(&format!("    #pragma unroll\n    for (uint32_t fragment = 0; fragment < {fragments}; ++fragment) {{\n        {namespace}::store_matrix_sync(tile_c + wave * 16 * 16, c[fragment], 16, {store_layout});\n        __syncthreads();\n        for (uint32_t flat = lane; flat < 16 * 16; flat += 32) {{\n            uint64_t row = row_base + wave * 16 + (flat >> 4);\n            uint64_t column = column_base + fragment * 16 + (flat & 15);\n            if (row < rows && column < output_features) {{\n                out[row * output_features + column] = catena_bf16_from_f32(tile_c[wave * 16 * 16 + flat]);\n            }}\n        }}\n        __syncthreads();\n    }}\n}}\n"));
     if dialect == GpuDialect::Hip {
         out.push_str("#endif\n");
@@ -1407,7 +1413,7 @@ fn render_bf16_gemm_wmma_kernel(out: &mut String, kernel_name: &str, dialect: Gp
 /// Render an opt-in BF16 GEMM. HIP gfx11 and CUDA sm80+ cooperatively execute a
 /// 128x128 output tile with eight waves/warps; the companion SIMT kernel handles
 /// small inputs.
-pub(in crate::codegen) fn render_bf16_gemm_wmma_kernels(
+pub(in crate::codegen::default) fn render_bf16_gemm_wmma_kernels(
     out: &mut String,
     kernel_name: &str,
     assignment: &GpuAssign,
@@ -1418,7 +1424,7 @@ pub(in crate::codegen) fn render_bf16_gemm_wmma_kernels(
     Ok(())
 }
 
-pub(in crate::codegen) fn render_borrow_native_bf16_gemm_wmma_pair_kernels(
+pub(in crate::codegen::default) fn render_borrow_native_bf16_gemm_wmma_pair_kernels(
     out: &mut String,
     kernel_name: &str,
     assignment: &GpuAssign,
@@ -1435,126 +1441,7 @@ pub(in crate::codegen) fn render_borrow_native_bf16_gemm_wmma_pair_kernels(
     Ok(())
 }
 
-pub(in crate::codegen) fn render_blas_support(out: &mut String, dialect: GpuDialect) {
-    out.push_str(match dialect {
-        GpuDialect::Hip => {
-            r#"#include <hipblas/hipblas.h>
-#ifndef __HIP_DEVICE_COMPILE__
-__host__ static inline void catena_host_blas_check(hipblasStatus_t status) {
-    if (status != HIPBLAS_STATUS_SUCCESS) {
-        fprintf(stderr, "catena hipBLAS error: %s\n", hipblasStatusToString(status));
-        fflush(stderr);
-        __builtin_trap();
-    }
-}
-
-struct catena_blas_context_t {
-    hipblasHandle_t handle;
-
-    catena_blas_context_t() : handle(nullptr) {
-        catena_host_blas_check(hipblasCreate(&handle));
-        catena_host_blas_check(hipblasSetPointerMode(handle, HIPBLAS_POINTER_MODE_HOST));
-        catena_host_blas_check(hipblasSetAtomicsMode(handle, HIPBLAS_ATOMICS_NOT_ALLOWED));
-        catena_host_blas_check(hipblasSetStream(handle, nullptr));
-    }
-
-    ~catena_blas_context_t() {
-        if (handle != nullptr) {
-            (void)hipblasDestroy(handle);
-        }
-    }
-};
-
-__host__ static inline hipblasHandle_t catena_host_blas_handle() {
-    static catena_blas_context_t context;
-    return context.handle;
-}
-
-__host__ static inline void catena_host_blas_gemm(
-    const catena_bf16_t *weight, const catena_bf16_t *input, catena_bf16_t *output,
-    int output_features, int rows, int reduction_len, const float *alpha, const float *beta) {
-    catena_host_blas_check(hipblasGemmEx(
-        catena_host_blas_handle(), HIPBLAS_OP_T, HIPBLAS_OP_N,
-        output_features, rows, reduction_len, alpha,
-        weight, HIP_R_16BF, reduction_len, input, HIP_R_16BF, reduction_len,
-        beta, output, HIP_R_16BF, output_features,
-        HIPBLAS_COMPUTE_32F, HIPBLAS_GEMM_DEFAULT));
-}
-#endif
-"#
-        }
-        GpuDialect::Cuda => {
-            r#"#include <cublas_v2.h>
-#ifndef __CUDA_ARCH__
-__host__ static inline void catena_host_blas_check(cublasStatus_t status) {
-    if (status != CUBLAS_STATUS_SUCCESS) {
-        fprintf(stderr, "catena cuBLAS error: %d\n", (int)status);
-        fflush(stderr);
-        __builtin_trap();
-    }
-}
-
-struct catena_blas_context_t {
-    cublasHandle_t handle;
-
-    catena_blas_context_t() : handle(nullptr) {
-        catena_host_blas_check(cublasCreate(&handle));
-        catena_host_blas_check(cublasSetPointerMode(handle, CUBLAS_POINTER_MODE_HOST));
-        catena_host_blas_check(cublasSetStream(handle, nullptr));
-    }
-
-    ~catena_blas_context_t() {
-        if (handle != nullptr) {
-            (void)cublasDestroy(handle);
-        }
-    }
-};
-
-__host__ static inline cublasHandle_t catena_host_blas_handle() {
-    static catena_blas_context_t context;
-    return context.handle;
-}
-
-__host__ static inline void catena_host_blas_gemm(
-    const catena_bf16_t *weight, const catena_bf16_t *input, catena_bf16_t *output,
-    int output_features, int rows, int reduction_len, const float *alpha, const float *beta) {
-    catena_host_blas_check(cublasGemmEx(
-        catena_host_blas_handle(), CUBLAS_OP_T, CUBLAS_OP_N,
-        output_features, rows, reduction_len, alpha,
-        weight, CUDA_R_16BF, reduction_len, input, CUDA_R_16BF, reduction_len,
-        beta, output, CUDA_R_16BF, output_features,
-        CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT));
-}
-#endif
-"#
-        }
-    });
-}
-
-pub(in crate::codegen) fn render_bf16_gemm_blas_kernels(
-    out: &mut String,
-    kernel_name: &str,
-    assignment: &GpuAssign,
-    dialect: GpuDialect,
-) -> Result<(), GpuRenderError> {
-    render_bf16_gemv_kernel(out, &format!("{kernel_name}_simt"), assignment, dialect)
-}
-
-pub(in crate::codegen) fn render_borrow_native_bf16_gemm_blas_pair_kernels(
-    out: &mut String,
-    kernel_name: &str,
-    assignment: &GpuAssign,
-    dialect: GpuDialect,
-) -> Result<(), GpuRenderError> {
-    render_borrow_native_bf16_gemv_pair_kernel(
-        out,
-        &format!("{kernel_name}_simt"),
-        assignment,
-        dialect,
-    )
-}
-
-pub(in crate::codegen) fn render_borrow_argmax_f32_kernel(
+pub(in crate::codegen::default) fn render_borrow_argmax_f32_kernel(
     out: &mut String,
     kernel_name: &str,
     assignment: &GpuAssign,
@@ -1634,7 +1521,7 @@ pub(in crate::codegen) fn render_borrow_argmax_f32_kernel(
     Ok(())
 }
 
-pub(in crate::codegen) fn render_borrow_argmax_f32_call(
+pub(in crate::codegen::default) fn render_borrow_argmax_f32_call(
     out: &mut String,
     function: &GpuFunction,
     assignment: &GpuAssign,
@@ -1674,7 +1561,7 @@ pub(in crate::codegen) fn render_borrow_argmax_f32_call(
     Ok(())
 }
 
-pub(in crate::codegen) fn render_borrow_topk_f32_kernel(
+pub(in crate::codegen::default) fn render_borrow_topk_f32_kernel(
     out: &mut String,
     kernel_name: &str,
     assignment: &GpuAssign,
@@ -1781,7 +1668,7 @@ pub(in crate::codegen) fn render_borrow_topk_f32_kernel(
     Ok(())
 }
 
-pub(in crate::codegen) fn render_borrow_topk_f32_call(
+pub(in crate::codegen::default) fn render_borrow_topk_f32_call(
     out: &mut String,
     function: &GpuFunction,
     assignment: &GpuAssign,
@@ -1835,7 +1722,7 @@ pub(in crate::codegen) fn render_borrow_topk_f32_call(
     Ok(())
 }
 
-pub(in crate::codegen) fn render_borrow_reduce_f32_call(
+pub(in crate::codegen::default) fn render_borrow_reduce_f32_call(
     out: &mut String,
     function: &GpuFunction,
     assignment: &GpuAssign,
@@ -1892,7 +1779,7 @@ pub(in crate::codegen) fn render_borrow_reduce_f32_call(
     Ok(())
 }
 
-pub(in crate::codegen) fn render_borrow_routed_bf16_gemv_pair_call(
+pub(in crate::codegen::default) fn render_borrow_routed_bf16_gemv_pair_call(
     out: &mut String,
     function: &GpuFunction,
     assignment: &GpuAssign,
@@ -2006,7 +1893,7 @@ pub(in crate::codegen) fn render_borrow_routed_bf16_gemv_pair_call(
     Ok(())
 }
 
-pub(in crate::codegen) fn render_borrow_native_bf16_gemm_pair_call(
+pub(in crate::codegen::default) fn render_borrow_native_bf16_gemm_pair_call(
     out: &mut String,
     function: &GpuFunction,
     assignment: &GpuAssign,
@@ -2105,27 +1992,6 @@ pub(in crate::codegen) fn render_borrow_native_bf16_gemm_pair_call(
                 up_output.name,
             ));
         }
-        ProjectionBackend::Blas => {
-            out.push_str(&format!(
-                "        if ({prefix}_rows >= 64) {{\n            catena_assert(({output_features}) <= INT32_MAX && {prefix}_rows <= INT32_MAX && ({reduction_len}) <= INT32_MAX);\n            const float {prefix}_alpha = 1.0f;\n            const float {prefix}_beta = 0.0f;\n"
-            ));
-            for (weight, output) in [(gate_weight, gate_output), (up_weight, up_output)] {
-                out.push_str(&format!(
-                    "            catena_host_blas_gemm(\n                {}, {} + ({input_row}) * ({reduction_len}), {}_data,\n                (int)({output_features}), (int){prefix}_rows, (int)({reduction_len}),\n                &{prefix}_alpha, &{prefix}_beta);\n",
-                    value_expr(weight),
-                    value_expr(input),
-                    output.name,
-                ));
-            }
-            out.push_str(&format!(
-                "        }} else {{\n            {kernel_name}_simt<<<dim3({output_len}), dim3(256)>>>(\n                {}, {}, {}, {}_data, {}_data, {output_len}, {reduction_len}, {input_row}, {output_features});\n        }}\n",
-                value_expr(input),
-                value_expr(gate_weight),
-                value_expr(up_weight),
-                gate_output.name,
-                up_output.name,
-            ));
-        }
     }
     out.push_str("    }\n");
     out.push_str(&format!(
@@ -2140,7 +2006,7 @@ pub(in crate::codegen) fn render_borrow_native_bf16_gemm_pair_call(
     Ok(())
 }
 
-pub(in crate::codegen) fn render_borrow_routed_native_bf16_gemv_pair_call(
+pub(in crate::codegen::default) fn render_borrow_routed_native_bf16_gemv_pair_call(
     out: &mut String,
     function: &GpuFunction,
     assignment: &GpuAssign,
@@ -2210,7 +2076,6 @@ pub(in crate::codegen) fn render_borrow_routed_native_bf16_gemv_pair_call(
     let simt_kernel_name = match backend {
         ProjectionBackend::Simt => kernel_name.clone(),
         ProjectionBackend::Wmma => format!("{kernel_name}_simt"),
-        ProjectionBackend::Blas => unreachable!("routed BLAS projections are not supported"),
     };
     let simt_call = format!(
         "        const uint64_t {prefix}_max_blocks_x = UINT32_MAX / 256u;\n        uint64_t {prefix}_blocks_x = ({output_len}) < {prefix}_max_blocks_x ? ({output_len}) : {prefix}_max_blocks_x;\n        uint64_t {prefix}_blocks_y = ({output_len}) / {prefix}_blocks_x + ((({output_len}) % {prefix}_blocks_x) != 0);\n        catena_assert({prefix}_blocks_y <= UINT32_MAX);\n        {simt_kernel_name}<<<dim3((uint32_t){prefix}_blocks_x, (uint32_t){prefix}_blocks_y), dim3(256)>>>(\n            {}, {}, {}, {}, {}_data, {}_data, {output_len}, {reduction_len}, {slots}, {output_features}, {prefix}_expert_count);\n",
@@ -2251,7 +2116,7 @@ pub(in crate::codegen) fn render_borrow_routed_native_bf16_gemv_pair_call(
     Ok(())
 }
 
-pub(in crate::codegen) fn render_borrow_routed_native_bf16_gemv_residual_call(
+pub(in crate::codegen::default) fn render_borrow_routed_native_bf16_gemv_residual_call(
     out: &mut String,
     function: &GpuFunction,
     assignment: &GpuAssign,
@@ -2321,7 +2186,6 @@ pub(in crate::codegen) fn render_borrow_routed_native_bf16_gemv_residual_call(
     let simt_kernel_name = match backend {
         ProjectionBackend::Simt => kernel_name.clone(),
         ProjectionBackend::Wmma => format!("{kernel_name}_simt"),
-        ProjectionBackend::Blas => unreachable!("routed BLAS projections are not supported"),
     };
     let simt_call = format!(
         "        const uint64_t {prefix}_max_blocks_x = UINT32_MAX / 256u;\n        uint64_t {prefix}_blocks_x = ({output_len}) < {prefix}_max_blocks_x ? ({output_len}) : {prefix}_max_blocks_x;\n        uint64_t {prefix}_blocks_y = ({output_len}) / {prefix}_blocks_x + ((({output_len}) % {prefix}_blocks_x) != 0);\n        catena_assert({prefix}_blocks_y <= UINT32_MAX);\n        {simt_kernel_name}<<<dim3((uint32_t){prefix}_blocks_x, (uint32_t){prefix}_blocks_y), dim3(256)>>>(\n            {}, {}, {}, {}, {}_data, {output_len}, {reduction_len}, {slots}, {intermediate}, {output_features}, {prefix}_expert_count);\n",
@@ -2360,7 +2224,7 @@ pub(in crate::codegen) fn render_borrow_routed_native_bf16_gemv_residual_call(
     Ok(())
 }
 
-pub(in crate::codegen) fn render_bf16_gemv_call(
+pub(in crate::codegen::default) fn render_bf16_gemv_call(
     out: &mut String,
     function: &GpuFunction,
     assignment: &GpuAssign,
@@ -2438,7 +2302,7 @@ pub(in crate::codegen) fn render_bf16_gemv_call(
     Ok(())
 }
 
-pub(in crate::codegen) fn render_bf16_gemm_wmma_call(
+pub(in crate::codegen::default) fn render_bf16_gemm_wmma_call(
     out: &mut String,
     function: &GpuFunction,
     assignment: &GpuAssign,
@@ -2481,71 +2345,7 @@ pub(in crate::codegen) fn render_bf16_gemm_wmma_call(
     Ok(())
 }
 
-pub(in crate::codegen) fn render_bf16_gemm_blas_call(
-    out: &mut String,
-    function: &GpuFunction,
-    assignment: &GpuAssign,
-    dialect: GpuDialect,
-) -> Result<(), GpuRenderError> {
-    let [output] = assignment.outputs.as_slice() else {
-        return Err(invalid_outputs(assignment, 1));
-    };
-    let (
-        input,
-        input_capacity,
-        weight,
-        weight_capacity,
-        output_len,
-        reduction_len,
-        input_row,
-        output_features,
-    ) = bf16_gemv_parts(assignment)?;
-    let kernel_name = kernel_name(&function.name, assignment)?;
-    let name = &output.name;
-
-    out.push_str(&format!(
-        r#"    uint64_t {name}_len = {output_len};
-    catena_bf16_t *{name}_data = nullptr;
-    catena_assert(({reduction_len}) != 0);
-    catena_assert(({input_capacity}) % ({reduction_len}) == 0);
-    uint64_t {name}_input_rows = ({input_capacity}) / ({reduction_len});
-    catena_assert(({output_features}) != 0);
-    catena_assert({name}_len % ({output_features}) == 0);
-    uint64_t {name}_rows = {name}_len / ({output_features});
-    catena_assert(({input_row}) <= {name}_input_rows && {name}_rows <= {name}_input_rows - ({input_row}));
-    catena_assert(({output_features}) <= UINT64_MAX / ({reduction_len}));
-    catena_assert(({weight_capacity}) == ({output_features}) * ({reduction_len}));
-    if ({name}_len != 0) {{
-        catena_host_gpu_check({device_alloc}((void **)&{name}_data, {name}_len * sizeof(catena_bf16_t), nullptr));
-        if ({name}_rows >= 64) {{
-            catena_assert(({output_features}) <= INT32_MAX && {name}_rows <= INT32_MAX && ({reduction_len}) <= INT32_MAX);
-            const float {name}_alpha = 1.0f;
-            const float {name}_beta = 0.0f;
-            catena_host_blas_gemm(
-                {weight}, {input} + ({input_row}) * ({reduction_len}), {name}_data,
-                (int)({output_features}), (int){name}_rows, (int)({reduction_len}),
-                &{name}_alpha, &{name}_beta);
-        }} else {{
-            {kernel_name}_simt<<<dim3({name}_len), dim3(256)>>>(
-                {input}, {weight}, {name}_data, {name}_len, {reduction_len}, {input_row}, {output_features});
-        }}
-    }}
-    {name} = {name}_data;
-"#,
-        input = value_expr(input),
-        input_capacity = value_expr(input_capacity),
-        weight = value_expr(weight),
-        weight_capacity = value_expr(weight_capacity),
-        output_len = value_expr(output_len),
-        reduction_len = value_expr(reduction_len),
-        input_row = value_expr(input_row),
-        output_features = value_expr(output_features),
-        device_alloc = dialect.device_alloc_async_fn(),
-    ));
-    Ok(())
-}
-
-pub(in crate::codegen) fn render_reduce_f32_call(
+pub(in crate::codegen::default) fn render_reduce_f32_call(
     out: &mut String,
     function: &GpuFunction,
     assignment: &GpuAssign,
@@ -2593,7 +2393,7 @@ pub(in crate::codegen) fn render_reduce_f32_call(
     Ok(())
 }
 
-pub(in crate::codegen) fn render_reduce_f32_pair_call(
+pub(in crate::codegen::default) fn render_reduce_f32_pair_call(
     out: &mut String,
     function: &GpuFunction,
     assignment: &GpuAssign,
@@ -2641,7 +2441,7 @@ pub(in crate::codegen) fn render_reduce_f32_pair_call(
     Ok(())
 }
 
-pub(in crate::codegen) fn render_softmax_f32_kernel(
+pub(in crate::codegen::default) fn render_softmax_f32_kernel(
     out: &mut String,
     kernel_name: &str,
     assignment: &GpuAssign,
@@ -2781,7 +2581,7 @@ pub(in crate::codegen) fn render_softmax_f32_kernel(
     Ok(())
 }
 
-pub(in crate::codegen) fn render_softmax_f32_call(
+pub(in crate::codegen::default) fn render_softmax_f32_call(
     out: &mut String,
     function: &GpuFunction,
     assignment: &GpuAssign,
@@ -2809,7 +2609,7 @@ pub(in crate::codegen) fn render_softmax_f32_call(
     Ok(())
 }
 
-pub(in crate::codegen) fn kernel_name(
+pub(in crate::codegen::default) fn kernel_name(
     function_name: &str,
     assignment: &GpuAssign,
 ) -> Result<String, GpuRenderError> {

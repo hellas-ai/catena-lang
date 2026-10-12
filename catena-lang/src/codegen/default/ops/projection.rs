@@ -1,24 +1,23 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::codegen) enum ProjectionBackend {
+pub(in crate::codegen::default) enum ProjectionBackend {
     Simt,
     Wmma,
-    Blas,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::codegen) enum ProjectionStorage {
+pub(in crate::codegen::default) enum ProjectionStorage {
     F32Activations,
     NativeBf16,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::codegen) enum RoutedProjectionBackend {
+pub(in crate::codegen::default) enum RoutedProjectionBackend {
     Simt,
     Wmma,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::codegen) enum ProjectionPlan {
+pub(in crate::codegen::default) enum ProjectionPlan {
     Dense(ProjectionBackend),
     DensePair(ProjectionBackend),
     RoutedPairSimt(ProjectionStorage),
@@ -27,7 +26,7 @@ pub(in crate::codegen) enum ProjectionPlan {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::codegen) struct MmaTileSpec {
+pub(in crate::codegen::default) struct MmaTileSpec {
     pub rows: u32,
     pub columns: u32,
     pub reduction: u32,
@@ -69,7 +68,7 @@ impl MmaTileSpec {
     }
 }
 
-pub(in crate::codegen) fn render_routed_tile_template(
+pub(in crate::codegen::default) fn render_routed_tile_template(
     out: &mut String,
     source: &str,
     kernel_name: &str,
@@ -85,7 +84,10 @@ pub(in crate::codegen) fn render_routed_tile_template(
     out.push_str(&rendered);
 }
 
-pub(in crate::codegen) fn render_stable_route_grouping(out: &mut String, kernel_name: &str) {
+pub(in crate::codegen::default) fn render_stable_route_grouping(
+    out: &mut String,
+    kernel_name: &str,
+) {
     let source = r#"
 __global__ void __KERNEL___group(
     const uint64_t *selected, uint64_t route_count, uint64_t expert_count,
@@ -124,17 +126,15 @@ __global__ void __KERNEL___group(
 }
 
 impl ProjectionPlan {
-    pub(in crate::codegen) fn from_operation(operation: &str) -> Option<Self> {
-        use ProjectionBackend::{Blas, Simt, Wmma};
+    pub(in crate::codegen::default) fn from_operation(operation: &str) -> Option<Self> {
+        use ProjectionBackend::{Simt, Wmma};
         use ProjectionStorage::{F32Activations, NativeBf16};
 
         let plan = match operation {
             "materializec.bf16-gemv" => Self::Dense(Simt),
             "materializec.bf16-gemm-wmma" => Self::Dense(Wmma),
-            "materializec.bf16-gemm-blas" => Self::Dense(Blas),
             "materializec.borrow-native-bf16-gemv-pair" => Self::DensePair(Simt),
             "materializec.borrow-native-bf16-gemm-wmma-pair" => Self::DensePair(Wmma),
-            "materializec.borrow-native-bf16-gemm-blas-pair" => Self::DensePair(Blas),
             "materializec.borrow-routed-bf16-gemv-pair" => Self::RoutedPairSimt(F32Activations),
             "materializec.borrow-routed-native-bf16-gemv-pair" => Self::RoutedPairSimt(NativeBf16),
             "materializec.borrow-routed-native-bf16-gemm-wmma-pair" => Self::RoutedPairWmma,
@@ -149,27 +149,11 @@ impl ProjectionPlan {
         Some(plan)
     }
 
-    pub(in crate::codegen) fn backend(self) -> ProjectionBackend {
-        match self {
-            Self::Dense(backend) | Self::DensePair(backend) => backend,
-            Self::RoutedPairSimt(_) | Self::RoutedResidual(RoutedProjectionBackend::Simt) => {
-                ProjectionBackend::Simt
-            }
-            Self::RoutedPairWmma | Self::RoutedResidual(RoutedProjectionBackend::Wmma) => {
-                ProjectionBackend::Wmma
-            }
-        }
-    }
-
-    pub(in crate::codegen) fn validates_materializec_producer(self) -> bool {
+    pub(in crate::codegen::default) fn validates_materializec_producer(self) -> bool {
         !matches!(
             self,
             Self::RoutedPairSimt(ProjectionStorage::F32Activations)
         )
-    }
-
-    pub(in crate::codegen) fn uses_blas(self) -> bool {
-        self.backend() == ProjectionBackend::Blas
     }
 }
 
@@ -179,13 +163,12 @@ mod tests {
 
     #[test]
     fn projection_names_map_to_valid_families() {
-        use ProjectionBackend::{Blas, Simt, Wmma};
+        use ProjectionBackend::{Simt, Wmma};
         use ProjectionStorage::{F32Activations, NativeBf16};
 
         let cases = [
             ("materializec.bf16-gemv", ProjectionPlan::Dense(Simt)),
             ("materializec.bf16-gemm-wmma", ProjectionPlan::Dense(Wmma)),
-            ("materializec.bf16-gemm-blas", ProjectionPlan::Dense(Blas)),
             (
                 "materializec.borrow-native-bf16-gemv-pair",
                 ProjectionPlan::DensePair(Simt),
@@ -193,10 +176,6 @@ mod tests {
             (
                 "materializec.borrow-native-bf16-gemm-wmma-pair",
                 ProjectionPlan::DensePair(Wmma),
-            ),
-            (
-                "materializec.borrow-native-bf16-gemm-blas-pair",
-                ProjectionPlan::DensePair(Blas),
             ),
             (
                 "materializec.borrow-routed-bf16-gemv-pair",
@@ -226,8 +205,7 @@ mod tests {
                 "{name}"
             );
         }
-        assert!(!cases[6].1.validates_materializec_producer());
-        assert!(cases[5].1.uses_blas());
+        assert!(!cases[4].1.validates_materializec_producer());
     }
 
     #[test]

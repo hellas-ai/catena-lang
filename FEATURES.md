@@ -6,7 +6,7 @@ The names are compositional. `materializec` marks an explicit materialization,
 `borrow` returns a temporarily borrowed owner, `native-bf16` keeps activation
 and result storage in BF16, `routed` selects MoE weights per route, `gemv` is
 the SIMT/small-batch path, `gemm-wmma` uses matrix-core instructions,
-`gemm-blas` calls the platform BLAS library, `pair` produces gate and up
+`pair` produces gate and up
 together, and `residual` includes residual addition. The `f32` suffix denotes
 F32 storage for storage-specific operations, but denotes F32 accumulation for
 the reduction and softmax operations, which also accept BF16 storage.
@@ -27,8 +27,8 @@ unaligned inputs, unsupported devices, and runs without matrix cores.
 | `materializec.softmax-f32` | Normalize F32 or BF16 attention rows with F32 arithmetic | Active |
 | `materializec.borrow-argmax-f32`, `materializec.borrow-argmax-bf16` | Select a token on the GPU without copying vocabulary logits to the host | Active F32/BF16 variants |
 | `materializec.borrow-topk-f32` | Perform stable GPU MoE expert selection for routers through 256 columns | Active |
-| `materializec.bf16-gemv`, `materializec.bf16-gemm-wmma`, `materializec.bf16-gemm-blas` | Provide SIMT, matrix-core, and vendor-library backends for ordinary BF16 projections | Active; GEMV is also the accelerated paths' fallback |
-| `materializec.borrow-native-bf16-gemv-pair`, `materializec.borrow-native-bf16-gemm-wmma-pair`, `materializec.borrow-native-bf16-gemm-blas-pair` | Compute dense or shared-expert gate/up projections from one BF16 input | Active; GEMV is also the accelerated paths' fallback |
+| `materializec.bf16-gemv`, `materializec.bf16-gemm-wmma` | Provide SIMT and matrix-core backends for ordinary BF16 projections | Active; GEMV is also the accelerated paths' fallback |
+| `materializec.borrow-native-bf16-gemv-pair`, `materializec.borrow-native-bf16-gemm-wmma-pair` | Compute dense or shared-expert gate/up projections from one BF16 input | Active; GEMV is also the accelerated paths' fallback |
 | `materializec.borrow-routed-bf16-gemv-pair` | Compute routed gate/up for F32 graphs using BF16 expert weights | Active in F32 model graphs |
 | `materializec.borrow-gated-delta-net-f32`, `materializec.borrow-gated-delta-net-bf16` | Fuse a complete Qwen3.5/3.6 recurrent DeltaNet scan | Active F32/BF16 variants |
 | `materializec.borrow-cached-context-f32`, `materializec.borrow-cached-context-bf16` | Tile the probability-times-V half of exact cached attention | Active F32/BF16 variants |
@@ -36,16 +36,13 @@ unaligned inputs, unsupported devices, and runs without matrix cores.
 | `materializec.borrow-routed-native-bf16-gemv-pair`, `materializec.borrow-routed-native-bf16-gemm-wmma-pair` | Compute native-BF16 routed gate/up with SIMT or grouped HIP matrix cores | Active; GEMV remains the decode/CUDA/shape fallback |
 | `materializec.borrow-routed-native-bf16-gemv-residual`, `materializec.borrow-routed-native-bf16-gemm-wmma-residual` | Compute native-BF16 routed down projection, slot combination, and residual addition | Active; GEMV remains the decode/CUDA/shape fallback |
 
-`Runtime::mem_bf16_zeroed` and the GPU module save/load hook documented below
-are supporting runtime facilities rather than Catena primitives.
-
 ## Optimized-kernel implementation families
 
 The operation names above remain the compiler-facing API, but the GPU backend
 no longer treats every spelling as an unrelated implementation. An
 `OptimizedOperation` registry classifies cached attention, cached context,
 gated DeltaNet, and projection operations once and supplies the common
-validation, host-placement, BLAS-linkage, auxiliary-kernel rendering, and call
+validation, host-placement, auxiliary-kernel rendering, and call
 rendering behavior. Optimized primitive spellings occur only in this registry
 or its projection classifier, rather than being copied into GPU dispatch
 tables.
@@ -53,7 +50,7 @@ tables.
 `ProjectionPlan` represents only supported families: dense single, dense
 pair, routed SIMT pair with explicit activation storage, native-BF16 routed
 WMMA pair, and routed residual with a SIMT or WMMA backend. Unsupported routed
-BLAS and F32-activation WMMA combinations therefore cannot be constructed.
+F32-activation WMMA combinations therefore cannot be constructed.
 Tuned matrix-core shapes remain explicit through `MmaTileSpec`: dense
 projection, routed gate/up, and routed down each keep their measured tile,
 wave, thread, and minimum-row values. The routed pair and down kernels also
@@ -273,31 +270,6 @@ canonical adjacent-pair reduction order: WMMA groups and accumulates products
 according to the matrix instruction. It is therefore selected explicitly by
 the caller when that numerical tradeoff is acceptable.
 
-## `materializec.bf16-gemm-blas`
-
-```text
-materializec.bf16-gemm-blas[I, W, N, K] :
-  Bufᵒʷⁿ(I, BF16)
-  ⊗ ⟦I : U64⟧
-  ⊗ Bufʳᵉᶠ(W, BF16)
-  ⊗ ⟦W : U64⟧
-  ⊗ ⟦N : U64⟧
-  ⊗ ⟦K : U64⟧
-  ⊗ U64
-  ⊗ U64
-  → Bufᵒʷⁿ(N, BF16)
-```
-
-This operation has the same row-major shape, capacity, ownership, and
-BF16-output contract as `materializec.bf16-gemv`. For at least 64 selected
-input rows it calls `hipblasGemmEx` on HIP or `cublasGemmEx` on CUDA, with BF16
-inputs and output and F32 accumulation. The generated module reuses one BLAS
-handle on the default stream and links the platform library only when this
-primitive is present. Smaller inputs retain the packed BF16 SIMT kernel.
-
-The BLAS path does not promise the canonical adjacent-pair reduction order;
-the library selects its GEMM algorithm and accumulation grouping.
-
 ## Dense paired native-BF16 projections
 
 ```text
@@ -322,14 +294,12 @@ contract:
 
 ```text
 materializec.borrow-native-bf16-gemm-wmma-pair[I, G, U, N, K]
-materializec.borrow-native-bf16-gemm-blas-pair[I, G, U, N, K]
 ```
 
 For at least 64 selected rows, the WMMA form launches one matrix-core GEMM for
-each weight matrix, while the BLAS form makes two platform GEMM calls through
-the module's shared handle. Both use BF16 inputs and outputs with F32
+each weight matrix. It uses BF16 inputs and outputs with F32
 accumulation. Smaller row counts use the fused paired SIMT kernel, so decode
-does not pay matrix-library or matrix-core setup costs. Like their single
+does not pay matrix-core setup costs. Like their single
 projection counterparts, the accelerated paths do not promise canonical
 adjacent-pair reduction order. WMMA requires HIP gfx11 or CUDA sm80+.
 
@@ -429,14 +399,6 @@ gfx11 targets, packed BF16 pairs use `v_dot2_f32_bf16`; HIP targets without
 that instruction and CUDA use scalar BF16-to-F32 products. An odd final
 element is handled separately, and the completed F32 sum is rounded once to
 BF16.
-
-## `Runtime::mem_bf16_zeroed`
-
-`Runtime::mem_bf16_zeroed(elements)` allocates an application-owned device
-buffer of `elements × 2` bytes and initializes it to zero. Allocation size is
-checked for overflow. It is the BF16 counterpart of `mem_f32_zeroed` and is
-used for persistent BF16 attention and recurrent-state storage without a host
-staging buffer.
 
 ## `materializec.borrow-argmax-bf16`
 
@@ -638,10 +600,10 @@ signed zero. The maximum-active-lane argument is part of the feature's
 determinism requirement; increasing the supported reduction length requires
 re-establishing it.
 
-## GPU module save/load hook
+## Default backend integration
 
-`CATENA_GPU_MODULE_SAVE=<path>` copies a newly compiled GPU module to `path`.
-`CATENA_GPU_MODULE_LOAD=<path>` loads that module instead of invoking the GPU
-compiler. This opt-in runtime hook supports profiling tools that cannot safely
-nest a `hipcc` invocation; normal runtime construction does not use it, and
-the caller is responsible for cache validity.
+These operations belong to the default compiler and default standard library.
+The experimental compiler and runtime APIs remain unchanged. Default-generated
+host calls synchronize GPU work once when the outermost generated call returns;
+nested calls retain asynchronous allocation, execution, and release on the
+default stream. Projections use SIMT or WMMA and need no vendor BLAS library.

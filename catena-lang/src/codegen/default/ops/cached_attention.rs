@@ -1,4 +1,4 @@
-use crate::codegen::{
+use crate::codegen::default::{
     GpuAssign, GpuDialect, GpuFunction, GpuValue, GpuVar,
     components::{input_components, output_components, single_value, value_expr},
     gpu::GpuRenderError,
@@ -88,7 +88,7 @@ fn outputs(assignment: &GpuAssign) -> Result<[&GpuVar; 3], GpuRenderError> {
     Ok(values)
 }
 
-pub(in crate::codegen) fn kernel_name(
+pub(in crate::codegen::default) fn kernel_name(
     function: &GpuFunction,
     assignment: &GpuAssign,
 ) -> Result<String, GpuRenderError> {
@@ -99,7 +99,7 @@ pub(in crate::codegen) fn kernel_name(
     ))
 }
 
-pub(in crate::codegen) fn render_kernel(
+pub(in crate::codegen::default) fn render_kernel(
     out: &mut String,
     name: &str,
     assignment: &GpuAssign,
@@ -407,17 +407,17 @@ fn render_wmma_kernel(out: &mut String, name: &str, tile: AttentionTileSpec) {
         __syncthreads();
         if (wave == 0) {{
             using a_t = rocwmma::fragment<rocwmma::matrix_a, 16, 16, 16,
-                catena_bf16_t, rocwmma::row_major>;
+                rocwmma::bfloat16_t, rocwmma::row_major>;
             using b_t = rocwmma::fragment<rocwmma::matrix_b, 16, 16, 16,
-                catena_bf16_t, rocwmma::col_major>;
+                rocwmma::bfloat16_t, rocwmma::col_major>;
             using c_t = rocwmma::fragment<rocwmma::accumulator, 16, 16, 16, float>;
             a_t a;
             b_t b;
             c_t c;
             rocwmma::fill_fragment(c, 0.0f);
             for (uint64_t first_channel = 0; first_channel < dim; first_channel += 16) {{
-                rocwmma::load_matrix_sync(a, queries + first_channel, dim);
-                rocwmma::load_matrix_sync(b, keys + first_channel, dim);
+                rocwmma::load_matrix_sync(a, reinterpret_cast<const rocwmma::bfloat16_t *>(queries + first_channel), dim);
+                rocwmma::load_matrix_sync(b, reinterpret_cast<const rocwmma::bfloat16_t *>(keys + first_channel), dim);
                 rocwmma::mma_sync(c, a, b, c);
             }}
             rocwmma::store_matrix_sync(scores, c, key_tile, rocwmma::mem_row_major);
@@ -502,7 +502,7 @@ fn render_wmma_kernel(out: &mut String, name: &str, tile: AttentionTileSpec) {
     ));
 }
 
-pub(in crate::codegen) fn render_call(
+pub(in crate::codegen::default) fn render_call(
     out: &mut String,
     function: &GpuFunction,
     assignment: &GpuAssign,

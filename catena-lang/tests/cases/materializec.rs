@@ -607,44 +607,6 @@ fn materialize_bf16_gemm_wmma_executes_matrix_tiles() -> anyhow::Result<()> {
 }
 
 #[test]
-fn materialize_bf16_gemm_blas_executes_matrix_tiles() -> anyhow::Result<()> {
-    let runtime = runtime_with(SOURCE)?;
-    let bf16_bits = |values: &[f32]| {
-        values
-            .iter()
-            .copied()
-            .map(half::bf16::from_f32)
-            .map(half::bf16::to_bits)
-            .collect::<Vec<_>>()
-    };
-    let input_values = (0..65 * 16)
-        .map(|index| (index % 16) as f32 - 8.0)
-        .collect::<Vec<_>>();
-    let expected = input_values[16..].to_vec();
-    let weight_values = (0..16 * 16)
-        .map(|index| if index / 16 == index % 16 { 1.0 } else { 0.0 })
-        .collect::<Vec<_>>();
-    let input = runtime.mem_u16(&bf16_bits(&input_values))?;
-    let weight = runtime.mem_u16(&bf16_bits(&weight_values))?;
-    let [output] = runtime.exec(
-        "materialize-bf16-gemm-blas",
-        [
-            input.into(),
-            weight.as_ref().into(),
-            64_u64.into(),
-            16_u64.into(),
-            16_u64.into(),
-            1_u64.into(),
-        ],
-    )?;
-    let Value::MemOwn(output) = output else {
-        anyhow::bail!("BF16 BLAS GEMM returned non-memory output: {output:?}");
-    };
-    assert_eq!(output.to_u16_vec(), bf16_bits(&expected));
-    Ok(())
-}
-
-#[test]
 fn materialize_native_bf16_gemm_pairs_execute_all_backends() -> anyhow::Result<()> {
     let runtime = runtime_with(SOURCE)?;
     let bf16_bits = |values: &[f32]| {
@@ -676,7 +638,6 @@ fn materialize_native_bf16_gemm_pairs_execute_all_backends() -> anyhow::Result<(
     for program in [
         "materialize-borrow-native-bf16-gemv-pair",
         "materialize-borrow-native-bf16-gemm-wmma-pair",
-        "materialize-borrow-native-bf16-gemm-blas-pair",
     ] {
         let input = runtime.mem_u16(&bf16_bits(&input_values))?;
         let input_ptr = input.as_ptr();

@@ -1,20 +1,20 @@
 //! General bounded-workspace attention, normalization and spatial convolution.
 use super::gpu_support::StorageType;
-use crate::codegen::{
+use crate::codegen::default::{
     GpuAssign, GpuDialect, GpuFunction, GpuValue,
     components::{input_components, output_components, single_value, value_expr},
     gpu::GpuRenderError,
     render_utils::{invalid_inputs, invalid_outputs},
 };
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::codegen) enum DiffusionOp {
+pub(in crate::codegen::default) enum DiffusionOp {
     Attention(StorageType),
     Norm(StorageType),
     Conv2d,
     Linear,
 }
 impl DiffusionOp {
-    pub(in crate::codegen) fn from_operation(op: &str) -> Option<Self> {
+    pub(in crate::codegen::default) fn from_operation(op: &str) -> Option<Self> {
         Some(match op {
             "materializec.attention-bf16" => Self::Attention(StorageType::Bf16),
             "materializec.attention-f32" => Self::Attention(StorageType::F32),
@@ -49,7 +49,7 @@ impl DiffusionOp {
             a.outputs.last().ok_or_else(|| invalid_outputs(a, 1))?.name
         ))
     }
-    pub(in crate::codegen) fn kernels(
+    pub(in crate::codegen::default) fn kernels(
         self,
         out: &mut String,
         f: &GpuFunction,
@@ -128,7 +128,7 @@ __global__ void {name}(const float*x,const float*w,const float*b,float*o,uint64_
   }
         Ok(())
     }
-    pub(in crate::codegen) fn call(
+    pub(in crate::codegen::default) fn call(
         self,
         out: &mut String,
         f: &GpuFunction,

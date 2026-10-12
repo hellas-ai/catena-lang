@@ -97,10 +97,6 @@ fn render_module(module: &GpuModule, dialect: GpuDialect) -> Result<String, GpuR
     let mut out = String::new();
     out.push_str(&render_gpu_prelude(dialect));
     out.push('\n');
-    if function_uses_blas(&module.entry) {
-        materializec::render_blas_support(&mut out, dialect);
-        out.push('\n');
-    }
     render_module_body(
         &mut out,
         module,
@@ -118,13 +114,6 @@ pub fn render_modules(
     let mut out = String::new();
     out.push_str(&render_gpu_prelude(dialect));
     out.push('\n');
-    if modules
-        .values()
-        .any(|module| function_uses_blas(&module.entry))
-    {
-        materializec::render_blas_support(&mut out, dialect);
-        out.push('\n');
-    }
     let placements = function_placements(modules);
 
     for module in modules.values() {
@@ -150,13 +139,6 @@ pub fn render_modules(
     }
 
     Ok(out)
-}
-
-fn function_uses_blas(function: &GpuFunction) -> bool {
-    function.assignments.iter().any(|assignment| {
-        OptimizedOperation::from_operation(assignment.op.as_str())
-            .is_some_and(OptimizedOperation::uses_blas)
-    })
 }
 
 fn render_module_body(
@@ -282,6 +264,9 @@ fn render_function(
     }
     out.push_str(&function_signature(function, placement)?);
     out.push_str(" {\n");
+    if placement.is_host_only() {
+        out.push_str("    catena_host_execution_scope_t execution_scope;\n");
+    }
     let mut declared = function
         .sources
         .iter()
@@ -1182,7 +1167,7 @@ fn render_call(
 /// Primitive symbols are lowered by `render_primitive_assignment`, exactly like
 /// direct primitive assignments. Non-primitive symbols retain the generated
 /// `program_*` calling convention.
-pub(in crate::codegen) fn render_function_application(
+pub(in crate::codegen::default) fn render_function_application(
     out: &mut String,
     indent: &str,
     function: &GpuValue,
@@ -1786,7 +1771,120 @@ mod tests {
             "#ifndef __HIP_DEVICE_COMPILE__\nextern \"C\" __host__ void program_materialize(uint64_t len, uint64_t * *out_out) {"
         ));
         assert!(source.contains("catena_host_gpu_check(hipMallocAsync((void **)"));
-        assert!(!source.contains("hipDeviceSynchronize"));
+        assert!(source.contains("catena_host_gpu_check(hipDeviceSynchronize());"));
+        assert!(source.contains("catena_host_execution_scope_t execution_scope;"));
         assert!(!source.contains("catena_gpu_check"));
+    }
+
+    #[test]
+    #[ignore = "requires hipcc with gfx1151 support; does not require a GPU"]
+    fn wmma_families_compile_with_master_bf16_storage() -> anyhow::Result<()> {
+        let bf16 = CType::Pointer(Box::new(CType::BF16));
+        let ids = CType::Pointer(Box::new(CType::U64));
+        let cases = [
+            (
+                "materializec.bf16-gemm-wmma",
+                8,
+                vec![(0, bf16.clone()), (2, bf16.clone())],
+                vec![bf16.clone()],
+            ),
+            (
+                "materializec.borrow-native-bf16-gemm-wmma-pair",
+                10,
+                vec![(0, bf16.clone()), (2, bf16.clone()), (4, bf16.clone())],
+                vec![bf16.clone(); 3],
+            ),
+            (
+                "materializec.borrow-routed-native-bf16-gemm-wmma-pair",
+                12,
+                vec![
+                    (0, bf16.clone()),
+                    (2, bf16.clone()),
+                    (4, bf16.clone()),
+                    (6, ids.clone()),
+                ],
+                vec![bf16.clone(), ids.clone(), bf16.clone(), bf16.clone()],
+            ),
+            (
+                "materializec.borrow-routed-native-bf16-gemm-wmma-residual",
+                13,
+                vec![
+                    (0, bf16.clone()),
+                    (2, bf16.clone()),
+                    (4, ids.clone()),
+                    (6, bf16.clone()),
+                ],
+                vec![bf16.clone(), ids, bf16.clone(), bf16.clone()],
+            ),
+            (
+                "materializec.borrow-cached-attention-bf16-wmma",
+                13,
+                vec![(0, bf16.clone()), (2, bf16.clone()), (12, CType::F32)],
+                vec![bf16; 3],
+            ),
+        ];
+        let mut modules = BTreeMap::new();
+        for (index, (operation, arity, overrides, outputs)) in cases.into_iter().enumerate() {
+            let name = format!("wmma_test_{index}");
+            let mut types = vec![CType::U64; arity];
+            for (input, ty) in overrides {
+                types[input] = ty;
+            }
+            let sources = types
+                .into_iter()
+                .enumerate()
+                .map(|(i, ty)| var(i, &format!("in_{i}"), ty))
+                .collect::<Vec<_>>();
+            let targets = outputs
+                .into_iter()
+                .enumerate()
+                .map(|(i, ty)| var(arity + i, &format!("result_{i}"), ty))
+                .collect::<Vec<_>>();
+            let assignment = GpuAssign {
+                op: op(operation),
+                input_sizes: vec![1; arity],
+                output_sizes: vec![1; targets.len()],
+                call_symbol: None,
+                inputs: sources.iter().cloned().map(GpuValue::Var).collect(),
+                outputs: targets.clone(),
+            };
+            modules.insert(
+                op(&name),
+                GpuModule {
+                    name: name.clone(),
+                    source_name: Some(op(&name)),
+                    entry: GpuFunction {
+                        name,
+                        sources,
+                        targets,
+                        assignments: vec![assignment],
+                    },
+                },
+            );
+        }
+        let source = render_modules(&modules, GpuDialect::Hip)?;
+        let dir = tempfile::tempdir()?;
+        let input = dir.path().join("wmma.cpp");
+        std::fs::write(&input, source)?;
+        let output = std::process::Command::new("hipcc")
+            .args([
+                "-shared",
+                "-O2",
+                "-fPIC",
+                "--std=c++17",
+                "-ffp-contract=off",
+                "-fno-fast-math",
+                "--offload-arch=gfx1151",
+            ])
+            .arg(input)
+            .arg("-o")
+            .arg(dir.path().join("wmma.so"))
+            .output()?;
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        Ok(())
     }
 }

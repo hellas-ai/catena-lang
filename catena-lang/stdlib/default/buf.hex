@@ -402,27 +402,6 @@
       ({cap.own [.n] bf16} buf val)
     }})
 
-  # Platform BLAS counterpart with a paired SIMT fallback below 64 rows.
-  (arr materializec.borrow-native-bf16-gemm-blas-pair :
-    {[input-cap gate-cap up-cap n k.]
-      ({cap.own [.input-cap] bf16} buf val)
-      ({[.input-cap] u64} :)
-      ({cap.ref [.gate-cap] bf16} buf val)
-      ({[.gate-cap] u64} :)
-      ({cap.ref [.up-cap] bf16} buf val)
-      ({[.up-cap] u64} :)
-      ({[.n] u64} :)
-      ({[.k] u64} :)
-      (u64 val)
-      (u64 val)
-    }
-    ->
-    {[input-cap gate-cap up-cap n k.] {
-      ({cap.own [.input-cap] bf16} buf val)
-      ({cap.own [.n] bf16} buf val)
-      ({cap.own [.n] bf16} buf val)
-    }})
-
   # Native routed down projection. The active selected-expert rows and weights
   # are BF16, accumulation and residual addition are F32, and the output is
   # rounded once to BF16. All owned inputs are returned after the launch.
@@ -504,19 +483,9 @@
     (u64 val)
   } -> {[input-cap weight-cap n k.] ({cap.own [.n] bf16} buf val)})
 
-  # Platform BLAS counterpart of bf16-gemv. Matrices with at least 64 input rows
   # use BF16 GEMM with F32 accumulation; smaller inputs retain the packed-BF16
   # SIMT implementation. This operation is available only on HIP.
-  (arr materializec.bf16-gemm-blas : {[input-cap weight-cap n k.]
-    ({cap.own [.input-cap] bf16} buf val)
-    ({[.input-cap] u64} :)
-    ({cap.ref [.weight-cap] bf16} buf val)
-    ({[.weight-cap] u64} :)
-    ({[.n] u64} :)
-    ({[.k] u64} :)
-    (u64 val)
-    (u64 val)
-  } -> {[input-cap weight-cap n k.] ({cap.own [.n] bf16} buf val)})
+
 
   # Find the greatest F32 element while returning the source owner. Comparison
   # uses IEEE-bit total order (negative NaNs through positive NaNs); equal bit

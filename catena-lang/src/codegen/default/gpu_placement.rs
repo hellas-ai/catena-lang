@@ -121,7 +121,7 @@ fn callers_by_callee(modules: &GpuModuleMap) -> BTreeMap<String, Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::codegen::{GpuAssign, GpuModule, fn_ptrs::FnPtrSymbol};
+    use crate::codegen::default::{GpuAssign, GpuModule, fn_ptrs::FnPtrSymbol};
     fn module(name: &str, op: &str, call: Option<&str>, inputs: Vec<GpuValue>) -> GpuModule {
         GpuModule {
             name: name.into(),

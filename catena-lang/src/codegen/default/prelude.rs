@@ -63,6 +63,21 @@ __host__ static inline void catena_host_gpu_check({error_type} err) {{
     }}
 }}
 
+// Nested generated calls share one completion boundary at the outermost host call.
+__host__ static inline uint64_t &catena_host_execution_depth() {{
+    static thread_local uint64_t depth = 0;
+    return depth;
+}}
+
+struct catena_host_execution_scope_t {{
+    catena_host_execution_scope_t() {{ ++catena_host_execution_depth(); }}
+    ~catena_host_execution_scope_t() {{
+        if (--catena_host_execution_depth() == 0) {{
+            catena_host_gpu_check({synchronize_fn}());
+        }}
+    }}
+}};
+
 __host__ static inline void catena_host_buffer_free(void *data) {{
     if (data != nullptr) {{
         catena_host_gpu_check({device_free_async_fn}(data, nullptr));
@@ -103,6 +118,7 @@ __host__ __device__ static inline uint32_t catena_f32_bitcast_u32(float value) {
         success_value = dialect.success_value(),
         error_string_fn = dialect.error_string_fn(),
         device_free_async_fn = dialect.device_free_async_fn(),
+        synchronize_fn = dialect.synchronize_fn(),
         buffer_load = buffer_load,
         bf16_support = bf16_support,
     )
@@ -232,5 +248,57 @@ mod tests {
         assert!(cuda.contains("typedef __nv_bfloat16 catena_bf16_t;"));
         assert!(cuda.contains("return __float2bfloat16_rn(value);"));
         assert!(!cuda.contains("catena_bf16_mul"));
+    }
+
+    #[test]
+    fn completion_scopes_wait_only_at_the_outermost_host_call() -> anyhow::Result<()> {
+        for dialect in [GpuDialect::Hip, GpuDialect::Cuda] {
+            let prelude = render_gpu_prelude(dialect);
+            let start = prelude.find("// Nested generated calls").unwrap();
+            let end = prelude
+                .find("__host__ static inline void catena_host_buffer_free")
+                .unwrap();
+            let source = format!(
+                r#"#include <cassert>
+#include <cstdint>
+#define __host__
+static int completions = 0;
+static int {sync}() {{ ++completions; return 0; }}
+static void catena_host_gpu_check(int error) {{ assert(error == 0); }}
+{scope}
+int main() {{
+    {{
+        catena_host_execution_scope_t outer;
+        {{ catena_host_execution_scope_t inner; }}
+        assert(completions == 0);
+        assert(catena_host_execution_depth() == 1);
+    }}
+    assert(completions == 1);
+    assert(catena_host_execution_depth() == 0);
+    {{ catena_host_execution_scope_t next; }}
+    assert(completions == 2);
+}}
+"#,
+                sync = dialect.synchronize_fn(),
+                scope = &prelude[start..end],
+            );
+            let dir = tempfile::tempdir()?;
+            let input = dir.path().join("completion.cpp");
+            let executable = dir.path().join("completion");
+            std::fs::write(&input, source)?;
+            let output = std::process::Command::new("c++")
+                .arg("-std=c++17")
+                .arg(input)
+                .arg("-o")
+                .arg(&executable)
+                .output()?;
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(std::process::Command::new(executable).status()?.success());
+        }
+        Ok(())
     }
 }

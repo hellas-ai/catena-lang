@@ -42,6 +42,22 @@ use crate::{
 
 pub use crate::runtime::GpuDialect;
 
+impl GpuDialect {
+    fn device_alloc_async_fn(self) -> &'static str {
+        match self {
+            Self::Hip => "hipMallocAsync",
+            Self::Cuda => "cudaMallocAsync",
+        }
+    }
+
+    fn device_free_async_fn(self) -> &'static str {
+        match self {
+            Self::Hip => "hipFreeAsync",
+            Self::Cuda => "cudaFreeAsync",
+        }
+    }
+}
+
 pub type GpuModuleMap = BTreeMap<Operation, GpuModule>;
 type CodegenOperation = OperationWithBoundarySizes<Operation>;
 type CodegenTerm = AnnotatedTerm<CodegenOperation>;

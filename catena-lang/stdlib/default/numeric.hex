@@ -1,4 +1,6 @@
 (theory program type {
+  # Checked narrowing for bounded loop counts and GPU indices.
+  (arr stdlib.numeric.u64_to_u32 : (u64 val) -> (u32 val))
   (arr numeric.u32_subtype_u64 : ([] {}) -> ([] {(({u32 u64} prop.Subtype) |-)}))
 
   (arr stdlib.numeric.*

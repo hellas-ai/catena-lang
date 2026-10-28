@@ -23,7 +23,11 @@ pub(super) fn lower(
     args: Vec<Value>,
     outputs: &[Obj],
 ) -> Result<Vec<Value>, CodegenError> {
-    if op.starts_with("bf16.") || op.starts_with("bf16x2.") || op == "f32.to-bf16" {
+    if op.starts_with("wmma.")
+        || op.starts_with("bf16.")
+        || op.starts_with("bf16x2.")
+        || op == "f32.to-bf16"
+    {
         l.modules.bf16 = true;
         return bf16::lower(l, op, &args, outputs);
     }

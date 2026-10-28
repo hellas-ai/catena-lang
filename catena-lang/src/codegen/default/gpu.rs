@@ -6,7 +6,11 @@ use std::fmt::Write;
 pub(super) fn render(modules: &Modules, dialect: GpuDialect) -> String {
     let mut out = super::prelude::render(dialect);
     if modules.bf16 {
-        out.push_str(&super::bf16_support::render(dialect, modules.bf16_dot));
+        out.push_str(&super::bf16_support::render(
+            dialect,
+            modules.bf16_dot,
+            modules.wmma,
+        ));
     }
     for (kernel, functions) in [(true, &modules.kernels), (false, &modules.functions)] {
         for f in functions.values() {

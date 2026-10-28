@@ -11,6 +11,8 @@ pub(super) enum CType {
     F32,
     Bf16,
     Bf16x2,
+    WmmaBf16x16,
+    WmmaF32x8,
     MemOwn,
     MemRef,
     Grid,
@@ -59,6 +61,8 @@ pub(super) fn concrete(ty: &Obj) -> Result<CType, CodegenError> {
         ("f32", []) => CType::F32,
         ("bf16", []) => CType::Bf16,
         ("bf16x2", []) => CType::Bf16x2,
+        ("wmma.bf16x16", []) => CType::WmmaBf16x16,
+        ("wmma.f32x8", []) => CType::WmmaF32x8,
         ("mem", [cap]) if children(cap, "cap.own") == Some(&[]) => CType::MemOwn,
         ("mem", [cap]) if children(cap, "cap.ref") == Some(&[]) => CType::MemRef,
         ("stdlib.gpu.geometry.type.Grid", [_, _]) => CType::Grid,
@@ -100,7 +104,7 @@ fn layout_len(ty: &Obj) -> Result<usize, CodegenError> {
 impl CType {
     pub(super) fn uses_bf16(&self) -> bool {
         match self {
-            Self::Bf16 | Self::Bf16x2 => true,
+            Self::Bf16 | Self::Bf16x2 | Self::WmmaBf16x16 | Self::WmmaF32x8 => true,
             Self::Global(element) | Self::Shared(element) => element.uses_bf16(),
             _ => false,
         }
@@ -113,6 +117,8 @@ impl CType {
             Self::F32 => "float".into(),
             Self::Bf16 => "catena_bf16_t".into(),
             Self::Bf16x2 => "catena_bf16x2_t".into(),
+            Self::WmmaBf16x16 => "catena_wmma_bf16x16_t".into(),
+            Self::WmmaF32x8 => "catena_wmma_f32x8_t".into(),
             Self::MemOwn => "catena_mem_own_t".into(),
             Self::MemRef => "catena_mem_ref_t".into(),
             Self::Grid => "catena_grid".into(),

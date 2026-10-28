@@ -233,3 +233,41 @@ fn bf16_size_evidence_enables_its_runtime_representation() -> anyhow::Result<()>
     assert!(module.source.contains("sizeof(catena_bf16_t)"));
     Ok(())
 }
+
+#[test]
+fn wmma_device_fragments_lower_to_native_instruction() -> anyhow::Result<()> {
+    let source = include_str!("runtime/fixtures/bf16.hex").replace(
+        "([.x1 x1 x6] bf16x2.dot-f32 [x7.])",
+        "({[.x1] [.x1] [.x1] [.x1] [.x1] [.x1] [.x1] [.x1]} wmma.bf16x16.pack [frag.]) (unit.intro wmma.f32x8.zero [zero.]) ({[.frag] [.frag] [.zero]} wmma.mma-bf16-f32 [acc.]) ({[.acc] (const.u32.0x00000000)} wmma.f32x8.get [x7.])",
+    );
+    for dialect in [GpuDialect::Hip, GpuDialect::Cuda] {
+        let module = build(&source, dialect)?;
+        assert!(
+            module
+                .source
+                .contains("__builtin_amdgcn_wmma_f32_16x16x16_bf16_w32")
+        );
+        assert!(module.source.contains("catena_wmma_mma("));
+    }
+    Ok(())
+}
+
+#[test]
+fn wmma_is_rejected_in_host_code() {
+    let source = "(def program main : (f32 val) -> (f32 val) = ([acc.] (unit.intro wmma.f32x8.zero [x.]) ({[.x] (const.u32.0x00000000)} wmma.f32x8.get)))";
+    let error = build(source, GpuDialect::Hip).unwrap_err().to_string();
+    assert!(error.contains("requires device execution"), "{error}");
+}
+
+#[test]
+fn wmma_f32_fragment_constructor_lowers_in_device_code() -> anyhow::Result<()> {
+    let source = include_str!("runtime/fixtures/bf16.hex").replace(
+        "([.x1 x1 x6] bf16x2.dot-f32 [x7.])",
+        "({[.x6] [.x6] [.x6] [.x6] [.x6] [.x6] [.x6] [.x6]} wmma.f32x8.pack [frag.]) ({[.frag] (const.u32.0x00000007)} wmma.f32x8.get [x7.])",
+    );
+    for dialect in [GpuDialect::Hip, GpuDialect::Cuda] {
+        let module = build(&source, dialect)?;
+        assert!(module.source.contains("catena_wmma_f32x8_t{{"));
+    }
+    Ok(())
+}

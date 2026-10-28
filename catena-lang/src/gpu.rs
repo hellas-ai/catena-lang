@@ -319,17 +319,21 @@ fn load_library(dialect: GpuDialect, tried: Vec<PathBuf>) -> Result<Library, Mem
 /// Return a small, ordered set of runtime-library locations.
 ///
 /// The bare soname delegates discovery to the platform loader. The remaining
-/// paths come only from toolkit roots explicitly configured by the user or
-/// development environment; this intentionally performs no filesystem search.
+/// paths come from explicitly configured toolkit roots, followed by conventional
+/// installation locations; this intentionally performs no filesystem search.
 fn runtime_library_fallback_paths(dialect: GpuDialect) -> Vec<PathBuf> {
     let mut paths = Vec::new();
     match dialect {
         GpuDialect::Hip => {
             for variable in ["ROCM_PATH", "HIP_PATH"] {
                 if let Some(root) = env::var_os(variable) {
-                    push_unique(&mut paths, PathBuf::from(root).join("lib/libamdhip64.so"));
+                    let root = PathBuf::from(root);
+                    push_unique(&mut paths, root.join("lib/libamdhip64.so"));
+                    push_unique(&mut paths, root.join("lib64/libamdhip64.so"));
                 }
             }
+            push_unique(&mut paths, PathBuf::from("/opt/rocm/lib/libamdhip64.so"));
+            push_unique(&mut paths, PathBuf::from("/opt/rocm/lib64/libamdhip64.so"));
         }
         GpuDialect::Cuda => {
             for variable in ["CUDA_PATH", "CUDA_HOME"] {

@@ -59,3 +59,15 @@ fn main() -> anyhow::Result<()> {
 
 The default code generator and its standard library are used by default.
 See [CLI usage](docs/cli.md) and [BF16 support and precision rules](BF16.md).
+
+GPU runtime tests require an installed GPU toolkit and a compatible GPU:
+
+```sh
+cargo test --all-features --test runtime
+CATENA_GPU_DIALECT=cuda cargo test --all-features --test runtime
+```
+
+The tests default to HIP; `CATENA_GPU_DIALECT` selects `hip` or `cuda`.
+The HIP runtime loader checks the system library path, then `ROCM_PATH` and
+`HIP_PATH` (both `lib` and `lib64`), then `/opt/rocm/lib` and `/opt/rocm/lib64`.
+For a nonstandard ROCm installation, set `ROCM_PATH` to its toolkit root.

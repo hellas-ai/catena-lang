@@ -33,6 +33,7 @@ pub(super) enum Response {
     Initialized(Result<(), String>),
     Loaded(Result<usize, String>),
     Executed(Result<WireExecution, RemoteExecError>),
+    OutputsReleased,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -270,6 +271,7 @@ mod tests {
         let mut bytes = Vec::new();
         write_frame(&mut bytes, &execution).unwrap();
         write_frame(&mut bytes, &Request::ReleaseOutputs).unwrap();
+        write_frame(&mut bytes, &Response::OutputsReleased).unwrap();
 
         let mut bytes = bytes.as_slice();
         let Some(Response::Executed(Ok(execution))) = read_frame(&mut bytes).unwrap() else {
@@ -286,6 +288,10 @@ mod tests {
         assert!(matches!(
             read_frame(&mut bytes).unwrap(),
             Some(Request::ReleaseOutputs)
+        ));
+        assert!(matches!(
+            read_frame(&mut bytes).unwrap(),
+            Some(Response::OutputsReleased)
         ));
     }
 

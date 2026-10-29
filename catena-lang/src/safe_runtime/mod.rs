@@ -136,7 +136,9 @@ impl SafeRuntime {
                 }),
             }),
             Response::Initialized(Err(error)) => Err(SafeInitError::RemoteInitialization(error)),
-            Response::Loaded(_) | Response::Executed(_) => Err(SafeInitError::UnexpectedResponse),
+            Response::Loaded(_) | Response::Executed(_) | Response::OutputsReleased => {
+                Err(SafeInitError::UnexpectedResponse)
+            }
         }
     }
 
@@ -157,7 +159,7 @@ impl SafeRuntime {
                 remote_id,
             }),
             Response::Loaded(Err(error)) => Err(SafeInitError::RemoteLoad(error)),
-            Response::Initialized(_) | Response::Executed(_) => {
+            Response::Initialized(_) | Response::Executed(_) | Response::OutputsReleased => {
                 Err(SafeInitError::UnexpectedResponse)
             }
         }
@@ -182,7 +184,6 @@ impl Artifact {
         name: &str,
         args: Vec<Value<'a>>,
     ) -> Result<Vec<Value<'static>>, SafeExecError> {
-        let (buffers, wire_args) = self.encode_parent_arguments(&args)?;
         let mut worker = self
             .session
             .worker
@@ -195,6 +196,8 @@ impl Artifact {
             });
         }
 
+        let (buffers, wire_args) = self.encode_parent_arguments(&args)?;
+
         worker
             .send(&Request::Execute {
                 artifact: self.remote_id,
@@ -205,6 +208,13 @@ impl Artifact {
             .map_err(map_exec_worker_error)?;
 
         let response = worker.receive().map_err(map_exec_worker_error)?;
+        // The child has closed its input mappings before replying. Free consumed
+        // parent allocations before output copies can reuse their GEM handles.
+        // Together with the release acknowledgment below, this mitigates the
+        // HIP/KFD double-deletion bug for sequential calls. It cannot protect
+        // arbitrary borrowed-buffer lifetimes, concurrent GPU allocation, other
+        // sessions/processes, or deferred allocator cleanup.
+        drop(args);
         let execution = match response {
             Response::Executed(Ok(execution)) => execution,
             Response::Executed(Err(RemoteExecError::Runtime(error))) => {
@@ -218,7 +228,7 @@ impl Artifact {
                     "child memory IPC failed: {error}"
                 )));
             }
-            Response::Initialized(_) | Response::Loaded(_) => {
+            Response::Initialized(_) | Response::Loaded(_) | Response::OutputsReleased => {
                 return Err(SafeExecError::UnexpectedResponse);
             }
         };
@@ -226,6 +236,12 @@ impl Artifact {
         worker
             .send(&Request::ReleaseOutputs)
             .map_err(map_exec_worker_error)?;
+        // Decode errors still require a complete release exchange. Do not let
+        // caller allocations race the child's destruction of exported outputs.
+        match worker.receive().map_err(map_exec_worker_error)? {
+            Response::OutputsReleased => {}
+            _ => return Err(SafeExecError::UnexpectedResponse),
+        }
         values
     }
 
@@ -399,6 +415,7 @@ fn run_child_loop(mut reader: impl Read, mut writer: impl io::Write) -> Result<(
             }
             Request::ReleaseOutputs => {
                 pending_outputs.clear();
+                write_response(&mut writer, &Response::OutputsReleased)?;
             }
             Request::Execute {
                 artifact,

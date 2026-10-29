@@ -43,3 +43,9 @@ svg-reports = ["dep:open-hypergraphs-dot"]
 name = "runtime"
 path = "tests/runtime.rs"
 required-features = ["runtime-tests"]
+
+[[test]]
+name = "safe_runtime_owned_state"
+path = "tests/safe_runtime_owned_state.rs"
+harness = false
+required-features = ["runtime-tests"]

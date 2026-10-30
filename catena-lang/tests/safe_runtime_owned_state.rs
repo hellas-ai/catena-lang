@@ -7,7 +7,9 @@
 //! The same program with an 8-byte state passes.
 //! Requires a HIP GPU: `cargo test -p catena-lang --features runtime-tests
 //! --test safe_runtime_owned_state`. Expected to fail until fixed.
-use catena_lang::runtime::{GeneratedFunction, GpuDialect, MemOwn, RuntimeModule, Value, ValueKind};
+use catena_lang::runtime::{
+    GeneratedFunction, GpuDialect, MemOwn, RuntimeModule, Value, ValueKind,
+};
 use catena_lang::safe_runtime::{SafeRuntime, run_safe_runtime_child_if_requested};
 
 const HIP: GpuDialect = GpuDialect::Hip;
@@ -51,7 +53,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut safe = SafeRuntime::new(HIP)?;
     let artifact = safe.load(module())?;
     // State created by, and returned from, the child.
-    let mut state = artifact.exec_values("alloc", vec![STATE_BYTES.into()])?.pop().unwrap();
+    let mut state = artifact
+        .exec_values("alloc", vec![STATE_BYTES.into()])?
+        .pop()
+        .unwrap();
     let mut token = MemOwn::from_u64_slice(&[41], HIP)?;
     for step in 0..2 {
         let mut out = artifact

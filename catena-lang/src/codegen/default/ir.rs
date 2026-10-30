@@ -64,6 +64,7 @@ pub(super) struct Function {
 pub(super) struct Modules {
     pub(super) bf16: bool,
     pub(super) bf16_dot: bool,
+    pub(super) wmma: bool,
     pub(super) functions: BTreeMap<String, Function>,
     pub(super) kernels: BTreeMap<String, Function>,
     pub(super) exports: Vec<GeneratedFunction>,

@@ -66,6 +66,14 @@ pub(super) fn lower(
         format!("UINT{}_C(0x{hex})", width * 4)
     } else {
         match (name, xs.as_slice()) {
+            ("u64_to_u32", [x])
+                if runtime(&values[0].ty)? == Some(CType::U64) && out == CType::U32 =>
+            {
+                l.body.push(Instruction::Assert {
+                    condition: format!("{x} <= UINT32_MAX"),
+                });
+                format!("uint32_t({x})")
+            }
             ("u32.bitcast-f32", [x])
                 if runtime(&values[0].ty)? == Some(CType::U32) && out == CType::F32 =>
             {

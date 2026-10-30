@@ -22,7 +22,38 @@ pub(super) fn lower(
     let xs = args.iter().map(expr).collect::<Result<Vec<_>, _>>()?;
     let b = Some(CType::Bf16);
     let p = Some(CType::Bf16x2);
+    if op.starts_with("wmma.") {
+        if l.place != Place::Device {
+            return Err(invalid(op, "WMMA requires device execution"));
+        }
+        l.modules.wmma = true;
+    }
     let (expected, inputs, expression) = match op {
+        "wmma.bf16x16.pack" => (
+            CType::WmmaBf16x16,
+            vec![p.clone(); 8],
+            format!("catena_wmma_pack({})", xs.join(",")),
+        ),
+        "wmma.f32x8.pack" => (
+            CType::WmmaF32x8,
+            vec![Some(CType::F32); 8],
+            format!("catena_wmma_f32x8_t{{{{{}}}}}", xs.join(",")),
+        ),
+        "wmma.f32x8.zero" => (CType::WmmaF32x8, vec![], "catena_wmma_zero()".into()),
+        "wmma.f32x8.get" => (
+            CType::F32,
+            vec![Some(CType::WmmaF32x8), Some(CType::U32)],
+            format!("catena_wmma_get({})", xs.join(",")),
+        ),
+        "wmma.mma-bf16-f32" => (
+            CType::WmmaF32x8,
+            vec![
+                Some(CType::WmmaBf16x16),
+                Some(CType::WmmaBf16x16),
+                Some(CType::WmmaF32x8),
+            ],
+            format!("catena_wmma_mma({})", xs.join(",")),
+        ),
         "bf16.to-f32" => (
             CType::F32,
             vec![b.clone()],

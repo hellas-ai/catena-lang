@@ -2,6 +2,9 @@
 (theory type nat {
  (arr bf16 : 0 -> 1)
  (arr bf16x2 : 0 -> 1)
+ # Per-lane gfx11 wave32 register fragments.
+ (arr wmma.bf16x16 : 0 -> 1)
+ (arr wmma.f32x8 : 0 -> 1)
 })
 (theory program type {
  (arr stdlib.numeric.numeric.bf16 : [] -> (({bf16} stdlib.numeric.prop.Numeric) |-))
@@ -12,6 +15,12 @@
  (arr bf16x2.pack : {(bf16 val) (bf16 val)} -> (bf16x2 val))
  (arr bf16x2.low : (bf16x2 val) -> (bf16 val))
  (arr bf16x2.high : (bf16x2 val) -> (bf16 val))
+ # A/B contain 16 BF16 values per lane (duplicated across wave halves).
+ (arr wmma.bf16x16.pack : {(bf16x2 val) (bf16x2 val) (bf16x2 val) (bf16x2 val) (bf16x2 val) (bf16x2 val) (bf16x2 val) (bf16x2 val)} -> (wmma.bf16x16 val))
+ (arr wmma.f32x8.pack : {(f32 val) (f32 val) (f32 val) (f32 val) (f32 val) (f32 val) (f32 val) (f32 val)} -> (wmma.f32x8 val))
+ (arr wmma.f32x8.zero : 1 -> (wmma.f32x8 val))
+ (arr wmma.f32x8.get : {(wmma.f32x8 val) (u32 val)} -> (f32 val))
+ (arr wmma.mma-bf16-f32 : {(wmma.bf16x16 val) (wmma.bf16x16 val) (wmma.f32x8 val)} -> (wmma.f32x8 val))
  (arr bf16x2.dot-f32 : {(bf16x2 val) (bf16x2 val) (f32 val)} -> (f32 val))
 
 (arr stdlib.gpu.memory.memoryelement.bf16

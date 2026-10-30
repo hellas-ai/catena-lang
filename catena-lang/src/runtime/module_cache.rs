@@ -34,14 +34,7 @@ impl ModuleCache {
         {
             return None;
         }
-        let base = std::env::var_os("CATENA_GPU_CACHE_DIR")
-            .map(PathBuf::from)
-            .or_else(|| {
-                std::env::var_os("XDG_CACHE_HOME")
-                    .map(PathBuf::from)
-                    .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))
-                    .map(|p| p.join("catena/gpu"))
-            })?;
+        let base = cache_root()?;
         Some(Self {
             root: base.join("hex"),
             key: source_key(sources, kind, dialect),
@@ -131,6 +124,17 @@ impl ModuleCache {
             .map_err(io::Error::other)?;
         Ok(())
     }
+}
+
+pub(super) fn cache_root() -> Option<PathBuf> {
+    std::env::var_os("CATENA_GPU_CACHE_DIR")
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("XDG_CACHE_HOME")
+                .map(PathBuf::from)
+                .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))
+                .map(|p| p.join("catena/gpu"))
+        })
 }
 
 fn hash_part(hash: &mut Sha256, bytes: &[u8]) {

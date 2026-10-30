@@ -71,3 +71,15 @@ The tests default to HIP; `CATENA_GPU_DIALECT` selects `hip` or `cuda`.
 The HIP runtime loader checks the system library path, then `ROCM_PATH` and
 `HIP_PATH` (both `lib` and `lib64`), then `/opt/rocm/lib` and `/opt/rocm/lib64`.
 For a nonstandard ROCm installation, set `ROCM_PATH` to its toolkit root.
+
+The runtime caches compiled GPU shared libraries to speed up repeated development
+runs. Entries live in `$CATENA_GPU_CACHE_DIR/native`, or
+`${XDG_CACHE_HOME:-$HOME/.cache}/catena/gpu/native` by default. Set
+`CATENA_NATIVE_CACHE=0` to disable this cache, or `CATENA_GPU_CACHE=0` to disable
+both native and Hex module caching. `CATENA_HEX_CACHE=0` disables only Hex caching.
+Set `CATENA_COMPILE_TIMINGS=1` to report cache hits, misses, and I/O failures.
+
+Native cache keys cover generated source, GPU dialect, and a build-version tag.
+After changing your compiler/toolkit, compilation environment, or GPU, delete
+the `native` directory above to rebuild. This development cache does not track
+toolchain files, headers, or GPU architecture changes automatically.

@@ -17,6 +17,7 @@ mod smolcat_compat;
 mod tests;
 mod validate;
 mod values;
+mod wmma_sim;
 
 use crate::{
     check::AnnotatedTerm,

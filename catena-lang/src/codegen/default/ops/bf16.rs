@@ -52,7 +52,7 @@ pub(super) fn lower(
                 Some(CType::WmmaBf16x16),
                 Some(CType::WmmaF32x8),
             ],
-            format!("catena_wmma_mma({})", xs.join(",")),
+            format!("catena_wmma_mma({},catena_wmma_emulate)", xs.join(",")),
         ),
         "bf16.to-f32" => (
             CType::F32,

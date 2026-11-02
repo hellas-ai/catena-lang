@@ -24,6 +24,9 @@ pub(super) fn render(modules: &Modules, dialect: GpuDialect) -> String {
                     .iter()
                     .map(|v| format!("{}* {}", v.ty.c_name(), v.name)),
             );
+            if kernel && modules.wmma {
+                parameters.push("bool catena_wmma_emulate".into());
+            }
             writeln!(
                 out,
                 "{} void {}({}) {{",
@@ -41,14 +44,20 @@ pub(super) fn render(modules: &Modules, dialect: GpuDialect) -> String {
                     "    extern __shared__ __align__(16) unsigned char catena_shared[];\n",
                 );
             }
-            render_body(&mut out, &f.body, 1, dialect);
+            render_body(&mut out, &f.body, 1, dialect, modules.wmma);
             out.push_str("}\n");
         }
     }
     out
 }
 
-fn render_body(out: &mut String, body: &[Instruction], depth: usize, dialect: GpuDialect) {
+fn render_body(
+    out: &mut String,
+    body: &[Instruction],
+    depth: usize,
+    dialect: GpuDialect,
+    wmma: bool,
+) {
     let indent = "    ".repeat(depth);
     for instruction in body {
         match instruction {
@@ -116,9 +125,9 @@ fn render_body(out: &mut String, body: &[Instruction], depth: usize, dialect: Gp
             }
             Instruction::If { condition, yes, no } => {
                 writeln!(out, "{indent}if ({condition}) {{").unwrap();
-                render_body(out, yes, depth + 1, dialect);
+                render_body(out, yes, depth + 1, dialect, wmma);
                 writeln!(out, "{indent}}} else {{").unwrap();
-                render_body(out, no, depth + 1, dialect);
+                render_body(out, no, depth + 1, dialect, wmma);
                 writeln!(out, "{indent}}}").unwrap();
             }
             Instruction::For {
@@ -133,7 +142,7 @@ fn render_body(out: &mut String, body: &[Instruction], depth: usize, dialect: Gp
                     index_type.c_name()
                 )
                 .unwrap();
-                render_body(out, body, depth + 1, dialect);
+                render_body(out, body, depth + 1, dialect, wmma);
                 writeln!(out, "{indent}}}").unwrap();
             }
             Instruction::Launch {
@@ -142,6 +151,10 @@ fn render_body(out: &mut String, body: &[Instruction], depth: usize, dialect: Gp
                 shared_bytes,
                 arguments,
             } => {
+                let mut arguments = arguments.clone();
+                if wmma {
+                    arguments.push("catena_wmma_emulation_enabled()".into());
+                }
                 writeln!(
                     out,
                     "{indent}{kernel}<<<{grid}.blocks,{grid}.threads,{shared_bytes}>>>({});",

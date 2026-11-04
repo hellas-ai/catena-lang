@@ -7,6 +7,7 @@ use std::{
 };
 
 use libloading::Library;
+#[cfg(unix)]
 use libloading::os::unix::{Library as UnixLibrary, RTLD_LAZY, RTLD_LOCAL};
 use serde::{Deserialize, Serialize};
 
@@ -338,13 +339,19 @@ fn load_generated_library(path: &Path) -> Result<Library, InitError> {
     // If one is unloaded and a generated GPU object is loaded again later, ROCm/LLVM
     // initialization can re-register process-global LLVM command-line options and
     // abort with "Option 'ubsan-guard-checks' registered more than once".
-    // RTLD_NODELETE lets the Rust handle be dropped while preventing that unload.
-    let flags = RTLD_LAZY | RTLD_LOCAL | libc::RTLD_NODELETE;
-    let library = unsafe { UnixLibrary::open(Some(path), flags) }.map_err(|source| {
-        InitError::LoadLibrary {
-            path: path.to_path_buf(),
-            source,
-        }
+    // RTLD_NODELETE and Windows module pinning both preserve that lifetime
+    // independently of the Rust handle.
+    #[cfg(unix)]
+    let loaded =
+        unsafe { UnixLibrary::open(Some(path), RTLD_LAZY | RTLD_LOCAL | libc::RTLD_NODELETE) };
+    #[cfg(windows)]
+    let loaded = unsafe { libloading::os::windows::Library::new(path) }.and_then(|library| {
+        library.pin()?;
+        Ok(library)
+    });
+    let library = loaded.map_err(|source| InitError::LoadLibrary {
+        path: path.to_path_buf(),
+        source,
     })?;
     Ok(library.into())
 }

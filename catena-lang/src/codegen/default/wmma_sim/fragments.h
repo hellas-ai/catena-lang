@@ -59,9 +59,16 @@ __device__ __noinline__ catena_wmma_f32x8_t catena_wmma_simulate(
         c.value[i] = catena_u32_bitcast_f32(accumulator[i]);
     return c;
 }
+// Host dispatch selects a kernel specialization. Native kernels must never
+// retain a reachable simulator call: its ABI can force native MMA spills.
+template<bool Emulate>
 __device__ inline catena_wmma_f32x8_t catena_wmma_mma(
-    catena_wmma_bf16x16_t a, catena_wmma_bf16x16_t b, catena_wmma_f32x8_t c, bool emulate) {
-    return emulate ? catena_wmma_simulate(a, b, c) : catena_wmma_native(a, b, c);
+    catena_wmma_bf16x16_t a, catena_wmma_bf16x16_t b, catena_wmma_f32x8_t c) {
+    if constexpr (Emulate) {
+        return catena_wmma_simulate(a, b, c);
+    } else {
+        return catena_wmma_native(a, b, c);
+    }
 }
 // Read on the host for each launch. No mutable module/device state is needed.
 inline bool catena_wmma_emulation_enabled() {

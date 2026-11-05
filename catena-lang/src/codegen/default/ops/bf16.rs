@@ -1,7 +1,7 @@
 //! BF16 operations retain BF16 operands/results. Packed dot is native BF16/F32.
 use super::super::{
     CodegenError, Lowerer, expr, invalid,
-    ir::Place,
+    ir::{Instruction, Place, Variable},
     lower_types::{CType, runtime},
     values::*,
 };
@@ -28,6 +28,46 @@ pub(super) fn lower(
         }
         l.modules.wmma = true;
     }
+    if op == "wmma.mma-bf16-f32" {
+        if types
+            != vec![
+                Some(CType::WmmaBf16x16),
+                Some(CType::WmmaBf16x16),
+                Some(CType::WmmaF32x8),
+            ]
+            || out != CType::WmmaF32x8
+        {
+            return Err(invalid(op, "BF16 operand or result type mismatch"));
+        }
+        l.modules.bf16 = true;
+        let name = l.fresh("v");
+        l.body.push(Instruction::WmmaMma {
+            result: Variable {
+                name: name.clone(),
+                ty: CType::WmmaF32x8,
+            },
+            a: Variable {
+                name: xs[0].into(),
+                ty: CType::WmmaBf16x16,
+            },
+            b: Variable {
+                name: xs[1].into(),
+                ty: CType::WmmaBf16x16,
+            },
+            accumulator: Variable {
+                name: xs[2].into(),
+                ty: CType::WmmaF32x8,
+            },
+        });
+        return results(
+            l,
+            outputs,
+            vec![Value {
+                ty,
+                repr: Repr::Runtime(name),
+            }],
+        );
+    }
     let (expected, inputs, expression) = match op {
         "wmma.bf16x16.pack" => (
             CType::WmmaBf16x16,
@@ -44,15 +84,6 @@ pub(super) fn lower(
             CType::F32,
             vec![Some(CType::WmmaF32x8), Some(CType::U32)],
             format!("catena_wmma_get({})", xs.join(",")),
-        ),
-        "wmma.mma-bf16-f32" => (
-            CType::WmmaF32x8,
-            vec![
-                Some(CType::WmmaBf16x16),
-                Some(CType::WmmaBf16x16),
-                Some(CType::WmmaF32x8),
-            ],
-            format!("catena_wmma_mma({},catena_wmma_emulate)", xs.join(",")),
         ),
         "bf16.to-f32" => (
             CType::F32,

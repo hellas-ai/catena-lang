@@ -1,9 +1,15 @@
 //! Rendering is deliberately mechanical: arrow semantics live in `ops`.
 use super::{ir::*, lower_types::CType};
 use crate::runtime::GpuDialect;
-use std::fmt::Write;
+use std::{collections::BTreeSet, fmt::Write};
 
 pub(super) fn render(modules: &Modules, dialect: GpuDialect) -> String {
+    let wmma_kernels = modules
+        .kernels
+        .values()
+        .filter(|f| f.uses_wmma_mma())
+        .map(|f| f.symbol.as_str())
+        .collect::<BTreeSet<_>>();
     let mut out = super::prelude::render(dialect);
     if modules.bf16 {
         out.push_str(&super::bf16_support::render(
@@ -24,8 +30,8 @@ pub(super) fn render(modules: &Modules, dialect: GpuDialect) -> String {
                     .iter()
                     .map(|v| format!("{}* {}", v.ty.c_name(), v.name)),
             );
-            if kernel && modules.wmma {
-                parameters.push("bool catena_wmma_emulate".into());
+            if kernel && wmma_kernels.contains(f.symbol.as_str()) {
+                out.push_str("template<bool CatenaWmmaEmulate>\n");
             }
             writeln!(
                 out,
@@ -44,7 +50,7 @@ pub(super) fn render(modules: &Modules, dialect: GpuDialect) -> String {
                     "    extern __shared__ __align__(16) unsigned char catena_shared[];\n",
                 );
             }
-            render_body(&mut out, &f.body, 1, dialect, modules.wmma);
+            render_body(&mut out, &f.body, 1, dialect, &wmma_kernels);
             out.push_str("}\n");
         }
     }
@@ -56,13 +62,30 @@ fn render_body(
     body: &[Instruction],
     depth: usize,
     dialect: GpuDialect,
-    wmma: bool,
+    wmma_kernels: &BTreeSet<&str>,
 ) {
     let indent = "    ".repeat(depth);
     for instruction in body {
         match instruction {
             Instruction::Let(v, e) => {
                 writeln!(out, "{indent}{} {} = {e};", v.ty.c_name(), v.name).unwrap()
+            }
+            Instruction::WmmaMma {
+                result,
+                a,
+                b,
+                accumulator,
+            } => {
+                writeln!(
+                    out,
+                    "{indent}{} {} = catena_wmma_mma<CatenaWmmaEmulate>({},{},{});",
+                    result.ty.c_name(),
+                    result.name,
+                    a.name,
+                    b.name,
+                    accumulator.name
+                )
+                .unwrap();
             }
             Instruction::Assign(v, e) => writeln!(out, "{indent}{v} = {e};").unwrap(),
             Instruction::Sync => writeln!(out, "{indent}__syncthreads();").unwrap(),
@@ -125,9 +148,9 @@ fn render_body(
             }
             Instruction::If { condition, yes, no } => {
                 writeln!(out, "{indent}if ({condition}) {{").unwrap();
-                render_body(out, yes, depth + 1, dialect, wmma);
+                render_body(out, yes, depth + 1, dialect, wmma_kernels);
                 writeln!(out, "{indent}}} else {{").unwrap();
-                render_body(out, no, depth + 1, dialect, wmma);
+                render_body(out, no, depth + 1, dialect, wmma_kernels);
                 writeln!(out, "{indent}}}").unwrap();
             }
             Instruction::For {
@@ -142,7 +165,7 @@ fn render_body(
                     index_type.c_name()
                 )
                 .unwrap();
-                render_body(out, body, depth + 1, dialect, wmma);
+                render_body(out, body, depth + 1, dialect, wmma_kernels);
                 writeln!(out, "{indent}}}").unwrap();
             }
             Instruction::Launch {
@@ -151,16 +174,22 @@ fn render_body(
                 shared_bytes,
                 arguments,
             } => {
-                let mut arguments = arguments.clone();
-                if wmma {
-                    arguments.push("catena_wmma_emulation_enabled()".into());
+                let arguments = arguments.join(", ");
+                if wmma_kernels.contains(kernel.as_str()) {
+                    writeln!(out, "{indent}if (catena_wmma_emulation_enabled()) {{").unwrap();
+                    writeln!(out,
+                        "{indent}    {kernel}<true><<<{grid}.blocks,{grid}.threads,{shared_bytes}>>>({arguments});"
+                    ).unwrap();
+                    writeln!(out, "{indent}}} else {{").unwrap();
+                    writeln!(out,
+                        "{indent}    {kernel}<false><<<{grid}.blocks,{grid}.threads,{shared_bytes}>>>({arguments});"
+                    ).unwrap();
+                    writeln!(out, "{indent}}}").unwrap();
+                } else {
+                    writeln!(out,
+                        "{indent}{kernel}<<<{grid}.blocks,{grid}.threads,{shared_bytes}>>>({arguments});"
+                    ).unwrap();
                 }
-                writeln!(
-                    out,
-                    "{indent}{kernel}<<<{grid}.blocks,{grid}.threads,{shared_bytes}>>>({});",
-                    arguments.join(", ")
-                )
-                .unwrap();
                 let last_error = match dialect {
                     GpuDialect::Hip => "hipGetLastError",
                     GpuDialect::Cuda => "cudaGetLastError",

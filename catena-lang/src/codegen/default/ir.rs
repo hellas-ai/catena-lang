@@ -13,6 +13,13 @@ pub(super) struct Variable {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum Instruction {
     Let(Variable, String),
+    /// Typed MMA keeps per-kernel specialization independent of C++ expressions.
+    WmmaMma {
+        result: Variable,
+        a: Variable,
+        b: Variable,
+        accumulator: Variable,
+    },
     Assign(String, String),
     /// Block-wide synchronization, including visibility of shared-memory writes.
     Sync,
@@ -58,6 +65,20 @@ pub(super) struct Function {
     pub(super) inputs: Vec<Variable>,
     pub(super) outputs: Vec<Variable>,
     pub(super) body: Vec<Instruction>,
+}
+
+impl Function {
+    pub(super) fn uses_wmma_mma(&self) -> bool {
+        fn contains(body: &[Instruction]) -> bool {
+            body.iter().any(|instruction| match instruction {
+                Instruction::WmmaMma { .. } => true,
+                Instruction::If { yes, no, .. } => contains(yes) || contains(no),
+                Instruction::For { body, .. } => contains(body),
+                _ => false,
+            })
+        }
+        contains(&self.body)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Default)]

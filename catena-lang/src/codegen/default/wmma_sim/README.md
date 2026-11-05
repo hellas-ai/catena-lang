@@ -5,11 +5,15 @@ Set `CATENA_WMMA_EMULATE=1` when running a model to simulate the existing
 simulation; unset, `0`, and other values select the existing native path.
 CUDA and unsupported HIP targets still trap if native WMMA is selected.
 
-Generated C++ contains both implementations. Generated host code reads the
-variable at **each kernel launch** and passes a private, uniform boolean to the
-kernel. Changing the variable between calls affects an already-loaded artifact;
-no recompilation or cache clearing is needed. Environment changes must be
-coordinated by the caller if multiple threads launch kernels. Public Hex types,
+Generated C++ contains both implementations and native/emulated specializations
+of each kernel containing MMA. Generated host code reads the variable at **each
+affected kernel launch** and selects a specialization. The choice is compile-time
+constant inside the kernel: native kernels have no reachable simulator call or
+runtime MMA branch, avoiding spill overhead from the simulator's call ABI.
+Kernels without MMA are not specialized. Changing the variable between calls
+affects an already-loaded artifact; no recompilation or cache clearing is needed.
+Environment changes must be coordinated by the caller if multiple threads launch
+kernels. Public Hex types,
 fragment layout, and the runtime ABI are unchanged.
 
 WMMA requires complete, converged groups of 32 lanes. A/B fragments in lanes
@@ -45,10 +49,10 @@ whole-model agreement if other operations differ between backends.
 
 ## Numerical tests
 
-All WMMA tests, corpus generators, references, and fixtures live here. There
-are no emitted-symbol presence/absence checks. Rust builds a self-contained C++
-validator containing the actual production code. GPU runs additionally use the
-real primitive lowerer and generated host launch path, with an independent
+The numerical stress tests, corpus generators, references, and fixtures live
+here. Rust builds a self-contained C++ validator containing the actual
+production code; its correctness checks compare numerical results. GPU runs
+additionally use the real primitive lowerer and generated host launch path, with an independent
 native WMMA oracle on AMD. Both backends exercise the same portable device
 implementation. CPU results are compared against both the original integer64
 oracle and a separate FP64 alignment/rounding implementation. Additional
@@ -101,9 +105,9 @@ suites, regardless of the random trial count:
   accumulators; partial final blocks, multiple waves, and 1D/2D/3D blocks.
 
 GPU runs compare raw output bits with no NaN relaxation. On AMD, every batch
-also toggles unset → `1` → `0` → `1` → invalid → `1` in the same compiled module,
-checking all three block shapes in each mode. The simulator must match both
-CPU results and the independent native hardware oracle. Counts in reports are
+also toggles unset, `1`, `0`, invalid strings, empty, `01`, and `true` in the
+same compiled module, returning to `1` repeatedly and checking all three block
+shapes in each mode. The simulator must match both CPU results and the independent native hardware oracle. Counts in reports are
 unique output positions; additional mode/geometry checks are not added again.
 
 Configuration is inherited by the test subprocess:

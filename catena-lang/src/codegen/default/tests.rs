@@ -18,6 +18,158 @@ fn lowerer<'a>(templates: &'a BTreeMap<Operation, Template>) -> Lowerer<'a> {
 }
 
 #[test]
+fn wmma_mma_is_typed_and_rejects_host_or_invalid_operands() {
+    let templates = BTreeMap::new();
+    let mut l = lowerer(&templates);
+    let args = vec![
+        value(scalar("wmma.bf16x16"), "a"),
+        value(scalar("wmma.bf16x16"), "b"),
+        value(scalar("wmma.f32x8"), "acc"),
+    ];
+    let output = [scalar("wmma.f32x8")];
+    assert!(
+        l.lower_operation("wmma.mma-bf16-f32", args.clone(), &output)
+            .is_err()
+    );
+    l.place = Place::Device;
+    let mut bad = args.clone();
+    bad[0] = value(scalar("f32"), "wrong");
+    assert!(
+        l.lower_operation("wmma.mma-bf16-f32", bad, &output)
+            .is_err()
+    );
+    assert!(l.body.is_empty());
+    let output = l
+        .lower_operation("wmma.mma-bf16-f32", args, &output)
+        .unwrap();
+    let [
+        Instruction::WmmaMma {
+            result,
+            a,
+            b,
+            accumulator,
+        },
+    ] = l.body.as_slice()
+    else {
+        panic!("MMA should have explicit IR");
+    };
+    assert_eq!(expr(&output[0]).unwrap(), result.name);
+    assert_eq!(
+        (a.name.as_str(), b.name.as_str(), accumulator.name.as_str()),
+        ("a", "b", "acc")
+    );
+}
+
+#[test]
+fn only_mma_kernels_specialize_and_host_dispatch_reaches_nested_launches() {
+    let variable = |name: &str, ty| Variable {
+        name: name.into(),
+        ty,
+    };
+    let inputs = vec![
+        variable("a", CType::WmmaBf16x16),
+        variable("b", CType::WmmaBf16x16),
+        variable("acc", CType::WmmaF32x8),
+    ];
+    let mma = Instruction::WmmaMma {
+        result: variable("result", CType::WmmaF32x8),
+        a: inputs[0].clone(),
+        b: inputs[1].clone(),
+        accumulator: inputs[2].clone(),
+    };
+    let nested = |body| Instruction::For {
+        index: "i".into(),
+        index_type: CType::U32,
+        end: "2".into(),
+        body: vec![Instruction::If {
+            condition: "true".into(),
+            yes: body,
+            no: vec![],
+        }],
+    };
+    let launch = |kernel: &str, arguments| Instruction::Launch {
+        kernel: kernel.into(),
+        grid: "grid".into(),
+        shared_bytes: "shared".into(),
+        arguments,
+    };
+    let mut modules = Modules {
+        bf16: true,
+        wmma: true,
+        ..Default::default()
+    };
+    modules.kernels.insert(
+        "mma_kernel".into(),
+        Function {
+            symbol: "mma_kernel".into(),
+            inputs: inputs.clone(),
+            outputs: vec![],
+            body: vec![nested(vec![mma])],
+        },
+    );
+    modules.kernels.insert(
+        "fragment_kernel".into(),
+        Function {
+            symbol: "fragment_kernel".into(),
+            inputs: vec![],
+            outputs: vec![],
+            body: vec![Instruction::Let(
+                variable("zero", CType::WmmaF32x8),
+                "catena_wmma_zero()".into(),
+            )],
+        },
+    );
+    let arguments = inputs.iter().map(|v| v.name.clone()).collect::<Vec<_>>();
+    modules.functions.insert(
+        "host".into(),
+        Function {
+            symbol: "host".into(),
+            inputs: vec![],
+            outputs: vec![],
+            body: vec![
+                nested(vec![launch("mma_kernel", arguments.clone())]),
+                launch("fragment_kernel", vec![]),
+                launch("mma_kernel", arguments),
+            ],
+        },
+    );
+    for dialect in [GpuDialect::Hip, GpuDialect::Cuda] {
+        let source = render_runtime_module(&modules, dialect).unwrap().source;
+        assert_eq!(
+            source.matches("template<bool CatenaWmmaEmulate>").count(),
+            1
+        );
+        assert!(source.contains("catena_wmma_mma<CatenaWmmaEmulate>(a,b,acc)"));
+        assert!(!source.contains("bool catena_wmma_emulate"));
+        assert_eq!(
+            source
+                .matches("if (catena_wmma_emulation_enabled())")
+                .count(),
+            2
+        );
+        assert_eq!(
+            source
+                .matches("mma_kernel<true><<<grid.blocks,grid.threads,shared>>>(a, b, acc)")
+                .count(),
+            2
+        );
+        assert_eq!(
+            source
+                .matches("mma_kernel<false><<<grid.blocks,grid.threads,shared>>>(a, b, acc)")
+                .count(),
+            2
+        );
+        assert!(source.contains("fragment_kernel<<<grid.blocks,grid.threads,shared>>>()"));
+        assert!(!source.contains("fragment_kernel<true>"));
+        let check = match dialect {
+            GpuDialect::Hip => "catena_gpu_check(hipGetLastError());",
+            GpuDialect::Cuda => "catena_gpu_check(cudaGetLastError());",
+        };
+        assert_eq!(source.matches(check).count(), 3);
+    }
+}
+
+#[test]
 fn generic_entrypoint_interfaces_fail_during_codegen() {
     use crate::pass::record_boundary_sizes::OperationWithBoundarySizes;
     use open_hypergraphs::lax::OpenHypergraph;

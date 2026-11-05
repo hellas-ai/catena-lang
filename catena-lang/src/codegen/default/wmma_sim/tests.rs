@@ -51,7 +51,7 @@ fn lower_primitive(
     (std::mem::take(&mut lower.body), expression)
 }
 
-/// Render a real launch with the production hidden argument and environment read.
+/// Render a real launch with the production host dispatch and environment read.
 /// Four independent tiles per block exercise subgroup isolation and partial batches.
 fn generated_module(dialect: GpuDialect) -> String {
     let templates = Default::default();

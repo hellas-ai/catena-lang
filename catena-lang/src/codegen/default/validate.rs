@@ -35,6 +35,26 @@ fn validate_body(
 ) -> Result<(), CodegenError> {
     for instruction in body {
         match instruction {
+            Instruction::WmmaMma {
+                result,
+                a,
+                b,
+                accumulator,
+            } => {
+                if place != Place::Device {
+                    return Err(error(function, "WMMA requires device execution"));
+                }
+                if !modules.bf16 || !modules.wmma {
+                    return Err(error(function, "WMMA requires module support"));
+                }
+                if result.ty != CType::WmmaF32x8
+                    || accumulator.ty != CType::WmmaF32x8
+                    || a.ty != CType::WmmaBf16x16
+                    || b.ty != CType::WmmaBf16x16
+                {
+                    return Err(error(function, "WMMA operand or result type mismatch"));
+                }
+            }
             Instruction::Free { buffer } => {
                 if place != Place::Host || !matches!(buffer.ty, CType::Global(_)) {
                     return Err(error(function, "free requires a global buffer on the host"));
@@ -125,6 +145,45 @@ fn validate_memory(
 mod tests {
     use super::*;
     use crate::runtime::GpuDialect;
+
+    #[test]
+    fn wmma_mma_checks_place_support_and_fragment_types() {
+        let mma = Instruction::WmmaMma {
+            result: variable("result", CType::WmmaF32x8),
+            a: variable("a", CType::WmmaBf16x16),
+            b: variable("b", CType::WmmaBf16x16),
+            accumulator: variable("acc", CType::WmmaF32x8),
+        };
+        for place in [Place::Host, Place::Device] {
+            let mut ir = module(place, nested(vec![mma.clone()]));
+            assert!(validate(&ir).is_err());
+            ir.bf16 = true;
+            ir.wmma = true;
+            assert_eq!(validate(&ir).is_ok(), place == Place::Device);
+        }
+        for operand in 0..4 {
+            let mut bad = mma.clone();
+            let Instruction::WmmaMma {
+                result,
+                a,
+                b,
+                accumulator,
+            } = &mut bad
+            else {
+                unreachable!()
+            };
+            match operand {
+                0 => result.ty = CType::F32,
+                1 => a.ty = CType::F32,
+                2 => b.ty = CType::F32,
+                _ => accumulator.ty = CType::F32,
+            }
+            let mut ir = module(Place::Device, nested(vec![bad]));
+            ir.bf16 = true;
+            ir.wmma = true;
+            assert!(validate(&ir).is_err());
+        }
+    }
 
     fn variable(name: &str, ty: CType) -> Variable {
         Variable {

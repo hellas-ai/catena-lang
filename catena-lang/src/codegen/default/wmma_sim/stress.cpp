@@ -203,11 +203,11 @@ public:
         hip_check(hipMemcpy(actual.data(), dd.data, elements*4, hipMemcpyDeviceToHost), "download native oracle");
         check(actual, "native oracle");
 #endif
-        // The SAME compiled host launcher/kernel is reused for every mode and
+        // The SAME compiled artifact and host launcher are reused for every mode and
         // geometry. Sentinel output catches missing writes. CUDA cannot run native.
         const char* modes[] = {
 #if WMMA_AMD_GPU
-            nullptr, "1", "0", "1", "invalid", "1",
+            nullptr, "1", "0", "1", "invalid", "1", "", "01", "true", "1",
 #else
             "1",
 #endif

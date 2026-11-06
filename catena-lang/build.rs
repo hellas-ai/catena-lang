@@ -96,7 +96,6 @@ fn compiler_fingerprint() {
     paths.sort();
     let mut hash = Sha256::new();
     for path in paths {
-        println!("cargo:rerun-if-changed={}", path.display());
         part(
             &mut hash,
             path.strip_prefix(&root)
@@ -107,6 +106,11 @@ fn compiler_fingerprint() {
         );
         match fs::read(&path) {
             Ok(bytes) => {
+                // Watch only inputs that exist. Cargo reruns a build script
+                // whose rerun-if-changed path is missing on every build, and
+                // the workspace ../Cargo.{toml,lock} are absent when this crate
+                // is vendored, e.g. by Nix.
+                println!("cargo:rerun-if-changed={}", path.display());
                 part(&mut hash, b"present");
                 part(&mut hash, &bytes);
             }

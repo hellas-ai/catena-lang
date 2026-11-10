@@ -18,6 +18,9 @@ pub(super) fn render(modules: &Modules, dialect: GpuDialect) -> String {
             modules.wmma,
         ));
     }
+    if modules.nvidia_mma {
+        out.push_str(super::nvidia_mma::SUPPORT);
+    }
     for (kernel, functions) in [(true, &modules.kernels), (false, &modules.functions)] {
         for f in functions.values() {
             let mut parameters = f
@@ -69,6 +72,23 @@ fn render_body(
         match instruction {
             Instruction::Let(v, e) => {
                 writeln!(out, "{indent}{} {} = {e};", v.ty.c_name(), v.name).unwrap()
+            }
+            Instruction::NvidiaMma {
+                result,
+                a,
+                b,
+                accumulator,
+            } => {
+                writeln!(
+                    out,
+                    "{indent}{} {} = catena_mma_bf16_f32({},{},{});",
+                    result.ty.c_name(),
+                    result.name,
+                    a.name,
+                    b.name,
+                    accumulator.name
+                )
+                .unwrap();
             }
             Instruction::WmmaMma {
                 result,

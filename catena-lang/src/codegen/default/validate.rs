@@ -1,5 +1,6 @@
 //! Structural GPU constraints checked before rendering. This does not establish
-//! that barriers are reached uniformly by every thread in a block.
+//! that barriers are reached uniformly by every thread in a block, or that MMA
+//! instructions are reached convergently by all 32 lanes in a warp.
 use super::{CodegenError, ir::*, lower_types::CType};
 
 pub(super) fn validate(modules: &Modules) -> Result<(), CodegenError> {
@@ -13,6 +14,9 @@ pub(super) fn validate(modules: &Modules) -> Result<(), CodegenError> {
                     &function.symbol,
                     "kernels cannot have output parameters",
                 ));
+            }
+            for variable in function.inputs.iter().chain(&function.outputs) {
+                validate_fragment(modules, &function.symbol, place, variable)?;
             }
             validate_body(modules, &function.symbol, place, &function.body)?;
         }
@@ -35,6 +39,33 @@ fn validate_body(
 ) -> Result<(), CodegenError> {
     for instruction in body {
         match instruction {
+            Instruction::NvidiaMma {
+                result,
+                a,
+                b,
+                accumulator,
+            } => {
+                for variable in [result, a, b, accumulator] {
+                    validate_fragment(modules, function, place, variable)?;
+                }
+                if place != Place::Device || !modules.bf16 || !modules.nvidia_mma {
+                    return Err(error(
+                        function,
+                        "NVIDIA MMA requires device execution and module support",
+                    ));
+                }
+                if result.ty != CType::MmaF32Acc
+                    || accumulator.ty != CType::MmaF32Acc
+                    || a.ty != CType::MmaBf16A
+                    || b.ty != CType::MmaBf16B
+                {
+                    return Err(error(
+                        function,
+                        "NVIDIA MMA operand or result type mismatch",
+                    ));
+                }
+            }
+            Instruction::Let(variable, _) => validate_fragment(modules, function, place, variable)?,
             Instruction::WmmaMma {
                 result,
                 a,
@@ -73,6 +104,8 @@ fn validate_body(
                 buffer,
                 index,
             } => {
+                validate_fragment(modules, function, place, buffer)?;
+                validate_fragment(modules, function, place, result)?;
                 validate_memory(function, place, buffer, index, result)?;
             }
             Instruction::Store {
@@ -80,6 +113,8 @@ fn validate_body(
                 index,
                 value,
             } => {
+                validate_fragment(modules, function, place, buffer)?;
+                validate_fragment(modules, function, place, value)?;
                 validate_memory(function, place, buffer, index, value)?;
             }
             Instruction::If { yes, no, .. } => {
@@ -104,8 +139,23 @@ fn validate_body(
                     ));
                 }
             }
-            Instruction::Let(..) | Instruction::Assign(..) | Instruction::Assert { .. } => {}
+            Instruction::Assign(..) | Instruction::Assert { .. } => {}
         }
+    }
+    Ok(())
+}
+
+fn validate_fragment(
+    modules: &Modules,
+    function: &str,
+    place: Place,
+    variable: &Variable,
+) -> Result<(), CodegenError> {
+    if variable.ty.uses_mma() && (place != Place::Device || !modules.bf16 || !modules.nvidia_mma) {
+        return Err(error(
+            function,
+            "NVIDIA fragments require device execution and module support",
+        ));
     }
     Ok(())
 }

@@ -20,6 +20,13 @@ pub(super) enum Instruction {
         b: Variable,
         accumulator: Variable,
     },
+    /// Native NVIDIA warp MMA; callers must ensure convergence of all 32 lanes.
+    NvidiaMma {
+        result: Variable,
+        a: Variable,
+        b: Variable,
+        accumulator: Variable,
+    },
     Assign(String, String),
     /// Block-wide synchronization, including visibility of shared-memory writes.
     Sync,
@@ -86,6 +93,7 @@ pub(super) struct Modules {
     pub(super) bf16: bool,
     pub(super) bf16_dot: bool,
     pub(super) wmma: bool,
+    pub(super) nvidia_mma: bool,
     pub(super) functions: BTreeMap<String, Function>,
     pub(super) kernels: BTreeMap<String, Function>,
     pub(super) exports: Vec<GeneratedFunction>,

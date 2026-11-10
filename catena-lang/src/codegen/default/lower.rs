@@ -97,6 +97,7 @@ impl<'a> Lowerer<'a> {
             CodegenError::Type(format!("runtime expression has erased type {ty:?}"))
         })?;
         self.modules.bf16 |= ctype.uses_bf16();
+        self.modules.nvidia_mma |= ctype.uses_mma();
         let name = self.fresh("v");
         self.body.push(Instruction::Let(
             Variable {
@@ -126,6 +127,7 @@ impl<'a> Lowerer<'a> {
         }
         if let Some(ctype) = runtime(ty)? {
             self.modules.bf16 |= ctype.uses_bf16();
+            self.modules.nvidia_mma |= ctype.uses_mma();
             let name = self.fresh("arg");
             parameters.push(Variable {
                 name: name.clone(),

@@ -9,6 +9,7 @@ mod ir;
 mod lower;
 mod lower_types;
 mod meta;
+mod nvidia_mma;
 mod ops;
 mod prelude;
 pub(crate) mod primitives;
@@ -260,6 +261,12 @@ fn render_runtime_module(
     dialect: GpuDialect,
 ) -> Result<RuntimeModule, CodegenError> {
     validate::validate(modules)?;
+    if modules.nvidia_mma && dialect != GpuDialect::Cuda {
+        return Err(invalid(
+            "mma.m16n8k16",
+            "NVIDIA MMA requires CUDA (sm_80+); HIP is unsupported",
+        ));
+    }
     Ok(RuntimeModule::new(
         dialect,
         gpu::render(modules, dialect),

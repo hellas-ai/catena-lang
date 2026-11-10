@@ -7,6 +7,7 @@ mod geometry;
 pub(super) mod launch;
 mod math;
 mod memory;
+mod mma;
 mod numeric;
 pub(super) mod structure;
 
@@ -23,6 +24,9 @@ pub(super) fn lower(
     args: Vec<Value>,
     outputs: &[Obj],
 ) -> Result<Vec<Value>, CodegenError> {
+    if op.starts_with("mma.") {
+        return mma::lower(l, op, &args, outputs);
+    }
     if op.starts_with("wmma.")
         || op.starts_with("bf16.")
         || op.starts_with("bf16x2.")

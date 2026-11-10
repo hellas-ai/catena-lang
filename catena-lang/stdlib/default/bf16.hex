@@ -5,8 +5,20 @@
  # Per-lane gfx11 wave32 register fragments.
  (arr wmma.bf16x16 : 0 -> 1)
  (arr wmma.f32x8 : 0 -> 1)
+ # Distinct per-lane NVIDIA sm_80+ fragments, in PTX operand register order.
+ (arr mma.m16n8k16.bf16.a : 0 -> 1)
+ (arr mma.m16n8k16.bf16.b : 0 -> 1)
+ (arr mma.m16n8k16.f32.acc : 0 -> 1)
 })
 (theory program type {
+ # Device-only NVIDIA primitives. All 32 lanes must execute MMA convergently.
+ # Shared-memory staging still requires the caller's barriers.
+ (arr mma.m16n8k16.bf16.a.pack : {(bf16x2 val) (bf16x2 val) (bf16x2 val) (bf16x2 val)} -> (mma.m16n8k16.bf16.a val))
+ (arr mma.m16n8k16.bf16.b.pack : {(bf16x2 val) (bf16x2 val)} -> (mma.m16n8k16.bf16.b val))
+ (arr mma.m16n8k16.f32.acc.pack : {(f32 val) (f32 val) (f32 val) (f32 val)} -> (mma.m16n8k16.f32.acc val))
+ (arr mma.m16n8k16.f32.acc.zero : 1 -> (mma.m16n8k16.f32.acc val))
+ (arr mma.m16n8k16.f32.acc.get : {(mma.m16n8k16.f32.acc val) (u32 val)} -> (f32 val))
+ (arr mma.m16n8k16.bf16-f32 : {(mma.m16n8k16.bf16.a val) (mma.m16n8k16.bf16.b val) (mma.m16n8k16.f32.acc val)} -> (mma.m16n8k16.f32.acc val))
  (arr stdlib.numeric.numeric.bf16 : [] -> (({bf16} stdlib.numeric.prop.Numeric) |-))
  (arr stdlib.numeric.signed.bf16 : [] -> (({bf16} stdlib.numeric.prop.Signed) |-))
  (arr stdlib.numeric.floating.bf16 : [] -> (({bf16} stdlib.numeric.prop.Floating) |-))

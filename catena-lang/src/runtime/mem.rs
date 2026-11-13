@@ -35,6 +35,12 @@ pub enum MemError {
         operation: &'static str,
         status: c_int,
     },
+    #[error("write at byte {offset} with length {bytes} exceeds allocation length {byte_len}")]
+    WriteOutOfBounds {
+        offset: u64,
+        bytes: usize,
+        byte_len: u64,
+    },
     #[error("device memory length {byte_len} cannot be represented on this platform")]
     LengthTooLarge { byte_len: u64 },
     #[error("memory length {byte_len} is not a whole number of {element_size}-byte elements")]
@@ -73,13 +79,19 @@ impl MemOwn {
         Self::from_bytes(slice_as_bytes(values), dialect)
     }
 
-    fn from_bytes(bytes: &[u8], dialect: GpuDialect) -> Result<Self, MemError> {
-        let gpu = GpuApi::load(dialect)?;
-        let data = gpu.allocate(bytes.len())?;
-        // SAFETY: `data` was just allocated by this same GPU API.
-        let mut memory = unsafe { Self::from_raw_parts_with_gpu(data, bytes.len() as u64, gpu) };
-        memory.write_from_host(bytes)?;
+    /// Copy bytes into a new device allocation.
+    pub fn from_bytes(bytes: &[u8], dialect: GpuDialect) -> Result<Self, MemError> {
+        let mut memory = Self::allocate(bytes.len(), dialect)?;
+        memory.write_bytes(0, bytes)?;
         Ok(memory)
+    }
+
+    /// Allocate device memory. Its contents are unspecified until written.
+    pub fn allocate(byte_len: usize, dialect: GpuDialect) -> Result<Self, MemError> {
+        let gpu = GpuApi::load(dialect)?;
+        let data = gpu.allocate(byte_len)?;
+        // SAFETY: `data` was just allocated by this same GPU API.
+        Ok(unsafe { Self::from_raw_parts_with_gpu(data, byte_len as u64, gpu) })
     }
 
     /// Take ownership of an existing device allocation.
@@ -180,9 +192,25 @@ impl MemOwn {
         }
     }
 
-    fn write_from_host(&mut self, bytes: &[u8]) -> Result<(), MemError> {
-        debug_assert_eq!(self.abi.len, bytes.len() as u64);
-        self.gpu.copy_host_to_device(self.abi.data, bytes)
+    /// Copy a bounded byte range from the host, completing before returning.
+    pub fn write_bytes(&mut self, offset: u64, bytes: &[u8]) -> Result<(), MemError> {
+        if offset
+            .checked_add(bytes.len() as u64)
+            .is_none_or(|end| end > self.abi.len)
+        {
+            return Err(MemError::WriteOutOfBounds {
+                offset,
+                bytes: bytes.len(),
+                byte_len: self.abi.len,
+            });
+        }
+        if bytes.is_empty() {
+            return Ok(());
+        }
+        let offset =
+            usize::try_from(offset).map_err(|_| MemError::LengthTooLarge { byte_len: offset })?;
+        let destination = self.abi.data.cast::<u8>().wrapping_add(offset).cast();
+        self.gpu.copy_host_to_device(destination, bytes)
     }
 
     /// Wrap a pointer using an already loaded GPU API.

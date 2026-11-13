@@ -207,8 +207,9 @@ impl MemOwn {
         if bytes.is_empty() {
             return Ok(());
         }
-        let offset =
-            usize::try_from(offset).map_err(|_| MemError::LengthTooLarge { byte_len: offset })?;
+        let offset = usize::try_from(offset).map_err(|_| MemError::LengthTooLarge {
+            byte_len: self.abi.len,
+        })?;
         let destination = self.abi.data.cast::<u8>().wrapping_add(offset).cast();
         self.gpu.copy_host_to_device(destination, bytes)
     }

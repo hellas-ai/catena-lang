@@ -75,6 +75,56 @@ impl GpuApi {
         self.dialect
     }
 
+    pub(crate) fn is_integrated(&self) -> Result<bool, MemError> {
+        let mut device = 0;
+        let get_device: Symbol<'_, unsafe extern "C" fn(*mut c_int) -> c_int> =
+            unsafe { self.load_symbol(self.symbol("hipGetDevice", "cudaGetDevice"))? };
+        self.check("query current device", unsafe { get_device(&mut device) })?;
+        let get_attribute: Symbol<'_, unsafe extern "C" fn(*mut c_int, c_int, c_int) -> c_int> = unsafe {
+            self.load_symbol(self.symbol("hipDeviceGetAttribute", "cudaDeviceGetAttribute"))?
+        };
+        // hipDeviceAttributeIntegrated / cudaDevAttrIntegrated.
+        let attribute = match self.dialect {
+            GpuDialect::Hip => 16,
+            GpuDialect::Cuda => 18,
+        };
+        let mut integrated = 0;
+        self.check("query integrated device attribute", unsafe {
+            get_attribute(&mut integrated, attribute, device)
+        })?;
+        Ok(integrated != 0)
+    }
+
+    pub(crate) fn register_host(&self, data: *mut c_void, byte_len: usize) -> Result<(), MemError> {
+        let function: Symbol<'_, unsafe extern "C" fn(*mut c_void, usize, c_uint) -> c_int> =
+            unsafe { self.load_symbol(self.symbol("hipHostRegister", "cudaHostRegister"))? };
+        // Mapped (both APIs) | HIP coarse-grained / CUDA read-only.
+        let flags = 0x02 | 0x08;
+        self.check("register file mapping", unsafe {
+            function(data, byte_len, flags)
+        })
+    }
+
+    pub(crate) fn host_device_pointer(&self, data: *mut c_void) -> Result<*mut c_void, MemError> {
+        let function: Symbol<
+            '_,
+            unsafe extern "C" fn(*mut *mut c_void, *mut c_void, c_uint) -> c_int,
+        > = unsafe {
+            self.load_symbol(self.symbol("hipHostGetDevicePointer", "cudaHostGetDevicePointer"))?
+        };
+        let mut device = std::ptr::null_mut();
+        self.check("get registered file device pointer", unsafe {
+            function(&mut device, data, 0)
+        })?;
+        Ok(device)
+    }
+
+    pub(crate) fn unregister_host(&self, data: *mut c_void) -> Result<(), MemError> {
+        let function: Symbol<'_, unsafe extern "C" fn(*mut c_void) -> c_int> =
+            unsafe { self.load_symbol(self.symbol("hipHostUnregister", "cudaHostUnregister"))? };
+        self.check("unregister file mapping", unsafe { function(data) })
+    }
+
     pub(crate) fn allocate(&self, byte_len: usize) -> Result<*mut c_void, MemError> {
         if byte_len == 0 {
             return Ok(std::ptr::null_mut());

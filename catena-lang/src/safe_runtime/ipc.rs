@@ -4,7 +4,9 @@
 //! addresses are used only while deriving a view offset and are never part of
 //! the exported representation.
 
-use std::{ffi::c_void, sync::Arc};
+#[cfg(target_os = "linux")]
+use std::os::fd::AsRawFd;
+use std::{ffi::c_void, fs::File, sync::Arc};
 
 use crate::{
     gpu::{GpuApi, IPC_HANDLE_BYTES, RawIpcMemHandle},
@@ -38,6 +40,7 @@ impl IpcMemoryHandle {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct ExportedIpcView {
     handle: Option<IpcMemoryHandle>,
+    pub(super) file: Option<(u32, i32)>,
     allocation_byte_len: u64,
     view_offset: u64,
     byte_len: u64,
@@ -47,6 +50,7 @@ impl ExportedIpcView {
     fn empty() -> Self {
         Self {
             handle: None,
+            file: None,
             allocation_byte_len: 0,
             view_offset: 0,
             byte_len: 0,
@@ -103,11 +107,32 @@ impl IpcTransport {
             return Ok(ExportedIpcView::empty());
         }
 
+        if let Some(owner) = memory.owner {
+            #[cfg(target_os = "linux")]
+            return Ok(ExportedIpcView {
+                handle: None,
+                file: Some((
+                    std::process::id(),
+                    owner.file.as_ref().unwrap().0.as_raw_fd(),
+                )),
+                allocation_byte_len: owner.byte_len(),
+                view_offset: (memory.as_ptr() as usize - owner.as_ptr() as usize) as u64,
+                byte_len: memory.byte_len(),
+            });
+            #[cfg(not(target_os = "linux"))]
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "registered file transport requires Linux procfs",
+            )
+            .into());
+        }
+
         let (base, allocation_byte_len) = self.gpu.address_range(memory.as_ptr().cast_const())?;
         let view_offset = memory.as_ptr() as usize - base as usize;
         let handle = self.gpu.ipc_get_mem_handle(base)?;
         Ok(ExportedIpcView {
             handle: Some(IpcMemoryHandle::from_bytes(handle.bytes)),
+            file: None,
             allocation_byte_len: allocation_byte_len as u64,
             view_offset: view_offset as u64,
             byte_len: memory.byte_len(),
@@ -119,17 +144,28 @@ impl IpcTransport {
         &self,
         handle: Option<IpcMemoryHandle>,
         allocation_byte_len: u64,
+        file: Option<(u32, i32)>,
     ) -> Result<ImportedIpcAllocation, MemError> {
-        let data = match handle {
-            Some(handle) => self.gpu.ipc_open_mem_handle(RawIpcMemHandle {
+        let file = file
+            .map(|(pid, fd)| {
+                // The parent retains the immutable file through synchronized execution.
+                unsafe {
+                    MemOwn::from_file(File::open(format!("/proc/{pid}/fd/{fd}"))?, self.dialect())
+                }
+            })
+            .transpose()?;
+        let data = match (file.as_ref(), handle) {
+            (Some(memory), _) => memory.as_ptr(),
+            (None, Some(handle)) => self.gpu.ipc_open_mem_handle(RawIpcMemHandle {
                 bytes: handle.bytes,
             })?,
-            None => std::ptr::null_mut(),
+            (None, None) => std::ptr::null_mut(),
         };
         Ok(ImportedIpcAllocation {
             data,
             byte_len: allocation_byte_len,
             gpu: self.gpu.clone(),
+            file,
         })
     }
 }
@@ -143,10 +179,14 @@ pub(super) struct ImportedIpcAllocation {
     data: *mut c_void,
     byte_len: u64,
     gpu: Arc<GpuApi>,
+    file: Option<MemOwn>,
 }
 
 impl ImportedIpcAllocation {
     pub(super) fn as_mem_ref(&self, view_offset: u64, byte_len: u64) -> Option<MemRef<'_>> {
+        if let Some(memory) = &self.file {
+            return memory.view(view_offset, byte_len);
+        }
         let view_end = view_offset.checked_add(byte_len)?;
         if view_end > self.byte_len || (byte_len != 0 && self.data.is_null()) {
             return None;
@@ -167,6 +207,9 @@ impl ImportedIpcAllocation {
         view_offset: u64,
         byte_len: u64,
     ) -> Result<Option<MemOwn>, MemError> {
+        if self.file.is_some() {
+            return Ok(None);
+        }
         let Some(source) = self.as_mem_ref(view_offset, byte_len) else {
             return Ok(None);
         };
@@ -185,6 +228,9 @@ impl ImportedIpcAllocation {
 
 impl Drop for ImportedIpcAllocation {
     fn drop(&mut self) {
+        if self.file.take().is_some() {
+            return;
+        }
         let data = std::mem::replace(&mut self.data, std::ptr::null_mut());
         let _ = self.gpu.ipc_close_mem_handle(data);
     }

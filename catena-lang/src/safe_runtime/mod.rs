@@ -260,6 +260,11 @@ impl Artifact {
                 Value::U64(value) => WireValue::U64(*value),
                 Value::F32(value) => WireValue::F32(*value),
                 Value::MemOwn(memory) => {
+                    if memory.file.is_some() {
+                        return Err(SafeExecError::Runtime(ExecError::FileRequiresBorrow {
+                            index,
+                        }));
+                    }
                     if memory.dialect() != self.session.ipc.dialect() {
                         return Err(SafeExecError::Runtime(
                             ExecError::IncompatibleDeviceMemory { index },
@@ -301,6 +306,11 @@ impl Artifact {
         &self,
         execution: WireExecution,
     ) -> Result<Vec<Value<'static>>, SafeExecError> {
+        if execution.buffers.iter().any(|buffer| buffer.file.is_some()) {
+            return Err(SafeExecError::Transport(
+                "file buffers are input-only".into(),
+            ));
+        }
         let imported =
             import_ipc_buffers(&self.session.ipc, execution.buffers).map_err(|error| {
                 SafeExecError::Transport(format!("child memory IPC failed: {error}"))
@@ -346,6 +356,7 @@ impl Drop for Artifact {
 fn encode_ipc_buffer(exported: ipc::ExportedIpcView) -> WireIpcBuffer {
     WireIpcBuffer {
         handle: exported.handle().map(|handle| handle.as_bytes().to_vec()),
+        file: exported.file,
         allocation_byte_len: exported.allocation_byte_len(),
     }
 }
@@ -520,7 +531,7 @@ fn import_ipc_buffers(
     buffers
         .into_iter()
         .map(|buffer| {
-            if buffer.handle.is_none() && buffer.allocation_byte_len != 0 {
+            if buffer.handle.is_none() && buffer.file.is_none() && buffer.allocation_byte_len != 0 {
                 return Err("non-empty IPC allocation has no handle".to_string());
             }
             let handle =
@@ -532,7 +543,7 @@ fn import_ipc_buffers(
                         )
                     })
                     .transpose()?;
-            ipc.import_allocation(handle, buffer.allocation_byte_len)
+            ipc.import_allocation(handle, buffer.allocation_byte_len, buffer.file)
                 .map_err(|error| error.to_string())
         })
         .collect()

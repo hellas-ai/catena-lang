@@ -1,10 +1,12 @@
 use std::{
     ffi::{c_int, c_void},
-    marker::PhantomData,
+    fs::File,
+    io::{Read, Seek},
     path::PathBuf,
     sync::Arc,
 };
 
+use memmap2::Mmap;
 use thiserror::Error;
 
 use super::{GpuDialect, executor::CatenaMem};
@@ -12,6 +14,8 @@ use crate::gpu::GpuApi;
 
 #[derive(Debug, Error)]
 pub enum MemError {
+    #[error("file memory I/O failed: {0}")]
+    Io(#[from] std::io::Error),
     #[error(
         "failed to load {dialect:?} GPU library (tried: {tried}): {source}",
         tried = display_paths(tried)
@@ -41,11 +45,12 @@ pub enum MemError {
     InvalidElementLength { byte_len: u64, element_size: usize },
 }
 
-/// A uniquely owned device allocation which can be transferred into a Catena program.
+/// Owned device memory. Registered files must be passed to programs by borrowing.
 #[derive(Debug)]
 pub struct MemOwn {
     pub(super) abi: CatenaMem,
     gpu: Arc<GpuApi>,
+    pub(crate) file: Option<(File, Mmap)>,
 }
 
 /// A borrowed device allocation which can be passed into a Catena program without
@@ -54,10 +59,50 @@ pub struct MemOwn {
 pub struct MemRef<'a> {
     pub(super) abi: CatenaMem,
     dialect: GpuDialect,
-    _lifetime: PhantomData<&'a ()>,
+    pub(crate) owner: Option<&'a MemOwn>,
 }
 
 impl MemOwn {
+    /// Load the whole file: register a mapping on integrated devices, otherwise
+    /// copy through a bounded buffer. Registered files must be borrowed by programs.
+    ///
+    /// # Safety
+    /// The file must remain immutable, including through other descriptors, until
+    /// this owner drops. GPU access must be read-only and finish before that drop.
+    pub unsafe fn from_file(mut file: File, dialect: GpuDialect) -> Result<Self, MemError> {
+        let byte_len = file.metadata()?.len();
+        let len = usize::try_from(byte_len).map_err(|_| MemError::LengthTooLarge { byte_len })?;
+        let mut memory = Self {
+            abi: CatenaMem {
+                data: std::ptr::null_mut(),
+                len: byte_len,
+            },
+            gpu: GpuApi::load(dialect)?,
+            file: None,
+        };
+        if len != 0 && memory.gpu.is_integrated()? {
+            // SAFETY: the caller guarantees file immutability.
+            let mapping = unsafe { Mmap::map(&file)? };
+            let host = mapping.as_ptr().cast_mut().cast();
+            memory.gpu.register_host(host, len)?;
+            memory.file = Some((file, mapping));
+            memory.abi.data = memory.gpu.host_device_pointer(host)?;
+        } else {
+            file.rewind()?;
+            memory.abi.data = memory.gpu.allocate(len)?;
+            let mut buffer = vec![0; len.min(1024 * 1024)];
+            for offset in (0..len).step_by(1024 * 1024) {
+                let count = buffer.len().min(len - offset);
+                file.read_exact(&mut buffer[..count])?;
+                memory.gpu.copy_host_to_device(
+                    memory.as_ptr().wrapping_byte_add(offset),
+                    &buffer[..count],
+                )?;
+            }
+        }
+        Ok(memory)
+    }
+
     /// Copy a slice into a new device allocation.
     pub fn from_u64_slice(values: &[u64], dialect: GpuDialect) -> Result<Self, MemError> {
         Self::from_bytes(slice_as_bytes(values), dialect)
@@ -176,8 +221,24 @@ impl MemOwn {
         MemRef {
             abi: self.abi,
             dialect: self.dialect(),
-            _lifetime: PhantomData,
+            owner: self.file.as_ref().map(|_| self),
         }
+    }
+
+    /// Borrow a checked byte range while retaining its allocation provenance.
+    pub fn view(&self, offset: u64, byte_len: u64) -> Option<MemRef<'_>> {
+        if offset.checked_add(byte_len)? > self.byte_len() {
+            return None;
+        }
+        Some(MemRef {
+            abi: CatenaMem {
+                data: self
+                    .as_ptr()
+                    .wrapping_byte_add(usize::try_from(offset).ok()?),
+                len: byte_len,
+            },
+            ..self.as_ref()
+        })
     }
 
     fn write_from_host(&mut self, bytes: &[u8]) -> Result<(), MemError> {
@@ -202,6 +263,7 @@ impl MemOwn {
                 len: byte_len,
             },
             gpu,
+            file: None,
         }
     }
 
@@ -215,6 +277,17 @@ impl MemOwn {
 
 impl Drop for MemOwn {
     fn drop(&mut self) {
+        if let Some((_file, mapping)) = self.file.take() {
+            if self
+                .gpu
+                .unregister_host(mapping.as_ptr().cast_mut().cast())
+                .is_err()
+            {
+                // The driver may still reference these pages after a failed unregister.
+                std::mem::forget(mapping);
+            }
+            return;
+        }
         let data = std::mem::replace(&mut self.abi.data, std::ptr::null_mut());
         let _ = self.gpu.free(data);
     }
@@ -242,7 +315,7 @@ impl<'a> MemRef<'a> {
                 len: byte_len,
             },
             dialect,
-            _lifetime: PhantomData,
+            owner: None,
         }
     }
 

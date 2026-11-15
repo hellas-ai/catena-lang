@@ -37,6 +37,10 @@
 //! - [`Runtime::load`] compiles a [`RuntimeModule`] into an [`Artifact`].
 //! - [`Artifact::exec`] calls a program from a compiled artifact with [`Value`] inputs.
 //! - [`Runtime::mem_u16`], [`Runtime::mem_u64`], and [`Runtime::mem_f32`] copy host slices into owned device memory.
+//! - [`MemOwn::from_file`] registers an immutable file on integrated devices, or
+//!   uploads it in bounded chunks on discrete devices. Use [`MemOwn::view`] for
+//!   checked byte ranges. Registered files must remain read-only and be borrowed;
+//!   they cannot transfer ownership to generated code.
 //! ### [`Value`] and Memory
 //!
 //! Values are input to a catena program by supplying [`Value`]s to [`Artifact::exec`].

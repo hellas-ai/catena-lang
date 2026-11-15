@@ -71,6 +71,7 @@ pub(super) enum WireValue {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(super) struct WireIpcBuffer {
     pub(super) handle: Option<Vec<u8>>,
+    pub(super) file: Option<(u32, i32)>,
     pub(super) allocation_byte_len: u64,
 }
 
@@ -227,6 +228,7 @@ mod tests {
                 name: "head".to_string(),
                 buffers: vec![WireIpcBuffer {
                     handle: Some(vec![7; 64]),
+                    file: None,
                     allocation_byte_len: 1024,
                 }],
                 args: vec![WireValue::MemRef {
@@ -260,6 +262,7 @@ mod tests {
         let execution = Response::Executed(Ok(WireExecution {
             buffers: vec![WireIpcBuffer {
                 handle: Some(vec![9; 64]),
+                file: None,
                 allocation_byte_len: 256,
             }],
             values: vec![WireValue::MemOwn {

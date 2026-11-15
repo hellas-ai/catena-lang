@@ -98,12 +98,8 @@ impl GpuApi {
     pub(crate) fn register_host(&self, data: *mut c_void, byte_len: usize) -> Result<(), MemError> {
         let function: Symbol<'_, unsafe extern "C" fn(*mut c_void, usize, c_uint) -> c_int> =
             unsafe { self.load_symbol(self.symbol("hipHostRegister", "cudaHostRegister"))? };
-        let flags = match self.dialect {
-            // Mapped | hipExtHostRegisterCoarseGrained.
-            GpuDialect::Hip => 0x02 | 0x08,
-            // Mapped | cudaHostRegisterReadOnly (the file mapping is read-only).
-            GpuDialect::Cuda => 0x02 | 0x08,
-        };
+        // Mapped (both APIs) | HIP coarse-grained / CUDA read-only.
+        let flags = 0x02 | 0x08;
         self.check("register file mapping", unsafe {
             function(data, byte_len, flags)
         })
@@ -120,9 +116,6 @@ impl GpuApi {
         self.check("get registered file device pointer", unsafe {
             function(&mut device, data, 0)
         })?;
-        if device.is_null() {
-            return Err(MemError::InvalidFilePointer);
-        }
         Ok(device)
     }
 

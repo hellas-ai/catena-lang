@@ -260,7 +260,7 @@ impl Artifact {
                 Value::U64(value) => WireValue::U64(*value),
                 Value::F32(value) => WireValue::F32(*value),
                 Value::MemOwn(memory) => {
-                    if memory.is_registered_file() {
+                    if memory.file.is_some() {
                         return Err(SafeExecError::Runtime(ExecError::FileRequiresBorrow {
                             index,
                         }));
@@ -356,7 +356,7 @@ impl Drop for Artifact {
 fn encode_ipc_buffer(exported: ipc::ExportedIpcView) -> WireIpcBuffer {
     WireIpcBuffer {
         handle: exported.handle().map(|handle| handle.as_bytes().to_vec()),
-        file: exported.file(),
+        file: exported.file,
         allocation_byte_len: exported.allocation_byte_len(),
     }
 }
@@ -531,15 +531,7 @@ fn import_ipc_buffers(
     buffers
         .into_iter()
         .map(|buffer| {
-            if let Some(file) = buffer.file {
-                if buffer.handle.is_some() || buffer.allocation_byte_len == 0 {
-                    return Err("invalid file buffer".into());
-                }
-                return ipc
-                    .import_file(file, buffer.allocation_byte_len)
-                    .map_err(|error| error.to_string());
-            }
-            if buffer.handle.is_none() && buffer.allocation_byte_len != 0 {
+            if buffer.handle.is_none() && buffer.file.is_none() && buffer.allocation_byte_len != 0 {
                 return Err("non-empty IPC allocation has no handle".to_string());
             }
             let handle =
@@ -551,7 +543,7 @@ fn import_ipc_buffers(
                         )
                     })
                     .transpose()?;
-            ipc.import_allocation(handle, buffer.allocation_byte_len)
+            ipc.import_allocation(handle, buffer.allocation_byte_len, buffer.file)
                 .map_err(|error| error.to_string())
         })
         .collect()

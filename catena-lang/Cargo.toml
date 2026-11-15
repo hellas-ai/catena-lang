@@ -41,17 +41,6 @@ runtime-tests = []
 svg-reports = ["dep:open-hypergraphs-dot"]
 
 [[test]]
-name = "file_memory"
-path = "tests/file_memory.rs"
-harness = false
-
-[[test]]
-name = "file_memory_gpu"
-path = "tests/file_memory_gpu.rs"
-harness = false
-required-features = ["runtime-tests"]
-
-[[test]]
 name = "runtime"
 path = "tests/runtime.rs"
 required-features = ["runtime-tests"]

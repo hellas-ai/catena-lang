@@ -275,7 +275,7 @@ impl Artifact {
             }
             let memory_dialect = match value {
                 Value::MemOwn(memory) => {
-                    if memory.is_registered_file() {
+                    if memory.file.is_some() {
                         return Err(ExecError::FileRequiresBorrow { index });
                     }
                     Some(memory.dialect())

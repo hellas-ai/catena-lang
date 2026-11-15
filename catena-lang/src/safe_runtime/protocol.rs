@@ -71,7 +71,7 @@ pub(super) enum WireValue {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(super) struct WireIpcBuffer {
     pub(super) handle: Option<Vec<u8>>,
-    pub(super) file: Option<super::ipc::FileHandle>,
+    pub(super) file: Option<(u32, i32)>,
     pub(super) allocation_byte_len: u64,
 }
 

@@ -4,10 +4,9 @@
 //! addresses are used only while deriving a view offset and are never part of
 //! the exported representation.
 
-use serde::{Deserialize, Serialize};
-use std::{ffi::c_void, sync::Arc};
 #[cfg(target_os = "linux")]
-use std::{fs::File, os::fd::AsRawFd};
+use std::os::fd::AsRawFd;
+use std::{ffi::c_void, fs::File, sync::Arc};
 
 use crate::{
     gpu::{GpuApi, IPC_HANDLE_BYTES, RawIpcMemHandle},
@@ -41,7 +40,7 @@ impl IpcMemoryHandle {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct ExportedIpcView {
     handle: Option<IpcMemoryHandle>,
-    file: Option<FileHandle>,
+    pub(super) file: Option<(u32, i32)>,
     allocation_byte_len: u64,
     view_offset: u64,
     byte_len: u64,
@@ -62,10 +61,6 @@ impl ExportedIpcView {
         self.handle.as_ref()
     }
 
-    pub(super) fn file(&self) -> Option<FileHandle> {
-        self.file
-    }
-
     pub(super) fn allocation_byte_len(&self) -> u64 {
         self.allocation_byte_len
     }
@@ -77,13 +72,6 @@ impl ExportedIpcView {
     pub(super) fn byte_len(&self) -> u64 {
         self.byte_len
     }
-}
-
-/// A live descriptor in the sending process, retained until execution completes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub(super) struct FileHandle {
-    pid: u32,
-    fd: i32,
 }
 
 #[derive(Debug, Clone)]
@@ -119,16 +107,16 @@ impl IpcTransport {
             return Ok(ExportedIpcView::empty());
         }
 
-        if let Some((backing, view_offset)) = memory.file {
+        if let Some(owner) = memory.owner {
             #[cfg(target_os = "linux")]
             return Ok(ExportedIpcView {
                 handle: None,
-                file: Some(FileHandle {
-                    pid: std::process::id(),
-                    fd: backing.file.as_raw_fd(),
-                }),
-                allocation_byte_len: backing.byte_len(),
-                view_offset,
+                file: Some((
+                    std::process::id(),
+                    owner.file.as_ref().unwrap().0.as_raw_fd(),
+                )),
+                allocation_byte_len: owner.byte_len(),
+                view_offset: (memory.as_ptr() as usize - owner.as_ptr() as usize) as u64,
                 byte_len: memory.byte_len(),
             });
             #[cfg(not(target_os = "linux"))]
@@ -156,50 +144,29 @@ impl IpcTransport {
         &self,
         handle: Option<IpcMemoryHandle>,
         allocation_byte_len: u64,
+        file: Option<(u32, i32)>,
     ) -> Result<ImportedIpcAllocation, MemError> {
-        let data = match handle {
-            Some(handle) => self.gpu.ipc_open_mem_handle(RawIpcMemHandle {
+        let file = file
+            .map(|(pid, fd)| {
+                // The parent retains the immutable file through synchronized execution.
+                unsafe {
+                    MemOwn::from_file(File::open(format!("/proc/{pid}/fd/{fd}"))?, self.dialect())
+                }
+            })
+            .transpose()?;
+        let data = match (file.as_ref(), handle) {
+            (Some(memory), _) => memory.as_ptr(),
+            (None, Some(handle)) => self.gpu.ipc_open_mem_handle(RawIpcMemHandle {
                 bytes: handle.bytes,
             })?,
-            None => std::ptr::null_mut(),
+            (None, None) => std::ptr::null_mut(),
         };
         Ok(ImportedIpcAllocation {
             data,
             byte_len: allocation_byte_len,
             gpu: self.gpu.clone(),
-            file: None,
+            file,
         })
-    }
-
-    pub(super) fn import_file(
-        &self,
-        handle: FileHandle,
-        byte_len: u64,
-    ) -> Result<ImportedIpcAllocation, MemError> {
-        #[cfg(target_os = "linux")]
-        {
-            // Open the descriptor itself, not its resolved pathname: renames and
-            // unlinks must not change which immutable file the child receives.
-            let file = File::open(format!("/proc/{}/fd/{}", handle.pid, handle.fd))?;
-            if file.metadata()?.len() != byte_len {
-                return Err(std::io::Error::other("registered file length changed").into());
-            }
-            // SAFETY: the parent retains the immutable owner through the reply;
-            // this protocol only permits borrowed, read-only uses in the child.
-            let memory = unsafe { MemOwn::from_file(file, self.dialect())? };
-            Ok(ImportedIpcAllocation {
-                data: memory.as_ptr(),
-                byte_len,
-                gpu: self.gpu.clone(),
-                file: Some(memory),
-            })
-        }
-        #[cfg(not(target_os = "linux"))]
-        Err(std::io::Error::new(
-            std::io::ErrorKind::Unsupported,
-            "registered file transport requires Linux procfs",
-        )
-        .into())
     }
 }
 
@@ -218,7 +185,7 @@ pub(super) struct ImportedIpcAllocation {
 impl ImportedIpcAllocation {
     pub(super) fn as_mem_ref(&self, view_offset: u64, byte_len: u64) -> Option<MemRef<'_>> {
         if let Some(memory) = &self.file {
-            return memory.view(view_offset, byte_len).ok();
+            return memory.view(view_offset, byte_len);
         }
         let view_end = view_offset.checked_add(byte_len)?;
         if view_end > self.byte_len || (byte_len != 0 && self.data.is_null()) {
@@ -241,7 +208,7 @@ impl ImportedIpcAllocation {
         byte_len: u64,
     ) -> Result<Option<MemOwn>, MemError> {
         if self.file.is_some() {
-            return Err(MemError::FileRequiresBorrow);
+            return Ok(None);
         }
         let Some(source) = self.as_mem_ref(view_offset, byte_len) else {
             return Ok(None);

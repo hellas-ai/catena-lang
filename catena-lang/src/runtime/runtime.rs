@@ -107,6 +107,8 @@ pub enum ExecError {
     },
     #[error("Argument {index} contains device memory from a different GPU dialect")]
     IncompatibleDeviceMemory { index: usize },
+    #[error("Argument {index} contains registered file memory; pass a borrowed view instead")]
+    FileRequiresBorrow { index: usize },
 }
 
 impl Runtime {
@@ -272,7 +274,12 @@ impl Artifact {
                 });
             }
             let memory_dialect = match value {
-                Value::MemOwn(memory) => Some(memory.dialect()),
+                Value::MemOwn(memory) => {
+                    if memory.is_registered_file() {
+                        return Err(ExecError::FileRequiresBorrow { index });
+                    }
+                    Some(memory.dialect())
+                }
                 Value::MemRef(memory) => Some(memory.dialect()),
                 _ => None,
             };
